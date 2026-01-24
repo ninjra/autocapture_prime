@@ -21,10 +21,10 @@ if (-not $pythonExe) {
 }
 
 function Invoke-Python {
-    param([string[]]$Args)
-    $cmd = @($pythonExe) + $pythonPrefix + $Args
+    param([string[]]$PyArgs)
+    $cmd = @($pythonExe) + $pythonPrefix + $PyArgs
     Write-Host ("Running: " + ($cmd -join " "))
-    & $pythonExe @pythonPrefix @Args
+    & $pythonExe @pythonPrefix @PyArgs
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }
