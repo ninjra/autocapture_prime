@@ -19,6 +19,11 @@ Windows (PowerShell):
 \tools\run_all_tests.ps1
 ```
 
+Notes:
+- The script creates a local `.venv` and installs deps.
+- For offline installs, place wheels in `tools\..\wheels` or set `AUTO_CAPTURE_WHEELHOUSE`.
+- To allow downloads, set `AUTO_CAPTURE_ALLOW_NETWORK=1` before running.
+
 ## Docs
 - `docs/plugin_model.md`
 - `docs/configuration.md`
