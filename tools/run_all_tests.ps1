@@ -38,12 +38,13 @@ function Invoke-EnsureDeps {
         if (Test-Path $candidate) { $wheelhouse = $candidate }
     }
     $allowNetwork = $env:AUTO_CAPTURE_ALLOW_NETWORK
+    if (-not $allowNetwork) { $allowNetwork = "1" }
 
     $pipArgs = @("-m", "pip", "install", "-e", ".")
     if ($wheelhouse) {
         Write-Host "Using wheelhouse: $wheelhouse"
         $pipArgs = @("-m", "pip", "install", "-e", ".", "--no-index", "--find-links", $wheelhouse)
-    } elseif (-not $allowNetwork) {
+    } elseif ($allowNetwork -ne "1") {
         Write-Error "Missing dependencies and no wheelhouse found. Set AUTO_CAPTURE_WHEELHOUSE to a folder of wheels or set AUTO_CAPTURE_ALLOW_NETWORK=1 to allow pip downloads."
         exit 1
     }
@@ -61,9 +62,18 @@ function Invoke-Python {
     }
 }
 
-try {
-    & $pythonExe "-c" "import cryptography" | Out-Null
-} catch {
+function Ensure-Pip {
+    & $pythonExe "-m" "ensurepip" "--upgrade" | Out-Null
+    & $pythonExe "-m" "pip" "install" "--upgrade" "pip" "setuptools" "wheel"
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
+$needInstall = $true
+& $pythonExe "-c" "import cryptography" | Out-Null
+if ($LASTEXITCODE -eq 0) { $needInstall = $false }
+
+if ($needInstall) {
+    Ensure-Pip
     Invoke-EnsureDeps
 }
 
