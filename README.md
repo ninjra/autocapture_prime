@@ -9,8 +9,14 @@ python3 -m autocapture_nx config show
 ```
 
 ## Tests
+Linux/WSL:
 ```bash
 python3 tools/run_all_tests.py
+```
+
+Windows (PowerShell):
+```powershell
+\tools\run_all_tests.ps1
 ```
 
 ## Docs
