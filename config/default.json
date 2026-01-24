@@ -199,8 +199,8 @@
     "enabled": {
       "builtin.egress.gateway": true,
       "builtin.privacy.egress_sanitizer": true,
-      "builtin.storage.sqlcipher": true,
-      "builtin.storage.encrypted": false,
+      "builtin.storage.sqlcipher": false,
+      "builtin.storage.encrypted": true,
       "builtin.anchor.basic": true,
       "builtin.ledger.basic": true,
       "builtin.journal.basic": true,

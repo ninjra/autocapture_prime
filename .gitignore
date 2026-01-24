@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .venv/
+autocapture_nx.egg-info/
 .data/
 data/
 data_anchor/

@@ -40,7 +40,10 @@ function Invoke-EnsureDeps {
     $allowNetwork = $env:AUTO_CAPTURE_ALLOW_NETWORK
     if (-not $allowNetwork) { $allowNetwork = "1" }
 
-    $pipArgs = @("-m", "pip", "install", "-e", ".")
+    $extra = $env:AUTO_CAPTURE_EXTRAS
+    $target = "."
+    if ($extra) { $target = ".[{0}]" -f $extra }
+    $pipArgs = @("-m", "pip", "install", "-e", $target)
     if ($wheelhouse) {
         Write-Host "Using wheelhouse: $wheelhouse"
         $pipArgs = @("-m", "pip", "install", "-e", ".", "--no-index", "--find-links", $wheelhouse)

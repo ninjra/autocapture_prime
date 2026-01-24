@@ -23,6 +23,7 @@ Notes:
 - The script creates a local `.venv` and installs deps.
 - For offline installs, place wheels in `tools\..\wheels` or set `AUTO_CAPTURE_WHEELHOUSE`.
 - By default it allows pip downloads; to disable, set `AUTO_CAPTURE_ALLOW_NETWORK=0`.
+- To include SQLCipher support, set `AUTO_CAPTURE_EXTRAS=sqlcipher` before running.
 
 ## Docs
 - `docs/plugin_model.md`

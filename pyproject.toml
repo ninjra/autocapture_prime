@@ -18,12 +18,14 @@ dependencies = [
   "pytesseract>=0.3.10",
   "sentence-transformers>=2.2.2",
   "transformers>=4.38.0",
-  "torch>=2.1.0",
-  "pysqlcipher3-binary>=1.0.4"
+  "torch>=2.1.0"
 ]
 
 [project.scripts]
 autocapture = "autocapture_nx.cli:main"
+
+[project.optional-dependencies]
+sqlcipher = ["pysqlcipher3-binary>=1.0.4"]
 
 [tool.setuptools]
 packages = ["autocapture_nx", "autocapture_nx.kernel", "autocapture_nx.plugin_system", "autocapture_nx.windows"]
