@@ -1,7 +1,7 @@
 {
   "files": {
     "contracts/config_schema.json": "af96980ae2088115d3e4f0cac897f52276de0a5389616100271b05a854e6dfbb",
-    "contracts/ir_pins.json": "a49ba9d8e6141423b5f261b5aa92f985b9ee1cda5d444bef41fef158792871ef",
+    "contracts/ir_pins.json": "6dae88900f83b372b9587bb756994858ab5ad5166842d08b5e17879d5355f6c5",
     "contracts/journal_schema.json": "7f61751efbcd52bf1de755421fc1a1c3001c4b1c1477734b2a72d39f7ff4fdeb",
     "contracts/ledger_schema.json": "911b2bab3e236ff77921b9a28f6a9808f05c38188e07aa1f4cc011f4bbf2eddf",
     "contracts/plugin_manifest.schema.json": "719cc843507297d2294d8de9a8e00fa8f662f435377e8b9e830932e7d75a41d1",
@@ -11,6 +11,6 @@
     "contracts/time_intent.schema.json": "6696c55883e35e0f2eb0689d61b7a05c637959d1d53ba7d8f985bbc2d5e397d8",
     "contracts/user_surface.md": "f814b6a390dd01903e45fadaa99db2203f9f15f7791ef5b4acb245149ee4ad22"
   },
-  "generated_at": "2026-01-24T20:41:08.698109+00:00",
+  "generated_at": "2026-01-24T22:57:58.694603+00:00",
   "version": 1
 }
