@@ -10,7 +10,7 @@ python3 -m autocapture_nx config show
 
 ## Tests
 ```bash
-PYTHONPATH=. python3 -m unittest discover -s tests -q
+python3 tools/run_all_tests.py
 ```
 
 ## Docs
