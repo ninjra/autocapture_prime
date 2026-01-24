@@ -24,6 +24,7 @@ Notes:
 - For offline installs, place wheels in `tools\..\wheels` or set `AUTO_CAPTURE_WHEELHOUSE`.
 - By default it allows pip downloads; to disable, set `AUTO_CAPTURE_ALLOW_NETWORK=0`.
 - To include SQLCipher support, set `AUTO_CAPTURE_EXTRAS=sqlcipher` before running.
+- Logs are written to `tools\run_all_tests.log` and a concise report to `tools\run_all_tests_report.json`.
 
 ## Docs
 - `docs/plugin_model.md`
