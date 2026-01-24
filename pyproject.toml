@@ -1,10 +1,14 @@
+[build-system]
+requires = ["setuptools>=77.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "autocapture_nx"
 version = "0.1.0"
 description = "Autocapture NX plugin-forward kernel"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "Proprietary"}
+license = "LicenseRef-Proprietary"
 dependencies = [
   "cryptography>=41.0.0",
   "mss>=9.0.1",
@@ -20,6 +24,9 @@ dependencies = [
 
 [project.scripts]
 autocapture = "autocapture_nx.cli:main"
+
+[tool.setuptools]
+packages = ["autocapture_nx", "autocapture_nx.kernel", "autocapture_nx.plugin_system", "autocapture_nx.windows"]
 
 [tool.autocapture]
 config_default_path = "config/default.json"
