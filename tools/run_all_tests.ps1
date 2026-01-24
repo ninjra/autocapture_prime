@@ -6,6 +6,39 @@ Set-Location $repoRoot
 
 $env:PYTHONPATH = $repoRoot
 
+$logPath = Join-Path $repoRoot "tools\\run_all_tests.log"
+$reportPath = Join-Path $repoRoot "tools\\run_all_tests_report.json"
+New-Item -ItemType File -Path $logPath -Force | Out-Null
+
+function Write-Log {
+    param([string]$Message)
+    $timestamp = (Get-Date).ToString("s")
+    $line = "[$timestamp] $Message"
+    $line | Tee-Object -FilePath $logPath -Append | Out-Host
+}
+
+function Write-Report {
+    param(
+        [string]$Status,
+        [string]$Step,
+        [int]$ExitCode
+    )
+    $tail = @()
+    if (Test-Path $logPath) {
+        $tail = Get-Content $logPath -Tail 60
+    }
+    $report = [ordered]@{
+        status = $Status
+        failed_step = $Step
+        exit_code = $ExitCode
+        python = $pythonExe
+        timestamp_utc = (Get-Date).ToUniversalTime().ToString("s") + "Z"
+        log_path = $logPath
+        tail = $tail
+    }
+    $report | ConvertTo-Json -Depth 5 | Set-Content -Path $reportPath -Encoding UTF8
+}
+
 $bootstrapExe = $null
 $bootstrapPrefix = @()
 if (Get-Command python -ErrorAction SilentlyContinue) {
@@ -56,11 +89,14 @@ function Invoke-EnsureDeps {
 }
 
 function Invoke-Python {
-    param([string[]]$PyArgs)
+    param([string]$Step, [string[]]$PyArgs)
     $cmd = @($pythonExe) + $pythonPrefix + $PyArgs
-    Write-Host ("Running: " + ($cmd -join " "))
-    & $pythonExe @pythonPrefix @PyArgs
+    Write-Log ("Running: " + ($cmd -join " "))
+    & $pythonExe @pythonPrefix @PyArgs 2>&1 | Tee-Object -FilePath $logPath -Append | Out-Host
     if ($LASTEXITCODE -ne 0) {
+        Write-Report -Status "failed" -Step $Step -ExitCode $LASTEXITCODE
+        Write-Log ("FAILED: " + $Step + " (code " + $LASTEXITCODE + ")")
+        Write-Log ("See " + $logPath + " and " + $reportPath)
         exit $LASTEXITCODE
     }
 }
@@ -80,18 +116,20 @@ function Test-Module {
 $needInstall = -not (Test-Module "cryptography")
 
 if ($needInstall) {
-    Write-Host "Installing dependencies..."
+    Write-Log "Installing dependencies..."
     Ensure-Pip
     Invoke-EnsureDeps
     if (-not (Test-Module "cryptography")) {
-        Write-Error "Dependency install did not succeed (cryptography still missing)."
+        Write-Report -Status "failed" -Step "deps" -ExitCode 2
+        Write-Log "Dependency install did not succeed (cryptography still missing)."
         exit 1
     }
 }
 
-Invoke-Python @("-m", "autocapture_nx", "doctor")
-Invoke-Python @("-m", "autocapture_nx", "--safe-mode", "doctor")
-Invoke-Python @("-m", "unittest", "tests/test_blueprint_spec_validation.py", "-q")
-Invoke-Python @("-m", "unittest", "discover", "-s", "tests", "-q")
+Invoke-Python -Step "doctor" -PyArgs @("-m", "autocapture_nx", "doctor")
+Invoke-Python -Step "doctor_safe_mode" -PyArgs @("-m", "autocapture_nx", "--safe-mode", "doctor")
+Invoke-Python -Step "spec_gate" -PyArgs @("-m", "unittest", "tests/test_blueprint_spec_validation.py", "-q")
+Invoke-Python -Step "tests" -PyArgs @("-m", "unittest", "discover", "-s", "tests", "-q")
 
-Write-Host "OK: all tests and invariants passed"
+Write-Report -Status "ok" -Step "complete" -ExitCode 0
+Write-Log "OK: all tests and invariants passed"
