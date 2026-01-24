@@ -99,7 +99,11 @@ class Kernel:
         if anchor_path:
             data_dir = Path(config.get("storage", {}).get("data_dir", "data")).resolve()
             anchor_abs = Path(anchor_path).resolve()
-            ok = not str(anchor_abs).startswith(str(data_dir))
+            try:
+                anchor_abs.relative_to(data_dir)
+                ok = False
+            except ValueError:
+                ok = True
             checks.append(
                 DoctorCheck(
                     name="anchor_separate_domain",
