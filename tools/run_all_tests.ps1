@@ -6,28 +6,25 @@ Set-Location $repoRoot
 
 $env:PYTHONPATH = $repoRoot
 
-$pythonCmd = $null
+$pythonExe = $null
+$pythonPrefix = @()
 if (Get-Command python -ErrorAction SilentlyContinue) {
-    $pythonCmd = @("python")
+    $pythonExe = "python"
 } elseif (Get-Command py -ErrorAction SilentlyContinue) {
-    $pythonCmd = @("py", "-3")
+    $pythonExe = "py"
+    $pythonPrefix = @("-3")
 }
 
-if (-not $pythonCmd) {
+if (-not $pythonExe) {
     Write-Error "Python not found. Install Python 3.x and retry."
     exit 1
 }
 
 function Invoke-Python {
     param([string[]]$Args)
-    $cmd = @($pythonCmd + $Args)
-    $exe = $cmd[0]
-    $exeArgs = @()
-    if ($cmd.Count -gt 1) {
-        $exeArgs = $cmd[1..($cmd.Count - 1)]
-    }
+    $cmd = @($pythonExe) + $pythonPrefix + $Args
     Write-Host ("Running: " + ($cmd -join " "))
-    & $exe @exeArgs
+    & $pythonExe @pythonPrefix @Args
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }
