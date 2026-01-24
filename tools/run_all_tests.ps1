@@ -71,13 +71,22 @@ function Ensure-Pip {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
-$needInstall = $true
-& $pythonExe "-c" "import cryptography" | Out-Null
-if ($LASTEXITCODE -eq 0) { $needInstall = $false }
+function Test-Module {
+    param([string]$ModuleName)
+    & $pythonExe "-c" "import $ModuleName" 2>$null | Out-Null
+    return ($LASTEXITCODE -eq 0)
+}
+
+$needInstall = -not (Test-Module "cryptography")
 
 if ($needInstall) {
+    Write-Host "Installing dependencies..."
     Ensure-Pip
     Invoke-EnsureDeps
+    if (-not (Test-Module "cryptography")) {
+        Write-Error "Dependency install did not succeed (cryptography still missing)."
+        exit 1
+    }
 }
 
 Invoke-Python @("-m", "autocapture_nx", "doctor")
