@@ -37,6 +37,7 @@ function Write-Report {
         tail = $tail
     }
     $report | ConvertTo-Json -Depth 5 | Set-Content -Path $reportPath -Encoding UTF8
+    Write-Host ("REPORT: status={0} failed_step={1} exit_code={2} log_path={3}" -f $Status, $Step, $ExitCode, $logPath)
 }
 
 $bootstrapExe = $null
