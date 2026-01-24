@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.data/
+data/
+data_anchor/
+config/user.json
+config/backup/
+tools/hypervisor/runs/
+tools/hypervisor/variants/

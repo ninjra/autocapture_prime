@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "entry_id",
+    "ts_utc",
+    "stage",
+    "inputs",
+    "outputs",
+    "policy_snapshot_hash",
+    "prev_hash",
+    "entry_hash"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer"},
+    "entry_id": {"type": "string"},
+    "ts_utc": {"type": "string"},
+    "stage": {"type": "string"},
+    "inputs": {"type": "array", "items": {"type": "string"}},
+    "outputs": {"type": "array", "items": {"type": "string"}},
+    "policy_snapshot_hash": {"type": "string"},
+    "payload": {"type": "object"},
+    "prev_hash": {"type": ["string", "null"]},
+    "entry_hash": {"type": "string"}
+  }
+}

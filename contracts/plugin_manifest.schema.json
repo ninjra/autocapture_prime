@@ -1,0 +1,69 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "plugin_id",
+    "version",
+    "enabled",
+    "entrypoints",
+    "permissions",
+    "compat",
+    "depends_on",
+    "hash_lock"
+  ],
+  "properties": {
+    "plugin_id": {"type": "string"},
+    "version": {"type": "string"},
+    "enabled": {"type": "boolean"},
+    "entrypoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "id", "path", "callable"],
+        "properties": {
+          "kind": {"type": "string"},
+          "id": {"type": "string"},
+          "path": {"type": "string"},
+          "callable": {"type": "string"}
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filesystem", "gpu", "raw_input", "network"],
+      "properties": {
+        "filesystem": {"type": "string"},
+        "gpu": {"type": "boolean"},
+        "raw_input": {"type": "boolean"},
+        "network": {"type": "boolean"}
+      }
+    },
+    "compat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requires_kernel", "requires_schema_versions"],
+      "properties": {
+        "requires_kernel": {"type": "string"},
+        "requires_schema_versions": {
+          "type": "array",
+          "items": {"type": "integer"}
+        }
+      }
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "hash_lock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest_sha256", "artifact_sha256"],
+      "properties": {
+        "manifest_sha256": {"type": "string"},
+        "artifact_sha256": {"type": "string"}
+      }
+    }
+  }
+}

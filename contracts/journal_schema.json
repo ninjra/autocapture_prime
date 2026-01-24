@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "sequence",
+    "ts_utc",
+    "tzid",
+    "offset_minutes",
+    "event_type",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer"},
+    "event_id": {"type": "string"},
+    "sequence": {"type": "integer"},
+    "ts_utc": {"type": "string"},
+    "tzid": {"type": "string"},
+    "offset_minutes": {"type": "integer"},
+    "event_type": {"type": "string"},
+    "payload": {"type": "object"}
+  }
+}

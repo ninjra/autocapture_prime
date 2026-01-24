@@ -1,0 +1,28 @@
+{
+  "plugin_id": "builtin.runtime.governor",
+  "version": "0.1.0",
+  "enabled": true,
+  "entrypoints": [
+    {
+      "kind": "runtime.governor",
+      "id": "default",
+      "path": "plugin.py",
+      "callable": "create_plugin"
+    }
+  ],
+  "permissions": {
+    "filesystem": "read",
+    "gpu": false,
+    "raw_input": false,
+    "network": false
+  },
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [1]
+  },
+  "depends_on": [],
+  "hash_lock": {
+    "manifest_sha256": "",
+    "artifact_sha256": ""
+  }
+}

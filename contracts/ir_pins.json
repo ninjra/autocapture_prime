@@ -1,0 +1,154 @@
+{
+  "capabilities": [
+    "anchor.writer",
+    "answer.builder",
+    "capture.backpressure",
+    "citation.validator",
+    "devtools.ast_ir",
+    "devtools.diffusion",
+    "egress.gateway",
+    "journal.writer",
+    "ledger.writer",
+    "observability.logger",
+    "privacy.egress_sanitizer",
+    "retrieval.strategy",
+    "runtime.governor",
+    "storage.entity_map",
+    "storage.media",
+    "storage.metadata",
+    "time.intent_parser"
+  ],
+  "config_keys": [
+    "backpressure",
+    "capture",
+    "devtools",
+    "kernel",
+    "observability",
+    "performance",
+    "plugins",
+    "privacy",
+    "processing",
+    "profile",
+    "runtime",
+    "schema_version",
+    "storage",
+    "time"
+  ],
+  "config_schema_version": 1,
+  "permissions": {
+    "network_allowed": [
+      "builtin.egress.gateway"
+    ]
+  },
+  "plugins": [
+    {
+      "enabled": true,
+      "id": "builtin.anchor.basic"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.answer.basic"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.backpressure.basic"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.capture.audio.windows"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.capture.stub"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.capture.windows"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.citation.basic"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.devtools.ast_ir"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.devtools.diffusion"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.egress.gateway"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.embedder.stub"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.journal.basic"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.ledger.basic"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.meta.configurator.noop"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.meta.policy.noop"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.observability.basic"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.ocr.stub"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.privacy.egress_sanitizer"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.reranker.stub"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.retrieval.basic"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.runtime.governor"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.storage.encrypted"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.storage.sqlcipher"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.time.advanced"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.tracking.input.windows"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.vlm.stub"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.window.metadata.windows"
+    }
+  ],
+  "schema_version": 1
+}

@@ -1,0 +1,27 @@
+[project]
+name = "autocapture_nx"
+version = "0.1.0"
+description = "Autocapture NX plugin-forward kernel"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Proprietary"}
+dependencies = [
+  "cryptography>=41.0.0",
+  "mss>=9.0.1",
+  "Pillow>=10.0.0",
+  "pynput>=1.7.6",
+  "sounddevice>=0.4.6",
+  "pytesseract>=0.3.10",
+  "sentence-transformers>=2.2.2",
+  "transformers>=4.38.0",
+  "torch>=2.1.0",
+  "pysqlcipher3-binary>=1.0.4"
+]
+
+[project.scripts]
+autocapture = "autocapture_nx.cli:main"
+
+[tool.autocapture]
+config_default_path = "config/default.json"
+config_user_path = "config/user.json"
+contracts_lock_path = "contracts/lock.json"

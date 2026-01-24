@@ -1,0 +1,418 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile",
+    "kernel",
+    "runtime",
+    "time",
+    "backpressure",
+    "performance",
+    "capture",
+    "processing",
+    "storage",
+    "privacy",
+    "observability",
+    "plugins",
+    "devtools"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer"},
+    "profile": {"type": "string"},
+    "kernel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_capabilities"],
+      "properties": {
+        "required_capabilities": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timezone", "active_window_s", "idle_window_s", "mode_enforcement", "gpu"],
+      "properties": {
+        "timezone": {"type": "string"},
+        "active_window_s": {"type": "integer"},
+        "idle_window_s": {"type": "integer"},
+        "mode_enforcement": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["suspend_workers", "suspend_deadline_ms"],
+          "properties": {
+            "suspend_workers": {"type": "boolean"},
+            "suspend_deadline_ms": {"type": "integer"}
+          }
+        },
+        "gpu": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["release_vram_on_active", "release_vram_deadline_ms"],
+          "properties": {
+            "release_vram_on_active": {"type": "boolean"},
+            "release_vram_deadline_ms": {"type": "integer"}
+          }
+        }
+      }
+    },
+    "time": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timezone", "dst_tie_breaker", "relative_window_max_days"],
+      "properties": {
+        "timezone": {"type": "string"},
+        "dst_tie_breaker": {"type": "string"},
+        "relative_window_max_days": {"type": "integer"}
+      }
+    },
+    "backpressure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "min_fps",
+        "max_fps",
+        "min_bitrate_kbps",
+        "max_bitrate_kbps",
+        "min_segment_seconds",
+        "max_segment_seconds",
+        "hysteresis_s",
+        "max_step_fps",
+        "max_step_bitrate_kbps",
+        "max_queue_depth"
+      ],
+      "properties": {
+        "min_fps": {"type": "integer"},
+        "max_fps": {"type": "integer"},
+        "min_bitrate_kbps": {"type": "integer"},
+        "max_bitrate_kbps": {"type": "integer"},
+        "min_segment_seconds": {"type": "integer"},
+        "max_segment_seconds": {"type": "integer"},
+        "hysteresis_s": {"type": "integer"},
+        "max_step_fps": {"type": "integer"},
+        "max_step_bitrate_kbps": {"type": "integer"},
+        "max_queue_depth": {"type": "integer"}
+      }
+    },
+    "performance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startup_ms", "query_latency_ms", "ingestion_mb_s"],
+      "properties": {
+        "startup_ms": {"type": "integer"},
+        "query_latency_ms": {"type": "integer"},
+        "ingestion_mb_s": {"type": "integer"}
+      }
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["video", "audio", "window_metadata", "input_tracking"],
+      "properties": {
+        "video": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "backend", "segment_seconds", "fps_target", "resolution"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "backend": {"type": "string"},
+            "segment_seconds": {"type": "integer"},
+            "fps_target": {"type": "integer"},
+            "resolution": {"type": "string"}
+          }
+        },
+        "audio": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["system_audio", "microphone"],
+          "properties": {
+            "system_audio": {"type": "boolean"},
+            "microphone": {"type": "boolean"}
+          }
+        },
+        "window_metadata": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "sample_hz"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "sample_hz": {"type": "integer"}
+          }
+        },
+        "input_tracking": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "flush_interval_ms"],
+          "properties": {
+            "mode": {"type": "string"},
+            "flush_interval_ms": {"type": "integer"}
+          }
+        }
+      }
+    },
+    "processing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["idle", "on_query"],
+      "properties": {
+        "idle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_concurrency_gpu", "max_concurrency_cpu"],
+          "properties": {
+            "max_concurrency_gpu": {"type": "integer"},
+            "max_concurrency_cpu": {"type": "integer"}
+          }
+        },
+        "on_query": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["allow_decode_extract", "max_window_minutes"],
+          "properties": {
+            "allow_decode_extract": {"type": "boolean"},
+            "max_window_minutes": {"type": "integer"}
+          }
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["data_dir", "encryption_required", "crypto", "retention", "disk_pressure", "entity_map", "anchor"],
+      "properties": {
+        "data_dir": {"type": "string"},
+        "encryption_required": {"type": "boolean"},
+        "crypto": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["backend", "root_key_path", "keyring_path"],
+          "properties": {
+            "backend": {"type": "string"},
+            "root_key_path": {"type": "string"},
+            "keyring_path": {"type": "string"}
+          }
+        },
+        "retention": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["evidence"],
+          "properties": {
+            "evidence": {"type": "string"}
+          }
+        },
+        "disk_pressure": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["warn_free_gb", "critical_free_gb"],
+          "properties": {
+            "warn_free_gb": {"type": "integer"},
+            "critical_free_gb": {"type": "integer"}
+          }
+        },
+        "entity_map": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["persist"],
+          "properties": {
+            "persist": {"type": "boolean"}
+          }
+        },
+        "anchor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "use_dpapi"],
+          "properties": {
+            "path": {"type": "string"},
+            "use_dpapi": {"type": "boolean"}
+          }
+        }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["egress", "cloud"],
+      "properties": {
+        "egress": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "default_sanitize",
+            "allow_raw_egress",
+            "reasoning_packet_only",
+            "token_scope",
+            "token_format",
+            "recognizers"
+          ],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "default_sanitize": {"type": "boolean"},
+            "allow_raw_egress": {"type": "boolean"},
+            "reasoning_packet_only": {"type": "boolean"},
+            "token_scope": {"type": "string"},
+            "token_format": {"type": "string"},
+            "recognizers": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "ssn",
+                "credit_card",
+                "email",
+                "phone",
+                "ipv4",
+                "url",
+                "filepath",
+                "names",
+                "custom_regex"
+              ],
+              "properties": {
+                "ssn": {"type": "boolean"},
+                "credit_card": {"type": "boolean"},
+                "email": {"type": "boolean"},
+                "phone": {"type": "boolean"},
+                "ipv4": {"type": "boolean"},
+                "url": {"type": "boolean"},
+                "filepath": {"type": "boolean"},
+                "names": {"type": "boolean"},
+                "custom_regex": {
+                  "type": "array",
+                  "items": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
+        "cloud": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "allow_images"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "allow_images": {"type": "boolean"}
+          }
+        }
+      }
+    },
+    "observability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allow_evidence", "allowlist_keys"],
+      "properties": {
+        "allow_evidence": {"type": "boolean"},
+        "allowlist_keys": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "plugins": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "safe_mode",
+        "allowlist",
+        "default_pack",
+        "enabled",
+        "search_paths",
+        "locks",
+        "hosting",
+        "permissions",
+        "meta"
+      ],
+      "properties": {
+        "safe_mode": {"type": "boolean"},
+        "allowlist": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "default_pack": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "enabled": {
+          "type": "object",
+          "additionalProperties": {"type": "boolean"}
+        },
+        "search_paths": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "locks": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enforce", "lockfile"],
+          "properties": {
+            "enforce": {"type": "boolean"},
+            "lockfile": {"type": "string"}
+          }
+        },
+        "hosting": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "inproc_allowlist"],
+          "properties": {
+            "mode": {"type": "string"},
+            "inproc_allowlist": {
+              "type": "array",
+              "items": {"type": "string"}
+            }
+          }
+        },
+        "permissions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["network_allowed_plugin_ids"],
+          "properties": {
+            "network_allowed_plugin_ids": {
+              "type": "array",
+              "items": {"type": "string"}
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["configurator_allowed", "policy_allowed"],
+          "properties": {
+            "configurator_allowed": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "policy_allowed": {
+              "type": "array",
+              "items": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "devtools": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["diffusion", "ast_ir"],
+      "properties": {
+        "diffusion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["k_variants", "dry_run"],
+          "properties": {
+            "k_variants": {"type": "integer"},
+            "dry_run": {"type": "boolean"}
+          }
+        },
+        "ast_ir": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pin_path"],
+          "properties": {
+            "pin_path": {"type": "string"}
+          }
+        }
+      }
+    }
+  }
+}

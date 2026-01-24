@@ -1,0 +1,33 @@
+{
+  "plugin_id": "builtin.capture.windows",
+  "version": "0.1.0",
+  "enabled": true,
+  "entrypoints": [
+    {
+      "kind": "capture.source",
+      "id": "default",
+      "path": "plugin.py",
+      "callable": "create_plugin"
+    }
+  ],
+  "permissions": {
+    "filesystem": "readwrite",
+    "gpu": true,
+    "raw_input": true,
+    "network": false
+  },
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [1]
+  },
+  "depends_on": [
+    "builtin.journal.basic",
+    "builtin.ledger.basic",
+    "builtin.anchor.basic",
+    "builtin.backpressure.basic"
+  ],
+  "hash_lock": {
+    "manifest_sha256": "",
+    "artifact_sha256": ""
+  }
+}

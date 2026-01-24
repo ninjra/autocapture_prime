@@ -1,0 +1,66 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "query_sanitized",
+    "facts",
+    "time_window"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [1]
+    },
+    "query_sanitized": {
+      "type": "string"
+    },
+    "time_window": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "facts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "type",
+          "ts_utc",
+          "fields"
+        ],
+        "properties": {
+          "type": {"type": "string"},
+          "ts_utc": {"type": "string"},
+          "fields": {"type": "object"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "intent": {
+      "type": "string"
+    },
+    "output_contract": {
+      "type": "object"
+    },
+    "constraints": {
+      "type": "object"
+    },
+    "entity_glossary": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "token_map": {
+      "type": "object"
+    },
+    "citations_stub": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}

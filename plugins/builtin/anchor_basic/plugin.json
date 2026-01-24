@@ -1,0 +1,28 @@
+{
+  "plugin_id": "builtin.anchor.basic",
+  "version": "0.1.0",
+  "enabled": true,
+  "entrypoints": [
+    {
+      "kind": "anchor.writer",
+      "id": "default",
+      "path": "plugin.py",
+      "callable": "create_plugin"
+    }
+  ],
+  "permissions": {
+    "filesystem": "readwrite",
+    "gpu": false,
+    "raw_input": false,
+    "network": false
+  },
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [1]
+  },
+  "depends_on": ["builtin.ledger.basic"],
+  "hash_lock": {
+    "manifest_sha256": "",
+    "artifact_sha256": ""
+  }
+}
