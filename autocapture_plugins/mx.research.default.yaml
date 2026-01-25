@@ -1,0 +1,64 @@
+schema_version: 1
+plugin_id: mx.research.default
+version: 0.1.0
+display_name: MX Research Default
+description: Default research sources.
+extensions:
+  -
+    kind: research.source
+    factory: autocapture.research.scout:create_research_source
+    name: default
+    version: 0.1.0
+    caps:
+      - research.source
+    pillars:
+      data_handling:
+        local_only: true
+        egress:
+          allow_cloud: false
+          allow_cloud_images: false
+          require_sanitizer: false
+          sanitizer_kind: egress.sanitizer
+      performance:
+        qos_class: background
+        cpu_budget_ms_p95: 200
+        io_budget_mb_s: 5
+      accuracy:
+        deterministic: true
+        validation_level: schema
+      security:
+        network_access: none
+        secrets_access: read
+        sandbox: process
+      citable:
+        produces_citations: true
+        citation_granularity: claim
+  -
+    kind: research.watchlist
+    factory: autocapture.research.scout:create_watchlist
+    name: default
+    version: 0.1.0
+    caps:
+      - research.watchlist
+    pillars:
+      data_handling:
+        local_only: true
+        egress:
+          allow_cloud: false
+          allow_cloud_images: false
+          require_sanitizer: false
+          sanitizer_kind: egress.sanitizer
+      performance:
+        qos_class: background
+        cpu_budget_ms_p95: 200
+        io_budget_mb_s: 5
+      accuracy:
+        deterministic: true
+        validation_level: schema
+      security:
+        network_access: none
+        secrets_access: read
+        sandbox: process
+      citable:
+        produces_citations: true
+        citation_granularity: claim

@@ -1,0 +1,64 @@
+schema_version: 1
+plugin_id: mx.core.llm_local
+version: 0.1.0
+display_name: MX LLM Local
+description: Local LLM provider.
+extensions:
+  -
+    kind: llm.provider
+    factory: autocapture.memory.answer_orchestrator:create_local_llm
+    name: local
+    version: 0.1.0
+    caps:
+      - llm.provider
+    pillars:
+      data_handling:
+        local_only: true
+        egress:
+          allow_cloud: false
+          allow_cloud_images: false
+          require_sanitizer: true
+          sanitizer_kind: egress.sanitizer
+      performance:
+        qos_class: background
+        cpu_budget_ms_p95: 1000
+        io_budget_mb_s: 10
+      accuracy:
+        deterministic: true
+        validation_level: strict
+      security:
+        network_access: none
+        secrets_access: none
+        sandbox: process
+      citable:
+        produces_citations: true
+        citation_granularity: claim
+  -
+    kind: decode.backend
+    factory: autocapture.memory.answer_orchestrator:create_local_decoder
+    name: local
+    version: 0.1.0
+    caps:
+      - decode.backend
+    pillars:
+      data_handling:
+        local_only: true
+        egress:
+          allow_cloud: false
+          allow_cloud_images: false
+          require_sanitizer: true
+          sanitizer_kind: egress.sanitizer
+      performance:
+        qos_class: background
+        cpu_budget_ms_p95: 1000
+        io_budget_mb_s: 10
+      accuracy:
+        deterministic: true
+        validation_level: strict
+      security:
+        network_access: none
+        secrets_access: none
+        sandbox: process
+      citable:
+        produces_citations: true
+        citation_granularity: claim

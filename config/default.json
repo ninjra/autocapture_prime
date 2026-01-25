@@ -1,6 +1,59 @@
 {
-  "schema_version": 1,
-  "profile": "justin_full_fidelity",
+  "backpressure": {
+    "hysteresis_s": 10,
+    "max_bitrate_kbps": 8000,
+    "max_fps": 30,
+    "max_queue_depth": 5,
+    "max_segment_seconds": 120,
+    "max_step_bitrate_kbps": 1000,
+    "max_step_fps": 5,
+    "min_bitrate_kbps": 1000,
+    "min_fps": 5,
+    "min_segment_seconds": 30
+  },
+  "capture": {
+    "audio": {
+      "microphone": true,
+      "system_audio": true
+    },
+    "input_tracking": {
+      "flush_interval_ms": 250,
+      "mode": "raw"
+    },
+    "video": {
+      "backend": "desktop_duplication_nvenc",
+      "enabled": true,
+      "fps_target": 30,
+      "resolution": "native",
+      "segment_seconds": 60
+    },
+    "window_metadata": {
+      "enabled": true,
+      "sample_hz": 5
+    }
+  },
+  "devtools": {
+    "ast_ir": {
+      "pin_path": "contracts/ir_pins.json"
+    },
+    "diffusion": {
+      "dry_run": true,
+      "k_variants": 1
+    }
+  },
+  "gateway": {
+    "openai_base_url": ""
+  },
+  "indexing": {
+    "embedder_model": null,
+    "qdrant": {
+      "binary_path": "vendor/qdrant.exe",
+      "collection": "autocapture",
+      "health_path": "/healthz",
+      "url": "http://localhost:6333"
+    },
+    "vector_backend": "sqlite"
+  },
   "kernel": {
     "required_capabilities": [
       "egress.gateway",
@@ -22,216 +75,137 @@
       "devtools.ast_ir"
     ]
   },
-  "runtime": {
-    "timezone": "America/Denver",
-    "active_window_s": 3,
-    "idle_window_s": 45,
-    "mode_enforcement": {
-      "suspend_workers": true,
-      "suspend_deadline_ms": 100
-    },
-    "gpu": {
-      "release_vram_on_active": true,
-      "release_vram_deadline_ms": 250
-    }
-  },
-  "time": {
-    "timezone": "America/Denver",
-    "dst_tie_breaker": "earliest",
-    "relative_window_max_days": 30
-  },
-  "backpressure": {
-    "min_fps": 5,
-    "max_fps": 30,
-    "min_bitrate_kbps": 1000,
-    "max_bitrate_kbps": 8000,
-    "min_segment_seconds": 30,
-    "max_segment_seconds": 120,
-    "hysteresis_s": 10,
-    "max_step_fps": 5,
-    "max_step_bitrate_kbps": 1000,
-    "max_queue_depth": 5
-  },
-  "performance": {
-    "startup_ms": 500,
-    "query_latency_ms": 2000,
-    "ingestion_mb_s": 50
-  },
-  "capture": {
-    "video": {
-      "enabled": true,
-      "backend": "desktop_duplication_nvenc",
-      "segment_seconds": 60,
-      "fps_target": 30,
-      "resolution": "native"
-    },
-    "audio": {
-      "system_audio": true,
-      "microphone": true
-    },
-    "window_metadata": {
-      "enabled": true,
-      "sample_hz": 5
-    },
-    "input_tracking": {
-      "mode": "raw",
-      "flush_interval_ms": 250
-    }
-  },
-  "processing": {
-    "idle": {
-      "max_concurrency_gpu": 1,
-      "max_concurrency_cpu": 2
-    },
-    "on_query": {
-      "allow_decode_extract": true,
-      "max_window_minutes": 120
-    }
-  },
-  "storage": {
-    "data_dir": "data",
-    "encryption_required": true,
-    "crypto": {
-      "backend": "aesgcm",
-      "root_key_path": "data/vault/root.key",
-      "keyring_path": "data/vault/keyring.json"
-    },
-    "retention": {
-      "evidence": "infinite"
-    },
-    "disk_pressure": {
-      "warn_free_gb": 200,
-      "critical_free_gb": 50
-    },
-    "entity_map": {
-      "persist": true
-    },
-    "anchor": {
-      "path": "data_anchor/anchors.ndjson",
-      "use_dpapi": true
-    }
-  },
-  "privacy": {
-    "egress": {
-      "enabled": true,
-      "default_sanitize": true,
-      "allow_raw_egress": false,
-      "reasoning_packet_only": true,
-      "token_scope": "per_provider",
-      "token_format": "⟦ENT:{type}:{token}⟧",
-      "recognizers": {
-        "ssn": true,
-        "credit_card": true,
-        "email": true,
-        "phone": true,
-        "ipv4": true,
-        "url": true,
-        "filepath": true,
-        "names": true,
-        "custom_regex": []
-      }
-    },
-    "cloud": {
-      "enabled": false,
-      "allow_images": false
-    }
+  "llm": {
+    "model": "sshleifer/tiny-gpt2"
   },
   "observability": {
     "allow_evidence": false,
-    "allowlist_keys": ["event", "level", "message"]
+    "allowlist_keys": [
+      "event",
+      "level",
+      "message"
+    ]
+  },
+  "performance": {
+    "ingestion_mb_s": 50,
+    "query_latency_ms": 2000,
+    "startup_ms": 500
   },
   "plugins": {
-    "safe_mode": false,
     "allowlist": [
-      "builtin.egress.gateway",
-      "builtin.privacy.egress_sanitizer",
-      "builtin.storage.sqlcipher",
-      "builtin.storage.encrypted",
       "builtin.anchor.basic",
-      "builtin.ledger.basic",
-      "builtin.journal.basic",
-      "builtin.retrieval.basic",
-      "builtin.time.advanced",
       "builtin.answer.basic",
-      "builtin.citation.basic",
-      "builtin.runtime.governor",
       "builtin.backpressure.basic",
-      "builtin.observability.basic",
-      "builtin.devtools.diffusion",
+      "builtin.capture.audio.windows",
+      "builtin.capture.stub",
+      "builtin.capture.windows",
+      "builtin.citation.basic",
       "builtin.devtools.ast_ir",
+      "builtin.devtools.diffusion",
+      "builtin.egress.gateway",
+      "builtin.embedder.stub",
+      "builtin.journal.basic",
+      "builtin.ledger.basic",
       "builtin.meta.configurator.noop",
       "builtin.meta.policy.noop",
-      "builtin.capture.windows",
-      "builtin.capture.audio.windows",
-      "builtin.tracking.input.windows",
-      "builtin.window.metadata.windows",
-      "builtin.capture.stub",
+      "builtin.observability.basic",
       "builtin.ocr.stub",
-      "builtin.embedder.stub",
+      "builtin.privacy.egress_sanitizer",
       "builtin.reranker.stub",
-      "builtin.vlm.stub"
+      "builtin.retrieval.basic",
+      "builtin.runtime.governor",
+      "builtin.storage.encrypted",
+      "builtin.storage.sqlcipher",
+      "builtin.time.advanced",
+      "builtin.tracking.input.windows",
+      "builtin.vlm.stub",
+      "builtin.window.metadata.windows",
+      "mx.core.capture_win",
+      "mx.core.compression_and_verify",
+      "mx.core.egress_sanitizer",
+      "mx.core.embed_local",
+      "mx.core.export_import",
+      "mx.core.llm_local",
+      "mx.core.llm_openai_compat",
+      "mx.core.ocr_local",
+      "mx.core.retrieval_tiers",
+      "mx.core.storage_sqlite",
+      "mx.core.vector_local",
+      "mx.core.web_ui",
+      "mx.prompts.default",
+      "mx.research.default",
+      "mx.training.default"
     ],
     "default_pack": [
-      "builtin.egress.gateway",
-      "builtin.privacy.egress_sanitizer",
-      "builtin.storage.sqlcipher",
       "builtin.anchor.basic",
-      "builtin.ledger.basic",
-      "builtin.journal.basic",
-      "builtin.retrieval.basic",
-      "builtin.time.advanced",
       "builtin.answer.basic",
-      "builtin.citation.basic",
-      "builtin.runtime.governor",
       "builtin.backpressure.basic",
-      "builtin.observability.basic",
-      "builtin.devtools.diffusion",
-      "builtin.devtools.ast_ir",
-      "builtin.capture.windows",
       "builtin.capture.audio.windows",
-      "builtin.tracking.input.windows",
-      "builtin.window.metadata.windows",
-      "builtin.ocr.stub",
+      "builtin.capture.windows",
+      "builtin.citation.basic",
+      "builtin.devtools.ast_ir",
+      "builtin.devtools.diffusion",
+      "builtin.egress.gateway",
       "builtin.embedder.stub",
+      "builtin.journal.basic",
+      "builtin.ledger.basic",
+      "builtin.observability.basic",
+      "builtin.ocr.stub",
+      "builtin.privacy.egress_sanitizer",
       "builtin.reranker.stub",
-      "builtin.vlm.stub"
+      "builtin.retrieval.basic",
+      "builtin.runtime.governor",
+      "builtin.storage.sqlcipher",
+      "builtin.time.advanced",
+      "builtin.tracking.input.windows",
+      "builtin.vlm.stub",
+      "builtin.window.metadata.windows",
+      "mx.core.capture_win",
+      "mx.core.compression_and_verify",
+      "mx.core.egress_sanitizer",
+      "mx.core.embed_local",
+      "mx.core.export_import",
+      "mx.core.llm_local",
+      "mx.core.llm_openai_compat",
+      "mx.core.ocr_local",
+      "mx.core.retrieval_tiers",
+      "mx.core.storage_sqlite",
+      "mx.core.vector_local",
+      "mx.core.web_ui",
+      "mx.prompts.default",
+      "mx.research.default",
+      "mx.training.default"
     ],
     "enabled": {
-      "builtin.egress.gateway": true,
-      "builtin.privacy.egress_sanitizer": true,
-      "builtin.storage.sqlcipher": false,
-      "builtin.storage.encrypted": true,
       "builtin.anchor.basic": true,
-      "builtin.ledger.basic": true,
-      "builtin.journal.basic": true,
-      "builtin.retrieval.basic": true,
-      "builtin.time.advanced": true,
       "builtin.answer.basic": true,
-      "builtin.citation.basic": true,
-      "builtin.runtime.governor": true,
       "builtin.backpressure.basic": true,
-      "builtin.observability.basic": true,
-      "builtin.devtools.diffusion": true,
-      "builtin.devtools.ast_ir": true,
-      "builtin.capture.windows": true,
       "builtin.capture.audio.windows": true,
-      "builtin.tracking.input.windows": true,
-      "builtin.window.metadata.windows": true,
+      "builtin.capture.stub": false,
+      "builtin.capture.windows": true,
+      "builtin.citation.basic": true,
+      "builtin.devtools.ast_ir": true,
+      "builtin.devtools.diffusion": true,
+      "builtin.egress.gateway": true,
+      "builtin.embedder.stub": true,
+      "builtin.journal.basic": true,
+      "builtin.ledger.basic": true,
       "builtin.meta.configurator.noop": false,
       "builtin.meta.policy.noop": false,
-      "builtin.capture.stub": false,
+      "builtin.observability.basic": true,
       "builtin.ocr.stub": true,
-      "builtin.embedder.stub": true,
+      "builtin.privacy.egress_sanitizer": true,
       "builtin.reranker.stub": true,
-      "builtin.vlm.stub": true
-    },
-    "search_paths": [],
-    "locks": {
-      "enforce": true,
-      "lockfile": "config/plugin_locks.json"
+      "builtin.retrieval.basic": true,
+      "builtin.runtime.governor": true,
+      "builtin.storage.encrypted": true,
+      "builtin.storage.sqlcipher": false,
+      "builtin.time.advanced": true,
+      "builtin.tracking.input.windows": true,
+      "builtin.vlm.stub": true,
+      "builtin.window.metadata.windows": true
     },
     "hosting": {
-      "mode": "subprocess",
       "inproc_allowlist": [
         "builtin.egress.gateway",
         "builtin.privacy.egress_sanitizer",
@@ -253,23 +227,109 @@
         "builtin.citation.basic",
         "builtin.devtools.diffusion",
         "builtin.devtools.ast_ir"
-      ]
+      ],
+      "mode": "subprocess"
     },
-    "permissions": {
-      "network_allowed_plugin_ids": ["builtin.egress.gateway"]
+    "locks": {
+      "enforce": true,
+      "lockfile": "config/plugin_locks.json"
     },
     "meta": {
       "configurator_allowed": [],
       "policy_allowed": []
+    },
+    "permissions": {
+      "network_allowed_plugin_ids": [
+        "builtin.egress.gateway"
+      ]
+    },
+    "safe_mode": false,
+    "search_paths": [
+      "autocapture_plugins"
+    ]
+  },
+  "privacy": {
+    "cloud": {
+      "allow_images": false,
+      "enabled": false
+    },
+    "egress": {
+      "allow_raw_egress": false,
+      "default_sanitize": true,
+      "enabled": true,
+      "reasoning_packet_only": true,
+      "recognizers": {
+        "credit_card": true,
+        "custom_regex": [],
+        "email": true,
+        "filepath": true,
+        "ipv4": true,
+        "names": true,
+        "phone": true,
+        "ssn": true,
+        "url": true
+      },
+      "token_format": "\u27e6ENT:{type}:{token}\u27e7",
+      "token_scope": "per_provider"
     }
   },
-  "devtools": {
-    "diffusion": {
-      "k_variants": 1,
-      "dry_run": true
+  "processing": {
+    "idle": {
+      "max_concurrency_cpu": 2,
+      "max_concurrency_gpu": 1
     },
-    "ast_ir": {
-      "pin_path": "contracts/ir_pins.json"
+    "on_query": {
+      "allow_decode_extract": true,
+      "max_window_minutes": 120
     }
+  },
+  "profile": "justin_full_fidelity",
+  "runtime": {
+    "active_window_s": 3,
+    "gpu": {
+      "release_vram_deadline_ms": 250,
+      "release_vram_on_active": true
+    },
+    "idle_window_s": 45,
+    "mode_enforcement": {
+      "suspend_deadline_ms": 100,
+      "suspend_workers": true
+    },
+    "timezone": "America/Denver"
+  },
+  "schema_version": 1,
+  "storage": {
+    "anchor": {
+      "path": "data_anchor/anchors.ndjson",
+      "use_dpapi": true
+    },
+    "blob_dir": "data/blobs",
+    "crypto": {
+      "backend": "aesgcm",
+      "keyring_path": "data/vault/keyring.json",
+      "root_key_path": "data/vault/root.key"
+    },
+    "data_dir": "data",
+    "disk_pressure": {
+      "critical_free_gb": 50,
+      "warn_free_gb": 200
+    },
+    "encryption_required": true,
+    "entity_map": {
+      "persist": true
+    },
+    "lexical_path": "data/lexical.db",
+    "media_dir": "data/media",
+    "metadata_path": "data/metadata.db",
+    "retention": {
+      "evidence": "infinite"
+    },
+    "spool_dir": "data/spool",
+    "vector_path": "data/vector.db"
+  },
+  "time": {
+    "dst_tie_breaker": "earliest",
+    "relative_window_max_days": 30,
+    "timezone": "America/Denver"
   }
 }
