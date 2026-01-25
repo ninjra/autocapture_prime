@@ -1,14 +1,27 @@
 # Run the full local test + invariant suite on Windows in one command.
 $ErrorActionPreference = "Stop"
 
-$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$repoRoot = $null
+try {
+    $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+} catch {
+    $repoRoot = Split-Path -Parent $PSScriptRoot
+}
+if (-not $repoRoot) {
+    $repoRoot = Get-Location
+}
+$repoRoot = $repoRoot.ToString()
 Set-Location $repoRoot
 
 $env:PYTHONPATH = $repoRoot
 
-$logPath = Join-Path $repoRoot "tools\\run_all_tests.log"
-$reportPath = Join-Path $repoRoot "tools\\run_all_tests_report.json"
-New-Item -ItemType File -Path $logPath -Force | Out-Null
+$logDir = Join-Path $repoRoot "tools"
+New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+$logPath = Join-Path $logDir "run_all_tests.log"
+$reportPath = Join-Path $logDir "run_all_tests_report.json"
+Set-Content -Path $logPath -Value "" -Encoding UTF8
+Write-Host "Logging to: $logPath"
+Write-Host "Report to: $reportPath"
 
 function Write-Log {
     param([string]$Message)
@@ -40,6 +53,12 @@ function Write-Report {
     Write-Host ("REPORT: status={0} failed_step={1} exit_code={2} log_path={3}" -f $Status, $Step, $ExitCode, $logPath)
 }
 
+trap {
+    Write-Log ("UNHANDLED ERROR: " + $_.Exception.Message)
+    Write-Report -Status "failed" -Step "script_exception" -ExitCode 1
+    break
+}
+
 $bootstrapExe = $null
 $bootstrapPrefix = @()
 if (Get-Command python -ErrorAction SilentlyContinue) {
@@ -50,7 +69,8 @@ if (Get-Command python -ErrorAction SilentlyContinue) {
 }
 
 if (-not $bootstrapExe) {
-    Write-Error "Python not found. Install Python 3.x and retry."
+    Write-Log "Python not found. Install Python 3.x and retry."
+    Write-Report -Status "failed" -Step "python_missing" -ExitCode 1
     exit 1
 }
 
