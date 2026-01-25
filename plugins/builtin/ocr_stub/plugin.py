@@ -23,7 +23,12 @@ class OCRLocal(PluginBase):
             raise RuntimeError(f"Missing OCR dependency: {exc}")
         from io import BytesIO
 
-        img = Image.open(BytesIO(image_bytes))
+        if not image_bytes:
+            raise RuntimeError("Missing OCR input bytes")
+        try:
+            img = Image.open(BytesIO(image_bytes))
+        except Exception as exc:
+            raise RuntimeError(f"Invalid OCR image bytes: {exc}")
         text = pytesseract.image_to_string(img)
         return {"text": text}
 

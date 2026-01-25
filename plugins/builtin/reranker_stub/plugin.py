@@ -24,7 +24,12 @@ class RerankerStub(PluginBase):
         except Exception as exc:
             raise RuntimeError(f"Missing reranker dependency: {exc}")
         model_path = os.path.join("D:\\autocapture", "models", "reranker")
-        self._model = CrossEncoder(model_path)
+        if not os.path.isdir(model_path):
+            raise RuntimeError(f"Missing reranker model files at {model_path}")
+        try:
+            self._model = CrossEncoder(model_path)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load reranker model at {model_path}: {exc}")
         return self._model
 
     def rerank(self, items: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:

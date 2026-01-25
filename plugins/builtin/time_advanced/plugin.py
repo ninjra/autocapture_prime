@@ -23,12 +23,15 @@ class TimeIntentParser(PluginBase):
     def capabilities(self) -> dict[str, Any]:
         return {"time.intent_parser": self}
 
-    def _tz(self) -> ZoneInfo:
+    def _tz(self):
         tz_name = self.context.config.get("time", {}).get("timezone") or self.context.config.get("runtime", {}).get("timezone", "UTC")
         try:
             return ZoneInfo(tz_name)
         except Exception:
-            return ZoneInfo("UTC")
+            try:
+                return ZoneInfo("UTC")
+            except Exception:
+                return timezone.utc
 
     def _tie_breaker_fold(self) -> int:
         tie = self.context.config.get("time", {}).get("dst_tie_breaker", "earliest")
@@ -42,7 +45,7 @@ class TimeIntentParser(PluginBase):
     def parse(self, text: str, now: datetime | None = None) -> dict[str, Any]:
         now = now or datetime.now(timezone.utc)
         tz = self._tz()
-        tz_name = tz.key
+        tz_name = getattr(tz, "key", None) or tz.tzname(None) or "UTC"
         assumptions: list[str] = []
         if tz_name == "UTC" and self.context.config.get("time", {}).get("timezone") not in (None, "UTC"):
             assumptions.append("timezone_fallback_utc")

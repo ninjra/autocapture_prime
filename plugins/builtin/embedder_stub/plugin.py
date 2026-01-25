@@ -24,7 +24,12 @@ class EmbedderLocal(PluginBase):
         except Exception as exc:
             raise RuntimeError(f"Missing embedder dependency: {exc}")
         model_path = os.path.join("D:\\autocapture", "models", "embeddings")
-        self._model = SentenceTransformer(model_path)
+        if not os.path.isdir(model_path):
+            raise RuntimeError(f"Missing embedder model files at {model_path}")
+        try:
+            self._model = SentenceTransformer(model_path)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load embedder model at {model_path}: {exc}")
         return self._model
 
     def embed(self, text: str) -> dict[str, Any]:

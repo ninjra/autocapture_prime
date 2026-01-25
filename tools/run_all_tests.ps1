@@ -80,7 +80,7 @@ function Invoke-EnsureDeps {
     $pipArgs = @("-m", "pip", "install", "-e", $target)
     if ($wheelhouse) {
         Write-Host "Using wheelhouse: $wheelhouse"
-        $pipArgs = @("-m", "pip", "install", "-e", ".", "--no-index", "--find-links", $wheelhouse)
+        $pipArgs = @("-m", "pip", "install", "-e", $target, "--no-index", "--find-links", $wheelhouse)
     } elseif ($allowNetwork -ne "1") {
         Write-Error "Missing dependencies and no wheelhouse found. Set AUTO_CAPTURE_WHEELHOUSE to a folder of wheels or set AUTO_CAPTURE_ALLOW_NETWORK=1 to allow pip downloads."
         exit 1
@@ -93,10 +93,9 @@ function Invoke-Python {
     param([string]$Step, [string[]]$PyArgs)
     $cmd = @($pythonExe) + $pythonPrefix + $PyArgs
     Write-Log ("Running: " + ($cmd -join " "))
-    $prevErrorAction = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    & $pythonExe @pythonPrefix @PyArgs 2>&1 | Tee-Object -FilePath $logPath -Append | Out-Host
-    $ErrorActionPreference = $prevErrorAction
+    $cmdLine = (("\"" + $pythonExe + "\"") + " " + (($pythonPrefix + $PyArgs) | ForEach-Object { if ($_ -match '[\s\"]') { '"' + ($_ -replace '"','""') + '"' } else { $_ } }) -join " ") + " 2>&1"
+    $output = cmd /c $cmdLine
+    $output | Tee-Object -FilePath $logPath -Append | Out-Host
     if ($LASTEXITCODE -ne 0) {
         Write-Report -Status "failed" -Step $Step -ExitCode $LASTEXITCODE
         Write-Log ("FAILED: " + $Step + " (code " + $LASTEXITCODE + ")")
@@ -117,7 +116,14 @@ function Test-Module {
     return ($LASTEXITCODE -eq 0)
 }
 
-$needInstall = -not (Test-Module "cryptography")
+$requiredModules = @("cryptography", "tzdata")
+$needInstall = $false
+foreach ($module in $requiredModules) {
+    if (-not (Test-Module $module)) {
+        $needInstall = $true
+        break
+    }
+}
 
 if ($needInstall) {
     Write-Log "Installing dependencies..."
