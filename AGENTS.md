@@ -1,6 +1,5 @@
 # Codex Instructions (Project)
 
-- Do not use network access.
 - Do not use sudo/admin commands.
 - Do not install global tooling.
 - Fail closed: never guess commands; add TODOs instead.
