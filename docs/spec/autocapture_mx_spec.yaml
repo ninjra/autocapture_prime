@@ -1,0 +1,523 @@
+codex_spec_version: 1
+blueprint_id: autocapture_mx_blueprint_2026_01_25
+
+requirements:
+
+  - id: MX-CONFIG-0001
+    title: Configuration loader with safe defaults (offline, cloud disabled)
+    pillars: [P1, P3]
+    artifacts:
+      - autocapture/config/models.py
+      - autocapture/config/load.py
+      - autocapture/config/defaults.py
+    validators:
+      - type: python_import
+        target: autocapture.config.load:load_config
+      - type: unit_test
+        target: tests/test_config_defaults.py
+
+
+  - id: MX-RETENTION-0001
+    title: Archive-only user data management (no delete or purge surfaces)
+    pillars: [P3, P4]
+    artifacts:
+      - autocapture/ux/facade.py
+      - autocapture/web/api.py
+    validators:
+      - type: cli_output_regex_absent
+        command: ["autocapture", "--help"]
+        patterns:
+          - "\\bdelete\\b"
+          - "\\bpurge\\b"
+          - "\\bwipe\\b"
+      - type: http_routes_absent
+        must_not_include_paths:
+          - "/api/delete"
+          - "/api/purge"
+          - "/api/wipe"
+
+  - id: MX-CORE-0001
+    title: Deterministic IDs + canonical hashing utilities
+    pillars: [P1, P2, P4]
+    artifacts:
+      - autocapture/core/hashing.py
+      - autocapture/core/ids.py
+      - autocapture/core/jsonschema.py
+    validators:
+      - type: unit_test
+        target: tests/test_hashing_canonical.py
+      - type: unit_test
+        target: tests/test_ids_stable.py
+
+  - id: MX-PLUGIN-0001
+    title: Plugin manifest schema + manager + discovery
+    pillars: [P1, P2, P3, P4]
+    artifacts:
+      - autocapture/plugins/manifest.py
+      - autocapture/plugins/manager.py
+      - autocapture/plugins/kinds.py
+    validators:
+      - type: python_import
+        target: autocapture.plugins.manager:PluginManager
+      - type: python_import
+        target: autocapture.plugins.manifest:ExtensionManifest
+      - type: unit_test
+        target: tests/test_plugin_discovery_no_import.py
+      - type: cli_json
+        command: ["autocapture", "plugins", "list", "--json"]
+        must_contain_json_keys: ["plugins", "extensions"]
+
+
+  - id: MX-KINDS-0001
+    title: Plugin kind registry includes required baseline and MX kinds
+    pillars: [P2, P3]
+    artifacts:
+      - autocapture/plugins/kinds.py
+    validators:
+      - type: unit_test
+        target: tests/test_plugin_kinds_registry.py
+
+
+  - id: MX-PLUGSET-0001
+    title: Built-in plugin set covers essential kinds and is enabled by default
+    pillars: [P1, P2, P3, P4]
+    artifacts:
+      - autocapture_plugins/
+    validators:
+      - type: plugins_have_ids
+        required_plugin_ids:
+          - mx.core.capture_win
+          - mx.core.storage_sqlite
+          - mx.core.ocr_local
+          - mx.core.llm_local
+          - mx.core.llm_openai_compat
+          - mx.core.embed_local
+          - mx.core.vector_local
+          - mx.core.retrieval_tiers
+          - mx.core.compression_and_verify
+          - mx.core.egress_sanitizer
+          - mx.core.export_import
+          - mx.core.web_ui
+          - mx.prompts.default
+          - mx.training.default
+          - mx.research.default
+      - type: plugins_have_kinds
+        required_kinds:
+          - capture.source
+          - capture.encoder
+          - activity.signal
+          - storage.blob_backend
+          - storage.media_backend
+          - spans_v2.backend
+          - ocr.engine
+          - llm.provider
+          - decode.backend
+          - embedder.text
+          - vector.backend
+          - retrieval.strategy
+          - reranker.provider
+          - compressor
+          - verifier
+          - egress.sanitizer
+          - export.bundle
+          - import.bundle
+          - ui.panel
+          - ui.overlay
+          - prompt.bundle
+          - training.pipeline
+          - research.source
+          - research.watchlist
+      - type: cli_exit
+        command: ["autocapture", "plugins", "verify-defaults"]
+        expected_exit_code: 0
+
+  - id: MX-PLUGIN-0002
+    title: Plugin hot-swap for non-core plugins
+    pillars: [P1, P2]
+    artifacts:
+      - autocapture/plugins/manager.py
+    validators:
+      - type: unit_test
+        target: tests/test_plugin_hotswap.py
+
+  - id: MX-PLUGIN-0003
+    title: Safe mode restricts external plugins and blocks cloud egress
+    pillars: [P3]
+    artifacts:
+      - autocapture/plugins/manager.py
+      - autocapture/plugins/policy_gate.py
+    validators:
+      - type: unit_test
+        target: tests/test_safe_mode.py
+
+  - id: MX-POLICY-0001
+    title: PolicyGate enforced network egress control
+    pillars: [P1, P3]
+    artifacts:
+      - autocapture/plugins/policy_gate.py
+      - autocapture/core/http.py
+    validators:
+      - type: python_import
+        target: autocapture.plugins.policy_gate:PolicyGate
+      - type: unit_test
+        target: tests/test_policy_gate.py
+
+  - id: MX-SAN-0001
+    title: Egress sanitizer with deterministic entity hashing for text
+    pillars: [P2, P3, P4]
+    artifacts:
+      - autocapture/memory/entities.py
+      - autocapture/ux/redaction.py
+    validators:
+      - type: unit_test
+        target: tests/test_entity_hashing_stable.py
+      - type: unit_test
+        target: tests/test_sanitizer_no_raw_pii.py
+
+  - id: MX-GOV-0001
+    title: RuntimeGovernor blocks heavy work during active interaction
+    pillars: [P1, P3]
+    artifacts:
+      - autocapture/runtime/governor.py
+      - autocapture/runtime/activity.py
+      - autocapture/runtime/scheduler.py
+      - autocapture/runtime/budgets.py
+    validators:
+      - type: unit_test
+        target: tests/test_governor_gating.py
+
+  - id: MX-LEASE-0001
+    title: Work leases prevent duplicate processing and support cancellation
+    pillars: [P1, P2]
+    artifacts:
+      - autocapture/runtime/leases.py
+    validators:
+      - type: unit_test
+        target: tests/test_work_leases.py
+
+  - id: MX-STORE-0001
+    title: Encrypted metadata DB + media blob encryption + portable keys
+    pillars: [P1, P3, P4]
+    artifacts:
+      - autocapture/storage/database.py
+      - autocapture/storage/sqlcipher.py
+      - autocapture/storage/keys.py
+      - autocapture/storage/media_store.py
+      - autocapture/storage/blob_store.py
+    validators:
+      - type: unit_test
+        target: tests/test_key_export_import_roundtrip.py
+      - type: unit_test
+        target: tests/test_sqlcipher_roundtrip.py
+      - type: unit_test
+        target: tests/test_blob_encryption_roundtrip.py
+
+  - id: MX-LEDGER-0001
+    title: Provenance ledger hash chain + verification CLI
+    pillars: [P2, P4]
+    artifacts:
+      - autocapture/pillars/citable.py
+      - autocapture/core/hashing.py
+      - autocapture/storage/archive.py
+    validators:
+      - type: unit_test
+        target: tests/test_provenance_chain.py
+      - type: cli_exit
+        command: ["autocapture", "provenance", "verify"]
+        expected_exit_code: 0
+
+
+  - id: MX-RULES-0001
+    title: Append-only rules ledger with state rebuild and query integration
+    pillars: [P2, P4]
+    artifacts:
+      - autocapture/rules/ledger.py
+      - autocapture/rules/store.py
+      - autocapture/rules/schema.py
+      - autocapture/rules/cli.py
+    validators:
+      - type: unit_test
+        target: tests/test_rules_ledger_append_only.py
+      - type: unit_test
+        target: tests/test_rules_state_rebuild.py
+
+  - id: MX-CAPTURE-0001
+    title: Capture pipeline writes durable spool records and encrypted screenshots
+    pillars: [P1, P3, P4]
+    artifacts:
+      - autocapture/capture/spool.py
+      - autocapture/capture/pipelines.py
+      - autocapture/capture/models.py
+    validators:
+      - type: unit_test
+        target: tests/test_capture_spool_idempotent.py
+
+  - id: MX-INGEST-0001
+    title: Ingest pipeline produces normalized spans with stable IDs
+    pillars: [P1, P2, P4]
+    artifacts:
+      - autocapture/ingest/normalizer.py
+      - autocapture/ingest/spans.py
+    validators:
+      - type: unit_test
+        target: tests/test_span_ids_stable.py
+      - type: unit_test
+        target: tests/test_span_bbox_norm.py
+
+  - id: MX-TABLE-0001
+    title: Table extractor supports structured + image + pdf strategies
+    pillars: [P2, P4]
+    artifacts:
+      - autocapture/plugins/kinds.py
+    validators:
+      - type: unit_test
+        target: tests/test_table_extractor_strategies.py
+
+  - id: MX-INDEX-0001
+    title: Lexical indexing via SQLite FTS5 for events and threads
+    pillars: [P1, P2]
+    artifacts:
+      - autocapture/indexing/lexical.py
+    validators:
+      - type: unit_test
+        target: tests/test_fts_query_returns_hits.py
+
+  - id: MX-INDEX-0002
+    title: Vector indexing using embedder plugins and vector backend
+    pillars: [P1, P2]
+    artifacts:
+      - autocapture/indexing/vector.py
+    validators:
+      - type: unit_test
+        target: tests/test_vector_index_roundtrip.py
+
+  - id: MX-INDEX-0003
+    title: Local Qdrant sidecar supported as vector backend
+    pillars: [P1]
+    artifacts:
+      - autocapture/indexing/vector.py
+      - autocapture/tools/vendor_windows_binaries.py
+    validators:
+      - type: unit_test
+        target: tests/test_qdrant_sidecar_healthcheck.py
+
+  - id: MX-GRAPH-0001
+    title: Graph adapter interface + optional retrieval tier integration
+    pillars: [P2]
+    artifacts:
+      - autocapture/indexing/graph.py
+    validators:
+      - type: unit_test
+        target: tests/test_graph_adapter_contract.py
+
+  - id: MX-RETR-0001
+    title: Tiered retrieval (FAST/FUSION/RERANK) + deterministic fusion
+    pillars: [P1, P2, P4]
+    artifacts:
+      - autocapture/retrieval/tiers.py
+      - autocapture/retrieval/fusion.py
+      - autocapture/retrieval/rerank.py
+      - autocapture/retrieval/signals.py
+    validators:
+      - type: unit_test
+        target: tests/test_rrf_fusion_determinism.py
+      - type: unit_test
+        target: tests/test_tier_planner_escalation.py
+
+  - id: MX-CTX-0001
+    title: Context pack JSON + TRON formats with retrieval signals
+    pillars: [P1, P4]
+    artifacts:
+      - autocapture/memory/context_pack.py
+      - autocapture/retrieval/signals.py
+    validators:
+      - type: unit_test
+        target: tests/test_context_pack_formats.py
+
+  - id: MX-ANS-0001
+    title: Claim-level citations + citation validation + verifier enforced
+    pillars: [P2, P4]
+    artifacts:
+      - autocapture/memory/answer_orchestrator.py
+      - autocapture/memory/citations.py
+      - autocapture/memory/verifier.py
+      - autocapture/memory/conflict.py
+    validators:
+      - type: unit_test
+        target: tests/test_citation_validation.py
+      - type: unit_test
+        target: tests/test_verifier_enforced.py
+      - type: unit_test
+        target: tests/test_conflict_reporting.py
+
+  - id: MX-GATEWAY-0001
+    title: OpenAI-compatible gateway enforces schema + stage routing + policy gate
+    pillars: [P1, P2, P3, P4]
+    artifacts:
+      - autocapture/gateway/app.py
+      - autocapture/gateway/router.py
+      - autocapture/gateway/schemas.py
+    validators:
+      - type: unit_test
+        target: tests/test_gateway_schema_enforced.py
+      - type: unit_test
+        target: tests/test_gateway_policy_block_cloud_default.py
+
+  - id: MX-UX-0001
+    title: UX Facade is the single surface for UI and CLI parity
+    pillars: [P2, P3]
+    artifacts:
+      - autocapture/ux/facade.py
+      - autocapture/ux/models.py
+    validators:
+      - type: python_import
+        target: autocapture.ux.facade:UXFacade
+      - type: unit_test
+        target: tests/test_ux_facade_parity.py
+
+  - id: MX-SETTINGS-0001
+    title: Tiered settings schema + preview tokens + apply confirmation
+    pillars: [P3]
+    artifacts:
+      - autocapture/ux/settings_schema.py
+      - autocapture/ux/preview_tokens.py
+      - autocapture/web/routes/settings.py
+    validators:
+      - type: unit_test
+        target: tests/test_settings_preview_tokens.py
+      - type: http_endpoint
+        method: GET
+        path: /api/settings/schema
+        expects_json_keys: ["schema_version", "tiers", "sections"]
+
+  - id: MX-WEB-0001
+    title: Web Console API routes present and return validated schemas
+    pillars: [P1, P3, P4]
+    artifacts:
+      - autocapture/web/api.py
+      - autocapture/web/routes/query.py
+      - autocapture/web/routes/citations.py
+      - autocapture/web/routes/plugins.py
+      - autocapture/web/routes/health.py
+      - autocapture/web/routes/metrics.py
+    validators:
+      - type: http_endpoint
+        method: GET
+        path: /api/health
+        expects_json_keys: ["ok", "generated_at_utc"]
+      - type: http_endpoint
+        method: POST
+        path: /api/query
+        expects_json_keys: ["answer", "citations", "provenance"]
+
+  - id: MX-CIT-OVERLAY-0001
+    title: Citation overlay API for bounding boxes and source rendering
+    pillars: [P4]
+    artifacts:
+      - autocapture/web/routes/citations.py
+    validators:
+      - type: unit_test
+        target: tests/test_citation_overlay_contract.py
+
+  - id: MX-DOCTOR-0001
+    title: Doctor report summarizes environment and binary availability
+    pillars: [P1, P3]
+    artifacts:
+      - autocapture/ux/models.py
+      - autocapture/web/routes/health.py
+    validators:
+      - type: unit_test
+        target: tests/test_doctor_report_schema.py
+
+  - id: MX-OBS-0001
+    title: Observability via OTel traces and Prometheus metrics
+    pillars: [P1, P2]
+    artifacts:
+      - autocapture/web/routes/metrics.py
+    validators:
+      - type: unit_test
+        target: tests/test_metrics_endpoint_exposes_counters.py
+
+  - id: MX-EXPORT-0001
+    title: Export/import bundles with manifest + hash verification
+    pillars: [P2, P3, P4]
+    artifacts:
+      - autocapture/storage/archive.py
+    validators:
+      - type: unit_test
+        target: tests/test_export_import_roundtrip.py
+
+  - id: MX-VENDOR-0001
+    title: Vendor binaries tool supports Qdrant and FFmpeg with hash verification
+    pillars: [P1, P3]
+    artifacts:
+      - autocapture/tools/vendor_windows_binaries.py
+    validators:
+      - type: unit_test
+        target: tests/test_vendor_binaries_hashcheck.py
+
+  - id: MX-PROMPTOPS-0001
+    title: PromptOps propose/validate/evaluate/apply with deterministic diffs
+    pillars: [P2, P3, P4]
+    artifacts:
+      - autocapture/promptops/propose.py
+      - autocapture/promptops/validate.py
+      - autocapture/promptops/evaluate.py
+      - autocapture/promptops/patch.py
+      - autocapture/promptops/github.py
+    validators:
+      - type: unit_test
+        target: tests/test_promptops_validation.py
+
+  - id: MX-TRAIN-0001
+    title: Training pipelines (LoRA + DPO) with reproducible manifests
+    pillars: [P1, P2, P3]
+    artifacts:
+      - autocapture/training/pipelines.py
+      - autocapture/training/lora.py
+      - autocapture/training/dpo.py
+      - autocapture/training/datasets.py
+    validators:
+      - type: unit_test
+        target: tests/test_training_manifest_schema.py
+
+  - id: MX-RESEARCH-0001
+    title: Research scout with caching and diff thresholding
+    pillars: [P1, P2]
+    artifacts:
+      - autocapture/research/scout.py
+      - autocapture/research/cache.py
+      - autocapture/research/diff.py
+    validators:
+      - type: unit_test
+        target: tests/test_research_scout_cache.py
+
+  - id: MX-GATE-0001
+    title: Pillar gate suite available and wired to codex
+    pillars: [P1, P2, P3, P4]
+    artifacts:
+      - autocapture/tools/pillar_gate.py
+      - autocapture/tools/privacy_scanner.py
+      - autocapture/tools/provenance_gate.py
+      - autocapture/tools/coverage_gate.py
+      - autocapture/tools/latency_gate.py
+      - autocapture/tools/retrieval_sensitivity.py
+      - autocapture/tools/conflict_gate.py
+      - autocapture/tools/integrity_gate.py
+    validators:
+      - type: cli_exit
+        command: ["autocapture", "codex", "pillar-gates"]
+        expected_exit_code: 0
+
+  - id: MX-CODEX-0001
+    title: Codex CLI validates against this blueprint spec
+    pillars: [P2, P4]
+    artifacts:
+      - autocapture/codex/cli.py
+      - autocapture/codex/spec.py
+      - autocapture/codex/validators.py
+      - autocapture/codex/report.py
+    validators:
+      - type: cli_exit
+        command: ["autocapture", "codex", "validate", "--json"]
+        expected_exit_code: 0
