@@ -93,7 +93,10 @@ function Invoke-Python {
     param([string]$Step, [string[]]$PyArgs)
     $cmd = @($pythonExe) + $pythonPrefix + $PyArgs
     Write-Log ("Running: " + ($cmd -join " "))
+    $prevErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     & $pythonExe @pythonPrefix @PyArgs 2>&1 | Tee-Object -FilePath $logPath -Append | Out-Host
+    $ErrorActionPreference = $prevErrorAction
     if ($LASTEXITCODE -ne 0) {
         Write-Report -Status "failed" -Step $Step -ExitCode $LASTEXITCODE
         Write-Log ("FAILED: " + $Step + " (code " + $LASTEXITCODE + ")")
