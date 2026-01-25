@@ -11,3 +11,6 @@ tools/hypervisor/runs/
 tools/hypervisor/variants/
 tools/run_all_tests.log
 tools/run_all_tests_report.json
+.dev/
+ops/dev/common.env
+ops/dev/ports.env
