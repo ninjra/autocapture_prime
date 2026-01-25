@@ -14,3 +14,8 @@ tools/run_all_tests_report.json
 .dev/
 ops/dev/common.env
 ops/dev/ports.env
+node_modules/
+/package.json
+/package-lock.json
+/repomix-output.xml
+/inventory_*.csv
