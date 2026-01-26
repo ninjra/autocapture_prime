@@ -4,6 +4,7 @@ import unittest
 import zipfile
 
 from autocapture_nx.processing.idle import IdleProcessor
+from autocapture_nx.kernel.ids import encode_record_id_component
 
 
 class _MetadataStore:
@@ -111,8 +112,9 @@ class IdleProcessorTests(unittest.TestCase):
             processor = IdleProcessor(system)
             stats = processor.process()
             self.assertEqual(stats.processed, 2)
-            self.assertIn("run1/derived.text.ocr/run1_segment_0", metadata.data)
-            self.assertIn("run1/derived.text.vlm/run1_segment_0", metadata.data)
+            encoded = encode_record_id_component(record_id)
+            self.assertIn(f"run1/derived.text.ocr/{encoded}", metadata.data)
+            self.assertIn(f"run1/derived.text.vlm/{encoded}", metadata.data)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,8 @@ import zipfile
 from datetime import datetime
 from typing import Any
 
+from autocapture_nx.kernel.ids import encode_record_id_component
+
 
 def _parse_ts(ts: str | None) -> datetime | None:
     if not ts:
@@ -66,13 +68,14 @@ def extract_on_demand(
             run_id = getattr(system, "config", {}).get("runtime", {}).get("run_id")
         run_id = run_id or "run"
         derived_ids: list[tuple[str, Any, str]] = []
+        encoded_source = encode_record_id_component(record_id)
         if ocr is not None:
             derived_ids.append(
-                (f"{run_id}/derived.text.ocr/{record_id.replace('/', '_')}", ocr, "ocr")
+                (f"{run_id}/derived.text.ocr/{encoded_source}", ocr, "ocr")
             )
         if vlm is not None:
             derived_ids.append(
-                (f"{run_id}/derived.text.vlm/{record_id.replace('/', '_')}", vlm, "vlm")
+                (f"{run_id}/derived.text.vlm/{encoded_source}", vlm, "vlm")
             )
         if not derived_ids:
             continue

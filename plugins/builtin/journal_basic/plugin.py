@@ -73,6 +73,11 @@ class JournalWriter(PluginBase):
         canonical = dumps(entry)
         with open(self._path, "a", encoding="utf-8") as handle:
             handle.write(f"{canonical}\n")
+            try:
+                handle.flush()
+                os.fsync(handle.fileno())
+            except OSError:
+                pass
 
     def append_batch(self, entries: list[dict[str, Any]]) -> list[str]:
         if not entries:
@@ -113,6 +118,11 @@ class JournalWriter(PluginBase):
                     canonical = dumps(entry)
                     handle.write(f"{canonical}\n")
                     event_ids.append(entry["event_id"])
+                try:
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                except OSError:
+                    pass
         return event_ids
 
     def append_typed(self, event: JournalEvent) -> None:

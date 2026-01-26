@@ -71,6 +71,7 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
     "builtin.tracking.input.windows": [
         "capture.input_tracking.mode",
         "capture.input_tracking.flush_interval_ms",
+        "capture.input_tracking.store_derived",
     ],
     "builtin.window.metadata.windows": [
         "capture.window_metadata.enabled",
@@ -112,6 +113,12 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "storage.crypto.root_key_path",
         "storage.fsync_policy",
         "storage.encryption_required",
+        "storage.disk_pressure.warn_free_gb",
+        "storage.disk_pressure.soft_free_gb",
+        "storage.disk_pressure.critical_free_gb",
+        "storage.disk_pressure.interval_s",
+        "storage.forecast.enabled",
+        "storage.forecast.warn_days",
     ],
     "builtin.storage.encrypted": [
         "storage.media_dir",
@@ -120,6 +127,12 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "storage.crypto.root_key_path",
         "storage.fsync_policy",
         "storage.encryption_required",
+        "storage.disk_pressure.warn_free_gb",
+        "storage.disk_pressure.soft_free_gb",
+        "storage.disk_pressure.critical_free_gb",
+        "storage.disk_pressure.interval_s",
+        "storage.forecast.enabled",
+        "storage.forecast.warn_days",
     ],
     "mx.core.storage_sqlite": [
         "storage.metadata_path",

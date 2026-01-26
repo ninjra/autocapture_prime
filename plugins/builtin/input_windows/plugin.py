@@ -9,6 +9,11 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+import json
+import hashlib
+import struct
+
+from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 
 
@@ -27,6 +32,7 @@ class InputTrackerWindows(PluginBase):
         self._flush_thread: threading.Thread | None = None
         self._flush_interval_ms = 250
         self._event_builder = None
+        self._batch_seq = 0
 
     def capabilities(self) -> dict[str, Any]:
         return {"tracking.input": self}
@@ -143,6 +149,50 @@ class InputTrackerWindows(PluginBase):
         event_id = event_builder.journal_event("input.batch", payload, ts_utc=end_ts)
         with self._lock:
             self._last_event_id = event_id
+        capture_cfg = self.context.config.get("capture", {}).get("input_tracking", {})
+        store_derived = bool(capture_cfg.get("store_derived", True))
+        if not store_derived:
+            return
+        try:
+            storage_media = self.context.get_capability("storage.media")
+            storage_meta = self.context.get_capability("storage.metadata")
+        except Exception:
+            return
+        run_id = ensure_run_id(self.context.config)
+        seq = self._batch_seq
+        self._batch_seq += 1
+        log_id = prefixed_id(run_id, "derived.input.log", seq)
+        summary_id = prefixed_id(run_id, "derived.input.summary", seq)
+        encoded = _encode_input_log(events)
+        if hasattr(storage_media, "put_new"):
+            storage_media.put_new(log_id, encoded, ts_utc=end_ts)
+        else:
+            storage_media.put(log_id, encoded, ts_utc=end_ts)
+        content_hash = hashlib.sha256(encoded).hexdigest()
+        summary = {
+            "record_type": "derived.input.summary",
+            "run_id": run_id,
+            "ts_utc": end_ts,
+            "start_ts_utc": start_ts,
+            "end_ts_utc": end_ts,
+            "log_id": log_id,
+            "event_id": event_id,
+            "event_count": int(len(events)),
+            "counts": payload["counts"],
+            "content_hash": content_hash,
+        }
+        if hasattr(storage_meta, "put_new"):
+            storage_meta.put_new(summary_id, summary)
+        else:
+            storage_meta.put(summary_id, summary)
+        event_builder.ledger_entry(
+            "input.batch",
+            inputs=[event_id],
+            outputs=[log_id, summary_id],
+            payload=summary,
+            entry_id=summary_id,
+            ts_utc=end_ts,
+        )
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> InputTrackerWindows:
@@ -170,3 +220,12 @@ class _InputBatcher:
         self._first_ts = None
         self._last_ts = None
         return events, start, end
+
+
+def _encode_input_log(events: list[dict[str, Any]]) -> bytes:
+    payload = bytearray(b"INPT1")
+    for event in events:
+        data = json.dumps(event, sort_keys=True).encode("utf-8")
+        payload.extend(struct.pack(">I", len(data)))
+        payload.extend(data)
+    return bytes(payload)

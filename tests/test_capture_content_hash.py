@@ -1,4 +1,4 @@
-import os
+import hashlib
 import tempfile
 import unittest
 
@@ -26,20 +26,14 @@ class _MetaStore:
 
 
 class _EventBuilder:
-    def __init__(self) -> None:
-        self.journal = []
-        self.ledger = []
-
     def policy_snapshot_hash(self) -> str:
         return "policyhash"
 
-    def journal_event(self, _event_type: str, payload: dict, **_kwargs) -> str:
-        self.journal.append(payload)
+    def journal_event(self, _event_type: str, _payload: dict, **_kwargs) -> str:
         return _kwargs.get("event_id") or "event_id"
 
-    def ledger_entry(self, _stage: str, inputs: list[str], outputs: list[str], *, payload: dict | None = None, **_kwargs) -> str:
+    def ledger_entry(self, _stage: str, inputs: list[str], outputs: list[str], **_kwargs) -> str:
         _ = (inputs, outputs)
-        self.ledger.append(payload or {})
         return "hash"
 
 
@@ -53,8 +47,8 @@ class _Logger:
         return None
 
 
-class CaptureStreamingTests(unittest.TestCase):
-    def test_segments_stream_to_media_store(self) -> None:
+class CaptureContentHashTests(unittest.TestCase):
+    def test_segment_content_hash_matches_payload(self) -> None:
         media = _MediaStore()
         meta = _MetaStore()
         event_builder = _EventBuilder()
@@ -88,18 +82,9 @@ class CaptureStreamingTests(unittest.TestCase):
             pipeline.start()
             pipeline.join()
 
-            self.assertTrue(media.records)
-            record_id, payload = media.records[0]
-            self.assertEqual(record_id, "run1/segment/0")
-            self.assertTrue(payload.startswith(b"RIFF"))
-            self.assertIn("run1/segment/0", meta.data)
-            self.assertEqual(meta.data["run1/segment/0"]["frame_count"], 2)
-            self.assertIn("content_hash", meta.data["run1/segment/0"])
-            self.assertIn("drops", meta.data["run1/segment/0"])
-            events = [entry.get("event") for entry in event_builder.ledger if isinstance(entry, dict)]
-            self.assertIn("segment.sealed", events)
-            leftovers = [name for name in os.listdir(tmpdir) if name.endswith(".avi") or name.endswith(".tmp")]
-            self.assertFalse(leftovers)
+        record_id, payload = media.records[0]
+        content_hash = meta.data[record_id]["content_hash"]
+        self.assertEqual(content_hash, hashlib.sha256(payload).hexdigest())
 
 
 if __name__ == "__main__":

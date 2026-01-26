@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from autocapture.research.runner import ResearchRunner
+from autocapture.storage.pressure import StoragePressureMonitor
 from autocapture.runtime.governor import RuntimeGovernor
 from autocapture.runtime.scheduler import Job, Scheduler
 
@@ -16,6 +17,7 @@ from autocapture.runtime.scheduler import Job, Scheduler
 class ConductorStats:
     last_idle_run: float | None = None
     last_research_run: float | None = None
+    last_storage_sample: float | None = None
 
 
 class RuntimeConductor:
@@ -26,6 +28,7 @@ class RuntimeConductor:
         self._scheduler = Scheduler(self._governor)
         self._input_tracker = self._resolve_input_tracker(system)
         self._idle_processor = None
+        self._storage_monitor = StoragePressureMonitor(system)
         self._research_runner = ResearchRunner(self._config)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -117,6 +120,22 @@ class RuntimeConductor:
         self._scheduler.enqueue(Job(name="idle.research", fn=job_fn, heavy=True))
         self._queued.add("idle.research")
 
+    def _schedule_storage_pressure(self) -> None:
+        if self._storage_monitor is None:
+            return
+        if not self._storage_monitor.due():
+            return
+        if "storage.pressure" in self._queued:
+            return
+
+        def job_fn():
+            sample = self._storage_monitor.record()
+            if sample is not None:
+                self._stats.last_storage_sample = time.time()
+
+        self._scheduler.enqueue(Job(name="storage.pressure", fn=job_fn, heavy=True))
+        self._queued.add("storage.pressure")
+
     def _should_abort(self) -> bool:
         signals = self._signals()
         decision = self._governor.decide(signals)
@@ -125,6 +144,7 @@ class RuntimeConductor:
     def _run_once(self) -> list[str]:
         self._schedule_idle()
         self._schedule_research()
+        self._schedule_storage_pressure()
         signals = self._signals()
         executed = self._scheduler.run_pending(signals)
         for name in executed:

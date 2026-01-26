@@ -3,6 +3,7 @@ import unittest
 import zipfile
 
 from autocapture_nx.kernel.query import extract_on_demand
+from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.plugin_system.api import PluginContext
 from plugins.builtin.retrieval_basic.plugin import RetrievalStrategy
 
@@ -58,8 +59,9 @@ class QueryDerivedRecordTests(unittest.TestCase):
         processed = extract_on_demand(system, time_window=None, limit=2)
         self.assertEqual(processed, 2)
         self.assertNotIn("text", metadata.get(record_id))
-        vlm_id = "run1/derived.text.vlm/run1_segment_0"
-        ocr_id = "run1/derived.text.ocr/run1_segment_0"
+        encoded = encode_record_id_component(record_id)
+        vlm_id = f"run1/derived.text.vlm/{encoded}"
+        ocr_id = f"run1/derived.text.ocr/{encoded}"
         derived_vlm = metadata.get(vlm_id)
         derived_ocr = metadata.get(ocr_id)
         self.assertEqual(derived_vlm["record_type"], "derived.text.vlm")
@@ -71,14 +73,16 @@ class QueryDerivedRecordTests(unittest.TestCase):
 
     def test_retrieval_returns_source_id_for_derived_records(self) -> None:
         metadata = _MetadataStore()
-        metadata.put("run1/segment/1", {"record_type": "evidence.capture.segment", "ts_utc": "2024-01-02T00:00:00+00:00"})
+        record_id = "run1/segment/1"
+        metadata.put(record_id, {"record_type": "evidence.capture.segment", "ts_utc": "2024-01-02T00:00:00+00:00"})
+        encoded = encode_record_id_component(record_id)
         metadata.put(
-            "run1/derived.text.vlm/run1_segment_1",
+            f"run1/derived.text.vlm/{encoded}",
             {
                 "record_type": "derived.text.vlm",
                 "ts_utc": "2024-01-02T00:00:00+00:00",
                 "text": "hello world",
-                "source_id": "run1/segment/1",
+                "source_id": record_id,
             },
         )
         ctx = PluginContext(config={}, get_capability=lambda _k: metadata, logger=lambda _m: None)
@@ -86,8 +90,8 @@ class QueryDerivedRecordTests(unittest.TestCase):
 
         results = retrieval.search("hello", time_window=None)
         self.assertTrue(results)
-        self.assertEqual(results[0]["record_id"], "run1/segment/1")
-        self.assertEqual(results[0]["derived_id"], "run1/derived.text.vlm/run1_segment_1")
+        self.assertEqual(results[0]["record_id"], record_id)
+        self.assertEqual(results[0]["derived_id"], f"run1/derived.text.vlm/{encoded}")
 
 
 if __name__ == "__main__":

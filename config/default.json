@@ -31,7 +31,8 @@
     },
     "input_tracking": {
       "flush_interval_ms": 250,
-      "mode": "raw"
+      "mode": "raw",
+      "store_derived": true
     },
     "video": {
       "backend": "mss",
@@ -398,6 +399,7 @@
     "data_dir": "data",
     "disk_pressure": {
       "critical_free_gb": 50,
+      "interval_s": 3600,
       "soft_free_gb": 100,
       "warn_free_gb": 200
     },
@@ -405,6 +407,10 @@
     "encryption_required": true,
     "entity_map": {
       "persist": true
+    },
+    "forecast": {
+      "enabled": true,
+      "warn_days": 14
     },
     "lexical_path": "data/lexical.db",
     "media_dir": "data/media",

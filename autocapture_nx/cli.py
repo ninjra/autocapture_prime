@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import asdict
+from pathlib import Path
 
 from autocapture_nx.kernel.config import (
     load_config,
@@ -268,6 +270,92 @@ def cmd_research_run(args: argparse.Namespace) -> int:
     return 0 if result.get("ok", False) else 1
 
 
+def _load_user_config(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_user_config(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def cmd_storage_migrate(args: argparse.Namespace) -> int:
+    from autocapture.storage.migrate import migrate_data_dir
+
+    paths = default_config_paths()
+    config = load_config(paths, safe_mode=args.safe_mode)
+    src = args.src or config.get("storage", {}).get("data_dir", "data")
+    dst = args.dst
+    result = migrate_data_dir(src, dst, dry_run=args.dry_run, verify=not args.no_verify)
+    _print_json(asdict(result))
+    if args.update_config and not args.dry_run:
+        user_cfg = _load_user_config(paths.user_path)
+        updates = {"storage": {"data_dir": dst}}
+        merged = _deep_merge(user_cfg, updates)
+        _write_user_config(paths.user_path, merged)
+    return 0
+
+
+def cmd_storage_forecast(args: argparse.Namespace) -> int:
+    from autocapture.storage.forecast import forecast_from_journal
+
+    paths = default_config_paths()
+    config = load_config(paths, safe_mode=args.safe_mode)
+    data_dir = args.data_dir or config.get("storage", {}).get("data_dir", "data")
+    result = forecast_from_journal(str(data_dir))
+    _print_json(asdict(result))
+    return 0
+
+
+def cmd_storage_compact(args: argparse.Namespace) -> int:
+    from autocapture.storage.compaction import compact_derived
+
+    kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
+    system = kernel.boot()
+    try:
+        result = compact_derived(
+            system.get("storage.metadata"),
+            system.get("storage.media"),
+            system.config,
+            dry_run=args.dry_run,
+            event_builder=system.get("event.builder"),
+        )
+        _print_json(asdict(result))
+    finally:
+        kernel.shutdown()
+    return 0
+
+
+def cmd_storage_cleanup(args: argparse.Namespace) -> int:
+    import shutil
+
+    target = Path(args.path).resolve()
+    if not args.confirm:
+        print("Refusing to delete without --confirm")
+        return 2
+    if str(target) in ("/", str(Path("/").resolve())):
+        print("Refusing to delete root path")
+        return 2
+    if not target.exists():
+        print(f"Missing path: {target}")
+        return 1
+    shutil.rmtree(target)
+    print(f"Deleted {target}")
+    return 0
+
+
 def cmd_codex(args: argparse.Namespace) -> int:
     from autocapture.codex.cli import main as codex_main
 
@@ -335,6 +423,26 @@ def build_parser() -> argparse.ArgumentParser:
     research_sub = research.add_subparsers(dest="research_cmd", required=True)
     research_run = research_sub.add_parser("run")
     research_run.set_defaults(func=cmd_research_run)
+
+    storage = sub.add_parser("storage")
+    storage_sub = storage.add_subparsers(dest="storage_cmd", required=True)
+    storage_migrate = storage_sub.add_parser("migrate")
+    storage_migrate.add_argument("--src", default="")
+    storage_migrate.add_argument("--dst", required=True)
+    storage_migrate.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=False)
+    storage_migrate.add_argument("--no-verify", action="store_true")
+    storage_migrate.add_argument("--update-config", action="store_true")
+    storage_migrate.set_defaults(func=cmd_storage_migrate)
+    storage_forecast = storage_sub.add_parser("forecast")
+    storage_forecast.add_argument("--data-dir", default="")
+    storage_forecast.set_defaults(func=cmd_storage_forecast)
+    storage_compact = storage_sub.add_parser("compact-derived")
+    storage_compact.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=False)
+    storage_compact.set_defaults(func=cmd_storage_compact)
+    storage_cleanup = storage_sub.add_parser("cleanup")
+    storage_cleanup.add_argument("--path", required=True)
+    storage_cleanup.add_argument("--confirm", action="store_true")
+    storage_cleanup.set_defaults(func=cmd_storage_cleanup)
 
     codex = sub.add_parser("codex")
     codex.add_argument("codex_args", nargs=argparse.REMAINDER)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
@@ -88,6 +89,7 @@ class Kernel:
         capabilities.register("event.builder", builder, network_allowed=False)
         self._record_storage_manifest(builder, capabilities, plugins)
         self._record_run_start(builder)
+        self._run_recovery(builder)
         self.system = System(config=self.config, plugins=plugins, capabilities=capabilities)
         try:
             from autocapture.runtime.conductor import create_conductor
@@ -149,6 +151,7 @@ class Kernel:
         ts_utc = datetime.now(timezone.utc).isoformat()
         duration_ms = self._run_duration_ms(ts_utc)
         summary = self._summarize_journal(builder.run_id)
+        self._record_storage_manifest_final(builder, summary, duration_ms, ts_utc)
         payload = {
             "event": "system.stop",
             "run_id": builder.run_id,
@@ -286,6 +289,22 @@ class Kernel:
         ts_utc = datetime.now(timezone.utc).isoformat()
         lock_hashes = self._lock_hashes()
         effective = self.effective_config
+        plugin_ids: list[str] = []
+        plugin_versions: dict[str, str] = {}
+        for plugin in plugins:
+            pid = getattr(plugin, "plugin_id", None) or plugin.manifest.get("plugin_id")
+            if not pid:
+                continue
+            plugin_ids.append(pid)
+            version = None
+            if hasattr(plugin, "manifest"):
+                version = plugin.manifest.get("version")
+            if version:
+                plugin_versions[pid] = str(version)
+        metadata_backend = type(getattr(metadata, "_store", metadata)).__name__
+        media = capabilities.get("storage.media")
+        media_backend = type(media).__name__
+        storage_cfg = self.config.get("storage", {})
         manifest = {
             "record_type": "system.run_manifest",
             "run_id": run_id,
@@ -294,11 +313,25 @@ class Kernel:
                 "schema_hash": effective.schema_hash if effective else None,
                 "effective_hash": effective.effective_hash if effective else None,
             },
+            "policy_snapshot_hash": builder.policy_snapshot_hash(),
             "locks": lock_hashes,
-            "plugins": sorted({p.plugin_id for p in plugins}),
+            "plugins": sorted(set(plugin_ids)),
+            "plugin_versions": plugin_versions,
             "storage": {
-                "data_dir": self.config.get("storage", {}).get("data_dir", "data"),
-                "fsync_policy": self.config.get("storage", {}).get("fsync_policy", "none"),
+                "data_dir": storage_cfg.get("data_dir", "data"),
+                "media_dir": storage_cfg.get("media_dir", "data/media"),
+                "metadata_path": storage_cfg.get("metadata_path", "data/metadata.db"),
+                "blob_dir": storage_cfg.get("blob_dir", "data/blobs"),
+                "fsync_policy": storage_cfg.get("fsync_policy", "none"),
+                "encryption_required": bool(storage_cfg.get("encryption_required", False)),
+                "metadata_backend": metadata_backend,
+                "media_backend": media_backend,
+            },
+            "platform": {
+                "system": platform.system(),
+                "release": platform.release(),
+                "version": platform.version(),
+                "python_version": platform.python_version(),
             },
         }
         record_id = prefixed_id(run_id, "system.run_manifest", 0)
@@ -316,6 +349,104 @@ class Kernel:
             payload={"event": "storage.manifest", "record_id": record_id},
             ts_utc=ts_utc,
         )
+
+    def _record_storage_manifest_final(
+        self,
+        builder: EventBuilder,
+        summary: dict[str, int],
+        duration_ms: int,
+        ts_utc: str,
+    ) -> None:
+        if self.system is None:
+            return
+        try:
+            metadata = self.system.get("storage.metadata")
+        except Exception:
+            return
+        plugin_ids: list[str] = []
+        plugin_versions: dict[str, str] = {}
+        for plugin in self.system.plugins:
+            pid = getattr(plugin, "plugin_id", None) or getattr(plugin, "manifest", {}).get("plugin_id")
+            if not pid:
+                continue
+            plugin_ids.append(pid)
+            version = None
+            if hasattr(plugin, "manifest"):
+                version = plugin.manifest.get("version")
+            if version:
+                plugin_versions[pid] = str(version)
+        storage_cfg = self.config.get("storage", {})
+        manifest = {
+            "record_type": "system.run_manifest.final",
+            "run_id": builder.run_id,
+            "ts_utc": ts_utc,
+            "started_at": self._run_started_at,
+            "stopped_at": ts_utc,
+            "duration_ms": int(duration_ms),
+            "summary": summary,
+            "policy_snapshot_hash": builder.policy_snapshot_hash(),
+            "locks": self._lock_hashes(),
+            "plugins": sorted(set(plugin_ids)),
+            "plugin_versions": plugin_versions,
+            "storage": {
+                "data_dir": storage_cfg.get("data_dir", "data"),
+                "media_dir": storage_cfg.get("media_dir", "data/media"),
+                "metadata_path": storage_cfg.get("metadata_path", "data/metadata.db"),
+                "blob_dir": storage_cfg.get("blob_dir", "data/blobs"),
+                "fsync_policy": storage_cfg.get("fsync_policy", "none"),
+                "encryption_required": bool(storage_cfg.get("encryption_required", False)),
+            },
+        }
+        record_id = prefixed_id(builder.run_id, "system.run_manifest.final", 0)
+        try:
+            if hasattr(metadata, "put_new"):
+                metadata.put_new(record_id, manifest)
+            else:
+                metadata.put(record_id, manifest)
+        except FileExistsError:
+            return
+        builder.ledger_entry(
+            "system",
+            inputs=[],
+            outputs=[record_id],
+            payload={"event": "storage.manifest.final", "record_id": record_id},
+            ts_utc=ts_utc,
+        )
+
+    def _run_recovery(self, builder: EventBuilder) -> None:
+        data_dir = self.config.get("storage", {}).get("data_dir", "data")
+        spool_dir = self.config.get("storage", {}).get("spool_dir", "data/spool")
+        media_dir = self.config.get("storage", {}).get("media_dir", "data/media")
+        blob_dir = self.config.get("storage", {}).get("blob_dir", "data/blobs")
+        metadata_dir = self.config.get("storage", {}).get("metadata_dir", "data/metadata")
+        candidates = {data_dir, spool_dir, media_dir, blob_dir, metadata_dir}
+        removed: list[str] = []
+        for root in sorted({str(Path(path)) for path in candidates if path}):
+            root_path = Path(root)
+            if not root_path.exists():
+                continue
+            for file_path in root_path.rglob("*.tmp"):
+                try:
+                    file_path.unlink()
+                    removed.append(str(file_path))
+                except Exception:
+                    continue
+        if removed:
+            sample = [path for path in removed[:5]]
+            payload = {
+                "event": "storage.recovery",
+                "removed_count": int(len(removed)),
+                "removed_samples": sample,
+            }
+            ts_utc = datetime.now(timezone.utc).isoformat()
+            builder.journal_event("storage.recovery", payload, ts_utc=ts_utc)
+            builder.ledger_entry(
+                "storage.recovery",
+                inputs=[],
+                outputs=[],
+                payload=payload,
+                ts_utc=ts_utc,
+            )
 
     def _apply_meta_plugins(self, config: dict[str, Any], plugins: list) -> dict[str, Any]:
         updated = dict(config)
@@ -516,6 +647,44 @@ class Kernel:
                     detail="anchor store separate from data_dir" if ok else "anchor path within data_dir",
                 )
             )
+        forecast_cfg = config.get("storage", {}).get("forecast", {})
+        if not isinstance(forecast_cfg, dict):
+            forecast_cfg = {}
+        if bool(forecast_cfg.get("enabled", True)):
+            try:
+                from autocapture.storage.forecast import forecast_from_journal
+
+                data_dir = config.get("storage", {}).get("data_dir", "data")
+                forecast = forecast_from_journal(str(data_dir))
+                warn_days = int(forecast_cfg.get("warn_days", 14))
+                if forecast.days_remaining is None:
+                    checks.append(
+                        DoctorCheck(
+                            name="disk_forecast",
+                            ok=True,
+                            detail="insufficient data",
+                        )
+                    )
+                else:
+                    ok = forecast.days_remaining >= warn_days
+                    detail = f"{forecast.days_remaining}d remaining"
+                    if forecast.trend_bytes_per_day is not None:
+                        detail += f" (trend {forecast.trend_bytes_per_day} B/day)"
+                    checks.append(
+                        DoctorCheck(
+                            name="disk_forecast",
+                            ok=ok,
+                            detail=detail,
+                        )
+                    )
+            except Exception as exc:
+                checks.append(
+                    DoctorCheck(
+                        name="disk_forecast",
+                        ok=False,
+                        detail=str(exc),
+                    )
+                )
         allowed_network = set(
             config.get("plugins", {})
             .get("permissions", {})

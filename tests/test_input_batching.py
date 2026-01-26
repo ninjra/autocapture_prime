@@ -1,7 +1,7 @@
 import unittest
 
 from autocapture_nx.plugin_system.api import PluginContext
-from plugins.builtin.input_windows.plugin import InputTrackerWindows
+from plugins.builtin.input_windows.plugin import InputTrackerWindows, _encode_input_log
 
 
 class _DummyEventBuilder:
@@ -38,6 +38,10 @@ class InputBatchingTests(unittest.TestCase):
         counts = payload.get("counts", {})
         self.assertEqual(counts.get("key"), 1)
         self.assertEqual(counts.get("mouse"), 1)
+
+    def test_input_log_encoding_has_header(self) -> None:
+        encoded = _encode_input_log([{"kind": "key", "ts_utc": "t1"}])
+        self.assertTrue(encoded.startswith(b"INPT1"))
 
 
 if __name__ == "__main__":

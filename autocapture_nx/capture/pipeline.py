@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 from autocapture_nx.capture.avi import AviMjpegWriter
 from autocapture_nx.capture.queues import BoundedQueue
-from autocapture_nx.kernel.ids import prefixed_id
+from autocapture_nx.kernel.ids import encode_record_id_component, prefixed_id
 from autocapture_nx.windows.win_capture import Frame, iter_screenshots
 
 STOP_SENTINEL = object()
@@ -170,7 +170,7 @@ class SegmentWriter:
         self._tmp_path = self._segment_path(final=False)
 
     def _segment_path(self, *, final: bool) -> str:
-        safe = self.segment_id.replace("/", "_")
+        safe = encode_record_id_component(self.segment_id)
         ext = self.container_ext()
         suffix = f".{ext}"
         if not final:
@@ -596,29 +596,88 @@ class CapturePipeline:
                     cursor_payload["handle"] = int(cursor.handle)
                 metadata["cursor"] = cursor_payload
 
-        with open(artifact.path, "rb") as handle:
-            if hasattr(self._storage_media, "put_stream"):
-                self._storage_media.put_stream(artifact.segment_id, handle, ts_utc=artifact.ts_start_utc)
-            else:
-                if hasattr(self._storage_media, "put"):
-                    self._storage_media.put(artifact.segment_id, handle.read(), ts_utc=artifact.ts_start_utc)
+        content_hash = None
+        try:
+            with open(artifact.path, "rb") as handle:
+                if hasattr(self._storage_media, "put_stream"):
+                    import hashlib
+
+                    hasher = hashlib.sha256()
+
+                    class _HashingReader:
+                        def __init__(self, source):
+                            self._source = source
+
+                        def read(self, size: int = -1) -> bytes:
+                            data = self._source.read(size)
+                            if data:
+                                hasher.update(data)
+                            return data
+
+                    reader = _HashingReader(handle)
+                    self._storage_media.put_stream(artifact.segment_id, reader, ts_utc=artifact.ts_start_utc)
+                    content_hash = hasher.hexdigest()
                 else:
-                    self._storage_media.put(artifact.segment_id, handle.read())
-        self._storage_meta.put(artifact.segment_id, metadata)
-        self._event_builder.journal_event(
-            "capture.segment",
-            metadata,
-            event_id=artifact.segment_id,
-            ts_utc=artifact.ts_start_utc,
-        )
-        self._event_builder.ledger_entry(
-            "capture",
-            inputs=[],
-            outputs=[artifact.segment_id],
-            payload=metadata,
-            entry_id=artifact.segment_id,
-            ts_utc=artifact.ts_start_utc,
-        )
+                    data = handle.read()
+                    if data:
+                        import hashlib
+
+                        content_hash = hashlib.sha256(data).hexdigest()
+                    if hasattr(self._storage_media, "put"):
+                        self._storage_media.put(artifact.segment_id, data, ts_utc=artifact.ts_start_utc)
+                    else:
+                        self._storage_media.put(artifact.segment_id, data)
+            if content_hash:
+                metadata["content_hash"] = content_hash
+            if hasattr(self._storage_meta, "put_new"):
+                self._storage_meta.put_new(artifact.segment_id, metadata)
+            else:
+                self._storage_meta.put(artifact.segment_id, metadata)
+            self._event_builder.journal_event(
+                "capture.segment",
+                metadata,
+                event_id=artifact.segment_id,
+                ts_utc=artifact.ts_start_utc,
+            )
+            self._event_builder.ledger_entry(
+                "capture",
+                inputs=[],
+                outputs=[artifact.segment_id],
+                payload=metadata,
+                entry_id=artifact.segment_id,
+                ts_utc=artifact.ts_start_utc,
+            )
+            seal_payload = {
+                "event": "segment.sealed",
+                "segment_id": artifact.segment_id,
+                "content_hash": content_hash,
+            }
+            self._event_builder.ledger_entry(
+                "segment.seal",
+                inputs=[artifact.segment_id],
+                outputs=[],
+                payload=seal_payload,
+                ts_utc=artifact.ts_end_utc,
+            )
+        except Exception as exc:
+            failure = {
+                "event": "capture.partial_failure",
+                "segment_id": artifact.segment_id,
+                "error": str(exc),
+            }
+            self._event_builder.journal_event(
+                "capture.partial_failure",
+                failure,
+                ts_utc=artifact.ts_start_utc,
+            )
+            self._event_builder.ledger_entry(
+                "capture.partial_failure",
+                inputs=[artifact.segment_id],
+                outputs=[],
+                payload=failure,
+                ts_utc=artifact.ts_start_utc,
+            )
+            return
         try:
             os.remove(artifact.path)
         except FileNotFoundError:

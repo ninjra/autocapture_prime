@@ -132,11 +132,15 @@
             },
             "mode": {
               "type": "string"
+            },
+            "store_derived": {
+              "type": "boolean"
             }
           },
           "required": [
             "mode",
-            "flush_interval_ms"
+            "flush_interval_ms",
+            "store_derived"
           ],
           "type": "object"
         },
@@ -1011,6 +1015,9 @@
             "critical_free_gb": {
               "type": "integer"
             },
+            "interval_s": {
+              "type": "integer"
+            },
             "soft_free_gb": {
               "type": "integer"
             },
@@ -1045,6 +1052,22 @@
           },
           "required": [
             "persist"
+          ],
+          "type": "object"
+        },
+        "forecast": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "warn_days": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "enabled",
+            "warn_days"
           ],
           "type": "object"
         },

@@ -132,10 +132,34 @@ def _extract_ts(value: Any) -> str | None:
     return None
 
 
-def _shard_dir(root_dir: str, run_id: str, ts_utc: str | None) -> str:
+def _classify_record_kind(record_id: str | None, record_type: str | None = None) -> str:
+    if record_type and str(record_type).startswith("derived."):
+        return "derived"
+    token = (record_id or "").lower()
+    if "/derived." in token or token.startswith("derived.") or "/derived/" in token:
+        return "derived"
+    return "evidence"
+
+
+def _shard_dir(
+    root_dir: str,
+    run_id: str,
+    ts_utc: str | None,
+    *,
+    record_id: str | None = None,
+    record_type: str | None = None,
+) -> str:
     dt = _parse_ts(ts_utc)
     safe_run = _encode_record_id(run_id or "run")
-    return os.path.join(root_dir, safe_run, f"{dt.year:04d}", f"{dt.month:02d}", f"{dt.day:02d}")
+    kind = _classify_record_kind(record_id, record_type)
+    return os.path.join(
+        root_dir,
+        safe_run,
+        kind,
+        f"{dt.year:04d}",
+        f"{dt.month:02d}",
+        f"{dt.day:02d}",
+    )
 
 
 def _iter_files(root_dir: str, extensions: Iterable[str]) -> Iterable[str]:
@@ -257,8 +281,14 @@ class EncryptedJSONStore:
         self._index: dict[str, str] = {}
         os.makedirs(self._root, exist_ok=True)
 
-    def _path_for_write(self, record_id: str, ts_utc: str | None) -> str:
-        shard_dir = _shard_dir(self._root, self._run_id, ts_utc)
+    def _path_for_write(self, record_id: str, ts_utc: str | None, record_type: str | None = None) -> str:
+        shard_dir = _shard_dir(
+            self._root,
+            self._run_id,
+            ts_utc,
+            record_id=record_id,
+            record_type=record_type,
+        )
         safe = _encode_record_id(record_id)
         return os.path.join(shard_dir, f"{safe}.json")
 
@@ -288,26 +318,36 @@ class EncryptedJSONStore:
         paths.append(os.path.join(self._root, f"{legacy}.json"))
         return paths
 
-    def put(self, record_id: str, value: Any) -> None:
+    def _remove_existing(self, record_id: str) -> None:
         for path in self._path_candidates(record_id):
             if os.path.exists(path):
                 try:
                     os.remove(path)
                 except OSError:
                     pass
+
+    def _write(self, record_id: str, value: Any) -> None:
         payload = json.dumps(value, sort_keys=True).encode("utf-8")
         key_id, key = self._key_provider.active()
         blob = encrypt_bytes(key, payload, key_id=key_id)
         ts_utc = _extract_ts(value)
-        path = self._path_for_write(record_id, ts_utc)
+        record_type = value.get("record_type") if isinstance(value, dict) else None
+        path = self._path_for_write(record_id, ts_utc, record_type)
         _atomic_write_json(path, blob.__dict__, fsync_policy=self._fsync_policy)
         self._index[record_id] = path
+
+    def put(self, record_id: str, value: Any) -> None:
+        self.put_replace(record_id, value)
+
+    def put_replace(self, record_id: str, value: Any) -> None:
+        self._remove_existing(record_id)
+        self._write(record_id, value)
 
     def put_new(self, record_id: str, value: Any) -> None:
         for path in self._path_candidates(record_id):
             if os.path.exists(path):
                 raise FileExistsError(f"Metadata record already exists: {record_id}")
-        self.put(record_id, value)
+        self._write(record_id, value)
 
     def get(self, record_id: str, default: Any = None) -> Any:
         for path in self._path_candidates(record_id):
@@ -339,6 +379,19 @@ class EncryptedJSONStore:
             token = filename[:-5]
             ids.add(_decode_record_id(token))
         return sorted(ids)
+
+    def delete(self, record_id: str) -> bool:
+        removed = False
+        for path in self._path_candidates(record_id):
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                    removed = True
+                except OSError:
+                    continue
+        if removed:
+            self._index.pop(record_id, None)
+        return removed
 
     def rotate(self, _new_key: bytes | None = None) -> int:
         count = 0
@@ -373,7 +426,12 @@ class EncryptedBlobStore:
         os.makedirs(self._root, exist_ok=True)
 
     def _path_for_write(self, record_id: str, ts_utc: str | None, *, stream: bool) -> str:
-        shard_dir = _shard_dir(self._root, self._run_id, ts_utc)
+        shard_dir = _shard_dir(
+            self._root,
+            self._run_id,
+            ts_utc,
+            record_id=record_id,
+        )
         safe = _encode_record_id(record_id)
         ext = STREAM_EXT if stream else BLOB_EXT
         return os.path.join(shard_dir, f"{safe}{ext}")
@@ -419,6 +477,9 @@ class EncryptedBlobStore:
                     pass
 
     def put(self, record_id: str, data: bytes, *, ts_utc: str | None = None) -> None:
+        self.put_replace(record_id, data, ts_utc=ts_utc)
+
+    def put_replace(self, record_id: str, data: bytes, *, ts_utc: str | None = None) -> None:
         key_id, key = self._key_provider.active()
         blob = encrypt_bytes_raw(key, data, key_id=key_id)
         path = self._path_for_write(record_id, ts_utc, stream=False)
@@ -430,14 +491,25 @@ class EncryptedBlobStore:
         for path in self._path_candidates(record_id):
             if os.path.exists(path):
                 raise FileExistsError(f"Blob record already exists: {record_id}")
-        self.put(record_id, data, ts_utc=ts_utc)
+        self.put_replace(record_id, data, ts_utc=ts_utc)
 
     def put_stream(self, record_id: str, stream, chunk_size: int = 1024 * 1024, *, ts_utc: str | None = None) -> None:
         for path in self._path_candidates(record_id):
             if os.path.exists(path):
                 raise FileExistsError(f"Blob record already exists: {record_id}")
+        self.put_stream_replace(record_id, stream, chunk_size=chunk_size, ts_utc=ts_utc)
+
+    def put_stream_replace(
+        self,
+        record_id: str,
+        stream,
+        chunk_size: int = 1024 * 1024,
+        *,
+        ts_utc: str | None = None,
+    ) -> None:
         key_id, key = self._key_provider.active()
         path = self._path_for_write(record_id, ts_utc, stream=True)
+        self._remove_existing(record_id)
         tmp_path = f"{path}.tmp"
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(tmp_path, "wb") as handle:
@@ -549,6 +621,19 @@ class EncryptedBlobStore:
                     ids.add(_decode_record_id(token))
                     break
         return sorted(ids)
+
+    def delete(self, record_id: str) -> bool:
+        removed = False
+        for path in self._path_candidates(record_id):
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                    removed = True
+                except OSError:
+                    continue
+        if removed:
+            self._index.pop(record_id, None)
+        return removed
 
     def rotate(self, _new_key: bytes | None = None) -> int:
         count = 0

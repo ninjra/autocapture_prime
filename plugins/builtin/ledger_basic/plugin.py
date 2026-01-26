@@ -83,6 +83,11 @@ class LedgerWriter(PluginBase):
             payload["entry_hash"] = entry_hash
             with open(self._path, "a", encoding="utf-8") as handle:
                 handle.write(f"{dumps(payload)}\n")
+                try:
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                except OSError:
+                    pass
             self._last_hash = entry_hash
             return entry_hash
 

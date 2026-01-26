@@ -45,12 +45,15 @@ class _DictStore:
 
 
 class _Caps:
-    def __init__(self, store):
+    def __init__(self, store, media):
         self._store = store
+        self._media = media
 
     def get(self, name: str):
         if name == "storage.metadata":
             return self._store
+        if name == "storage.media":
+            return self._media
         raise KeyError(name)
 
 
@@ -77,7 +80,7 @@ class RunManifestTests(unittest.TestCase):
             ensure_run_id(kernel.config)
 
             store = _DictStore()
-            caps = _Caps(store)
+            caps = _Caps(store, object())
             builder = EventBuilder(kernel.config, _DummyJournal(), _DummyLedger(), _DummyAnchor())
             plugins = [SimpleNamespace(plugin_id="builtin.storage.encrypted")]
 
@@ -90,6 +93,44 @@ class RunManifestTests(unittest.TestCase):
             self.assertEqual(payload.get("run_id"), builder.run_id)
             self.assertIn("locks", payload)
             self.assertIn("plugins", payload)
+
+    def test_run_manifest_final_written(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            default_path = root / "default.json"
+            user_path = root / "user.json"
+            schema_path = root / "schema.json"
+            backup_dir = root / "backup"
+
+            default = json.loads(Path("config/default.json").read_text(encoding="utf-8"))
+            schema = json.loads(Path("contracts/config_schema.json").read_text(encoding="utf-8"))
+            default_path.write_text(json.dumps(default, indent=2, sort_keys=True), encoding="utf-8")
+            user_path.write_text("{}", encoding="utf-8")
+            schema_path.write_text(json.dumps(schema, indent=2, sort_keys=True), encoding="utf-8")
+
+            paths = ConfigPaths(default_path, user_path, schema_path, backup_dir)
+            kernel = Kernel(paths, safe_mode=False)
+            effective = kernel.load_effective_config()
+            kernel.config = effective.data
+            kernel.effective_config = effective
+            ensure_run_id(kernel.config)
+
+            store = _DictStore()
+            system = SimpleNamespace(
+                config=kernel.config,
+                plugins=[SimpleNamespace(plugin_id="builtin.storage.encrypted")],
+                get=lambda name: store if name == "storage.metadata" else None,
+            )
+            kernel.system = system
+            builder = EventBuilder(kernel.config, _DummyJournal(), _DummyLedger(), _DummyAnchor())
+
+            kernel._record_storage_manifest_final(builder, {"events": 0, "drops": 0, "errors": 0}, 0, "2024-01-01T00:00:00+00:00")
+
+            record_id = prefixed_id(builder.run_id, "system.run_manifest.final", 0)
+            self.assertIn(record_id, store.data)
+            payload = store.data[record_id]
+            self.assertEqual(payload.get("record_type"), "system.run_manifest.final")
+            self.assertEqual(payload.get("run_id"), builder.run_id)
 
 
 if __name__ == "__main__":

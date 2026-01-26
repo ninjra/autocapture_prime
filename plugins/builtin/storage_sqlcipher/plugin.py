@@ -90,6 +90,9 @@ class SQLCipherStore:
                 self._conn.execute(f"ALTER TABLE metadata ADD COLUMN {column} {col_type}")
 
     def put(self, record_id: str, value: Any) -> None:
+        self.put_replace(record_id, value)
+
+    def put_replace(self, record_id: str, value: Any) -> None:
         import json
 
         self._ensure()
@@ -143,6 +146,13 @@ class SQLCipherStore:
         cur = self._conn.execute("SELECT id FROM metadata ORDER BY id")
         return [row[0] for row in cur.fetchall()]
 
+    def delete(self, record_id: str) -> bool:
+        self._ensure()
+        before = self._conn.total_changes
+        self._conn.execute("DELETE FROM metadata WHERE id = ?", (record_id,))
+        self._conn.commit()
+        return self._conn.total_changes > before
+
     def entity_put(self, token: str, value: str, kind: str) -> None:
         self._ensure()
         self._conn.execute(
@@ -171,6 +181,11 @@ class SQLCipherStore:
         self._conn.execute("PRAGMA rekey = ?", (new_key.hex(),))
         self._conn.commit()
         self._key = new_key
+
+    def vacuum(self) -> None:
+        self._ensure()
+        self._conn.execute("VACUUM")
+        self._conn.commit()
 
 
 class EntityMapAdapter:

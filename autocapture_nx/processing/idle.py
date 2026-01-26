@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from autocapture_nx.kernel.ids import encode_record_id_component
+
 
 @dataclass
 class IdleProcessStats:
@@ -113,14 +115,15 @@ class IdleProcessor:
             ts_utc = record.get("ts_utc") or record.get("ts_start_utc")
             ts_utc = ts_utc or datetime.now(timezone.utc).isoformat()
             derived_keys: dict[str, tuple[str, Any]] = {}
+            encoded_source = encode_record_id_component(record_id)
             if allow_ocr and self._ocr is not None:
                 derived_keys["ocr"] = (
-                    f"{run_id}/derived.text.ocr/{record_id.replace('/', '_')}",
+                    f"{run_id}/derived.text.ocr/{encoded_source}",
                     self._ocr,
                 )
             if allow_vlm and self._vlm is not None:
                 derived_keys["vlm"] = (
-                    f"{run_id}/derived.text.vlm/{record_id.replace('/', '_')}",
+                    f"{run_id}/derived.text.vlm/{encoded_source}",
                     self._vlm,
                 )
             if not derived_keys:

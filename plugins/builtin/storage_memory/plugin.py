@@ -18,6 +18,9 @@ class InMemoryStore:
         _ = ts_utc
         self._data[key] = value
 
+    def put_replace(self, key: str, value: Any, *, ts_utc: str | None = None) -> None:
+        self.put(key, value, ts_utc=ts_utc)
+
     def put_new(self, key: str, value: Any, *, ts_utc: str | None = None) -> None:
         _ = ts_utc
         if key in self._data:
@@ -39,6 +42,12 @@ class InMemoryStore:
 
     def keys(self) -> list[str]:
         return sorted(self._data.keys())
+
+    def delete(self, key: str) -> bool:
+        if key in self._data:
+            del self._data[key]
+            return True
+        return False
 
 
 class EntityMapStore:
