@@ -582,6 +582,19 @@ class CapturePipeline:
             metadata["window_ref"] = window_ref
         if input_ref:
             metadata["input_ref"] = input_ref
+        cursor_cfg = self._config.get("capture", {}).get("cursor", {})
+        if isinstance(cursor_cfg, dict) and cursor_cfg.get("enabled", False):
+            try:
+                from autocapture_nx.windows.win_cursor import current_cursor
+
+                cursor = current_cursor()
+            except Exception:
+                cursor = None
+            if cursor is not None:
+                cursor_payload = {"x": int(cursor.x), "y": int(cursor.y), "visible": bool(cursor.visible)}
+                if cursor_cfg.get("include_shape", True):
+                    cursor_payload["handle"] = int(cursor.handle)
+                metadata["cursor"] = cursor_payload
 
         with open(artifact.path, "rb") as handle:
             if hasattr(self._storage_media, "put_stream"):

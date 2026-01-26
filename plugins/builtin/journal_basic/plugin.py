@@ -74,6 +74,47 @@ class JournalWriter(PluginBase):
         with open(self._path, "a", encoding="utf-8") as handle:
             handle.write(f"{canonical}\n")
 
+    def append_batch(self, entries: list[dict[str, Any]]) -> list[str]:
+        if not entries:
+            return []
+        event_ids: list[str] = []
+        required = {
+            "schema_version",
+            "event_id",
+            "sequence",
+            "ts_utc",
+            "tzid",
+            "offset_minutes",
+            "event_type",
+            "payload",
+            "run_id",
+        }
+        with self._lock:
+            with open(self._path, "a", encoding="utf-8") as handle:
+                for entry in entries:
+                    if not entry.get("run_id"):
+                        if not self._run_id:
+                            raise ValueError("Journal run_id missing")
+                        entry["run_id"] = self._run_id
+                    if "sequence" not in entry or entry.get("sequence") is None:
+                        entry["sequence"] = self._sequence
+                        self._sequence += 1
+                    if not entry.get("ts_utc"):
+                        entry["ts_utc"] = datetime.now(timezone.utc).isoformat()
+                    if not entry.get("tzid"):
+                        entry["tzid"] = self._tzid
+                    if not entry.get("event_id"):
+                        entry["event_id"] = prefixed_id(entry["run_id"], entry.get("event_type", "event"), entry["sequence"])
+                    else:
+                        entry["event_id"] = ensure_prefixed(entry["run_id"], str(entry["event_id"]))
+                    missing = required - set(entry.keys())
+                    if missing:
+                        raise ValueError(f"Journal entry missing fields: {sorted(missing)}")
+                    canonical = dumps(entry)
+                    handle.write(f"{canonical}\n")
+                    event_ids.append(entry["event_id"])
+        return event_ids
+
     def append_typed(self, event: JournalEvent) -> None:
         payload = {
             "schema_version": event.schema_version,

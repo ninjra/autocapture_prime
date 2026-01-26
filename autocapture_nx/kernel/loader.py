@@ -405,7 +405,7 @@ class Kernel:
             )
         )
         backend = config.get("capture", {}).get("video", {}).get("backend")
-        supported_backends = {"mss"}
+        supported_backends = {"mss", "dxcam", "auto"}
         checks.append(
             DoctorCheck(
                 name="capture_backend",

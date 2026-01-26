@@ -74,6 +74,11 @@ class WindowMetadataWindows(PluginBase):
                     "hwnd": info.hwnd,
                     "rect": [int(value) for value in info.rect],
                 }
+                if info.monitor is not None:
+                    payload["monitor"] = {
+                        "device": info.monitor.device,
+                        "rect": [int(value) for value in info.monitor.rect],
+                    }
                 record_id = prefixed_id(run_id, "window", seq)
                 event_builder.journal_event(
                     "window.meta",

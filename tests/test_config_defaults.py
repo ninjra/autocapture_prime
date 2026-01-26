@@ -19,6 +19,8 @@ class TestConfigDefaults(unittest.TestCase):
         self.assertTrue(cfg.get("storage", {}).get("encryption_required", False))
         on_query = cfg.get("processing", {}).get("on_query", {})
         self.assertFalse(on_query.get("allow_decode_extract", True))
+        cursor_cfg = cfg.get("capture", {}).get("cursor", {})
+        self.assertFalse(cursor_cfg.get("enabled", True))
 
     def test_safe_mode_forces_flag(self) -> None:
         paths = default_config_paths()

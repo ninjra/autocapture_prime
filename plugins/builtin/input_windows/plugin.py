@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import threading
+from collections import deque
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -22,6 +23,10 @@ class InputTrackerWindows(PluginBase):
         self._counts = {"key": 0, "mouse": 0}
         self._last_cursor: dict[str, int] | None = None
         self._lock = threading.Lock()
+        self._batcher = _InputBatcher()
+        self._flush_thread: threading.Thread | None = None
+        self._flush_interval_ms = 250
+        self._event_builder = None
 
     def capabilities(self) -> dict[str, Any]:
         return {"tracking.input": self}
@@ -55,41 +60,33 @@ class InputTrackerWindows(PluginBase):
         except Exception as exc:
             raise RuntimeError(f"Missing input dependency: {exc}")
 
+        self._stop.clear()
+        self._batcher = _InputBatcher()
         event_builder = self.context.get_capability("event.builder")
-        mode = self.context.config.get("capture", {}).get("input_tracking", {}).get("mode", "raw")
+        self._event_builder = event_builder
+        capture_cfg = self.context.config.get("capture", {}).get("input_tracking", {})
+        mode = capture_cfg.get("mode", "raw")
+        self._flush_interval_ms = int(capture_cfg.get("flush_interval_ms", 250))
         if mode == "off":
             return
 
         def on_key_press(key):
             ts = datetime.now(timezone.utc).isoformat()
-            self._last_event_ts = time.time()
-            event_id = event_builder.journal_event(
-                "input.key",
-                {"key": str(key), "action": "press"} if mode == "raw" else {"action": "press"},
-                ts_utc=ts,
-            )
-            with self._lock:
-                self._counts["key"] += 1
-                self._last_event_id = event_id
-                self._last_event_ts_utc = ts
+            payload = {"action": "press"}
+            if mode == "raw":
+                payload["key"] = str(key)
+            self._record_event("key", payload, ts)
 
         def on_click(x, y, button, pressed):
             ts = datetime.now(timezone.utc).isoformat()
-            self._last_event_ts = time.time()
             payload = {"button": str(button), "pressed": pressed}
             if mode == "raw":
                 payload["x"] = int(x)
                 payload["y"] = int(y)
-            event_id = event_builder.journal_event(
-                "input.mouse",
-                payload,
-                ts_utc=ts,
-            )
+            self._record_event("mouse", payload, ts)
             with self._lock:
-                self._counts["mouse"] += 1
-                self._last_event_id = event_id
-                self._last_event_ts_utc = ts
-                self._last_cursor = {"x": int(x), "y": int(y)}
+                if "x" in payload and "y" in payload:
+                    self._last_cursor = {"x": int(payload["x"]), "y": int(payload["y"])}
 
         self._listener = {
             "keyboard": keyboard.Listener(on_press=on_key_press),
@@ -98,13 +95,78 @@ class InputTrackerWindows(PluginBase):
         self._listener["keyboard"].start()
         self._listener["mouse"].start()
         self._last_event_ts = time.time()
+        self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
+        self._flush_thread.start()
 
     def stop(self) -> None:
         if self._listener:
             self._listener["keyboard"].stop()
             self._listener["mouse"].stop()
             self._listener = None
+        self._stop.set()
+        if self._flush_thread:
+            self._flush_thread.join(timeout=5)
+        self._flush_batch()
+
+    def _record_event(self, kind: str, payload: dict[str, Any], ts_utc: str) -> None:
+        event = {"kind": kind, "ts_utc": ts_utc, **payload}
+        with self._lock:
+            self._batcher.add(event)
+            if kind in self._counts:
+                self._counts[kind] += 1
+            self._last_event_ts = time.time()
+            self._last_event_ts_utc = ts_utc
+
+    def _flush_loop(self) -> None:
+        interval_s = max(0.05, self._flush_interval_ms / 1000.0)
+        while not self._stop.is_set():
+            time.sleep(interval_s)
+            self._flush_batch()
+
+    def _flush_batch(self) -> None:
+        event_builder = self._event_builder
+        if event_builder is None:
+            return
+        with self._lock:
+            events, start_ts, end_ts = self._batcher.drain()
+        if not events:
+            return
+        payload = {
+            "start_ts_utc": start_ts,
+            "end_ts_utc": end_ts,
+            "events": events,
+            "counts": {
+                "key": sum(1 for event in events if event.get("kind") == "key"),
+                "mouse": sum(1 for event in events if event.get("kind") == "mouse"),
+            },
+        }
+        event_id = event_builder.journal_event("input.batch", payload, ts_utc=end_ts)
+        with self._lock:
+            self._last_event_id = event_id
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> InputTrackerWindows:
     return InputTrackerWindows(plugin_id, context)
+
+
+class _InputBatcher:
+    def __init__(self) -> None:
+        self._events: deque[dict[str, Any]] = deque()
+        self._first_ts: str | None = None
+        self._last_ts: str | None = None
+
+    def add(self, event: dict[str, Any]) -> None:
+        self._events.append(event)
+        ts = str(event.get("ts_utc", ""))
+        if self._first_ts is None:
+            self._first_ts = ts
+        self._last_ts = ts
+
+    def drain(self) -> tuple[list[dict[str, Any]], str | None, str | None]:
+        events = list(self._events)
+        self._events.clear()
+        start = self._first_ts
+        end = self._last_ts
+        self._first_ts = None
+        self._last_ts = None
+        return events, start, end

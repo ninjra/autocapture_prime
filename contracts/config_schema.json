@@ -55,8 +55,39 @@
         "audio": {
           "additionalProperties": false,
           "properties": {
+            "blocksize": {
+              "type": "integer"
+            },
+            "channels": {
+              "type": "integer"
+            },
+            "device": {
+              "type": [
+                "integer",
+                "string",
+                "null"
+              ]
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "encoding": {
+              "type": "string"
+            },
+            "ffmpeg_path": {
+              "type": "string"
+            },
             "microphone": {
               "type": "boolean"
+            },
+            "mode": {
+              "type": "string"
+            },
+            "queue_max": {
+              "type": "integer"
+            },
+            "sample_rate": {
+              "type": "integer"
             },
             "system_audio": {
               "type": "boolean"
@@ -64,7 +95,32 @@
           },
           "required": [
             "system_audio",
-            "microphone"
+            "microphone",
+            "enabled",
+            "mode",
+            "sample_rate",
+            "channels",
+            "blocksize",
+            "queue_max",
+            "encoding",
+            "ffmpeg_path",
+            "device"
+          ],
+          "type": "object"
+        },
+        "cursor": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "include_shape": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "include_shape"
           ],
           "type": "object"
         },
@@ -152,7 +208,8 @@
         "video",
         "audio",
         "window_metadata",
-        "input_tracking"
+        "input_tracking",
+        "cursor"
       ],
       "type": "object"
     },

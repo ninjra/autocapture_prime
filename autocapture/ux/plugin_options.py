@@ -42,6 +42,8 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "capture.video.monitor_index",
         "capture.video.jpeg_quality",
         "capture.video.resolution",
+        "capture.cursor.enabled",
+        "capture.cursor.include_shape",
     ],
     "mx.core.capture_win": [
         "capture.video.backend",
@@ -54,8 +56,17 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "capture.video.resolution",
     ],
     "builtin.capture.audio.windows": [
+        "capture.audio.enabled",
+        "capture.audio.mode",
         "capture.audio.microphone",
         "capture.audio.system_audio",
+        "capture.audio.sample_rate",
+        "capture.audio.channels",
+        "capture.audio.blocksize",
+        "capture.audio.queue_max",
+        "capture.audio.encoding",
+        "capture.audio.ffmpeg_path",
+        "capture.audio.device",
     ],
     "builtin.tracking.input.windows": [
         "capture.input_tracking.mode",

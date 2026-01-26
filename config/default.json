@@ -13,8 +13,21 @@
   },
   "capture": {
     "audio": {
+      "blocksize": 44100,
+      "channels": 2,
+      "device": null,
+      "encoding": "wav",
+      "enabled": true,
+      "ffmpeg_path": "",
       "microphone": true,
+      "mode": "auto",
+      "queue_max": 8,
+      "sample_rate": 44100,
       "system_audio": true
+    },
+    "cursor": {
+      "enabled": false,
+      "include_shape": true
     },
     "input_tracking": {
       "flush_interval_ms": 250,
