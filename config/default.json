@@ -22,8 +22,12 @@
     },
     "video": {
       "backend": "mss",
+      "container": "avi_mjpeg",
+      "encoder": "cpu",
       "enabled": true,
       "fps_target": 30,
+      "jpeg_quality": 90,
+      "monitor_index": 0,
       "resolution": "native",
       "segment_seconds": 60
     },
@@ -317,6 +321,7 @@
     "data_dir": "data",
     "disk_pressure": {
       "critical_free_gb": 50,
+      "soft_free_gb": 100,
       "warn_free_gb": 200
     },
     "encryption_required": true,

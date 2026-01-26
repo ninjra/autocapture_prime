@@ -14,6 +14,7 @@ class Frame:
     data: bytes
     width: int
     height: int
+    ts_monotonic: float | None = None
 
 
 def _iso_utc() -> str:
@@ -28,6 +29,7 @@ def iter_screenshots(
     frame_source: Iterator[Frame] | None = None,
     now_fn: Callable[[], float] = time.monotonic,
     sleep_fn: Callable[[float], None] = time.sleep,
+    jpeg_quality: int = 90,
 ) -> Iterator[Frame]:
     if callable(fps):
         fps_provider = fps
@@ -52,14 +54,28 @@ def iter_screenshots(
                     from io import BytesIO
 
                     bio = BytesIO()
-                    img.save(bio, format="JPEG", quality=90)
+                    img.save(bio, format="JPEG", quality=int(jpeg_quality))
                     data = bio.getvalue()
-                    yield Frame(ts_utc=_iso_utc(), data=data, width=raw.width, height=raw.height)
+                    yield Frame(
+                        ts_utc=_iso_utc(),
+                        data=data,
+                        width=raw.width,
+                        height=raw.height,
+                        ts_monotonic=time.monotonic(),
+                    )
 
         frame_source = _frames()
 
     for frame in frame_source:
         start = now_fn()
+        if frame.ts_monotonic is None:
+            frame = Frame(
+                ts_utc=frame.ts_utc,
+                data=frame.data,
+                width=frame.width,
+                height=frame.height,
+                ts_monotonic=start,
+            )
         yield frame
         interval = 1.0 / max(int(fps_provider()), 1)
         elapsed = now_fn() - start

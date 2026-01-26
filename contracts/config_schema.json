@@ -90,10 +90,25 @@
             "backend": {
               "type": "string"
             },
+            "container": {
+              "type": "string"
+            },
+            "encoder": {
+              "type": "string"
+            },
             "enabled": {
               "type": "boolean"
             },
             "fps_target": {
+              "type": "integer"
+            },
+            "jpeg_quality": {
+              "type": "integer"
+            },
+            "ffmpeg_path": {
+              "type": "string"
+            },
+            "monitor_index": {
               "type": "integer"
             },
             "resolution": {
@@ -106,8 +121,12 @@
           "required": [
             "enabled",
             "backend",
+            "container",
+            "encoder",
             "segment_seconds",
             "fps_target",
+            "jpeg_quality",
+            "monitor_index",
             "resolution"
           ],
           "type": "object"
@@ -690,12 +709,16 @@
             "critical_free_gb": {
               "type": "integer"
             },
+            "soft_free_gb": {
+              "type": "integer"
+            },
             "warn_free_gb": {
               "type": "integer"
             }
           },
           "required": [
             "warn_free_gb",
+            "soft_free_gb",
             "critical_free_gb"
           ],
           "type": "object"

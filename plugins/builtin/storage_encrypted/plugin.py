@@ -13,6 +13,13 @@ from autocapture_nx.kernel.keyring import KeyRing
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 
 
+def _atomic_write_json(path: str, payload: dict) -> None:
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, sort_keys=True)
+    os.replace(tmp_path, path)
+
+
 class DerivedKeyProvider:
     def __init__(self, keyring: KeyRing, purpose: str) -> None:
         self._keyring = keyring
@@ -58,8 +65,7 @@ class EncryptedJSONStore:
         payload = json.dumps(value, sort_keys=True).encode("utf-8")
         key_id, key = self._key_provider.active()
         blob = encrypt_bytes(key, payload, key_id=key_id)
-        with open(self._path(record_id), "w", encoding="utf-8") as handle:
-            json.dump(blob.__dict__, handle, sort_keys=True)
+        _atomic_write_json(self._path(record_id), blob.__dict__)
 
     def get(self, record_id: str, default: Any = None) -> Any:
         path = self._path(record_id)
@@ -119,8 +125,7 @@ class EncryptedBlobStore:
         stream_path = self._path_stream(record_id)
         if os.path.exists(stream_path):
             os.remove(stream_path)
-        with open(self._path(record_id), "w", encoding="utf-8") as handle:
-            json.dump(blob.__dict__, handle, sort_keys=True)
+        _atomic_write_json(self._path(record_id), blob.__dict__)
 
     def put_stream(self, record_id: str, stream, chunk_size: int = 1024 * 1024) -> None:
         key_id, key = self._key_provider.active()
@@ -128,7 +133,8 @@ class EncryptedBlobStore:
         blob_path = self._path(record_id)
         if os.path.exists(blob_path):
             os.remove(blob_path)
-        with open(path, "w", encoding="utf-8") as handle:
+        tmp_path = f"{path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as handle:
             header = {"format": "chunked", "schema_version": 1, "key_id": key_id}
             handle.write(json.dumps(header, sort_keys=True))
             handle.write("\n")
@@ -139,6 +145,7 @@ class EncryptedBlobStore:
                 blob = encrypt_bytes(key, chunk, key_id=key_id)
                 handle.write(json.dumps({"nonce_b64": blob.nonce_b64, "ciphertext_b64": blob.ciphertext_b64}, sort_keys=True))
                 handle.write("\n")
+        os.replace(tmp_path, path)
 
     def get(self, record_id: str, default: bytes | None = None) -> bytes | None:
         path = self._path(record_id)
@@ -238,8 +245,7 @@ class EntityMapStore:
         payload = json.dumps(self._data, sort_keys=True).encode("utf-8")
         key_id, key = self._key_provider.active()
         blob = encrypt_bytes(key, payload, key_id=key_id)
-        with open(self._path, "w", encoding="utf-8") as handle:
-            json.dump(blob.__dict__, handle, sort_keys=True)
+        _atomic_write_json(self._path, blob.__dict__)
 
     def put(self, token: str, value: str, kind: str) -> None:
         self._data[token] = {"value": value, "kind": kind}

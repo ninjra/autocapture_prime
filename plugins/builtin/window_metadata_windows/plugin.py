@@ -19,12 +19,27 @@ class WindowMetadataWindows(PluginBase):
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._last_info: dict[str, Any] | None = None
+        self._last_record_id: str | None = None
+        self._last_ts_utc: str | None = None
+        self._lock = threading.Lock()
 
     def capabilities(self) -> dict[str, Any]:
         return {"window.metadata": self}
 
     def current(self) -> dict[str, Any] | None:
         return self._last_info
+
+    def last_record(self) -> dict[str, Any] | None:
+        with self._lock:
+            if not self._last_record_id:
+                return None
+            payload = {
+                "record_id": self._last_record_id,
+                "ts_utc": self._last_ts_utc,
+            }
+            if self._last_info:
+                payload["window"] = dict(self._last_info)
+            return payload
 
     def start(self) -> None:
         if os.name != "nt":
@@ -77,7 +92,10 @@ class WindowMetadataWindows(PluginBase):
                 )
                 seq += 1
                 last_hwnd = info.hwnd
-                self._last_info = payload
+                with self._lock:
+                    self._last_info = payload
+                    self._last_record_id = record_id
+                    self._last_ts_utc = ts
             time.sleep(interval)
 
 

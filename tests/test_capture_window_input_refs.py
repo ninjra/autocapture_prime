@@ -8,7 +8,7 @@ from autocapture_nx.windows.win_capture import Frame
 
 class _MediaStore:
     def __init__(self) -> None:
-        self.records: list[tuple[str, bytes]] = []
+        self.records = []
 
     def put_stream(self, record_id: str, stream, chunk_size: int = 1024 * 1024) -> None:
         _ = chunk_size
@@ -17,7 +17,7 @@ class _MediaStore:
 
 class _MetaStore:
     def __init__(self) -> None:
-        self.data: dict[str, dict] = {}
+        self.data = {}
 
     def put(self, key: str, value: dict) -> None:
         self.data[key] = value
@@ -28,7 +28,7 @@ class _EventBuilder:
         return "policyhash"
 
     def journal_event(self, _event_type: str, _payload: dict, **_kwargs) -> str:
-        return "event"
+        return _kwargs.get("event_id") or "event"
 
     def ledger_entry(self, _stage: str, inputs: list[str], outputs: list[str], **_kwargs) -> str:
         _ = (inputs, outputs)
@@ -45,23 +45,29 @@ class _Logger:
         return None
 
 
-class CaptureMonotonicTests(unittest.TestCase):
-    def test_segment_duration_uses_monotonic(self) -> None:
-        frames = [
-            Frame(ts_utc="t0", data=b"x", width=1, height=1, ts_monotonic=0.0),
-            Frame(ts_utc="t1", data=b"y", width=1, height=1, ts_monotonic=6.0),
-            Frame(ts_utc="t2", data=b"z", width=1, height=1, ts_monotonic=7.0),
-        ]
+class _WindowTracker:
+    def last_record(self) -> dict:
+        return {"record_id": "run1/window/0", "ts_utc": "t0", "window": {"title": "Title"}}
 
+
+class _InputTracker:
+    def snapshot(self, reset: bool = False) -> dict:
+        _ = reset
+        return {"counts": {"key": 1, "mouse": 2}, "last_event_id": "run1/input/0", "last_ts_utc": "t0"}
+
+
+class CaptureWindowInputRefsTests(unittest.TestCase):
+    def test_segment_includes_window_and_input_refs(self) -> None:
+        frames = [Frame(ts_utc="t0", data=b"x", width=1, height=1, ts_monotonic=0.0)]
         media = _MediaStore()
         meta = _MetaStore()
-        event_builder = _EventBuilder()
+        builder = _EventBuilder()
         backpressure = _Backpressure()
         logger = _Logger()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config = {
-                "capture": {"video": {"backend": "mss", "segment_seconds": 5, "fps_target": 30, "container": "avi_mjpeg", "encoder": "cpu", "jpeg_quality": 90, "monitor_index": 0}},
+                "capture": {"video": {"backend": "mss", "segment_seconds": 1, "fps_target": 30, "container": "avi_mjpeg", "encoder": "cpu", "jpeg_quality": 90, "monitor_index": 0}},
                 "storage": {"spool_dir": tmpdir, "data_dir": tmpdir},
                 "backpressure": {"max_fps": 30, "max_bitrate_kbps": 8000, "max_queue_depth": 5},
                 "runtime": {"run_id": "run1", "timezone": "UTC"},
@@ -71,19 +77,22 @@ class CaptureMonotonicTests(unittest.TestCase):
                 ctx.config,
                 storage_media=media,
                 storage_meta=meta,
-                event_builder=event_builder,
+                event_builder=builder,
                 backpressure=backpressure,
                 logger=logger,
-                window_tracker=None,
-                input_tracker=None,
+                window_tracker=_WindowTracker(),
+                input_tracker=_InputTracker(),
                 frame_source=iter(frames),
             )
             pipeline.start()
             pipeline.join()
 
-        self.assertEqual(len(media.records), 2)
-        self.assertEqual(media.records[0][0], "run1/segment/0")
-        self.assertEqual(media.records[1][0], "run1/segment/1")
+        record = meta.data.get("run1/segment/0")
+        self.assertIsNotNone(record)
+        self.assertIn("window_ref", record)
+        self.assertIn("input_ref", record)
+        self.assertEqual(record["window_ref"]["record_id"], "run1/window/0")
+        self.assertEqual(record["input_ref"]["last_event_id"], "run1/input/0")
 
 
 if __name__ == "__main__":

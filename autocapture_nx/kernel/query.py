@@ -59,18 +59,13 @@ def extract_on_demand(system, time_window: dict[str, Any] | None, limit: int = 5
         if not blob:
             continue
         text = ""
-        try:
-            with zipfile.ZipFile(io.BytesIO(blob)) as zf:
-                names = sorted(zf.namelist())
-                if not names:
-                    continue
-                frame = zf.read(names[0])
-            try:
-                text = vlm.extract(frame).get("text", "")
-            except Exception:
-                text = ocr.extract(frame).get("text", "")
-        except Exception:
+        frame = _extract_frame(blob, record)
+        if not frame:
             continue
+        try:
+            text = vlm.extract(frame).get("text", "")
+        except Exception:
+            text = ocr.extract(frame).get("text", "")
         if text:
             metadata.put(
                 derived_id,
@@ -85,6 +80,31 @@ def extract_on_demand(system, time_window: dict[str, Any] | None, limit: int = 5
         if processed >= limit:
             break
     return processed
+
+
+def _extract_frame(blob: bytes, record: dict[str, Any]) -> bytes | None:
+    container = record.get("container", {})
+    container_type = container.get("type")
+    if container_type == "avi_mjpeg":
+        try:
+            from autocapture_nx.capture.avi import AviMjpegReader
+
+            reader = AviMjpegReader(blob)
+            frame = reader.first_frame()
+            reader.close()
+            return frame
+        except Exception:
+            return None
+    if container_type and container_type not in ("zip", "avi_mjpeg"):
+        return None
+    try:
+        with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+            names = sorted(zf.namelist())
+            if not names:
+                return None
+            return zf.read(names[0])
+    except Exception:
+        return None
 
 
 def run_query(system, query: str) -> dict[str, Any]:

@@ -17,6 +17,11 @@ class InputTrackerWindows(PluginBase):
         self._stop = threading.Event()
         self._listener = None
         self._last_event_ts = None
+        self._last_event_id = None
+        self._last_event_ts_utc = None
+        self._counts = {"key": 0, "mouse": 0}
+        self._last_cursor: dict[str, int] | None = None
+        self._lock = threading.Lock()
 
     def capabilities(self) -> dict[str, Any]:
         return {"tracking.input": self}
@@ -28,6 +33,19 @@ class InputTrackerWindows(PluginBase):
         if self._last_event_ts is None:
             return float("inf")
         return max(0.0, time.time() - self._last_event_ts)
+
+    def snapshot(self, reset: bool = False) -> dict[str, Any]:
+        with self._lock:
+            payload = {
+                "counts": dict(self._counts),
+                "last_event_id": self._last_event_id,
+                "last_ts_utc": self._last_event_ts_utc,
+            }
+            if self._last_cursor:
+                payload["cursor"] = dict(self._last_cursor)
+            if reset:
+                self._counts = {"key": 0, "mouse": 0}
+            return payload
 
     def start(self) -> None:
         if os.name != "nt":
@@ -45,11 +63,15 @@ class InputTrackerWindows(PluginBase):
         def on_key_press(key):
             ts = datetime.now(timezone.utc).isoformat()
             self._last_event_ts = time.time()
-            event_builder.journal_event(
+            event_id = event_builder.journal_event(
                 "input.key",
                 {"key": str(key), "action": "press"} if mode == "raw" else {"action": "press"},
                 ts_utc=ts,
             )
+            with self._lock:
+                self._counts["key"] += 1
+                self._last_event_id = event_id
+                self._last_event_ts_utc = ts
 
         def on_click(x, y, button, pressed):
             ts = datetime.now(timezone.utc).isoformat()
@@ -58,11 +80,16 @@ class InputTrackerWindows(PluginBase):
             if mode == "raw":
                 payload["x"] = int(x)
                 payload["y"] = int(y)
-            event_builder.journal_event(
+            event_id = event_builder.journal_event(
                 "input.mouse",
                 payload,
                 ts_utc=ts,
             )
+            with self._lock:
+                self._counts["mouse"] += 1
+                self._last_event_id = event_id
+                self._last_event_ts_utc = ts
+                self._last_cursor = {"x": int(x), "y": int(y)}
 
         self._listener = {
             "keyboard": keyboard.Listener(on_press=on_key_press),
