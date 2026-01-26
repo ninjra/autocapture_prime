@@ -18,16 +18,18 @@ class CaptureSpool:
 
     def append(self, segment: CaptureSegment) -> bool:
         path = self._path(segment.segment_id)
-        if path.exists():
-            return False
         payload = {
             "segment_id": segment.segment_id,
             "ts_utc": segment.ts_utc,
             "blob_id": segment.blob_id,
             "metadata": segment.metadata,
         }
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-        return True
+        try:
+            with path.open("x", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, indent=2, sort_keys=True))
+            return True
+        except FileExistsError:
+            return False
 
     def has(self, segment_id: str) -> bool:
         return self._path(segment_id).exists()

@@ -24,6 +24,9 @@ class BlobStore:
 
     def put(self, data: bytes) -> str:
         blob_id = hashlib.sha256(data).hexdigest()
+        path = self.root / f"{blob_id}.blob"
+        if path.exists():
+            return blob_id
         key_id, root = self.keyring.active_key()
         key = derive_key(root, "blob_store")
         blob = encrypt_bytes(key, data, key_id=key_id)
@@ -32,8 +35,11 @@ class BlobStore:
             "ciphertext_b64": blob.ciphertext_b64,
             "key_id": key_id,
         }
-        path = self.root / f"{blob_id}.blob"
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        try:
+            with path.open("x", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, indent=2, sort_keys=True))
+        except FileExistsError:
+            return blob_id
         return blob_id
 
     def get(self, blob_id: str) -> bytes:

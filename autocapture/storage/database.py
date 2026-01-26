@@ -36,15 +36,27 @@ class EncryptedMetadataStore:
         return derive_key(root, "metadata_store")
 
     def put(self, record_id: str, payload: dict[str, Any]) -> None:
+        existing = self.get(record_id, default=None)
+        if existing is not None:
+            if existing == payload:
+                return
+            raise ValueError(f"record already exists: {record_id}")
+
         key_id, root = self.keyring.active_key()
         key = derive_key(root, "metadata_store")
         data = json.dumps(payload, sort_keys=True).encode("utf-8")
         blob = encrypt_bytes(key, data, key_id=key_id)
-        self._conn.execute(
-            "REPLACE INTO records (record_id, nonce_b64, ciphertext_b64, key_id) VALUES (?, ?, ?, ?)",
-            (record_id, blob.nonce_b64, blob.ciphertext_b64, key_id),
-        )
-        self._conn.commit()
+        try:
+            self._conn.execute(
+                "INSERT INTO records (record_id, nonce_b64, ciphertext_b64, key_id) VALUES (?, ?, ?, ?)",
+                (record_id, blob.nonce_b64, blob.ciphertext_b64, key_id),
+            )
+            self._conn.commit()
+        except sqlite3.IntegrityError:
+            existing = self.get(record_id, default=None)
+            if existing == payload:
+                return
+            raise
 
     def get(self, record_id: str, default: Any | None = None) -> Any:
         cur = self._conn.execute(
