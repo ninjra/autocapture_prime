@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from autocapture_nx.kernel.config import ConfigPaths
 from autocapture_nx.kernel.event_builder import EventBuilder
-from autocapture_nx.kernel.ids import ensure_run_id
+from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
 from autocapture_nx.kernel.loader import Kernel
 
 
@@ -83,7 +83,7 @@ class RunManifestTests(unittest.TestCase):
 
             kernel._record_storage_manifest(builder, caps, plugins)
 
-            record_id = f"run_manifest.{builder.run_id}"
+            record_id = prefixed_id(builder.run_id, "system.run_manifest", 0)
             self.assertIn(record_id, store.data)
             payload = store.data[record_id]
             self.assertEqual(payload.get("record_type"), "system.run_manifest")

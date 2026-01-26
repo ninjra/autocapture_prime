@@ -26,6 +26,11 @@ class EventBuilder:
     def run_id(self) -> str:
         return self._run_id
 
+    def ledger_head(self) -> str | None:
+        if hasattr(self._ledger, "head_hash"):
+            return self._ledger.head_hash()
+        return None
+
     def policy_snapshot_hash(self) -> str:
         if self._policy_hash is None:
             self._policy_hash = sha256_text(dumps(self._config))
@@ -68,6 +73,7 @@ class EventBuilder:
         if not entry_id:
             entry_id = prefixed_id(self._run_id, f"ledger.{stage}", seq)
         entry = {
+            "record_type": "ledger.entry",
             "schema_version": 1,
             "entry_id": entry_id,
             "ts_utc": ts_utc,

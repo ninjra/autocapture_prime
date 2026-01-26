@@ -60,6 +60,23 @@ class RunStateEntryTests(unittest.TestCase):
             events = {entry.get("payload", {}).get("event") for entry in entries}
             self.assertIn("system.start", events)
             self.assertIn("system.stop", events)
+            start_entries = [entry for entry in entries if entry.get("payload", {}).get("event") == "system.start"]
+            stop_entries = [entry for entry in entries if entry.get("payload", {}).get("event") == "system.stop"]
+            self.assertTrue(start_entries)
+            self.assertTrue(stop_entries)
+            start_payload = start_entries[-1]["payload"]
+            self.assertIn("config", start_payload)
+            self.assertIn("locks", start_payload)
+            self.assertIn("kernel_version", start_payload)
+            self.assertEqual(start_payload.get("run_id"), kernel.config.get("runtime", {}).get("run_id"))
+            stop_payload = stop_entries[-1]["payload"]
+            self.assertIn("duration_ms", stop_payload)
+            self.assertIsInstance(stop_payload.get("duration_ms"), int)
+            self.assertIn("summary", stop_payload)
+            summary = stop_payload.get("summary", {})
+            self.assertIsInstance(summary.get("events"), int)
+            self.assertIsInstance(summary.get("drops"), int)
+            self.assertIsInstance(summary.get("errors"), int)
 
     def test_crash_entry_on_next_boot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -74,6 +91,11 @@ class RunStateEntryTests(unittest.TestCase):
             entries = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines() if line.strip()]
             events = [entry.get("payload", {}).get("event") for entry in entries]
             self.assertIn("system.crash", events)
+            crash_entries = [entry for entry in entries if entry.get("payload", {}).get("event") == "system.crash"]
+            self.assertTrue(crash_entries)
+            crash_payload = crash_entries[-1]["payload"]
+            self.assertIn("previous_run_id", crash_payload)
+            self.assertIn("previous_state_ts_utc", crash_payload)
 
 
 if __name__ == "__main__":

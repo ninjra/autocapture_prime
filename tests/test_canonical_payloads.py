@@ -43,6 +43,7 @@ class CanonicalPayloadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             writer = LedgerWriter("ledger", _context(tmp))
             entry = {
+                "record_type": "ledger.entry",
                 "schema_version": 1,
                 "entry_id": "entry-1",
                 "ts_utc": "2025-01-01T00:00:00Z",

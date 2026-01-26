@@ -12,6 +12,7 @@ class ProvenanceChainTests(unittest.TestCase):
             path = Path(tmp) / "ledger.ndjson"
             ledger = Ledger(path)
             entry = {
+                "record_type": "ledger.entry",
                 "schema_version": 1,
                 "entry_id": "e1",
                 "ts_utc": datetime.now(timezone.utc).isoformat(),

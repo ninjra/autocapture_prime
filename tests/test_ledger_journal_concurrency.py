@@ -73,6 +73,7 @@ class LedgerJournalConcurrencyTests(unittest.TestCase):
             for idx in range(30):
                 entries.append(
                     {
+                        "record_type": "ledger.entry",
                         "schema_version": 1,
                         "entry_id": f"entry-{idx}",
                         "ts_utc": "2025-01-01T00:00:00Z",

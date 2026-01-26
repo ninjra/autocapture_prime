@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-01-26T19:34:06.868095+00:00",
+  "generated_at": "2026-01-26T20:59:36.645606+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "15a258e23ffb0b8ee91e9f6955272db5d7992f024ef54ac98580010152b40012",
@@ -50,7 +50,7 @@
       "manifest_sha256": "0ed20ca9d613875b2826ee5a6c24787657e38e3d8375fded1bde754486d20f2d"
     },
     "builtin.ledger.basic": {
-      "artifact_sha256": "58a58546d61e56899ca8349a5947cbf5102b4dcfb4579981b1ade8e9d996a6b1",
+      "artifact_sha256": "f95585f8fe0fc26e6b2699d9ddc884ddca15e47412a3f4f62ba4a31a6f3c0e73",
       "manifest_sha256": "a89c520c2466d5447307801123d31b711bcbd9817f8879bad0ae36cb6e2a6710"
     },
     "builtin.meta.configurator.noop": {

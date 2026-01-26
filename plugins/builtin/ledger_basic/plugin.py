@@ -15,6 +15,7 @@ from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 
 @dataclass(frozen=True)
 class LedgerEntryV1:
+    record_type: str
     schema_version: int
     entry_id: str
     ts_utc: str
@@ -58,7 +59,16 @@ class LedgerWriter(PluginBase):
         return {"ledger.writer": self}
 
     def append(self, entry: dict[str, Any]) -> str:
-        required = {"schema_version", "entry_id", "ts_utc", "stage", "inputs", "outputs", "policy_snapshot_hash"}
+        required = {
+            "record_type",
+            "schema_version",
+            "entry_id",
+            "ts_utc",
+            "stage",
+            "inputs",
+            "outputs",
+            "policy_snapshot_hash",
+        }
         missing = required - set(entry.keys())
         if missing:
             raise ValueError(f"Ledger entry missing fields: {sorted(missing)}")

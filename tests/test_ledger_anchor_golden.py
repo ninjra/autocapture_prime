@@ -52,6 +52,7 @@ class LedgerAnchorGoldenTests(unittest.TestCase):
             last_hash = None
             for idx in range(5):
                 entry = {
+                    "record_type": "ledger.entry",
                     "schema_version": 1,
                     "entry_id": f"entry-{idx}",
                     "ts_utc": "2025-01-01T00:00:00Z",

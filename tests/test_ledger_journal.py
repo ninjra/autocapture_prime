@@ -39,6 +39,7 @@ class LedgerJournalTests(unittest.TestCase):
             )
             ledger = LedgerWriter("ledger", ctx)
             entry1 = {
+                "record_type": "ledger.entry",
                 "schema_version": 1,
                 "entry_id": "e1",
                 "ts_utc": "2025-01-01T00:00:00Z",
@@ -49,6 +50,7 @@ class LedgerJournalTests(unittest.TestCase):
             }
             h1 = ledger.append(entry1)
             entry2 = {
+                "record_type": "ledger.entry",
                 "schema_version": 1,
                 "entry_id": "e2",
                 "ts_utc": "2025-01-01T00:00:01Z",

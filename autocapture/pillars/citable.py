@@ -36,7 +36,16 @@ class Ledger:
         return last
 
     def append(self, entry: dict[str, Any]) -> str:
-        required = {"schema_version", "entry_id", "ts_utc", "stage", "inputs", "outputs", "policy_snapshot_hash"}
+        required = {
+            "record_type",
+            "schema_version",
+            "entry_id",
+            "ts_utc",
+            "stage",
+            "inputs",
+            "outputs",
+            "policy_snapshot_hash",
+        }
         missing = required - set(entry.keys())
         if missing:
             raise ValueError(f"Ledger entry missing fields: {sorted(missing)}")

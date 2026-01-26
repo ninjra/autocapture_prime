@@ -14,8 +14,9 @@ from autocapture_nx.kernel.paths import default_config_dir, resolve_repo_path
 from autocapture_nx.kernel.errors import ConfigError
 from autocapture_nx.kernel.hashing import sha256_directory, sha256_file, sha256_text
 from autocapture_nx.kernel.canonical_json import dumps
+from autocapture_nx import __version__ as kernel_version
 from autocapture_nx.kernel.event_builder import EventBuilder
-from autocapture_nx.kernel.ids import ensure_run_id
+from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
 from autocapture_nx.plugin_system.registry import PluginRegistry
 
 from .system import System
@@ -58,6 +59,7 @@ class Kernel:
         self.config: dict[str, Any] = {}
         self.effective_config: EffectiveConfig | None = None
         self.system: System | None = None
+        self._run_started_at: str | None = None
 
     def boot(self) -> System:
         effective = self.load_effective_config()
@@ -97,6 +99,14 @@ class Kernel:
     def validate_config(self, cfg: dict[str, Any]) -> None:
         validate_config(self.config_paths.schema_path, cfg)
 
+    def _lock_hashes(self) -> dict[str, str | None]:
+        contract_lock = resolve_repo_path("contracts/lock.json")
+        contracts_hash = sha256_file(contract_lock) if contract_lock.exists() else None
+        locks_cfg = self.config.get("plugins", {}).get("locks", {})
+        lockfile_path = resolve_repo_path(locks_cfg.get("lockfile", "config/plugin_locks.json"))
+        plugin_lock_hash = sha256_file(lockfile_path) if lockfile_path.exists() else None
+        return {"contracts": contracts_hash, "plugins": plugin_lock_hash}
+
     def _verify_contract_lock(self) -> None:
         lock_path = resolve_repo_path("contracts/lock.json")
         if not lock_path.exists():
@@ -119,45 +129,145 @@ class Kernel:
         if self.system is None:
             return
         builder = self.system.get("event.builder")
-        builder.ledger_entry("system", inputs=[], outputs=[], payload={"event": "system.stop"})
-        self._write_run_state(builder.run_id, "stopped")
+        ts_utc = datetime.now(timezone.utc).isoformat()
+        duration_ms = self._run_duration_ms(ts_utc)
+        summary = self._summarize_journal(builder.run_id)
+        payload = {
+            "event": "system.stop",
+            "run_id": builder.run_id,
+            "duration_ms": int(duration_ms),
+            "summary": summary,
+            "previous_ledger_head": builder.ledger_head(),
+        }
+        stop_hash = builder.ledger_entry(
+            "system",
+            inputs=[],
+            outputs=[],
+            payload=payload,
+            ts_utc=ts_utc,
+        )
+        self._write_run_state(
+            builder.run_id,
+            "stopped",
+            started_at=self._run_started_at,
+            stopped_at=ts_utc,
+            ledger_head=stop_hash,
+        )
 
     def _run_state_path(self) -> Path:
         data_dir = self.config.get("storage", {}).get("data_dir", "data")
         return Path(data_dir) / "run_state.json"
 
-    def _write_run_state(self, run_id: str, state: str) -> None:
+    def _load_run_state(self) -> dict[str, Any] | None:
+        path = self._run_state_path()
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def _write_run_state(
+        self,
+        run_id: str,
+        state: str,
+        *,
+        started_at: str | None = None,
+        stopped_at: str | None = None,
+        ledger_head: str | None = None,
+    ) -> None:
         path = self._run_state_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"run_id": run_id, "state": state, "ts_utc": datetime.now(timezone.utc).isoformat()}
+        if started_at:
+            payload["started_at"] = started_at
+        if stopped_at:
+            payload["stopped_at"] = stopped_at
+        if ledger_head:
+            payload["ledger_head"] = ledger_head
         path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 
+    def _parse_ts(self, ts: str | None) -> datetime | None:
+        if not ts:
+            return None
+        if ts.endswith("Z"):
+            ts = ts[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(ts)
+        except Exception:
+            return None
+
+    def _run_duration_ms(self, now_ts: str) -> int:
+        start_ts = self._run_started_at
+        if not start_ts:
+            state = self._load_run_state() or {}
+            start_ts = state.get("started_at") or state.get("ts_utc")
+        start_dt = self._parse_ts(start_ts)
+        end_dt = self._parse_ts(now_ts)
+        if not start_dt or not end_dt:
+            return 0
+        delta = end_dt - start_dt
+        return max(0, int(delta.total_seconds() * 1000))
+
+    def _summarize_journal(self, run_id: str) -> dict[str, int]:
+        data_dir = self.config.get("storage", {}).get("data_dir", "data")
+        path = Path(data_dir) / "journal.ndjson"
+        summary = {"events": 0, "drops": 0, "errors": 0}
+        if not path.exists():
+            return summary
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                except Exception:
+                    continue
+                if entry.get("run_id") != run_id:
+                    continue
+                summary["events"] += 1
+                event_type = str(entry.get("event_type", ""))
+                if event_type == "capture.drop":
+                    dropped = entry.get("payload", {}).get("dropped_frames", 1)
+                    try:
+                        summary["drops"] += int(dropped)
+                    except Exception:
+                        summary["drops"] += 1
+                if "error" in event_type:
+                    summary["errors"] += 1
+        return summary
+
     def _record_run_start(self, builder: EventBuilder) -> None:
-        path = self._run_state_path()
-        if path.exists():
-            try:
-                previous = json.loads(path.read_text(encoding="utf-8"))
-                if previous.get("state") == "running":
-                    builder.ledger_entry(
-                        "system",
-                        inputs=[],
-                        outputs=[],
-                        payload={"event": "system.crash", "previous_run_id": previous.get("run_id")},
-                    )
-            except Exception:
-                pass
-        builder.ledger_entry("system", inputs=[], outputs=[], payload={"event": "system.start"})
-        self._write_run_state(builder.run_id, "running")
+        previous = self._load_run_state()
+        if isinstance(previous, dict) and previous.get("state") == "running":
+            crash_payload = {
+                "event": "system.crash",
+                "previous_run_id": previous.get("run_id"),
+                "previous_state_ts_utc": previous.get("ts_utc"),
+                "previous_ledger_head": builder.ledger_head(),
+            }
+            builder.ledger_entry("system", inputs=[], outputs=[], payload=crash_payload)
+        start_ts = datetime.now(timezone.utc).isoformat()
+        self._run_started_at = start_ts
+        effective = self.effective_config
+        payload = {
+            "event": "system.start",
+            "run_id": builder.run_id,
+            "kernel_version": kernel_version,
+            "config": {
+                "schema_hash": effective.schema_hash if effective else None,
+                "effective_hash": effective.effective_hash if effective else None,
+            },
+            "locks": self._lock_hashes(),
+        }
+        builder.ledger_entry("system", inputs=[], outputs=[], payload=payload, ts_utc=start_ts)
+        self._write_run_state(builder.run_id, "running", started_at=start_ts)
 
     def _record_storage_manifest(self, builder: EventBuilder, capabilities, plugins: list) -> None:
         metadata = capabilities.get("storage.metadata")
         run_id = builder.run_id
         ts_utc = datetime.now(timezone.utc).isoformat()
-        contract_lock = resolve_repo_path("contracts/lock.json")
-        contracts_hash = sha256_file(contract_lock) if contract_lock.exists() else None
-        locks_cfg = self.config.get("plugins", {}).get("locks", {})
-        lockfile_path = resolve_repo_path(locks_cfg.get("lockfile", "config/plugin_locks.json"))
-        plugin_lock_hash = sha256_file(lockfile_path) if lockfile_path.exists() else None
+        lock_hashes = self._lock_hashes()
         effective = self.effective_config
         manifest = {
             "record_type": "system.run_manifest",
@@ -167,17 +277,14 @@ class Kernel:
                 "schema_hash": effective.schema_hash if effective else None,
                 "effective_hash": effective.effective_hash if effective else None,
             },
-            "locks": {
-                "contracts": contracts_hash,
-                "plugins": plugin_lock_hash,
-            },
+            "locks": lock_hashes,
             "plugins": sorted({p.plugin_id for p in plugins}),
             "storage": {
                 "data_dir": self.config.get("storage", {}).get("data_dir", "data"),
                 "fsync_policy": self.config.get("storage", {}).get("fsync_policy", "none"),
             },
         }
-        record_id = f"run_manifest.{run_id}"
+        record_id = prefixed_id(run_id, "system.run_manifest", 0)
         try:
             if hasattr(metadata, "put_new"):
                 metadata.put_new(record_id, manifest)
