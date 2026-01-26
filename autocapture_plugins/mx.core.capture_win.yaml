@@ -1,0 +1,93 @@
+schema_version: 1
+plugin_id: mx.core.capture_win
+version: 0.1.0
+display_name: MX Capture Windows
+description: Windows capture + encoder + activity signal.
+extensions:
+  -
+    kind: capture.source
+    factory: autocapture.capture.pipelines:create_capture_source
+    name: windows
+    version: 0.1.0
+    caps:
+      - capture.source
+    pillars:
+      data_handling:
+        local_only: true
+        egress:
+          allow_cloud: false
+          allow_cloud_images: false
+          require_sanitizer: false
+          sanitizer_kind: egress.sanitizer
+      performance:
+        qos_class: realtime
+        cpu_budget_ms_p95: 10
+        io_budget_mb_s: 50
+      accuracy:
+        deterministic: true
+        validation_level: schema
+      security:
+        network_access: none
+        secrets_access: none
+        sandbox: inproc
+      citable:
+        produces_citations: false
+        citation_granularity: event
+  -
+    kind: capture.encoder
+    factory: autocapture.capture.pipelines:create_capture_encoder
+    name: windows
+    version: 0.1.0
+    caps:
+      - capture.encoder
+    pillars:
+      data_handling:
+        local_only: true
+        egress:
+          allow_cloud: false
+          allow_cloud_images: false
+          require_sanitizer: false
+          sanitizer_kind: egress.sanitizer
+      performance:
+        qos_class: realtime
+        cpu_budget_ms_p95: 10
+        io_budget_mb_s: 50
+      accuracy:
+        deterministic: true
+        validation_level: schema
+      security:
+        network_access: none
+        secrets_access: none
+        sandbox: inproc
+      citable:
+        produces_citations: false
+        citation_granularity: event
+  -
+    kind: activity.signal
+    factory: autocapture.runtime.activity:create_activity_signal
+    name: input
+    version: 0.1.0
+    caps:
+      - activity.signal
+    pillars:
+      data_handling:
+        local_only: true
+        egress:
+          allow_cloud: false
+          allow_cloud_images: false
+          require_sanitizer: false
+          sanitizer_kind: egress.sanitizer
+      performance:
+        qos_class: interactive
+        cpu_budget_ms_p95: 5
+        io_budget_mb_s: 1
+      accuracy:
+        deterministic: true
+        validation_level: schema
+      security:
+        network_access: none
+        secrets_access: none
+        sandbox: inproc
+      citable:
+        produces_citations: false
+        citation_granularity: event

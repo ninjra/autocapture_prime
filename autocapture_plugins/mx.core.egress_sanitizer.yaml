@@ -1,0 +1,35 @@
+schema_version: 1
+plugin_id: mx.core.egress_sanitizer
+version: 0.1.0
+display_name: MX Egress Sanitizer
+description: Egress sanitizer for cloud calls.
+extensions:
+  -
+    kind: egress.sanitizer
+    factory: autocapture.ux.redaction:create_egress_sanitizer
+    name: default
+    version: 0.1.0
+    caps:
+      - egress.sanitizer
+    pillars:
+      data_handling:
+        local_only: false
+        egress:
+          allow_cloud: true
+          allow_cloud_images: false
+          require_sanitizer: true
+          sanitizer_kind: egress.sanitizer
+      performance:
+        qos_class: interactive
+        cpu_budget_ms_p95: 200
+        io_budget_mb_s: 5
+      accuracy:
+        deterministic: true
+        validation_level: strict
+      security:
+        network_access: none
+        secrets_access: read
+        sandbox: inproc
+      citable:
+        produces_citations: false
+        citation_granularity: event

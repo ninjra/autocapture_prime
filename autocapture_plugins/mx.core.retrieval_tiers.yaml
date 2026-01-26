@@ -1,0 +1,64 @@
+schema_version: 1
+plugin_id: mx.core.retrieval_tiers
+version: 0.1.0
+display_name: MX Retrieval Tiers
+description: Tiered retrieval + rerank.
+extensions:
+  -
+    kind: retrieval.strategy
+    factory: autocapture.retrieval.tiers:create_retrieval_strategy
+    name: tiers
+    version: 0.1.0
+    caps:
+      - retrieval.strategy
+    pillars:
+      data_handling:
+        local_only: true
+        egress:
+          allow_cloud: false
+          allow_cloud_images: false
+          require_sanitizer: true
+          sanitizer_kind: egress.sanitizer
+      performance:
+        qos_class: interactive
+        cpu_budget_ms_p95: 200
+        io_budget_mb_s: 10
+      accuracy:
+        deterministic: true
+        validation_level: schema
+      security:
+        network_access: none
+        secrets_access: none
+        sandbox: inproc
+      citable:
+        produces_citations: true
+        citation_granularity: span
+  -
+    kind: reranker.provider
+    factory: autocapture.retrieval.rerank:create_reranker
+    name: local
+    version: 0.1.0
+    caps:
+      - reranker.provider
+    pillars:
+      data_handling:
+        local_only: true
+        egress:
+          allow_cloud: false
+          allow_cloud_images: false
+          require_sanitizer: true
+          sanitizer_kind: egress.sanitizer
+      performance:
+        qos_class: background
+        cpu_budget_ms_p95: 500
+        io_budget_mb_s: 10
+      accuracy:
+        deterministic: true
+        validation_level: schema
+      security:
+        network_access: none
+        secrets_access: none
+        sandbox: process
+      citable:
+        produces_citations: true
+        citation_granularity: span

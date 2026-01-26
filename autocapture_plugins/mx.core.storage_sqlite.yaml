@@ -1,0 +1,93 @@
+schema_version: 1
+plugin_id: mx.core.storage_sqlite
+version: 0.1.0
+display_name: MX Storage SQLite
+description: Encrypted metadata + blob storage + span store.
+extensions:
+  -
+    kind: storage.blob_backend
+    factory: autocapture.storage.blob_store:create_blob_store
+    name: sqlite
+    version: 0.1.0
+    caps:
+      - storage.blob_backend
+    pillars:
+      data_handling:
+        local_only: true
+        egress:
+          allow_cloud: false
+          allow_cloud_images: false
+          require_sanitizer: false
+          sanitizer_kind: egress.sanitizer
+      performance:
+        qos_class: background
+        cpu_budget_ms_p95: 50
+        io_budget_mb_s: 50
+      accuracy:
+        deterministic: true
+        validation_level: schema
+      security:
+        network_access: none
+        secrets_access: read
+        sandbox: inproc
+      citable:
+        produces_citations: true
+        citation_granularity: span
+  -
+    kind: storage.media_backend
+    factory: autocapture.storage.media_store:create_media_store
+    name: sqlite
+    version: 0.1.0
+    caps:
+      - storage.media_backend
+    pillars:
+      data_handling:
+        local_only: true
+        egress:
+          allow_cloud: false
+          allow_cloud_images: false
+          require_sanitizer: false
+          sanitizer_kind: egress.sanitizer
+      performance:
+        qos_class: background
+        cpu_budget_ms_p95: 50
+        io_budget_mb_s: 50
+      accuracy:
+        deterministic: true
+        validation_level: schema
+      security:
+        network_access: none
+        secrets_access: read
+        sandbox: inproc
+      citable:
+        produces_citations: true
+        citation_granularity: span
+  -
+    kind: spans_v2.backend
+    factory: autocapture.ingest.spans:create_span_store
+    name: sqlite
+    version: 0.1.0
+    caps:
+      - spans_v2.backend
+    pillars:
+      data_handling:
+        local_only: true
+        egress:
+          allow_cloud: false
+          allow_cloud_images: false
+          require_sanitizer: false
+          sanitizer_kind: egress.sanitizer
+      performance:
+        qos_class: background
+        cpu_budget_ms_p95: 50
+        io_budget_mb_s: 50
+      accuracy:
+        deterministic: true
+        validation_level: schema
+      security:
+        network_access: none
+        secrets_access: read
+        sandbox: inproc
+      citable:
+        produces_citations: true
+        citation_granularity: span

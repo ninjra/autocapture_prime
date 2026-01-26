@@ -45,6 +45,7 @@ class TimeIntentParser(PluginBase):
     def parse(self, text: str, now: datetime | None = None) -> dict[str, Any]:
         now = now or datetime.now(timezone.utc)
         tz = self._tz()
+        now_local = now.astimezone(tz)
         tz_name = getattr(tz, "key", None) or tz.tzname(None) or "UTC"
         assumptions: list[str] = []
         if tz_name == "UTC" and self.context.config.get("time", {}).get("timezone") not in (None, "UTC"):
@@ -52,7 +53,7 @@ class TimeIntentParser(PluginBase):
         lowered = text.lower()
 
         if "today" in lowered:
-            start_local = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+            start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
             end_local = start_local + timedelta(days=1)
             return {
                 "query": text,
@@ -64,7 +65,7 @@ class TimeIntentParser(PluginBase):
                 "assumptions": assumptions,
             }
         if "yesterday" in lowered:
-            end_local = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+            end_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
             start_local = end_local - timedelta(days=1)
             return {
                 "query": text,
@@ -76,7 +77,7 @@ class TimeIntentParser(PluginBase):
                 "assumptions": assumptions,
             }
         if "tomorrow" in lowered:
-            start_local = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+            start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
             end_local = start_local + timedelta(days=1)
             return {
                 "query": text,

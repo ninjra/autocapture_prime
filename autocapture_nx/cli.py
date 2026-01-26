@@ -76,7 +76,19 @@ def cmd_plugins_list(args: argparse.Namespace) -> int:
                 "path": str(manifest_path.parent),
             }
         )
-    _print_json({"plugins": sorted(rows, key=lambda r: r["plugin_id"])})
+    from autocapture.plugins.manager import PluginManager
+
+    mx_manager = PluginManager(config, safe_mode=args.safe_mode)
+    mx_plugins = mx_manager.list_plugins()
+    plugins = {item["plugin_id"]: item for item in rows}
+    for item in mx_plugins:
+        if item["plugin_id"] not in plugins:
+            plugins[item["plugin_id"]] = item
+    payload = {
+        "plugins": sorted(plugins.values(), key=lambda r: r["plugin_id"]),
+        "extensions": mx_manager.list_extensions(),
+    }
+    _print_json(payload)
     return 0
 
 
@@ -86,6 +98,71 @@ def cmd_plugins_approve(_args: argparse.Namespace) -> int:
     update_plugin_locks()
     print("Plugin lockfile updated")
     return 0
+
+
+def cmd_plugins_verify_defaults(_args: argparse.Namespace) -> int:
+    from autocapture.codex.validators import _validator_plugins_have_ids, _validator_plugins_have_kinds
+    from autocapture.codex.spec import ValidatorSpec
+
+    ids = ValidatorSpec(
+        type="plugins_have_ids",
+        config={
+            "required_plugin_ids": [
+                "mx.core.capture_win",
+                "mx.core.storage_sqlite",
+                "mx.core.ocr_local",
+                "mx.core.llm_local",
+                "mx.core.llm_openai_compat",
+                "mx.core.embed_local",
+                "mx.core.vector_local",
+                "mx.core.retrieval_tiers",
+                "mx.core.compression_and_verify",
+                "mx.core.egress_sanitizer",
+                "mx.core.export_import",
+                "mx.core.web_ui",
+                "mx.prompts.default",
+                "mx.training.default",
+                "mx.research.default",
+            ]
+        },
+    )
+    kinds = ValidatorSpec(
+        type="plugins_have_kinds",
+        config={
+            "required_kinds": [
+                "capture.source",
+                "capture.encoder",
+                "activity.signal",
+                "storage.blob_backend",
+                "storage.media_backend",
+                "spans_v2.backend",
+                "ocr.engine",
+                "llm.provider",
+                "decode.backend",
+                "embedder.text",
+                "vector.backend",
+                "retrieval.strategy",
+                "reranker.provider",
+                "compressor",
+                "verifier",
+                "egress.sanitizer",
+                "export.bundle",
+                "import.bundle",
+                "ui.panel",
+                "ui.overlay",
+                "prompt.bundle",
+                "training.pipeline",
+                "research.source",
+                "research.watchlist",
+            ]
+        },
+    )
+    ids_result = _validator_plugins_have_ids(ids)
+    kinds_result = _validator_plugins_have_kinds(kinds)
+    ok = ids_result.ok and kinds_result.ok
+    if not ok:
+        _print_json({"ids": ids_result.data, "kinds": kinds_result.data})
+    return 0 if ok else 2
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -146,6 +223,38 @@ def cmd_keys_rotate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_provenance_verify(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from autocapture.config.defaults import default_config_paths
+    from autocapture.config.load import load_config
+    from autocapture.pillars.citable import verify_ledger
+
+    if args.path:
+        ledger_path = Path(args.path)
+    else:
+        config = load_config(default_config_paths(), safe_mode=args.safe_mode)
+        data_dir = Path(config.get("storage", {}).get("data_dir", "data"))
+        ledger_path = data_dir / "ledger.ndjson"
+
+    if not ledger_path.exists():
+        print(f"OK ledger_missing: {ledger_path}")
+        return 0
+
+    ok, errors = verify_ledger(ledger_path)
+    if ok:
+        print("OK ledger_verified")
+        return 0
+    _print_json({"ok": False, "errors": errors, "path": str(ledger_path)})
+    return 2
+
+
+def cmd_codex(args: argparse.Namespace) -> int:
+    from autocapture.codex.cli import main as codex_main
+
+    return codex_main(args.codex_args)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="autocapture")
     parser.add_argument("--safe-mode", action="store_true", help="Boot in safe mode")
@@ -167,9 +276,12 @@ def build_parser() -> argparse.ArgumentParser:
     plugins = sub.add_parser("plugins")
     plugins_sub = plugins.add_subparsers(dest="plugins_cmd", required=True)
     plugins_list = plugins_sub.add_parser("list")
+    plugins_list.add_argument("--json", action="store_true", default=False)
     plugins_list.set_defaults(func=cmd_plugins_list)
     plugins_approve = plugins_sub.add_parser("approve")
     plugins_approve.set_defaults(func=cmd_plugins_approve)
+    plugins_verify = plugins_sub.add_parser("verify-defaults")
+    plugins_verify.set_defaults(func=cmd_plugins_verify_defaults)
 
     run_cmd = sub.add_parser("run")
     run_cmd.set_defaults(func=cmd_run)
@@ -193,6 +305,16 @@ def build_parser() -> argparse.ArgumentParser:
     keys_sub = keys.add_subparsers(dest="keys_cmd", required=True)
     rotate = keys_sub.add_parser("rotate")
     rotate.set_defaults(func=cmd_keys_rotate)
+
+    provenance = sub.add_parser("provenance")
+    provenance_sub = provenance.add_subparsers(dest="provenance_cmd", required=True)
+    provenance_verify = provenance_sub.add_parser("verify")
+    provenance_verify.add_argument("--path", default="")
+    provenance_verify.set_defaults(func=cmd_provenance_verify)
+
+    codex = sub.add_parser("codex")
+    codex.add_argument("codex_args", nargs=argparse.REMAINDER)
+    codex.set_defaults(func=cmd_codex)
 
     return parser
 

@@ -1,0 +1,35 @@
+schema_version: 1
+plugin_id: mx.core.vector_local
+version: 0.1.0
+display_name: MX Vector Local
+description: SQLite vector backend.
+extensions:
+  -
+    kind: vector.backend
+    factory: autocapture.indexing.vector:create_vector_backend
+    name: sqlite
+    version: 0.1.0
+    caps:
+      - vector.backend
+    pillars:
+      data_handling:
+        local_only: true
+        egress:
+          allow_cloud: false
+          allow_cloud_images: false
+          require_sanitizer: false
+          sanitizer_kind: egress.sanitizer
+      performance:
+        qos_class: background
+        cpu_budget_ms_p95: 200
+        io_budget_mb_s: 20
+      accuracy:
+        deterministic: true
+        validation_level: schema
+      security:
+        network_access: none
+        secrets_access: read
+        sandbox: inproc
+      citable:
+        produces_citations: true
+        citation_granularity: span

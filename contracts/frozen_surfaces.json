@@ -1,0 +1,217 @@
+{
+  "canonical_json": {
+    "cases": {
+      "nested": {
+        "canonical": "{\"alpha\":[1,2,{\"a\":\"ok\",\"z\":\"ok\"}]}",
+        "hash": "0bad67d05ed772c145f03009055861dbe4c58aa4cd2fa264f0675b0fc391cee7",
+        "input": {
+          "alpha": [
+            1,
+            2,
+            {
+              "a": "ok",
+              "z": "ok"
+            }
+          ]
+        }
+      },
+      "simple_map": {
+        "canonical": "{\"a\":1,\"b\":2}",
+        "hash": "43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777",
+        "input": {
+          "a": 1,
+          "b": 2
+        }
+      },
+      "unicode_norm": {
+        "canonical": "{\"text\":\"\u00e9\"}",
+        "hash": "42d3cbf59fdccced04e5dff14433fb52d34d58e385e9770ffd896ff517d63b92",
+        "input": {
+          "text": "e\u0301"
+        }
+      }
+    }
+  },
+  "generated_at": "2026-01-25T19:56:33.770435+00:00",
+  "sanitizer": {
+    "cases": {
+      "card_url": {
+        "hash": "9922d187813dfed16f2a65e645934c9d0a138a9b4489b42029060d4f7d935195",
+        "input": {
+          "scope": "default",
+          "text": "Charge 4111 1111 1111 1111 at https://example.com."
+        },
+        "output": {
+          "detokenized": "Charge 4111 1111 1111 1111 at https://example.com.",
+          "glossary": [
+            {
+              "kind": "CREDIT_CARD",
+              "token": "QZN6NVVTKIMRSFKPK6M4X4D2WQ"
+            },
+            {
+              "kind": "URL",
+              "token": "W2T5HE7SHY4GC37DMUGLUJH3WA"
+            }
+          ],
+          "leak_ok": true,
+          "text": "Charge \u27e6ENT:CREDIT_CARD:QZN6NVVTKIMRSFKPK6M4X4D2WQ\u27e7 at \u27e6ENT:URL:W2T5HE7SHY4GC37DMUGLUJH3WA\u27e7.",
+          "tokens": {
+            "QZN6NVVTKIMRSFKPK6M4X4D2WQ": {
+              "kind": "CREDIT_CARD",
+              "value": "4111 1111 1111 1111"
+            },
+            "W2T5HE7SHY4GC37DMUGLUJH3WA": {
+              "kind": "URL",
+              "value": "https://example.com"
+            }
+          }
+        }
+      },
+      "pii_mix": {
+        "hash": "c6cc6b80701dd20b5bfc7a2c3766a1c18734608deca5429c87124b977a36c568",
+        "input": {
+          "scope": "default",
+          "text": "Contact John Doe at john@example.com or 555-123-4567. SSN 123-45-6789."
+        },
+        "output": {
+          "detokenized": "Contact John Doe at john@example.com or 555-123-4567. SSN 123-45-6789.",
+          "glossary": [
+            {
+              "kind": "NAME",
+              "token": "5UXYLGRIUO7QKVWHKNF2PU3NTI"
+            },
+            {
+              "kind": "EMAIL",
+              "token": "I5QMF2AQRXY3XPWMZUFWNEZNFI"
+            },
+            {
+              "kind": "PHONE",
+              "token": "Y47R7BTMIFYYAHJVGAEI6UPGWE"
+            },
+            {
+              "kind": "SSN",
+              "token": "S62TPM6DDKEPD53YJCNVD7FS3I"
+            }
+          ],
+          "leak_ok": true,
+          "text": "\u27e6ENT:NAME:5UXYLGRIUO7QKVWHKNF2PU3NTI\u27e7 at \u27e6ENT:EMAIL:I5QMF2AQRXY3XPWMZUFWNEZNFI\u27e7 or \u27e6ENT:PHONE:Y47R7BTMIFYYAHJVGAEI6UPGWE\u27e7. SSN \u27e6ENT:SSN:S62TPM6DDKEPD53YJCNVD7FS3I\u27e7.",
+          "tokens": {
+            "5UXYLGRIUO7QKVWHKNF2PU3NTI": {
+              "kind": "NAME",
+              "value": "Contact John Doe"
+            },
+            "I5QMF2AQRXY3XPWMZUFWNEZNFI": {
+              "kind": "EMAIL",
+              "value": "john@example.com"
+            },
+            "S62TPM6DDKEPD53YJCNVD7FS3I": {
+              "kind": "SSN",
+              "value": "123-45-6789"
+            },
+            "Y47R7BTMIFYYAHJVGAEI6UPGWE": {
+              "kind": "PHONE",
+              "value": "555-123-4567"
+            }
+          }
+        }
+      }
+    }
+  },
+  "time_intent": {
+    "cases": {
+      "between_dates": {
+        "hash": "e6eebf1069b55a493da0af376042987c0ef0e239cf0c3dbff68082d3a585f1ea",
+        "input": "between 2026-01-01 and 2026-01-03",
+        "now": "2026-01-24T12:00:00+00:00",
+        "output": {
+          "assumptions": [
+            "between_dates_inclusive"
+          ],
+          "query": "between 2026-01-01 and 2026-01-03",
+          "time_window": {
+            "end": "2026-01-04T00:00:00+00:00",
+            "start": "2026-01-01T00:00:00+00:00"
+          },
+          "tz": "UTC"
+        }
+      },
+      "iso_date": {
+        "hash": "0edb36a98a44ede7391575cb96ef1fb9fa1b5016260ef45295249e78ec88e812",
+        "input": "2026-01-01",
+        "now": "2026-01-24T12:00:00+00:00",
+        "output": {
+          "assumptions": [
+            "date_interpreted_as_full_day"
+          ],
+          "query": "2026-01-01",
+          "time_window": {
+            "end": "2026-01-02T00:00:00+00:00",
+            "start": "2026-01-01T00:00:00+00:00"
+          },
+          "tz": "UTC"
+        }
+      },
+      "last_2_hours": {
+        "hash": "1536f2074c15a5501536222abe0a3b29813654c9a92bc0099a78dabfe06b03c3",
+        "input": "last 2 hours",
+        "now": "2026-01-24T12:00:00+00:00",
+        "output": {
+          "assumptions": [],
+          "query": "last 2 hours",
+          "time_window": {
+            "end": "2026-01-24T12:00:00+00:00",
+            "start": "2026-01-24T10:00:00+00:00"
+          },
+          "tz": "UTC"
+        }
+      },
+      "today": {
+        "hash": "bc222fdf18a5f40f4686be200d86da9712d4186ead258cb58b121ecbff81e19c",
+        "input": "today",
+        "now": "2026-01-24T12:00:00+00:00",
+        "output": {
+          "assumptions": [],
+          "query": "today",
+          "time_window": {
+            "end": "2026-01-25T00:00:00+00:00",
+            "start": "2026-01-24T00:00:00+00:00"
+          },
+          "tz": "UTC"
+        }
+      },
+      "tomorrow": {
+        "hash": "28f0133b928976d841c85935ca64a738ea026712d15a3014e7d7b830dc55caeb",
+        "input": "tomorrow",
+        "now": "2026-01-24T12:00:00+00:00",
+        "output": {
+          "assumptions": [],
+          "query": "tomorrow",
+          "time_window": {
+            "end": "2026-01-26T00:00:00+00:00",
+            "start": "2026-01-25T00:00:00+00:00"
+          },
+          "tz": "UTC"
+        }
+      },
+      "yesterday": {
+        "hash": "50c816fa24585da0c3cb26b146e79bfe32d8fa7aa130f7750b56e7662d475e7b",
+        "input": "yesterday",
+        "now": "2026-01-24T12:00:00+00:00",
+        "output": {
+          "assumptions": [],
+          "query": "yesterday",
+          "time_window": {
+            "end": "2026-01-24T00:00:00+00:00",
+            "start": "2026-01-23T00:00:00+00:00"
+          },
+          "tz": "UTC"
+        }
+      }
+    }
+  },
+  "token_format": {
+    "format": "\u27e6ENT:{type}:{token}\u27e7",
+    "hash": "2eb54f60bd5d09278a7c3d9cc8f4e816699efb323daa1f25f656d825f92695d5"
+  },
+  "version": 1
+}
