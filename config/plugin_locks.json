@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-01-26T15:26:28.388620+00:00",
+  "generated_at": "2026-01-26T17:34:47.812715+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "15a258e23ffb0b8ee91e9f6955272db5d7992f024ef54ac98580010152b40012",
@@ -46,11 +46,11 @@
       "manifest_sha256": "621109dbd68227803abd44d91348ab4d552e761759b82f14715291bbfbaddff9"
     },
     "builtin.journal.basic": {
-      "artifact_sha256": "06e1c8790403445c1fabb24bda35a67fcca2072a9aa2ac4aaf98a5a6da4c55da",
+      "artifact_sha256": "a44dca4289989a915abe086668ce11cb31587905aff998050f45858a9a132206",
       "manifest_sha256": "0ed20ca9d613875b2826ee5a6c24787657e38e3d8375fded1bde754486d20f2d"
     },
     "builtin.ledger.basic": {
-      "artifact_sha256": "6e2af85af420a7191b15519006705e66c5b0df322301be943127c85706b4ec0a",
+      "artifact_sha256": "58a58546d61e56899ca8349a5947cbf5102b4dcfb4579981b1ade8e9d996a6b1",
       "manifest_sha256": "a89c520c2466d5447307801123d31b711bcbd9817f8879bad0ae36cb6e2a6710"
     },
     "builtin.meta.configurator.noop": {

@@ -23,5 +23,8 @@ class PluginBase:
     def capabilities(self) -> dict[str, Any]:
         return {}
 
+    def activate(self, _ctx: PluginContext) -> None:
+        return None
+
     def close(self) -> None:
         return None

@@ -6,10 +6,25 @@ import json
 import os
 import hashlib
 import threading
+from dataclasses import dataclass
 from typing import Any
 
 from autocapture_nx.kernel.canonical_json import dumps
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
+
+
+@dataclass(frozen=True)
+class LedgerEntryV1:
+    schema_version: int
+    entry_id: str
+    ts_utc: str
+    stage: str
+    inputs: list[str]
+    outputs: list[str]
+    policy_snapshot_hash: str
+    payload: dict[str, Any]
+    prev_hash: str | None
+    entry_hash: str
 
 
 class LedgerWriter(PluginBase):
@@ -60,6 +75,9 @@ class LedgerWriter(PluginBase):
                 handle.write(f"{dumps(payload)}\n")
             self._last_hash = entry_hash
             return entry_hash
+
+    def head_hash(self) -> str | None:
+        return self._last_hash
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> LedgerWriter:

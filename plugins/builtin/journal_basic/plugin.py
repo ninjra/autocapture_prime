@@ -4,12 +4,25 @@ from __future__ import annotations
 
 import os
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from autocapture_nx.kernel.canonical_json import dumps
 from autocapture_nx.kernel.ids import ensure_prefixed, prefixed_id
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
+
+
+@dataclass(frozen=True)
+class JournalEvent:
+    schema_version: int
+    event_id: str
+    sequence: int
+    ts_utc: str
+    tzid: str
+    offset_minutes: int
+    event_type: str
+    payload: dict[str, Any]
 
 
 class JournalWriter(PluginBase):
@@ -60,6 +73,19 @@ class JournalWriter(PluginBase):
         canonical = dumps(entry)
         with open(self._path, "a", encoding="utf-8") as handle:
             handle.write(f"{canonical}\n")
+
+    def append_typed(self, event: JournalEvent) -> None:
+        payload = {
+            "schema_version": event.schema_version,
+            "event_id": event.event_id,
+            "sequence": event.sequence,
+            "ts_utc": event.ts_utc,
+            "tzid": event.tzid,
+            "offset_minutes": event.offset_minutes,
+            "event_type": event.event_type,
+            "payload": event.payload,
+        }
+        self.append(payload)
 
     def append_event(
         self,

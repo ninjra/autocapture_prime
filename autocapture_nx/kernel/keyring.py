@@ -58,9 +58,13 @@ class KeyRecord:
 class KeyRing:
     def __init__(self, path: str, active_key_id: str, records: list[KeyRecord], require_protection: bool = False) -> None:
         self.path = path
-        self.active_key_id = active_key_id
+        self._active_key_id = active_key_id
         self.records = records
         self.require_protection = require_protection
+
+    @property
+    def active_key_id(self) -> str:
+        return self._active_key_id
 
     @classmethod
     def load(cls, path: str, legacy_root_path: Optional[str] = None, require_protection: bool = False) -> "KeyRing":
@@ -110,7 +114,7 @@ class KeyRing:
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         payload = {
             "schema_version": 1,
-            "active_key_id": self.active_key_id,
+            "active_key_id": self._active_key_id,
             "keys": [
                 {
                     "key_id": record.key_id,
@@ -125,7 +129,7 @@ class KeyRing:
             json.dump(payload, handle, indent=2, sort_keys=True)
 
     def active_key(self) -> tuple[str, bytes]:
-        return self.active_key_id, self.key_for(self.active_key_id)
+        return self._active_key_id, self.key_for(self._active_key_id)
 
     def key_for(self, key_id: str) -> bytes:
         for record in self.records:
@@ -151,7 +155,7 @@ class KeyRing:
                 protected=protected,
             )
         )
-        self.active_key_id = key_id
+        self._active_key_id = key_id
         self.save()
         return key_id
 
@@ -167,3 +171,16 @@ class KeyRing:
                 _ = record.key_bytes()
             except Exception as exc:
                 raise RuntimeError("DPAPI unprotect failed") from exc
+
+
+@dataclass
+class KeyringStatus:
+    active_key_id: str
+    keyring_path: str
+
+
+class Keyring(KeyRing):
+    """Alias for KeyRing to match spec naming."""
+
+    def status(self) -> KeyringStatus:
+        return KeyringStatus(active_key_id=self.active_key_id, keyring_path=self.path)
