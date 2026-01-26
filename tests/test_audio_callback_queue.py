@@ -1,41 +1,31 @@
 import unittest
 
 from autocapture_nx.plugin_system.api import PluginContext
-from plugins.builtin.audio_windows.plugin import AudioCaptureWindows
+from plugins.builtin.audio_windows.plugin import AudioCaptureWindows, _AudioBuffer
 
 
-class _DummyBuffer:
-    def __init__(self) -> None:
-        self.calls = 0
-        self.last = None
-
-    def enqueue(self, data, frames, time_info) -> None:
-        self.calls += 1
-        self.last = (data, frames, time_info)
-
-
-class _DummyInData:
-    def __init__(self, payload: bytes) -> None:
-        self._payload = payload
+class _DummyInput:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
 
     def tobytes(self) -> bytes:
-        return self._payload
+        return self._data
 
 
 class AudioCallbackQueueTests(unittest.TestCase):
-    def test_callback_enqueues_only(self) -> None:
+    def test_callback_enqueues_without_blocking(self) -> None:
         ctx = PluginContext(config={}, get_capability=lambda _k: None, logger=lambda _m: None)
         plugin = AudioCaptureWindows("audio", ctx)
-        buffer = _DummyBuffer()
+        buffer = _AudioBuffer(max_queue=1)
+        callback = plugin._build_callback(buffer, RuntimeError)
 
-        class DummyStop(Exception):
-            pass
-
-        callback = plugin._build_callback(buffer, DummyStop)
-        callback(_DummyInData(b"abc"), frames=3, time_info=None, status=None)
-
-        self.assertEqual(buffer.calls, 1)
-        self.assertEqual(buffer.last[0], b"abc")
+        callback(_DummyInput(b"a"), 4, {}, None)
+        callback(_DummyInput(b"b"), 2, {}, None)
+        self.assertEqual(buffer.queue.qsize(), 1)
+        self.assertEqual(buffer.dropped, 1)
+        data, frames, _info = buffer.queue.get_nowait()
+        self.assertEqual(data, b"a")
+        self.assertEqual(frames, 4)
 
 
 if __name__ == "__main__":

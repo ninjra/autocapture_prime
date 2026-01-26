@@ -26,7 +26,7 @@ def iter_screenshots(
     fps: int | Callable[[], int],
     *,
     frame_source: Iterator[Frame] | None = None,
-    now_fn: Callable[[], float] = time.time,
+    now_fn: Callable[[], float] = time.monotonic,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> Iterator[Frame]:
     if callable(fps):

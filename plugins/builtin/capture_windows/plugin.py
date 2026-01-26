@@ -94,7 +94,7 @@ class CaptureWindows(PluginBase):
                 segment = self._open_segment(spool_dir, run_id, sequence)
                 segment_start = time.monotonic()
             segment.add_frame(frame)
-            now = time.time()
+            now = time.monotonic()
             if time.monotonic() - segment_start >= segment_seconds:
                 if not self._check_disk(logger, event_builder, warn_free, critical_free):
                     flush_on_exit = False
