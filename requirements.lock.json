@@ -1,5 +1,5 @@
 {
-  "content_hash": "86fc2a06800f7483985732a2053185539b7e5e9a2d5e359be5b6987387141b24",
+  "content_hash": "993e1ebb925e66b9e4a6254504f4e732d44b459b65193600232d61aa24de7927",
   "dependencies": [
     "Pillow>=10.0.0",
     "PyPDF2>=3.0.0",
@@ -8,13 +8,15 @@
     "fastapi>=0.110.0",
     "httpx>=0.27.0",
     "mss>=9.0.1",
+    "mypy>=1.8.0",
     "platformdirs",
     "pynput>=1.7.6",
     "pytesseract>=0.3.10",
+    "ruff>=0.6.0",
     "sounddevice>=0.4.6",
     "tzdata>=2024.1"
   ],
-  "generated_at": "2026-01-26T03:52:38.678076+00:00",
+  "generated_at": "2026-01-26T19:14:16.115001+00:00",
   "optional_dependencies": {
     "embeddings": [
       "sentence-transformers>=2.2.2",
