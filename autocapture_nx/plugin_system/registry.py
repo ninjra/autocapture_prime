@@ -11,6 +11,7 @@ from typing import Any
 from autocapture_nx.kernel.config import SchemaLiteValidator
 from autocapture_nx.kernel.errors import PluginError
 from autocapture_nx.kernel.hashing import sha256_directory, sha256_file
+from autocapture_nx.kernel.paths import plugins_dir, resolve_repo_path, load_json
 
 from .api import PluginContext
 from .host import SubprocessPlugin
@@ -70,9 +71,9 @@ class PluginRegistry:
         self._validator = SchemaLiteValidator()
 
     def discover_manifests(self) -> list[Path]:
-        paths = [Path("plugins") / "builtin"]
+        paths = [plugins_dir() / "builtin"]
         for extra in self.config.get("plugins", {}).get("search_paths", []):
-            paths.append(Path(extra))
+            paths.append(resolve_repo_path(extra))
         manifests: list[Path] = []
         for root in paths:
             if not root.exists():
@@ -83,18 +84,20 @@ class PluginRegistry:
 
     def load_lockfile(self) -> dict[str, Any]:
         locks_cfg = self.config.get("plugins", {}).get("locks", {})
-        lockfile = Path(locks_cfg.get("lockfile", "config/plugin_locks.json"))
+        lockfile = resolve_repo_path(locks_cfg.get("lockfile", "config/plugin_locks.json"))
         if not lockfile.exists():
             raise PluginError(f"Missing plugin lockfile: {lockfile}")
-        with lockfile.open("r", encoding="utf-8") as handle:
-            return json.load(handle)
+        try:
+            return load_json(lockfile)
+        except FileNotFoundError:
+            raise PluginError(f"Missing plugin lockfile: {lockfile}")
 
     def _validate_manifest(self, manifest: dict[str, Any]) -> None:
-        schema_path = Path("contracts/plugin_manifest.schema.json")
-        if not schema_path.exists():
+        schema_path = resolve_repo_path("contracts/plugin_manifest.schema.json")
+        try:
+            schema = load_json(schema_path)
+        except FileNotFoundError:
             raise PluginError("Missing plugin manifest schema")
-        with schema_path.open("r", encoding="utf-8") as handle:
-            schema = json.load(handle)
         self._validator.validate(schema, manifest)
 
     def _check_lock(self, plugin_id: str, manifest_path: Path, plugin_root: Path, lockfile: dict[str, Any]) -> None:

@@ -27,6 +27,7 @@
     "kernel",
     "llm",
     "observability",
+    "paths",
     "performance",
     "plugins",
     "privacy",

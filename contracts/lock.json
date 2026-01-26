@@ -1,16 +1,16 @@
 {
   "files": {
-    "contracts/config_schema.json": "eae65e4df2fb0fdc87499fac7f3b4fc2b46c0d27b45d73fcb35156d33fef6a91",
-    "contracts/ir_pins.json": "fe6e7bce9204e04af66153d0c3c16cdec2253ebf3bef5c9c62d4680f2582841f",
+    "contracts/config_schema.json": "64fc7ac4e6b5c7e035ce7cfbb5813ac019a6d46640eb29282cbb27dd3a472db8",
+    "contracts/ir_pins.json": "30935542dd09798145b126868851988cc9acc1c156da49c650ecbe9ac1f7950b",
     "contracts/journal_schema.json": "7f61751efbcd52bf1de755421fc1a1c3001c4b1c1477734b2a72d39f7ff4fdeb",
     "contracts/ledger_schema.json": "911b2bab3e236ff77921b9a28f6a9808f05c38188e07aa1f4cc011f4bbf2eddf",
-    "contracts/plugin_manifest.schema.json": "719cc843507297d2294d8de9a8e00fa8f662f435377e8b9e830932e7d75a41d1",
+    "contracts/plugin_manifest.schema.json": "d665229ee8942853a467edc7c375d27d54eb4bb6c9fefb38e419eacd96649e64",
     "contracts/plugin_sdk.md": "4d409f66370d62cb938b9349c312cac18acc1cfc62700503c8f748cf436e5b04",
     "contracts/reasoning_packet.schema.json": "25ab514324b82bd15e267417f3a2cd4ddcb945ff4fa66206fd8f0840fd27f1cd",
     "contracts/security.md": "6946f3233c891fc66998872219d818caa9119449fd4e7ff9e28bb9259f5e6599",
     "contracts/time_intent.schema.json": "6696c55883e35e0f2eb0689d61b7a05c637959d1d53ba7d8f985bbc2d5e397d8",
     "contracts/user_surface.md": "f814b6a390dd01903e45fadaa99db2203f9f15f7791ef5b4acb245149ee4ad22"
   },
-  "generated_at": "2026-01-25T21:26:45.330640+00:00",
+  "generated_at": "2026-01-26T03:55:22.702300+00:00",
   "version": 1
 }

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import hashlib
+import threading
 from typing import Any
 
 from autocapture_nx.kernel.canonical_json import dumps
@@ -18,6 +19,7 @@ class LedgerWriter(PluginBase):
         os.makedirs(data_dir, exist_ok=True)
         self._path = os.path.join(data_dir, "ledger.ndjson")
         self._last_hash = None
+        self._lock = threading.Lock()
         if os.path.exists(self._path):
             with open(self._path, "r", encoding="utf-8") as handle:
                 for line in handle:
@@ -45,18 +47,19 @@ class LedgerWriter(PluginBase):
         missing = required - set(entry.keys())
         if missing:
             raise ValueError(f"Ledger entry missing fields: {sorted(missing)}")
-        payload = dict(entry)
-        prev_hash = self._last_hash
-        payload["prev_hash"] = prev_hash
-        payload.pop("entry_hash", None)
-        canonical = dumps(payload)
-        tail = prev_hash or ""
-        entry_hash = hashlib.sha256((canonical + tail).encode("utf-8")).hexdigest()
-        payload["entry_hash"] = entry_hash
-        with open(self._path, "a", encoding="utf-8") as handle:
-            handle.write(f"{dumps(payload)}\n")
-        self._last_hash = entry_hash
-        return entry_hash
+        with self._lock:
+            payload = dict(entry)
+            prev_hash = self._last_hash
+            payload["prev_hash"] = prev_hash
+            payload.pop("entry_hash", None)
+            canonical = dumps(payload)
+            tail = prev_hash or ""
+            entry_hash = hashlib.sha256((canonical + tail).encode("utf-8")).hexdigest()
+            payload["entry_hash"] = entry_hash
+            with open(self._path, "a", encoding="utf-8") as handle:
+                handle.write(f"{dumps(payload)}\n")
+            self._last_hash = entry_hash
+            return entry_hash
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> LedgerWriter:

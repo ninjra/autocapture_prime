@@ -14,6 +14,10 @@ $repoRoot = $repoRoot.ToString()
 Set-Location $repoRoot
 
 $env:PYTHONPATH = $repoRoot
+$env:AUTOCAPTURE_CONFIG_DIR = Join-Path $repoRoot ".dev\\test_env\\config"
+$env:AUTOCAPTURE_DATA_DIR = Join-Path $repoRoot ".dev\\test_env\\data"
+New-Item -ItemType Directory -Path $env:AUTOCAPTURE_CONFIG_DIR -Force | Out-Null
+New-Item -ItemType Directory -Path $env:AUTOCAPTURE_DATA_DIR -Force | Out-Null
 
 $logDir = Join-Path $repoRoot "tools"
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
@@ -156,6 +160,14 @@ if ($needInstall) {
     }
 }
 
+Invoke-Python -Step "deps_lock" -PyArgs @("tools/gate_deps_lock.py")
+Invoke-Python -Step "canon_gate" -PyArgs @("tools/gate_canon.py")
+Invoke-Python -Step "concurrency_gate" -PyArgs @("tools/gate_concurrency.py")
+Invoke-Python -Step "ledger_gate" -PyArgs @("tools/gate_ledger.py")
+Invoke-Python -Step "perf_gate" -PyArgs @("tools/gate_perf.py")
+Invoke-Python -Step "security_gate" -PyArgs @("tools/gate_security.py")
+Invoke-Python -Step "static_gate" -PyArgs @("tools/gate_static.py")
+Invoke-Python -Step "doctor_gate" -PyArgs @("tools/gate_doctor.py")
 Invoke-Python -Step "doctor" -PyArgs @("-m", "autocapture_nx", "doctor")
 Invoke-Python -Step "doctor_safe_mode" -PyArgs @("-m", "autocapture_nx", "--safe-mode", "doctor")
 Invoke-Python -Step "spec_gate" -PyArgs @("-m", "unittest", "tests/test_blueprint_spec_validation.py", "-q")
