@@ -23,7 +23,10 @@ class TableExtractor:
             import pytesseract
         except Exception as exc:
             raise RuntimeError(f"OCR unavailable: {exc}")
-        text = pytesseract.image_to_string(image)
+        try:
+            text = pytesseract.image_to_string(image)
+        except Exception as exc:
+            raise RuntimeError(f"OCR unavailable: {exc}")
         return self._parse_text(text)
 
     def extract_from_pdf(self, path: str) -> list[list[str]]:
