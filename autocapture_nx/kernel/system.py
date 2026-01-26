@@ -16,3 +16,9 @@ class System:
 
     def get(self, capability: str) -> Any:
         return self.capabilities.get(capability)
+
+    def has(self, capability: str) -> bool:
+        return capability in self.capabilities.all()
+
+    def register(self, capability: str, value: Any, *, network_allowed: bool = False) -> None:
+        self.capabilities.register(capability, value, network_allowed)

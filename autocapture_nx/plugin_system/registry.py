@@ -16,6 +16,7 @@ from autocapture_nx.kernel.paths import plugins_dir, resolve_repo_path, load_jso
 
 from .api import PluginContext
 from .host import SubprocessPlugin
+from .manifest import PluginManifest
 from .runtime import network_guard
 
 
@@ -110,7 +111,7 @@ class PluginRegistry:
         self.safe_mode = safe_mode
         self._validator = SchemaLiteValidator()
 
-    def discover_manifests(self) -> list[Path]:
+    def discover_manifest_paths(self) -> list[Path]:
         paths = [plugins_dir() / "builtin"]
         for extra in self.config.get("plugins", {}).get("search_paths", []):
             paths.append(resolve_repo_path(extra))
@@ -121,6 +122,16 @@ class PluginRegistry:
             for manifest in root.rglob("plugin.json"):
                 manifests.append(manifest)
         return sorted(manifests)
+
+    def discover_manifests(self) -> list[PluginManifest]:
+        manifests: list[PluginManifest] = []
+        for manifest_path in self.discover_manifest_paths():
+            with manifest_path.open("r", encoding="utf-8") as handle:
+                manifest = json.load(handle)
+            self._validate_manifest(manifest)
+            self._check_compat(manifest)
+            manifests.append(PluginManifest.from_dict(manifest, manifest_path))
+        return manifests
 
     def load_lockfile(self) -> dict[str, Any]:
         locks_cfg = self.config.get("plugins", {}).get("locks", {})
@@ -179,8 +190,52 @@ class PluginRegistry:
             if manifest.get("plugin_id") not in allowed:
                 raise PluginError("Network permission denied by policy")
 
+    def validate_allowlist_and_hashes(self, manifests: list[PluginManifest]) -> None:
+        allowlist = set(self.config.get("plugins", {}).get("allowlist", []))
+        locks_cfg = self.config.get("plugins", {}).get("locks", {})
+        lockfile = self.load_lockfile() if locks_cfg.get("enforce", True) else {"plugins": {}}
+        plugin_locks = lockfile.get("plugins", {})
+        for manifest in manifests:
+            if manifest.plugin_id not in allowlist:
+                raise PluginError(f"Plugin {manifest.plugin_id} not allowlisted")
+            if not locks_cfg.get("enforce", True):
+                continue
+            expected = plugin_locks.get(manifest.plugin_id)
+            if not isinstance(expected, dict):
+                raise PluginError(f"Plugin {manifest.plugin_id} missing from lockfile")
+            manifest_hash = sha256_file(manifest.path)
+            artifact_hash = sha256_directory(manifest.path.parent)
+            if manifest_hash != expected.get("manifest_sha256"):
+                raise PluginError(f"Plugin {manifest.plugin_id} manifest hash mismatch")
+            if artifact_hash != expected.get("artifact_sha256"):
+                raise PluginError(f"Plugin {manifest.plugin_id} artifact hash mismatch")
+    def load_enabled(self, manifests: list[PluginManifest], *, safe_mode: bool) -> list[LoadedPlugin]:
+        registry = self if safe_mode == self.safe_mode else PluginRegistry(self.config, safe_mode=safe_mode)
+        loaded, _caps = registry.load_plugins()
+        allowed_ids = {manifest.plugin_id for manifest in manifests}
+        return [plugin for plugin in loaded if plugin.plugin_id in allowed_ids]
+
+    def register_capabilities(self, plugins: list[Any], system: "System") -> None:
+        from autocapture_nx.kernel.system import System as SystemType
+
+        if not isinstance(system, SystemType):
+            raise PluginError("register_capabilities requires a System instance")
+        for plugin in plugins:
+            if isinstance(plugin, LoadedPlugin):
+                caps = plugin.capabilities
+                network_allowed = bool(plugin.manifest.get("permissions", {}).get("network", False))
+            elif hasattr(plugin, "capabilities"):
+                caps = plugin.capabilities()
+                network_allowed = False
+            else:
+                continue
+            for cap_name, impl in caps.items():
+                if system.has(cap_name):
+                    continue
+                system.register(cap_name, impl, network_allowed=network_allowed)
+
     def load_plugins(self) -> tuple[list[LoadedPlugin], CapabilityRegistry]:
-        manifests = self.discover_manifests()
+        manifests = self.discover_manifest_paths()
         lockfile = self.load_lockfile()
         allowlist = set(self.config.get("plugins", {}).get("allowlist", []))
         enabled_map = self.config.get("plugins", {}).get("enabled", {})

@@ -24,7 +24,7 @@ class PackageSafePathsTests(unittest.TestCase):
             if not manifests:
                 raise SystemExit("no_manifests_found")
             registry.load_lockfile()
-            with open(manifests[0], "r", encoding="utf-8") as handle:
+            with open(manifests[0].path, "r", encoding="utf-8") as handle:
                 manifest = json.load(handle)
             registry._validate_manifest(manifest)
             """

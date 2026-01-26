@@ -12,7 +12,8 @@ from typing import Any
 from autocapture_nx.kernel.config import ConfigPaths, load_config, validate_config
 from autocapture_nx.kernel.paths import default_config_dir, resolve_repo_path
 from autocapture_nx.kernel.errors import ConfigError
-from autocapture_nx.kernel.hashing import sha256_directory, sha256_file
+from autocapture_nx.kernel.hashing import sha256_directory, sha256_file, sha256_text
+from autocapture_nx.kernel.canonical_json import dumps
 from autocapture_nx.kernel.event_builder import EventBuilder
 from autocapture_nx.kernel.ids import ensure_run_id
 from autocapture_nx.plugin_system.registry import PluginRegistry
@@ -27,15 +28,41 @@ class DoctorCheck:
     detail: str
 
 
+@dataclass(frozen=True)
+class KernelBootArgs:
+    safe_mode: bool
+    config_default_path: str = "config/default.json"
+    config_user_path: str = "config/user.json"
+
+
+@dataclass(frozen=True)
+class EffectiveConfig:
+    data: dict[str, Any]
+    schema_hash: str
+    effective_hash: str
+
+
 class Kernel:
-    def __init__(self, config_paths: ConfigPaths, safe_mode: bool = False) -> None:
-        self.config_paths = config_paths
-        self.safe_mode = safe_mode
+    def __init__(self, args: KernelBootArgs | ConfigPaths, safe_mode: bool | None = None) -> None:
+        if isinstance(args, KernelBootArgs):
+            self.safe_mode = bool(args.safe_mode)
+            self.config_paths = ConfigPaths(
+                default_path=resolve_repo_path(args.config_default_path),
+                user_path=resolve_repo_path(args.config_user_path),
+                schema_path=resolve_repo_path("contracts/config_schema.json"),
+                backup_dir=(default_config_dir() / "backup").resolve(),
+            )
+        else:
+            self.config_paths = args
+            self.safe_mode = bool(safe_mode)
         self.config: dict[str, Any] = {}
+        self.effective_config: EffectiveConfig | None = None
         self.system: System | None = None
 
     def boot(self) -> System:
-        self.config = load_config(self.config_paths, safe_mode=self.safe_mode)
+        effective = self.load_effective_config()
+        self.effective_config = effective
+        self.config = effective.data
         ensure_run_id(self.config)
         self._verify_contract_lock()
         registry = PluginRegistry(self.config, safe_mode=self.safe_mode)
@@ -59,6 +86,15 @@ class Kernel:
         self._record_run_start(builder)
         self.system = System(config=self.config, plugins=plugins, capabilities=capabilities)
         return self.system
+
+    def load_effective_config(self) -> EffectiveConfig:
+        cfg = load_config(self.config_paths, safe_mode=self.safe_mode)
+        schema_hash = sha256_file(self.config_paths.schema_path)
+        effective_hash = sha256_text(dumps(cfg))
+        return EffectiveConfig(data=cfg, schema_hash=schema_hash, effective_hash=effective_hash)
+
+    def validate_config(self, cfg: dict[str, Any]) -> None:
+        validate_config(self.config_paths.schema_path, cfg)
 
     def _verify_contract_lock(self) -> None:
         lock_path = resolve_repo_path("contracts/lock.json")
@@ -258,12 +294,10 @@ class Kernel:
             try:
                 registry = PluginRegistry(config, safe_mode=self.safe_mode)
                 lockfile = registry.load_lockfile()
-                manifest_paths = registry.discover_manifests()
+                manifest_objs = registry.discover_manifests()
                 manifests_by_id: dict[str, Path] = {}
-                for manifest_path in manifest_paths:
-                    with manifest_path.open("r", encoding="utf-8") as handle:
-                        manifest = json.load(handle)
-                    manifests_by_id[manifest.get("plugin_id", "")] = manifest_path
+                for manifest in manifest_objs:
+                    manifests_by_id[manifest.plugin_id] = manifest.path
                 mismatches = []
                 plugins = lockfile.get("plugins", {})
                 for pid in sorted(plugin_ids):

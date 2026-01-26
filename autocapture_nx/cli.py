@@ -65,16 +65,14 @@ def cmd_plugins_list(args: argparse.Namespace) -> int:
     enabled = config.get("plugins", {}).get("enabled", {})
 
     rows = []
-    for manifest_path in manifests:
-        with open(manifest_path, "r", encoding="utf-8") as handle:
-            manifest = json.load(handle)
-        pid = manifest["plugin_id"]
+    for manifest in manifests:
+        pid = manifest.plugin_id
         rows.append(
             {
                 "plugin_id": pid,
                 "allowlisted": pid in allowlist,
-                "enabled": enabled.get(pid, manifest.get("enabled", True)),
-                "path": str(manifest_path.parent),
+                "enabled": enabled.get(pid, manifest.enabled),
+                "path": str(manifest.path.parent),
             }
         )
     from autocapture.plugins.manager import PluginManager
