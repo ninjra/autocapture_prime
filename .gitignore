@@ -19,3 +19,5 @@ node_modules/
 /package-lock.json
 /repomix-output.xml
 /inventory_*.csv
+/artifacts/
+/docs/AUTOCAPTURE_NX_BLUEPRINT*.md

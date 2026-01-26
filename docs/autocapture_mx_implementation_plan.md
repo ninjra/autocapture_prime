@@ -39,6 +39,65 @@ Milestones (ordered)
 6) UX + Settings + Gateway + Web + Observability + Doctor (MX-UX-0001, MX-SETTINGS-0001, MX-GATEWAY-0001, MX-WEB-0001, MX-CIT-OVERLAY-0001, MX-OBS-0001, MX-DOCTOR-0001, MX-RETENTION-0001)
 7) Vendor binaries + PromptOps + Training + Research + Pillar gates + Codex validate (MX-VENDOR-0001, MX-PROMPTOPS-0001, MX-TRAIN-0001, MX-RESEARCH-0001, MX-GATE-0001, MX-CODEX-0001)
 
+Build order and early gate tests
+| Group | Modules | Primary deliverables | Gate tests (early) |
+| --- | --- | --- | --- |
+| A | MOD-001..005 | autocapture CLI + config + core utils + plugin system + autocapture_plugins manifests | tests/test_config_defaults.py; tests/test_plugin_discovery_no_import.py; tests/test_plugin_kinds_registry.py; tests/test_policy_gate.py |
+| B | MOD-006..011 | redaction + runtime governor/leases + storage v2 + capture spool/pipeline | tests/test_sanitizer_no_raw_pii.py; tests/test_governor_gating.py; tests/test_work_leases.py; tests/test_capture_spool_idempotent.py; tests/test_sqlcipher_roundtrip.py |
+| C | MOD-012..017 | ingest -> indexing -> retrieval -> context -> answers | tests/test_span_ids_stable.py; tests/test_fts_query_returns_hits.py; tests/test_vector_index_roundtrip.py; tests/test_context_pack_formats.py; tests/test_citation_validation.py |
+| D | MOD-018..021 | gateway + web + citation overlay + UX + settings | tests/test_gateway_schema_enforced.py; tests/test_gateway_policy_block_cloud_default.py; tests/test_citation_overlay_contract.py; tests/test_ux_facade_parity.py; tests/test_settings_preview_tokens.py |
+| E | MOD-022..030 | doctor + obs + export + vendor + promptops + training/research stubs + pillar gates + codex CLI | tests/test_doctor_report_schema.py; tests/test_metrics_endpoint_exposes_counters.py; tests/test_export_import_roundtrip.py; tests/test_vendor_binaries_hashcheck.py; tests/test_promptops_validation.py |
+| F | MOD-031 | Appendix A required test files present and enforced | tests/test_blueprint_spec_validation.py; unittest discovery; codex validate CLI |
+
+Hard rules (acceptance criteria)
+- HR-003 single HTTP surface: all egress via autocapture/core/http.py; PolicyGate denies non-gateway.
+- HR-004 privacy: no keystroke text capture, even if config enables raw input.
+- HR-005/006 append-only: put-if-absent + strong IDs; idempotent same-content puts allowed; overwrites forbidden.
+- HR-008 DO_NOT_SHIP: missing required tests or CLI commands fails deterministically.
+
+Traceability map (validators -> owners)
+| Requirement ID | Validators (tests/CLI/http) | Owning MX paths |
+| --- | --- | --- |
+| MX-CONFIG-0001 | python_import autocapture.config.load:load_config; tests/test_config_defaults.py | autocapture/config/models.py; autocapture/config/load.py; autocapture/config/defaults.py |
+| MX-RETENTION-0001 | cli_output_regex_absent autocapture --help; http_routes_absent /api/delete|/api/purge|/api/wipe | autocapture/ux/facade.py; autocapture/web/api.py |
+| MX-CORE-0001 | tests/test_hashing_canonical.py; tests/test_ids_stable.py | autocapture/core/hashing.py; autocapture/core/ids.py; autocapture/core/jsonschema.py |
+| MX-PLUGIN-0001 | python_import PluginManager + ExtensionManifest; tests/test_plugin_discovery_no_import.py; autocapture plugins list --json | autocapture/plugins/manifest.py; autocapture/plugins/manager.py; autocapture/plugins/kinds.py |
+| MX-KINDS-0001 | tests/test_plugin_kinds_registry.py | autocapture/plugins/kinds.py |
+| MX-PLUGSET-0001 | plugins_have_ids; plugins_have_kinds; autocapture plugins verify-defaults | autocapture_plugins/ |
+| MX-PLUGIN-0002 | tests/test_plugin_hotswap.py | autocapture/plugins/manager.py |
+| MX-PLUGIN-0003 | tests/test_safe_mode.py | autocapture/plugins/manager.py; autocapture/plugins/policy_gate.py |
+| MX-POLICY-0001 | python_import PolicyGate; tests/test_policy_gate.py | autocapture/plugins/policy_gate.py; autocapture/core/http.py |
+| MX-SAN-0001 | tests/test_entity_hashing_stable.py; tests/test_sanitizer_no_raw_pii.py | autocapture/memory/entities.py; autocapture/ux/redaction.py |
+| MX-GOV-0001 | tests/test_governor_gating.py | autocapture/runtime/governor.py; autocapture/runtime/activity.py; autocapture/runtime/scheduler.py; autocapture/runtime/budgets.py |
+| MX-LEASE-0001 | tests/test_work_leases.py | autocapture/runtime/leases.py |
+| MX-STORE-0001 | tests/test_key_export_import_roundtrip.py; tests/test_sqlcipher_roundtrip.py; tests/test_blob_encryption_roundtrip.py | autocapture/storage/database.py; autocapture/storage/sqlcipher.py; autocapture/storage/keys.py; autocapture/storage/media_store.py; autocapture/storage/blob_store.py |
+| MX-LEDGER-0001 | tests/test_provenance_chain.py; autocapture provenance verify | autocapture/pillars/citable.py; autocapture/core/hashing.py; autocapture/storage/archive.py |
+| MX-RULES-0001 | tests/test_rules_ledger_append_only.py; tests/test_rules_state_rebuild.py | autocapture/rules/ledger.py; autocapture/rules/store.py; autocapture/rules/schema.py; autocapture/rules/cli.py |
+| MX-CAPTURE-0001 | tests/test_capture_spool_idempotent.py | autocapture/capture/spool.py; autocapture/capture/pipelines.py; autocapture/capture/models.py |
+| MX-INGEST-0001 | tests/test_span_ids_stable.py; tests/test_span_bbox_norm.py | autocapture/ingest/normalizer.py; autocapture/ingest/spans.py |
+| MX-TABLE-0001 | tests/test_table_extractor_strategies.py | autocapture/plugins/kinds.py |
+| MX-INDEX-0001 | tests/test_fts_query_returns_hits.py | autocapture/indexing/lexical.py |
+| MX-INDEX-0002 | tests/test_vector_index_roundtrip.py | autocapture/indexing/vector.py |
+| MX-INDEX-0003 | tests/test_qdrant_sidecar_healthcheck.py | autocapture/indexing/vector.py; autocapture/tools/vendor_windows_binaries.py |
+| MX-GRAPH-0001 | tests/test_graph_adapter_contract.py | autocapture/indexing/graph.py |
+| MX-RETR-0001 | tests/test_rrf_fusion_determinism.py; tests/test_tier_planner_escalation.py | autocapture/retrieval/tiers.py; autocapture/retrieval/fusion.py; autocapture/retrieval/rerank.py; autocapture/retrieval/signals.py |
+| MX-CTX-0001 | tests/test_context_pack_formats.py | autocapture/memory/context_pack.py; autocapture/retrieval/signals.py |
+| MX-ANS-0001 | tests/test_citation_validation.py; tests/test_verifier_enforced.py; tests/test_conflict_reporting.py | autocapture/memory/answer_orchestrator.py; autocapture/memory/citations.py; autocapture/memory/verifier.py; autocapture/memory/conflict.py |
+| MX-GATEWAY-0001 | tests/test_gateway_schema_enforced.py; tests/test_gateway_policy_block_cloud_default.py | autocapture/gateway/app.py; autocapture/gateway/router.py; autocapture/gateway/schemas.py |
+| MX-UX-0001 | python_import autocapture.ux.facade:UXFacade; tests/test_ux_facade_parity.py | autocapture/ux/facade.py; autocapture/ux/models.py |
+| MX-SETTINGS-0001 | tests/test_settings_preview_tokens.py; http_endpoint GET /api/settings/schema | autocapture/ux/settings_schema.py; autocapture/ux/preview_tokens.py; autocapture/web/routes/settings.py |
+| MX-WEB-0001 | http_endpoint GET /api/health; POST /api/query | autocapture/web/api.py; autocapture/web/routes/query.py; autocapture/web/routes/citations.py; autocapture/web/routes/plugins.py; autocapture/web/routes/health.py; autocapture/web/routes/metrics.py |
+| MX-CIT-OVERLAY-0001 | tests/test_citation_overlay_contract.py | autocapture/web/routes/citations.py |
+| MX-DOCTOR-0001 | tests/test_doctor_report_schema.py | autocapture/ux/models.py; autocapture/web/routes/health.py |
+| MX-OBS-0001 | tests/test_metrics_endpoint_exposes_counters.py | autocapture/web/routes/metrics.py |
+| MX-EXPORT-0001 | tests/test_export_import_roundtrip.py | autocapture/storage/archive.py |
+| MX-VENDOR-0001 | tests/test_vendor_binaries_hashcheck.py | autocapture/tools/vendor_windows_binaries.py |
+| MX-PROMPTOPS-0001 | tests/test_promptops_validation.py | autocapture/promptops/propose.py; autocapture/promptops/validate.py; autocapture/promptops/evaluate.py; autocapture/promptops/patch.py; autocapture/promptops/github.py |
+| MX-TRAIN-0001 | tests/test_training_manifest_schema.py | autocapture/training/pipelines.py; autocapture/training/lora.py; autocapture/training/dpo.py; autocapture/training/datasets.py |
+| MX-RESEARCH-0001 | tests/test_research_scout_cache.py | autocapture/research/scout.py; autocapture/research/cache.py; autocapture/research/diff.py |
+| MX-GATE-0001 | autocapture codex pillar-gates | autocapture/tools/pillar_gate.py; autocapture/tools/privacy_scanner.py; autocapture/tools/provenance_gate.py; autocapture/tools/coverage_gate.py; autocapture/tools/latency_gate.py; autocapture/tools/retrieval_sensitivity.py; autocapture/tools/conflict_gate.py; autocapture/tools/integrity_gate.py |
+| MX-CODEX-0001 | autocapture codex validate --json | autocapture/codex/cli.py; autocapture/codex/spec.py; autocapture/codex/validators.py; autocapture/codex/report.py |
+
 Requirement checklist (Appendix A)
 
 MX-CONFIG-0001
