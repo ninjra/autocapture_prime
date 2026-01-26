@@ -15,6 +15,7 @@ from autocapture.retrieval.rerank import Reranker
 from autocapture.retrieval.tiers import TieredRetriever
 from autocapture.ux.models import DoctorCheck, DoctorReport
 from autocapture.ux.settings_schema import get_schema
+from autocapture.ux.plugin_options import build_plugin_options
 
 
 class UXFacade:
@@ -55,6 +56,9 @@ class UXFacade:
 
     def settings_schema(self) -> dict[str, Any]:
         return get_schema()
+
+    def plugin_options(self) -> dict[str, Any]:
+        return build_plugin_options(self.config)
 
     def doctor_report(self) -> DoctorReport:
         from autocapture_nx.kernel.loader import Kernel, default_config_paths as nx_paths

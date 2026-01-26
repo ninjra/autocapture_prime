@@ -1,7 +1,7 @@
 {
   "files": {
-    "contracts/config_schema.json": "1c9e22eb5a0b4f3b6bba66ebbb4b365288c371f21070dc380dfbc62f21ce6cd4",
-    "contracts/ir_pins.json": "27e6044323935b0236cb67aad721f4df69c7accf80a610b8bce578b562ffd7da",
+    "contracts/config_schema.json": "cd17572bae5c806514376b39adcec85467783ba2eeb3d98618c6748bdf3e5ee0",
+    "contracts/ir_pins.json": "b4fb8ee41cec834f8fb951bea8c7b4fa8900cbf7489fbd3e8e4d9f09404e8bba",
     "contracts/journal_schema.json": "8f380b9ebc3f4cfa903c14c32e907c55410e3fc65418f27e32761f1a45fa930a",
     "contracts/ledger_schema.json": "4dcc4657309e1326c739fb924a6cf2ef00d994f88de7a5833a30628fa493ccc8",
     "contracts/plugin_manifest.schema.json": "d665229ee8942853a467edc7c375d27d54eb4bb6c9fefb38e419eacd96649e64",
@@ -11,6 +11,6 @@
     "contracts/time_intent.schema.json": "6696c55883e35e0f2eb0689d61b7a05c637959d1d53ba7d8f985bbc2d5e397d8",
     "contracts/user_surface.md": "f814b6a390dd01903e45fadaa99db2203f9f15f7791ef5b4acb245149ee4ad22"
   },
-  "generated_at": "2026-01-26T20:59:31.945340+00:00",
+  "generated_at": "2026-01-26T22:24:31.109846+00:00",
   "version": 1
 }

@@ -17,6 +17,8 @@ class TestConfigDefaults(unittest.TestCase):
         self.assertFalse(egress.get("allow_raw_egress", True))
         self.assertTrue(egress.get("reasoning_packet_only", False))
         self.assertTrue(cfg.get("storage", {}).get("encryption_required", False))
+        on_query = cfg.get("processing", {}).get("on_query", {})
+        self.assertFalse(on_query.get("allow_decode_extract", True))
 
     def test_safe_mode_forces_flag(self) -> None:
         paths = default_config_paths()

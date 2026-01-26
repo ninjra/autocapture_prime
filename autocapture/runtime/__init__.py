@@ -2,6 +2,7 @@
 
 from .activity import ActivitySignal, ActivitySnapshot
 from .budgets import RuntimeBudgets, DEFAULT_BUDGETS
+from .conductor import RuntimeConductor, create_conductor
 from .governor import RuntimeGovernor, GovernorDecision
 from .scheduler import Scheduler, Job
 from .leases import LeaseManager
@@ -11,6 +12,8 @@ __all__ = [
     "ActivitySnapshot",
     "RuntimeBudgets",
     "DEFAULT_BUDGETS",
+    "RuntimeConductor",
+    "create_conductor",
     "RuntimeGovernor",
     "GovernorDecision",
     "Scheduler",

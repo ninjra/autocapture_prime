@@ -97,6 +97,7 @@ class InputTrackerWindows(PluginBase):
         }
         self._listener["keyboard"].start()
         self._listener["mouse"].start()
+        self._last_event_ts = time.time()
 
     def stop(self) -> None:
         if self._listener:

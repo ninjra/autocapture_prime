@@ -55,21 +55,31 @@ class QueryDerivedRecordTests(unittest.TestCase):
             "vision.extractor": _Extractor("vlm text"),
         }
 
-        processed = extract_on_demand(system, time_window=None, limit=1)
-        self.assertEqual(processed, 1)
+        processed = extract_on_demand(system, time_window=None, limit=2)
+        self.assertEqual(processed, 2)
         self.assertNotIn("text", metadata.get(record_id))
-        derived_id = "run1/derived.text/run1_segment_0"
-        derived = metadata.get(derived_id)
-        self.assertEqual(derived["record_type"], "derived.text")
-        self.assertEqual(derived["source_id"], record_id)
-        self.assertEqual(derived["text"], "vlm text")
+        vlm_id = "run1/derived.text.vlm/run1_segment_0"
+        ocr_id = "run1/derived.text.ocr/run1_segment_0"
+        derived_vlm = metadata.get(vlm_id)
+        derived_ocr = metadata.get(ocr_id)
+        self.assertEqual(derived_vlm["record_type"], "derived.text.vlm")
+        self.assertEqual(derived_ocr["record_type"], "derived.text.ocr")
+        self.assertEqual(derived_vlm["source_id"], record_id)
+        self.assertEqual(derived_ocr["source_id"], record_id)
+        self.assertEqual(derived_vlm["text"], "vlm text")
+        self.assertEqual(derived_ocr["text"], "ocr text")
 
     def test_retrieval_returns_source_id_for_derived_records(self) -> None:
         metadata = _MetadataStore()
         metadata.put("run1/segment/1", {"record_type": "evidence.capture.segment", "ts_utc": "2024-01-02T00:00:00+00:00"})
         metadata.put(
-            "run1/derived.text/run1_segment_1",
-            {"record_type": "derived.text", "ts_utc": "2024-01-02T00:00:00+00:00", "text": "hello world", "source_id": "run1/segment/1"},
+            "run1/derived.text.vlm/run1_segment_1",
+            {
+                "record_type": "derived.text.vlm",
+                "ts_utc": "2024-01-02T00:00:00+00:00",
+                "text": "hello world",
+                "source_id": "run1/segment/1",
+            },
         )
         ctx = PluginContext(config={}, get_capability=lambda _k: metadata, logger=lambda _m: None)
         retrieval = RetrievalStrategy("retrieval", ctx)
@@ -77,7 +87,7 @@ class QueryDerivedRecordTests(unittest.TestCase):
         results = retrieval.search("hello", time_window=None)
         self.assertTrue(results)
         self.assertEqual(results[0]["record_id"], "run1/segment/1")
-        self.assertEqual(results[0]["derived_id"], "run1/derived.text/run1_segment_1")
+        self.assertEqual(results[0]["derived_id"], "run1/derived.text.vlm/run1_segment_1")
 
 
 if __name__ == "__main__":

@@ -60,6 +60,7 @@ class Kernel:
         self.effective_config: EffectiveConfig | None = None
         self.system: System | None = None
         self._run_started_at: str | None = None
+        self._conductor: Any | None = None
 
     def boot(self) -> System:
         effective = self.load_effective_config()
@@ -88,6 +89,17 @@ class Kernel:
         self._record_storage_manifest(builder, capabilities, plugins)
         self._record_run_start(builder)
         self.system = System(config=self.config, plugins=plugins, capabilities=capabilities)
+        try:
+            from autocapture.runtime.conductor import create_conductor
+
+            conductor = create_conductor(self.system)
+            self._conductor = conductor
+            capabilities.register("runtime.conductor", conductor, network_allowed=False)
+            idle_cfg = self.config.get("processing", {}).get("idle", {})
+            if bool(idle_cfg.get("auto_start", False)):
+                conductor.start()
+        except Exception:
+            self._conductor = None
         return self.system
 
     def load_effective_config(self) -> EffectiveConfig:
@@ -128,6 +140,11 @@ class Kernel:
     def shutdown(self) -> None:
         if self.system is None:
             return
+        if self._conductor is not None:
+            try:
+                self._conductor.stop()
+            except Exception:
+                pass
         builder = self.system.get("event.builder")
         ts_utc = datetime.now(timezone.utc).isoformat()
         duration_ms = self._run_duration_ms(ts_utc)
@@ -241,7 +258,7 @@ class Kernel:
         previous = self._load_run_state()
         if isinstance(previous, dict) and previous.get("state") == "running":
             crash_payload = {
-                "event": "system.crash",
+                "event": "system.crash_detected",
                 "previous_run_id": previous.get("run_id"),
                 "previous_state_ts_utc": previous.get("ts_utc"),
                 "previous_ledger_head": builder.ledger_head(),

@@ -282,19 +282,83 @@
       "token_scope": "per_provider"
     }
   },
+  "promptops": {
+    "banned_patterns": [
+      "http://",
+      "https://",
+      "curl ",
+      "wget ",
+      "Invoke-WebRequest",
+      "os.system",
+      "subprocess"
+    ],
+    "bundle_name": "default",
+    "enabled": true,
+    "examples": {},
+    "github": {
+      "body": "Automated prompt update.",
+      "enabled": false,
+      "output_path": "artifacts/promptops_pr.json",
+      "title": "PromptOps update"
+    },
+    "history": {
+      "enabled": true,
+      "include_prompt": false
+    },
+    "max_chars": 8000,
+    "max_tokens": 2000,
+    "min_pass_rate_pct": 100,
+    "mode": "auto_apply",
+    "persist_prompts": false,
+    "query_strategy": "none",
+    "require_citations": true,
+    "sources": [],
+    "strategy": "append_sources"
+  },
   "processing": {
     "idle": {
+      "auto_start": true,
+      "enabled": true,
+      "extractors": {
+        "ocr": true,
+        "vlm": true
+      },
       "max_concurrency_cpu": 2,
-      "max_concurrency_gpu": 1
+      "max_concurrency_gpu": 1,
+      "max_items_per_run": 20,
+      "max_seconds_per_run": 30,
+      "sleep_ms": 2000
     },
     "on_query": {
-      "allow_decode_extract": true,
-      "max_window_minutes": 120
+      "allow_decode_extract": false,
+      "extractors": {
+        "ocr": true,
+        "vlm": false
+      },
+      "max_window_minutes": 120,
+      "require_idle": true
     }
   },
   "profile": "justin_full_fidelity",
+  "research": {
+    "cache_dir": "data/research/cache",
+    "enabled": true,
+    "interval_s": 1800,
+    "report_dir": "data/research/reports",
+    "run_on_idle": true,
+    "source_name": "default",
+    "sources": [],
+    "threshold_pct": 10,
+    "watchlist": {
+      "tags": []
+    },
+    "watchlist_name": "default"
+  },
   "runtime": {
     "active_window_s": 3,
+    "activity": {
+      "assume_idle_when_missing": false
+    },
     "gpu": {
       "release_vram_deadline_ms": 250,
       "release_vram_on_active": true

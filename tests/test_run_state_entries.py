@@ -90,8 +90,10 @@ class RunStateEntryTests(unittest.TestCase):
             ledger_path = Path(tmp) / "data" / "ledger.ndjson"
             entries = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines() if line.strip()]
             events = [entry.get("payload", {}).get("event") for entry in entries]
-            self.assertIn("system.crash", events)
-            crash_entries = [entry for entry in entries if entry.get("payload", {}).get("event") == "system.crash"]
+            self.assertIn("system.crash_detected", events)
+            crash_entries = [
+                entry for entry in entries if entry.get("payload", {}).get("event") == "system.crash_detected"
+            ]
             self.assertTrue(crash_entries)
             crash_payload = crash_entries[-1]["payload"]
             self.assertIn("previous_run_id", crash_payload)

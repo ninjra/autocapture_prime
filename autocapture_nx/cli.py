@@ -254,6 +254,20 @@ def cmd_provenance_verify(args: argparse.Namespace) -> int:
     return 2
 
 
+def cmd_research_run(args: argparse.Namespace) -> int:
+    from autocapture.config.defaults import default_config_paths as mx_paths
+    from autocapture.config.load import load_config as mx_load
+    from autocapture.research.runner import ResearchRunner
+
+    config = mx_load(mx_paths(), safe_mode=args.safe_mode)
+    if args.safe_mode:
+        config.setdefault("plugins", {})["safe_mode"] = True
+    runner = ResearchRunner(config)
+    result = runner.run_once()
+    _print_json(result)
+    return 0 if result.get("ok", False) else 1
+
+
 def cmd_codex(args: argparse.Namespace) -> int:
     from autocapture.codex.cli import main as codex_main
 
@@ -316,6 +330,11 @@ def build_parser() -> argparse.ArgumentParser:
     provenance_verify = provenance_sub.add_parser("verify")
     provenance_verify.add_argument("--path", default="")
     provenance_verify.set_defaults(func=cmd_provenance_verify)
+
+    research = sub.add_parser("research")
+    research_sub = research.add_subparsers(dest="research_cmd", required=True)
+    research_run = research_sub.add_parser("run")
+    research_run.set_defaults(func=cmd_research_run)
 
     codex = sub.add_parser("codex")
     codex.add_argument("codex_args", nargs=argparse.REMAINDER)

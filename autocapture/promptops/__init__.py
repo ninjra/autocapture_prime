@@ -1,5 +1,6 @@
 """PromptOps subsystem exports."""
 
+from .engine import PromptOpsLayer
 from .evaluate import evaluate_prompt
 from .github import create_pull_request
 from .patch import apply_patch_file, apply_patch_to_text, create_patch
@@ -14,6 +15,7 @@ __all__ = [
     "create_prompt_bundle",
     "create_pull_request",
     "evaluate_prompt",
+    "PromptOpsLayer",
     "propose_prompt",
     "snapshot_sources",
     "validate_prompt",

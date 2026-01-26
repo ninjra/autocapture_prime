@@ -19,9 +19,10 @@ class AnswerOrchestrator:
 
 
 class LocalLLM:
-    def __init__(self, model_name: str) -> None:
+    def __init__(self, model_name: str, config: dict[str, Any] | None = None) -> None:
         self.model_name = model_name
         self._pipeline = None
+        self._config = config or {}
 
     def _load(self) -> None:
         if self._pipeline is not None:
@@ -32,7 +33,16 @@ class LocalLLM:
         model = AutoModelForCausalLM.from_pretrained(self.model_name)
         self._pipeline = pipeline("text-generation", model=model, tokenizer=tokenizer)
 
-    def generate(self, prompt: str, max_tokens: int = 128) -> str:
+    def generate(self, prompt: str, max_tokens: int = 128, *, apply_promptops: bool = True) -> str:
+        if apply_promptops:
+            try:
+                from autocapture.promptops.engine import PromptOpsLayer
+
+                layer = PromptOpsLayer(self._config)
+                result = layer.prepare_prompt(prompt, prompt_id="llm.local")
+                prompt = result.prompt
+            except Exception:
+                pass
         self._load()
         outputs = self._pipeline(prompt, max_new_tokens=max_tokens)
         if outputs:
@@ -54,7 +64,7 @@ def create_local_llm(plugin_id: str) -> LocalLLM:
 
     config = load_config(default_config_paths(), safe_mode=False)
     model = config.get("llm", {}).get("model", "sshleifer/tiny-gpt2")
-    return LocalLLM(model)
+    return LocalLLM(model, config=config)
 
 
 def create_local_decoder(plugin_id: str) -> LocalDecoder:

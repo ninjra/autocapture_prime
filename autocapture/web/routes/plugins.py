@@ -14,3 +14,8 @@ def list_plugins(request: Request):
     config = request.app.state.facade.config
     manager = PluginManager(config, safe_mode=False)
     return {"plugins": manager.list_plugins(), "extensions": manager.list_extensions()}
+
+
+@router.get("/api/plugins/options")
+def plugin_options(request: Request):
+    return {"options": request.app.state.facade.plugin_options()}

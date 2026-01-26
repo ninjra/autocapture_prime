@@ -9,6 +9,7 @@ from autocapture.config.defaults import default_config_paths
 from autocapture.config.load import load_config
 from autocapture.gateway.schemas import ChatRequest, ChatResponse, ChatChoice, ChatMessage
 from autocapture.memory.answer_orchestrator import create_local_llm
+from autocapture.promptops.engine import PromptOpsLayer
 from autocapture.plugins.policy_gate import PolicyGate
 from autocapture.ux.redaction import EgressSanitizer
 from autocapture.core.http import EgressClient
@@ -24,11 +25,16 @@ def _config():
 def chat(req: ChatRequest):
     config = _config()
     prompt = "\n".join([m.content for m in req.messages])
+    promptops = PromptOpsLayer(config)
+    prepared = promptops.prepare_prompt(prompt, prompt_id="gateway.chat")
+    prepared_prompt = prepared.prompt
 
     if req.use_cloud:
         sanitizer = EgressSanitizer(config)
         gate = PolicyGate(config, sanitizer)
-        decision = gate.enforce("mx.core.llm_openai_compat", req.model_dump())
+        payload = req.model_dump()
+        payload["messages"] = [{"role": "user", "content": prepared_prompt}]
+        decision = gate.enforce("mx.core.llm_openai_compat", payload)
         if not decision.ok:
             raise HTTPException(status_code=403, detail=decision.reason)
         client = EgressClient(gate)
@@ -39,7 +45,7 @@ def chat(req: ChatRequest):
             resp = client.post(
                 f"{base_url}/v1/chat/completions",
                 plugin_id="mx.core.llm_openai_compat",
-                payload=req.model_dump(),
+                payload=payload,
             )
         except Exception as exc:
             raise HTTPException(status_code=403, detail=str(exc))
@@ -48,7 +54,7 @@ def chat(req: ChatRequest):
         content = message.get("content", "")
     else:
         llm = create_local_llm("mx.core.llm_local")
-        content = llm.generate(prompt)
+        content = llm.generate(prepared_prompt, apply_promptops=False)
 
     choice = ChatChoice(index=0, message=ChatMessage(role="assistant", content=content))
     return ChatResponse(id="chatcmpl-local", object="chat.completion", created=int(time.time()), choices=[choice])

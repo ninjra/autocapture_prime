@@ -553,22 +553,234 @@
       ],
       "type": "object"
     },
+    "promptops": {
+      "additionalProperties": false,
+      "properties": {
+        "banned_patterns": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "bundle_name": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "examples": {
+          "type": "object"
+        },
+        "github": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "output_path": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "enabled",
+            "title",
+            "body",
+            "output_path"
+          ],
+          "type": "object"
+        },
+        "history": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "include_prompt": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "include_prompt"
+          ],
+          "type": "object"
+        },
+        "history_dir": {
+          "type": "string"
+        },
+        "max_chars": {
+          "type": "integer"
+        },
+        "max_tokens": {
+          "type": "integer"
+        },
+        "min_pass_rate_pct": {
+          "type": "integer"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "persist_prompts": {
+          "type": "boolean"
+        },
+        "prompt_dir": {
+          "type": "string"
+        },
+        "query_strategy": {
+          "type": "string"
+        },
+        "require_citations": {
+          "type": "boolean"
+        },
+        "sources": {
+          "items": {},
+          "type": "array"
+        },
+        "strategy": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "mode",
+        "strategy",
+        "query_strategy",
+        "max_chars",
+        "max_tokens",
+        "min_pass_rate_pct",
+        "require_citations",
+        "persist_prompts",
+        "sources",
+        "examples",
+        "history",
+        "github",
+        "bundle_name",
+        "banned_patterns"
+      ],
+      "type": "object"
+    },
+    "research": {
+      "additionalProperties": false,
+      "properties": {
+        "cache_dir": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "interval_s": {
+          "type": "integer"
+        },
+        "report_dir": {
+          "type": "string"
+        },
+        "run_on_idle": {
+          "type": "boolean"
+        },
+        "source_name": {
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "threshold_pct": {
+          "type": "integer"
+        },
+        "watchlist": {
+          "additionalProperties": false,
+          "properties": {
+            "tags": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "tags"
+          ],
+          "type": "object"
+        },
+        "watchlist_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "run_on_idle",
+        "interval_s",
+        "threshold_pct",
+        "cache_dir",
+        "report_dir",
+        "source_name",
+        "watchlist_name",
+        "watchlist",
+        "sources"
+      ],
+      "type": "object"
+    },
     "processing": {
       "additionalProperties": false,
       "properties": {
         "idle": {
           "additionalProperties": false,
           "properties": {
+            "auto_start": {
+              "type": "boolean"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "extractors": {
+              "additionalProperties": false,
+              "properties": {
+                "ocr": {
+                  "type": "boolean"
+                },
+                "vlm": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "ocr",
+                "vlm"
+              ],
+              "type": "object"
+            },
             "max_concurrency_cpu": {
               "type": "integer"
             },
             "max_concurrency_gpu": {
               "type": "integer"
+            },
+            "max_items_per_run": {
+              "type": "integer"
+            },
+            "max_seconds_per_run": {
+              "type": "integer"
+            },
+            "sleep_ms": {
+              "type": "integer"
             }
           },
           "required": [
             "max_concurrency_gpu",
-            "max_concurrency_cpu"
+            "max_concurrency_cpu",
+            "enabled",
+            "auto_start",
+            "sleep_ms",
+            "max_items_per_run",
+            "max_seconds_per_run",
+            "extractors"
           ],
           "type": "object"
         },
@@ -578,13 +790,34 @@
             "allow_decode_extract": {
               "type": "boolean"
             },
+            "extractors": {
+              "additionalProperties": false,
+              "properties": {
+                "ocr": {
+                  "type": "boolean"
+                },
+                "vlm": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "ocr",
+                "vlm"
+              ],
+              "type": "object"
+            },
             "max_window_minutes": {
               "type": "integer"
+            },
+            "require_idle": {
+              "type": "boolean"
             }
           },
           "required": [
             "allow_decode_extract",
-            "max_window_minutes"
+            "max_window_minutes",
+            "require_idle",
+            "extractors"
           ],
           "type": "object"
         }
@@ -603,6 +836,18 @@
       "properties": {
         "active_window_s": {
           "type": "integer"
+        },
+        "activity": {
+          "additionalProperties": false,
+          "properties": {
+            "assume_idle_when_missing": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "assume_idle_when_missing"
+          ],
+          "type": "object"
         },
         "gpu": {
           "additionalProperties": false,
@@ -819,6 +1064,8 @@
     "processing",
     "storage",
     "privacy",
+    "promptops",
+    "research",
     "observability",
     "plugins",
     "devtools"

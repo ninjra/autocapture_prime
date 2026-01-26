@@ -66,8 +66,10 @@ packages = [
   "autocapture.research",
   "autocapture.rules",
   "autocapture_nx",
+  "autocapture_nx.capture",
   "autocapture_nx.kernel",
   "autocapture_nx.plugin_system",
+  "autocapture_nx.processing",
   "autocapture_nx.windows",
   "plugins",
 ]
