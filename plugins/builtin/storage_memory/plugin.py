@@ -14,11 +14,21 @@ class InMemoryStore:
     def __init__(self) -> None:
         self._data: dict[str, Any] = {}
 
-    def put(self, key: str, value: Any) -> None:
+    def put(self, key: str, value: Any, *, ts_utc: str | None = None) -> None:
+        _ = ts_utc
         self._data[key] = value
 
-    def put_stream(self, key: str, stream, chunk_size: int = 1024 * 1024) -> None:
+    def put_new(self, key: str, value: Any, *, ts_utc: str | None = None) -> None:
+        _ = ts_utc
+        if key in self._data:
+            raise FileExistsError(f"Record already exists: {key}")
+        self._data[key] = value
+
+    def put_stream(self, key: str, stream, chunk_size: int = 1024 * 1024, *, ts_utc: str | None = None) -> None:
         _ = chunk_size
+        _ = ts_utc
+        if key in self._data:
+            raise FileExistsError(f"Record already exists: {key}")
         self.put(key, stream.read())
 
     def get(self, key: str, default: Any = None) -> Any:

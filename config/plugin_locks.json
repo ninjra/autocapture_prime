@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-01-26T18:28:26.045309+00:00",
+  "generated_at": "2026-01-26T19:11:12.180241+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "15a258e23ffb0b8ee91e9f6955272db5d7992f024ef54ac98580010152b40012",
@@ -14,7 +14,7 @@
       "manifest_sha256": "aa4a1f71cbc98f5b6426ade5d9b6baf4b2515182025a8ac63a0f1a85254a9dc5"
     },
     "builtin.capture.audio.windows": {
-      "artifact_sha256": "1dfbe60e82ca813f1ac46f3a7684e32e6b460b23a0b38876d857e3e678a480cb",
+      "artifact_sha256": "d97cb625131e8d0736e8762a26602a1ab3458ea2455a2a97f9196106460c5f99",
       "manifest_sha256": "653f16211636d316c0122bb48950f103785fc78a73a3cb3640bf28992a31c98c"
     },
     "builtin.capture.stub": {
@@ -86,15 +86,15 @@
       "manifest_sha256": "9c041b1533d1ef0a340e9f6731863f6b28099e00a3e38e812d231d8145e89f7f"
     },
     "builtin.storage.encrypted": {
-      "artifact_sha256": "44fbd5fb1354905aa9e863c125c897780a8bc1e8e07318471cf4bd9013193276",
+      "artifact_sha256": "f7505de45004765d55e5bb459d689e0ccbd8d3625d3f4c1ce8bcb3897b304b67",
       "manifest_sha256": "185c820ed062ae573d5b2dd2a43cf97269edae847b89ac6e2d056fca34057dd0"
     },
     "builtin.storage.memory": {
-      "artifact_sha256": "ea70233de4fd4a72fe88ae31521bcc0e5701dab3bf033ccf05f4f35485e50eca",
+      "artifact_sha256": "59b117af4ece00f8a5c3300d5af3e73112400ce0c1c468b0e6ac466a77dbe711",
       "manifest_sha256": "2dc41efa6788c77bd0061e6d4d3252bcb6a95621db15f0390f8f78f25699ff39"
     },
     "builtin.storage.sqlcipher": {
-      "artifact_sha256": "b388a9f3a1ebaea75cce3ea07aa9c577a83b2d328e2039ff8adbec020d4f37a9",
+      "artifact_sha256": "b6b544391dc5cbcda13ae174dd19e0c8f3d0a1210c174809c1cd1fd357bb066f",
       "manifest_sha256": "589c8ece39e10e5b632219a2562dc804757081039d72dd69a73efd5d217bd0eb"
     },
     "builtin.time.advanced": {

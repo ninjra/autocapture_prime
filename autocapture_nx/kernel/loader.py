@@ -83,6 +83,7 @@ class Kernel:
             capabilities.get("anchor.writer"),
         )
         capabilities.register("event.builder", builder, network_allowed=False)
+        self._record_storage_manifest(builder, capabilities, plugins)
         self._record_run_start(builder)
         self.system = System(config=self.config, plugins=plugins, capabilities=capabilities)
         return self.system
@@ -147,6 +148,50 @@ class Kernel:
                 pass
         builder.ledger_entry("system", inputs=[], outputs=[], payload={"event": "system.start"})
         self._write_run_state(builder.run_id, "running")
+
+    def _record_storage_manifest(self, builder: EventBuilder, capabilities, plugins: list) -> None:
+        metadata = capabilities.get("storage.metadata")
+        run_id = builder.run_id
+        ts_utc = datetime.now(timezone.utc).isoformat()
+        contract_lock = resolve_repo_path("contracts/lock.json")
+        contracts_hash = sha256_file(contract_lock) if contract_lock.exists() else None
+        locks_cfg = self.config.get("plugins", {}).get("locks", {})
+        lockfile_path = resolve_repo_path(locks_cfg.get("lockfile", "config/plugin_locks.json"))
+        plugin_lock_hash = sha256_file(lockfile_path) if lockfile_path.exists() else None
+        effective = self.effective_config
+        manifest = {
+            "record_type": "system.run_manifest",
+            "run_id": run_id,
+            "ts_utc": ts_utc,
+            "config": {
+                "schema_hash": effective.schema_hash if effective else None,
+                "effective_hash": effective.effective_hash if effective else None,
+            },
+            "locks": {
+                "contracts": contracts_hash,
+                "plugins": plugin_lock_hash,
+            },
+            "plugins": sorted({p.plugin_id for p in plugins}),
+            "storage": {
+                "data_dir": self.config.get("storage", {}).get("data_dir", "data"),
+                "fsync_policy": self.config.get("storage", {}).get("fsync_policy", "none"),
+            },
+        }
+        record_id = f"run_manifest.{run_id}"
+        try:
+            if hasattr(metadata, "put_new"):
+                metadata.put_new(record_id, manifest)
+            else:
+                metadata.put(record_id, manifest)
+        except FileExistsError:
+            return
+        builder.ledger_entry(
+            "system",
+            inputs=[],
+            outputs=[record_id],
+            payload={"event": "storage.manifest", "record_id": record_id},
+            ts_utc=ts_utc,
+        )
 
     def _apply_meta_plugins(self, config: dict[str, Any], plugins: list) -> dict[str, Any]:
         updated = dict(config)

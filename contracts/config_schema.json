@@ -723,6 +723,14 @@
           ],
           "type": "object"
         },
+        "fsync_policy": {
+          "enum": [
+            "none",
+            "bulk",
+            "critical"
+          ],
+          "type": "string"
+        },
         "encryption_required": {
           "type": "boolean"
         },

@@ -23,6 +23,13 @@ class EncryptedBlob:
     key_id: str | None = None
 
 
+@dataclass
+class EncryptedBlobRaw:
+    nonce: bytes
+    ciphertext: bytes
+    key_id: str | None = None
+
+
 def load_root_key(path: str) -> bytes:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if os.path.exists(path):
@@ -82,8 +89,25 @@ def encrypt_bytes(
     )
 
 
+def encrypt_bytes_raw(
+    key: bytes,
+    plaintext: bytes,
+    aad: Optional[bytes] = None,
+    key_id: Optional[str] = None,
+) -> EncryptedBlobRaw:
+    aes = AESGCM(key)
+    nonce = os.urandom(12)
+    ciphertext = aes.encrypt(nonce, plaintext, aad)
+    return EncryptedBlobRaw(nonce=nonce, ciphertext=ciphertext, key_id=key_id)
+
+
 def decrypt_bytes(key: bytes, blob: EncryptedBlob, aad: Optional[bytes] = None) -> bytes:
     aes = AESGCM(key)
     nonce = base64.b64decode(blob.nonce_b64)
     ciphertext = base64.b64decode(blob.ciphertext_b64)
     return aes.decrypt(nonce, ciphertext, aad)
+
+
+def decrypt_bytes_raw(key: bytes, blob: EncryptedBlobRaw, aad: Optional[bytes] = None) -> bytes:
+    aes = AESGCM(key)
+    return aes.decrypt(blob.nonce, blob.ciphertext, aad)

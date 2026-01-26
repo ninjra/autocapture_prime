@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from autocapture_nx.plugin_system.api import PluginContext
-from plugins.builtin.storage_encrypted.plugin import EncryptedStoragePlugin
+from plugins.builtin.storage_encrypted.plugin import EncryptedStoragePlugin, _encode_record_id
 
 
 class EncryptedStoreFailLoudTests(unittest.TestCase):
@@ -25,9 +25,12 @@ class EncryptedStoreFailLoudTests(unittest.TestCase):
             ctx = PluginContext(config=config, get_capability=lambda _k: None, logger=lambda _m: None)
             plugin = EncryptedStoragePlugin("test", ctx)
             store = plugin.capabilities()["storage.metadata"]
-            store.put("record1", {"record_type": "derived.test", "secret": "value"})
+            ts_utc = "2026-01-26T00:00:00+00:00"
+            store.put("record1", {"record_type": "derived.test", "secret": "value", "ts_utc": ts_utc})
 
-            path = os.path.join(tmp, "metadata", "record1.json")
+            safe_run = _encode_record_id("run1")
+            safe_record = _encode_record_id("record1")
+            path = os.path.join(tmp, "metadata", safe_run, "2026", "01", "26", f"{safe_record}.json")
             with open(path, "r", encoding="utf-8") as handle:
                 payload = json.load(handle)
             payload["ciphertext_b64"] = "corrupted"

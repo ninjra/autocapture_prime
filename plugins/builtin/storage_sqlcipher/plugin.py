@@ -9,17 +9,33 @@ from typing import Any
 from autocapture_nx.kernel.keyring import KeyRing
 from autocapture_nx.kernel.metadata_store import ImmutableMetadataStore
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
-from plugins.builtin.storage_encrypted.plugin import DerivedKeyProvider, EncryptedBlobStore
+from plugins.builtin.storage_encrypted.plugin import (
+    DerivedKeyProvider,
+    EncryptedBlobStore,
+    EncryptedJSONStore,
+    EntityMapStore,
+    _FsyncPolicy,
+)
+
+
+def _sqlcipher_available() -> tuple[bool, str | None]:
+    try:
+        import sqlcipher3  # noqa: F401
+    except Exception as exc:
+        return False, str(exc)
+    return True, None
 
 
 class SQLCipherStore:
-    def __init__(self, db_path: str, key: bytes) -> None:
+    def __init__(self, db_path: str, key: bytes, run_id: str, fsync_policy: str) -> None:
         self._db_path = db_path
         self._key = key
+        self._run_id = run_id
+        self._fsync_policy = str(fsync_policy or "").strip().lower() or "none"
         os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
         self._conn = None
 
-    def _ensure(self):
+    def _ensure(self) -> None:
         if self._conn is None:
             self._conn = self._connect()
             self._init_schema()
@@ -31,27 +47,86 @@ class SQLCipherStore:
             raise RuntimeError(f"Missing SQLCipher dependency: {exc}")
         conn = sqlcipher3.connect(self._db_path)
         conn.execute("PRAGMA key = ?", (self._key.hex(),))
+        self._apply_fsync_policy(conn)
         return conn
+
+    def _apply_fsync_policy(self, conn) -> None:
+        policy = self._fsync_policy
+        if policy == "critical":
+            conn.execute("PRAGMA synchronous = FULL")
+        elif policy == "bulk":
+            conn.execute("PRAGMA synchronous = NORMAL")
+        elif policy == "none":
+            conn.execute("PRAGMA synchronous = OFF")
 
     def _init_schema(self) -> None:
         self._conn.execute(
-            "CREATE TABLE IF NOT EXISTS metadata (id TEXT PRIMARY KEY, payload TEXT)"
+            "CREATE TABLE IF NOT EXISTS metadata (id TEXT PRIMARY KEY, payload TEXT NOT NULL, record_type TEXT, ts_utc TEXT, run_id TEXT)"
         )
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS entity_map (token TEXT PRIMARY KEY, value TEXT, kind TEXT)"
         )
+        self._ensure_columns()
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_metadata_record_type ON metadata(record_type)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_metadata_ts_utc ON metadata(ts_utc)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_metadata_run_id ON metadata(run_id)"
+        )
         self._conn.commit()
+
+    def _ensure_columns(self) -> None:
+        cur = self._conn.execute("PRAGMA table_info(metadata)")
+        existing = {row[1] for row in cur.fetchall()}
+        for column, col_type in (
+            ("record_type", "TEXT"),
+            ("ts_utc", "TEXT"),
+            ("run_id", "TEXT"),
+        ):
+            if column not in existing:
+                self._conn.execute(f"ALTER TABLE metadata ADD COLUMN {column} {col_type}")
 
     def put(self, record_id: str, value: Any) -> None:
         import json
 
         self._ensure()
+        record_type = None
+        ts_utc = None
+        run_id = self._run_id
+        if isinstance(value, dict):
+            record_type = value.get("record_type")
+            ts_utc = value.get("ts_utc") or value.get("ts_start_utc") or value.get("ts_end_utc")
+            run_id = value.get("run_id") or run_id
         payload = json.dumps(value, sort_keys=True)
         self._conn.execute(
-            "INSERT OR REPLACE INTO metadata (id, payload) VALUES (?, ?)",
-            (record_id, payload),
+            "INSERT OR REPLACE INTO metadata (id, payload, record_type, ts_utc, run_id) VALUES (?, ?, ?, ?, ?)",
+            (record_id, payload, record_type, ts_utc, run_id),
         )
         self._conn.commit()
+
+    def put_new(self, record_id: str, value: Any) -> None:
+        import json
+
+        self._ensure()
+        record_type = None
+        ts_utc = None
+        run_id = self._run_id
+        if isinstance(value, dict):
+            record_type = value.get("record_type")
+            ts_utc = value.get("ts_utc") or value.get("ts_start_utc") or value.get("ts_end_utc")
+            run_id = value.get("run_id") or run_id
+        payload = json.dumps(value, sort_keys=True)
+        try:
+            self._conn.execute(
+                "INSERT INTO metadata (id, payload, record_type, ts_utc, run_id) VALUES (?, ?, ?, ?, ?)",
+                (record_id, payload, record_type, ts_utc, run_id),
+            )
+            self._conn.commit()
+        except sqlite3.IntegrityError as exc:
+            raise FileExistsError(f"Metadata record already exists: {record_id}") from exc
 
     def get(self, record_id: str, default: Any = None) -> Any:
         import json
@@ -124,13 +199,44 @@ class SQLCipherStoragePlugin(PluginBase):
         keyring = KeyRing.load(keyring_path, legacy_root_path=root_key_path, require_protection=require_protection)
         meta_provider = DerivedKeyProvider(keyring, "metadata")
         media_provider = DerivedKeyProvider(keyring, "media")
+        entity_provider = DerivedKeyProvider(keyring, "entity_tokens")
         data_dir = storage_cfg.get("data_dir", "data")
-        _meta_id, meta_key = meta_provider.active()
-        self._metadata = ImmutableMetadataStore(SQLCipherStore(os.path.join(data_dir, "metadata", "metadata.db"), meta_key))
-        self._media = EncryptedBlobStore(os.path.join(data_dir, "media"), media_provider, require_decrypt=bool(encryption_required))
-        self._entity_map = EntityMapAdapter(self._metadata)
+        run_id = str(context.config.get("runtime", {}).get("run_id", "run"))
+        fsync_policy = _FsyncPolicy.normalize(storage_cfg.get("fsync_policy"))
+        require_decrypt = bool(encryption_required)
+        available, reason = _sqlcipher_available()
+        if available:
+            _meta_id, meta_key = meta_provider.active()
+            store = SQLCipherStore(os.path.join(data_dir, "metadata", "metadata.db"), meta_key, run_id, fsync_policy)
+            self._metadata = ImmutableMetadataStore(store)
+            self._entity_map = EntityMapAdapter(store)
+        else:
+            context.logger(f"SQLCipher unavailable ({reason}); falling back to encrypted JSON store")
+            self._metadata = ImmutableMetadataStore(
+                EncryptedJSONStore(
+                    os.path.join(data_dir, "metadata"),
+                    meta_provider,
+                    run_id,
+                    require_decrypt=require_decrypt,
+                    fsync_policy=fsync_policy,
+                )
+            )
+            persist = storage_cfg.get("entity_map", {}).get("persist", True)
+            self._entity_map = EntityMapStore(
+                os.path.join(data_dir, "entity_map"),
+                entity_provider,
+                persist,
+                require_decrypt=require_decrypt,
+                fsync_policy=fsync_policy,
+            )
+        self._media = EncryptedBlobStore(
+            os.path.join(data_dir, "media"),
+            media_provider,
+            run_id,
+            require_decrypt=require_decrypt,
+            fsync_policy=fsync_policy,
+        )
         self._keyring = keyring
-        self._meta_provider = meta_provider
 
     def capabilities(self) -> dict[str, Any]:
         return {

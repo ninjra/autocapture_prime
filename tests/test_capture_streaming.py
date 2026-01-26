@@ -11,8 +11,9 @@ class _MediaStore:
     def __init__(self) -> None:
         self.records: list[tuple[str, bytes]] = []
 
-    def put_stream(self, record_id: str, stream, chunk_size: int = 1024 * 1024) -> None:
+    def put_stream(self, record_id: str, stream, chunk_size: int = 1024 * 1024, *, ts_utc: str | None = None) -> None:
         _ = chunk_size
+        _ = ts_utc
         self.records.append((record_id, stream.read()))
 
 

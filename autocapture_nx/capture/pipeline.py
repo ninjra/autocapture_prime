@@ -583,9 +583,12 @@ class CapturePipeline:
 
         with open(artifact.path, "rb") as handle:
             if hasattr(self._storage_media, "put_stream"):
-                self._storage_media.put_stream(artifact.segment_id, handle)
+                self._storage_media.put_stream(artifact.segment_id, handle, ts_utc=artifact.ts_start_utc)
             else:
-                self._storage_media.put(artifact.segment_id, handle.read())
+                if hasattr(self._storage_media, "put"):
+                    self._storage_media.put(artifact.segment_id, handle.read(), ts_utc=artifact.ts_start_utc)
+                else:
+                    self._storage_media.put(artifact.segment_id, handle.read())
         self._storage_meta.put(artifact.segment_id, metadata)
         self._event_builder.journal_event(
             "capture.segment",

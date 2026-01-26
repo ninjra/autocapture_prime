@@ -22,6 +22,16 @@ class ImmutableMetadataStore:
             raise ValueError(f"Metadata record {record_id} missing record_type")
         self._store.put(record_id, value)
 
+    def put_new(self, record_id: str, value: Any) -> None:
+        if isinstance(value, dict) and "record_type" not in value:
+            raise ValueError(f"Metadata record {record_id} missing record_type")
+        if hasattr(self._store, "put_new"):
+            return self._store.put_new(record_id, value)
+        existing = self._store.get(record_id)
+        if existing is not None:
+            raise FileExistsError(f"Metadata record already exists: {record_id}")
+        self._store.put(record_id, value)
+
     def get(self, record_id: str, default: Any = None) -> Any:
         return self._store.get(record_id, default)
 

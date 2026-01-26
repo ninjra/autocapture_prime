@@ -132,11 +132,11 @@
       "id": "builtin.runtime.governor"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "id": "builtin.storage.encrypted"
     },
     {
-      "enabled": false,
+      "enabled": true,
       "id": "builtin.storage.sqlcipher"
     },
     {

@@ -60,7 +60,10 @@ class AudioCaptureWindows(PluginBase):
                 except queue.Empty:
                     continue
                 record_id = prefixed_id(run_id, "audio", seq)
-                storage_media.put(record_id, data)
+                if hasattr(storage_media, "put_new"):
+                    storage_media.put_new(record_id, data, ts_utc=_iso_utc())
+                else:
+                    storage_media.put(record_id, data, ts_utc=_iso_utc())
                 event_builder.journal_event(
                     "capture.audio",
                     {"frames": int(frames), "channels": int(channels), "samplerate": int(samplerate)},
@@ -74,7 +77,10 @@ class AudioCaptureWindows(PluginBase):
             except queue.Empty:
                 break
             record_id = prefixed_id(run_id, "audio", seq)
-            storage_media.put(record_id, data)
+            if hasattr(storage_media, "put_new"):
+                storage_media.put_new(record_id, data, ts_utc=_iso_utc())
+            else:
+                storage_media.put(record_id, data, ts_utc=_iso_utc())
             event_builder.journal_event(
                 "capture.audio",
                 {"frames": int(frames), "channels": int(channels), "samplerate": int(samplerate)},

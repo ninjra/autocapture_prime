@@ -207,8 +207,8 @@
       "builtin.reranker.stub": true,
       "builtin.retrieval.basic": true,
       "builtin.runtime.governor": true,
-      "builtin.storage.encrypted": true,
-      "builtin.storage.sqlcipher": false,
+      "builtin.storage.encrypted": false,
+      "builtin.storage.sqlcipher": true,
       "builtin.time.advanced": true,
       "builtin.tracking.input.windows": true,
       "builtin.vlm.stub": true,
@@ -324,6 +324,7 @@
       "soft_free_gb": 100,
       "warn_free_gb": 200
     },
+    "fsync_policy": "critical",
     "encryption_required": true,
     "entity_map": {
       "persist": true
