@@ -31,6 +31,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     for check in checks:
         status = "OK" if check.ok else "FAIL"
         print(f"{status} {check.name}: {check.detail}")
+    kernel.shutdown()
     return 0 if ok else 2
 
 
@@ -182,11 +183,14 @@ def cmd_run(args: argparse.Namespace) -> int:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
+        pass
+    finally:
         capture.stop()
         audio.stop()
         input_tracker.stop()
         window_meta.stop()
-        return 0
+        kernel.shutdown()
+    return 0
 
 
 def cmd_devtools_diffusion(args: argparse.Namespace) -> int:
@@ -195,6 +199,7 @@ def cmd_devtools_diffusion(args: argparse.Namespace) -> int:
     harness = system.get("devtools.diffusion")
     result = harness.run(axis=args.axis, k_variants=args.k, dry_run=args.dry_run)
     _print_json(result)
+    kernel.shutdown()
     return 0
 
 
@@ -204,6 +209,7 @@ def cmd_devtools_ast_ir(args: argparse.Namespace) -> int:
     tool = system.get("devtools.ast_ir")
     result = tool.run(scan_root=args.scan_root)
     _print_json(result)
+    kernel.shutdown()
     return 0
 
 
@@ -212,6 +218,7 @@ def cmd_query(args: argparse.Namespace) -> int:
     system = kernel.boot()
     result = run_query(system, args.text)
     _print_json(result)
+    kernel.shutdown()
     return 0
 
 
@@ -220,6 +227,7 @@ def cmd_keys_rotate(args: argparse.Namespace) -> int:
     system = kernel.boot()
     result = rotate_keys(system)
     _print_json(result)
+    kernel.shutdown()
     return 0
 
 

@@ -1,0 +1,21 @@
+# rg -n /subprocess.*plugin|plugin.*subprocess/
+./contracts/security.md:9:- `plugins.hosting.mode` defaults to subprocess with an explicit in-proc allowlist.
+./docs/configuration.md:19:- `plugins.hosting` controls in-proc vs subprocess hosting.
+./contracts/plugin_sdk.md:67:`plugins.hosting.mode` controls default hosting (`subprocess` or `inproc`).
+./tools/blueprint_items.json:837:    "title": "Capability bridging for subprocess plugins (real capability plumbing)",
+./docs/blueprints/autocapture_nx_blueprint.md:52:- Network is allowed only for explicitly policy-approved, subprocess-hosted plugins.
+./docs/blueprints/autocapture_nx_blueprint.md:70:- **Phase 6: Security + egress hardening** — Least privilege plugins, subprocess sandbox, key separation/rotation, egress ledgering.
+./docs/blueprints/autocapture_nx_blueprint.md:128:- [ ] **I051** (Phase 6) — [Capability bridging for subprocess plugins (real capability plumbing)](#i051)
+./docs/blueprints/autocapture_nx_blueprint.md:1945:Least privilege plugins, subprocess sandbox, key separation/rotation, egress ledgering.
+./docs/blueprints/autocapture_nx_blueprint.md:1963:  - process model: kernel has network denied; egress plugin runs in subprocess
+./docs/blueprints/autocapture_nx_blueprint.md:1969:  - Move all network use into subprocess-hosted plugins.
+./docs/blueprints/autocapture_nx_blueprint.md:1981:  - plugin registry: inproc_allowlist minimized; default subprocess
+./docs/blueprints/autocapture_nx_blueprint.md:1991:### I051 — Capability bridging for subprocess plugins (real capability plumbing)
+./docs/blueprints/autocapture_nx_blueprint.md:1998:  - Test: subprocess plugin receives only declared capabilities and can operate
+./docs/blueprints/autocapture_nx_blueprint.md:2026:  - filesystem sandboxing for subprocess plugins
+./docs/blueprints/autocapture_nx_blueprint.md:2378:  - new clipboard capture plugin (subprocess-hosted by default)
+./docs/mx_evidence_bundle.md:169:rg -n "\\bsocket\\b|subprocess\\.|requests\\.|httpx\\." -S autocapture autocapture_plugins || true
+./docs/reports/grep_ledger.txt:89:./docs/blueprints/autocapture_nx_blueprint.md:70:- **Phase 6: Security + egress hardening** — Least privilege plugins, subprocess sandbox, key separation/rotation, egress ledgering.
+./docs/reports/grep_ledger.txt:152:./docs/blueprints/autocapture_nx_blueprint.md:1945:Least privilege plugins, subprocess sandbox, key separation/rotation, egress ledgering.
+./docs/reports/blueprint_items.md:111:| I051 | Phase 6: Security + egress hardening | Capability bridging for subprocess plugins (real capability plumbing) |  |  |  |
+./autocapture_nx/plugin_system/registry.py:183:                if hosting_mode == "subprocess" and plugin_id not in inproc_allowlist:

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import os
 import threading
+from datetime import datetime, timezone
 from typing import Any
 
 from autocapture_nx.kernel.canonical_json import dumps
+from autocapture_nx.kernel.ids import ensure_prefixed, prefixed_id
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 
 
@@ -17,6 +19,9 @@ class JournalWriter(PluginBase):
         os.makedirs(data_dir, exist_ok=True)
         self._path = os.path.join(data_dir, "journal.ndjson")
         self._lock = threading.Lock()
+        self._sequence = 0
+        self._run_id = context.config.get("runtime", {}).get("run_id")
+        self._tzid = context.config.get("runtime", {}).get("timezone", "UTC")
 
     def capabilities(self) -> dict[str, Any]:
         return {"journal.writer": self}
@@ -31,14 +36,54 @@ class JournalWriter(PluginBase):
             "offset_minutes",
             "event_type",
             "payload",
+            "run_id",
         }
+        with self._lock:
+            if not entry.get("run_id"):
+                if not self._run_id:
+                    raise ValueError("Journal run_id missing")
+                entry["run_id"] = self._run_id
+            if "sequence" not in entry or entry.get("sequence") is None:
+                entry["sequence"] = self._sequence
+                self._sequence += 1
+            if not entry.get("ts_utc"):
+                entry["ts_utc"] = datetime.now(timezone.utc).isoformat()
+            if not entry.get("tzid"):
+                entry["tzid"] = self._tzid
+            if not entry.get("event_id"):
+                entry["event_id"] = prefixed_id(entry["run_id"], entry.get("event_type", "event"), entry["sequence"])
+            else:
+                entry["event_id"] = ensure_prefixed(entry["run_id"], str(entry["event_id"]))
         missing = required - set(entry.keys())
         if missing:
             raise ValueError(f"Journal entry missing fields: {sorted(missing)}")
         canonical = dumps(entry)
-        with self._lock:
-            with open(self._path, "a", encoding="utf-8") as handle:
-                handle.write(f"{canonical}\n")
+        with open(self._path, "a", encoding="utf-8") as handle:
+            handle.write(f"{canonical}\n")
+
+    def append_event(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        *,
+        event_id: str | None = None,
+        ts_utc: str | None = None,
+        tzid: str | None = None,
+        offset_minutes: int = 0,
+    ) -> str:
+        entry = {
+            "schema_version": 1,
+            "event_id": event_id,
+            "sequence": None,
+            "ts_utc": ts_utc,
+            "tzid": tzid,
+            "offset_minutes": int(offset_minutes),
+            "event_type": event_type,
+            "payload": payload,
+            "run_id": self._run_id,
+        }
+        self.append(entry)
+        return entry["event_id"]
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> JournalWriter:

@@ -1,0 +1,12 @@
+# baseline_repo_state
+date_utc: 2026-01-26
+
+$ git rev-parse --show-toplevel
+/mnt/d/projects/autocapture_prime
+
+$ git status -sb
+## main...origin/main
+?? docs/reports/
+
+$ git log -1 --oneline
+d408cfe Merge pull request #3 from ninjra/autocaptureprime/mx-replace

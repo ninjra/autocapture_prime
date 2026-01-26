@@ -22,7 +22,7 @@ class SQLCipherStoreTests(unittest.TestCase):
             plugin = SQLCipherStoragePlugin("sql", ctx)
             store = plugin.capabilities()["storage.metadata"]
             try:
-                store.put("k", {"v": 1})
+                store.put("k", {"record_type": "derived.test", "v": 1})
                 self.assertEqual(store.get("k")["v"], 1)
             except RuntimeError:
                 # Dependency missing; acceptable for non-Windows test env

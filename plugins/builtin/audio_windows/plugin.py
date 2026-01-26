@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import os
+import queue
 import threading
+from dataclasses import dataclass, field
 from typing import Any
 
+from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 
 
@@ -39,38 +42,77 @@ class AudioCaptureWindows(PluginBase):
             raise RuntimeError(f"Missing audio dependency: {exc}")
 
         storage_media = self.context.get_capability("storage.media")
-        journal = self.context.get_capability("journal.writer")
+        event_builder = self.context.get_capability("event.builder")
 
         samplerate = 44100
         channels = 2
         blocksize = 44100
         seq = 0
+        run_id = ensure_run_id(self.context.config)
+        audio_buffer = _AudioBuffer(max_queue=self.context.config.get("capture", {}).get("audio", {}).get("queue_max", 8))
 
-        def callback(indata, frames, time_info, status):
-            nonlocal seq
-            if self._stop.is_set():
-                raise sd.CallbackStop()
-            data = indata.tobytes()
-            record_id = f"audio_{seq}"
-            storage_media.put(record_id, data)
-            journal.append(
-                {
-                    "schema_version": 1,
-                    "event_id": record_id,
-                    "sequence": seq,
-                    "ts_utc": time_info.inputBufferAdcTime and str(time_info.inputBufferAdcTime) or "",
-                    "tzid": "UTC",
-                    "offset_minutes": 0,
-                    "event_type": "capture.audio",
-                    "payload": {"frames": frames, "channels": channels, "samplerate": samplerate},
-                }
-            )
-            seq += 1
+        callback = self._build_callback(audio_buffer, sd.CallbackStop)
 
         with sd.InputStream(samplerate=samplerate, channels=channels, callback=callback, blocksize=blocksize):
             while not self._stop.is_set():
-                sd.sleep(200)
+                try:
+                    data, frames, time_info = audio_buffer.queue.get(timeout=0.2)
+                except queue.Empty:
+                    continue
+                record_id = prefixed_id(run_id, "audio", seq)
+                storage_media.put(record_id, data)
+                event_builder.journal_event(
+                    "capture.audio",
+                    {"frames": int(frames), "channels": int(channels), "samplerate": int(samplerate)},
+                    event_id=record_id,
+                    ts_utc=_iso_utc(),
+                )
+                seq += 1
+        while not audio_buffer.queue.empty():
+            try:
+                data, frames, time_info = audio_buffer.queue.get_nowait()
+            except queue.Empty:
+                break
+            record_id = prefixed_id(run_id, "audio", seq)
+            storage_media.put(record_id, data)
+            event_builder.journal_event(
+                "capture.audio",
+                {"frames": int(frames), "channels": int(channels), "samplerate": int(samplerate)},
+                event_id=record_id,
+                ts_utc=_iso_utc(),
+            )
+            seq += 1
+
+    def _build_callback(self, audio_buffer: "_AudioBuffer", stop_exc) -> Any:
+        def callback(indata, frames, time_info, status):
+            if self._stop.is_set():
+                raise stop_exc()
+            audio_buffer.enqueue(indata.tobytes(), frames, time_info)
+
+        return callback
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> AudioCaptureWindows:
     return AudioCaptureWindows(plugin_id, context)
+
+
+def _iso_utc() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass
+class _AudioBuffer:
+    max_queue: int
+    queue: queue.Queue = field(init=False)
+    dropped: int = 0
+
+    def __post_init__(self) -> None:
+        self.queue = queue.Queue(maxsize=int(self.max_queue))
+
+    def enqueue(self, data: bytes, frames: int, time_info: Any) -> None:
+        try:
+            self.queue.put_nowait((data, frames, time_info))
+        except queue.Full:
+            self.dropped += 1

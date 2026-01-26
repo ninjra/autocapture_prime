@@ -7,6 +7,7 @@ import sqlite3
 from typing import Any
 
 from autocapture_nx.kernel.keyring import KeyRing
+from autocapture_nx.kernel.metadata_store import ImmutableMetadataStore
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 from plugins.builtin.storage_encrypted.plugin import DerivedKeyProvider, EncryptedBlobStore
 
@@ -64,7 +65,7 @@ class SQLCipherStore:
 
     def keys(self) -> list[str]:
         self._ensure()
-        cur = self._conn.execute("SELECT id FROM metadata")
+        cur = self._conn.execute("SELECT id FROM metadata ORDER BY id")
         return [row[0] for row in cur.fetchall()]
 
     def entity_put(self, token: str, value: str, kind: str) -> None:
@@ -118,13 +119,15 @@ class SQLCipherStoragePlugin(PluginBase):
         crypto_cfg = storage_cfg.get("crypto", {})
         keyring_path = crypto_cfg.get("keyring_path", "data/vault/keyring.json")
         root_key_path = crypto_cfg.get("root_key_path", "data/vault/root.key")
-        keyring = KeyRing.load(keyring_path, legacy_root_path=root_key_path)
+        encryption_required = storage_cfg.get("encryption_required", False)
+        require_protection = bool(encryption_required and os.name == "nt")
+        keyring = KeyRing.load(keyring_path, legacy_root_path=root_key_path, require_protection=require_protection)
         meta_provider = DerivedKeyProvider(keyring, "metadata")
         media_provider = DerivedKeyProvider(keyring, "media")
         data_dir = storage_cfg.get("data_dir", "data")
         _meta_id, meta_key = meta_provider.active()
-        self._metadata = SQLCipherStore(os.path.join(data_dir, "metadata", "metadata.db"), meta_key)
-        self._media = EncryptedBlobStore(os.path.join(data_dir, "media"), media_provider)
+        self._metadata = ImmutableMetadataStore(SQLCipherStore(os.path.join(data_dir, "metadata", "metadata.db"), meta_key))
+        self._media = EncryptedBlobStore(os.path.join(data_dir, "media"), media_provider, require_decrypt=bool(encryption_required))
         self._entity_map = EntityMapAdapter(self._metadata)
         self._keyring = keyring
         self._meta_provider = meta_provider

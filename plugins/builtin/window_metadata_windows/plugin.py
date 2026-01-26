@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 from autocapture_nx.windows.win_window import active_window
 
@@ -40,12 +41,13 @@ class WindowMetadataWindows(PluginBase):
             self._thread.join(timeout=5)
 
     def _run_loop(self) -> None:
-        journal = self.context.get_capability("journal.writer")
+        event_builder = self.context.get_capability("event.builder")
         metadata_store = self.context.get_capability("storage.metadata")
         window_cfg = self.context.config.get("capture", {}).get("window_metadata", {})
         sample_hz = int(window_cfg.get("sample_hz", 5))
         interval = 1.0 / max(sample_hz, 1)
         seq = 0
+        run_id = ensure_run_id(self.context.config)
         last_hwnd = None
         while not self._stop.is_set():
             info = active_window()
@@ -55,24 +57,19 @@ class WindowMetadataWindows(PluginBase):
                     "title": info.title,
                     "process_path": info.process_path,
                     "hwnd": info.hwnd,
-                    "rect": list(info.rect),
+                    "rect": [int(value) for value in info.rect],
                 }
-                journal.append(
-                    {
-                        "schema_version": 1,
-                        "event_id": f"window_{seq}",
-                        "sequence": seq,
-                        "ts_utc": ts,
-                        "tzid": "UTC",
-                        "offset_minutes": 0,
-                        "event_type": "window.meta",
-                        "payload": payload,
-                    }
+                record_id = prefixed_id(run_id, "window", seq)
+                event_builder.journal_event(
+                    "window.meta",
+                    payload,
+                    event_id=record_id,
+                    ts_utc=ts,
                 )
                 metadata_store.put(
-                    f"window_{seq}",
+                    record_id,
                     {
-                        "record_type": "window.meta",
+                        "record_type": "evidence.window.meta",
                         "ts_utc": ts,
                         "text": f"{info.title} {info.process_path}".strip(),
                         "window": payload,

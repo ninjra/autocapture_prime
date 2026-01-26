@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from autocapture_nx.kernel.crypto import EncryptedBlob, decrypt_bytes, derive_key, encrypt_bytes
+from autocapture_nx.kernel.metadata_store import ImmutableMetadataStore
 from autocapture_nx.kernel.keyring import KeyRing
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 
@@ -43,9 +44,10 @@ class DerivedKeyProvider:
 
 
 class EncryptedJSONStore:
-    def __init__(self, root_dir: str, key_provider: DerivedKeyProvider) -> None:
+    def __init__(self, root_dir: str, key_provider: DerivedKeyProvider, require_decrypt: bool = False) -> None:
         self._root = root_dir
         self._key_provider = key_provider
+        self._require_decrypt = require_decrypt
         os.makedirs(self._root, exist_ok=True)
 
     def _path(self, record_id: str) -> str:
@@ -74,6 +76,8 @@ class EncryptedJSONStore:
             except Exception:
                 continue
         if payload is None:
+            if self._require_decrypt:
+                raise RuntimeError(f"Decrypt failed for metadata record {record_id}")
             return default
         return json.loads(payload.decode("utf-8"))
 
@@ -83,7 +87,7 @@ class EncryptedJSONStore:
             if not filename.endswith(".json"):
                 continue
             ids.append(filename[:-5])
-        return ids
+        return sorted(ids)
 
     def rotate(self, _new_key: bytes | None = None) -> int:
         count = 0
@@ -95,42 +99,100 @@ class EncryptedJSONStore:
 
 
 class EncryptedBlobStore:
-    def __init__(self, root_dir: str, key_provider: DerivedKeyProvider) -> None:
+    def __init__(self, root_dir: str, key_provider: DerivedKeyProvider, require_decrypt: bool = False) -> None:
         self._root = root_dir
         self._key_provider = key_provider
+        self._require_decrypt = require_decrypt
         os.makedirs(self._root, exist_ok=True)
 
     def _path(self, record_id: str) -> str:
         safe = record_id.replace("/", "_")
         return os.path.join(self._root, f"{safe}.json")
 
+    def _path_stream(self, record_id: str) -> str:
+        safe = record_id.replace("/", "_")
+        return os.path.join(self._root, f"{safe}.jsonl")
+
     def put(self, record_id: str, data: bytes) -> None:
         key_id, key = self._key_provider.active()
         blob = encrypt_bytes(key, data, key_id=key_id)
+        stream_path = self._path_stream(record_id)
+        if os.path.exists(stream_path):
+            os.remove(stream_path)
         with open(self._path(record_id), "w", encoding="utf-8") as handle:
             json.dump(blob.__dict__, handle, sort_keys=True)
 
+    def put_stream(self, record_id: str, stream, chunk_size: int = 1024 * 1024) -> None:
+        key_id, key = self._key_provider.active()
+        path = self._path_stream(record_id)
+        blob_path = self._path(record_id)
+        if os.path.exists(blob_path):
+            os.remove(blob_path)
+        with open(path, "w", encoding="utf-8") as handle:
+            header = {"format": "chunked", "schema_version": 1, "key_id": key_id}
+            handle.write(json.dumps(header, sort_keys=True))
+            handle.write("\n")
+            while True:
+                chunk = stream.read(chunk_size)
+                if not chunk:
+                    break
+                blob = encrypt_bytes(key, chunk, key_id=key_id)
+                handle.write(json.dumps({"nonce_b64": blob.nonce_b64, "ciphertext_b64": blob.ciphertext_b64}, sort_keys=True))
+                handle.write("\n")
+
     def get(self, record_id: str, default: bytes | None = None) -> bytes | None:
         path = self._path(record_id)
-        if not os.path.exists(path):
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            blob = EncryptedBlob(**data)
+            for key in self._key_provider.candidates(blob.key_id):
+                try:
+                    return decrypt_bytes(key, blob)
+                except Exception:
+                    continue
+            if self._require_decrypt:
+                raise RuntimeError(f"Decrypt failed for blob record {record_id}")
             return default
-        with open(path, "r", encoding="utf-8") as handle:
-            data = json.load(handle)
-        blob = EncryptedBlob(**data)
-        for key in self._key_provider.candidates(blob.key_id):
-            try:
-                return decrypt_bytes(key, blob)
-            except Exception:
-                continue
+        stream_path = self._path_stream(record_id)
+        if not os.path.exists(stream_path):
+            return default
+        with open(stream_path, "r", encoding="utf-8") as handle:
+            header_line = handle.readline()
+            if not header_line:
+                if self._require_decrypt:
+                    raise RuntimeError(f"Decrypt failed for blob record {record_id}")
+                return default
+            header = json.loads(header_line)
+            key_id = header.get("key_id")
+            key_candidates = self._key_provider.candidates(key_id)
+            for key in key_candidates:
+                try:
+                    handle.seek(0)
+                    handle.readline()
+                    payload = bytearray()
+                    for line in handle:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        chunk_data = json.loads(line)
+                        blob = EncryptedBlob(**chunk_data)
+                        payload.extend(decrypt_bytes(key, blob))
+                    return bytes(payload)
+                except Exception:
+                    continue
+        if self._require_decrypt:
+            raise RuntimeError(f"Decrypt failed for blob record {record_id}")
         return default
 
     def keys(self) -> list[str]:
-        ids = []
+        ids: set[str] = set()
         for filename in os.listdir(self._root):
-            if not filename.endswith(".json"):
-                continue
-            ids.append(filename[:-5])
-        return ids
+            if filename.endswith(".json"):
+                ids.add(filename[:-5])
+            elif filename.endswith(".jsonl"):
+                ids.add(filename[:-6])
+        return sorted(ids)
 
     def rotate(self, _new_key: bytes | None = None) -> int:
         count = 0
@@ -144,10 +206,11 @@ class EncryptedBlobStore:
 
 
 class EntityMapStore:
-    def __init__(self, root_dir: str, key_provider: DerivedKeyProvider, persist: bool) -> None:
+    def __init__(self, root_dir: str, key_provider: DerivedKeyProvider, persist: bool, require_decrypt: bool = False) -> None:
         self._root = root_dir
         self._key_provider = key_provider
         self._persist = persist
+        self._require_decrypt = require_decrypt
         os.makedirs(self._root, exist_ok=True)
         self._path = os.path.join(self._root, "entity_map.json")
         self._data: dict[str, dict[str, str]] = {}
@@ -166,6 +229,8 @@ class EntityMapStore:
             except Exception:
                 continue
         if decrypted is None:
+            if self._require_decrypt:
+                raise RuntimeError("Decrypt failed for entity map")
             return {}
         return json.loads(decrypted.decode("utf-8"))
 
@@ -201,16 +266,21 @@ class EncryptedStoragePlugin(PluginBase):
         crypto_cfg = storage_cfg.get("crypto", {})
         keyring_path = crypto_cfg.get("keyring_path", "data/vault/keyring.json")
         root_key_path = crypto_cfg.get("root_key_path", "data/vault/root.key")
-        keyring = KeyRing.load(keyring_path, legacy_root_path=root_key_path)
+        encryption_required = storage_cfg.get("encryption_required", False)
+        require_protection = bool(encryption_required and os.name == "nt")
+        keyring = KeyRing.load(keyring_path, legacy_root_path=root_key_path, require_protection=require_protection)
         self._keyring = keyring
         meta_provider = DerivedKeyProvider(keyring, "metadata")
         media_provider = DerivedKeyProvider(keyring, "media")
         entity_provider = DerivedKeyProvider(keyring, "entity_tokens")
         data_dir = storage_cfg.get("data_dir", "data")
-        self._metadata = EncryptedJSONStore(os.path.join(data_dir, "metadata"), meta_provider)
-        self._media = EncryptedBlobStore(os.path.join(data_dir, "media"), media_provider)
+        require_decrypt = bool(encryption_required)
+        self._metadata = ImmutableMetadataStore(
+            EncryptedJSONStore(os.path.join(data_dir, "metadata"), meta_provider, require_decrypt=require_decrypt)
+        )
+        self._media = EncryptedBlobStore(os.path.join(data_dir, "media"), media_provider, require_decrypt=require_decrypt)
         persist = storage_cfg.get("entity_map", {}).get("persist", True)
-        self._entity_map = EntityMapStore(os.path.join(data_dir, "entity_map"), entity_provider, persist)
+        self._entity_map = EntityMapStore(os.path.join(data_dir, "entity_map"), entity_provider, persist, require_decrypt=require_decrypt)
 
     def capabilities(self) -> dict[str, Any]:
         return {

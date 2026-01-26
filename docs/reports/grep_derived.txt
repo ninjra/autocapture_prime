@@ -1,0 +1,90 @@
+# rg -n /derived/
+./tools/blueprint_items.json:405:    "title": "Store audio as PCM/FLAC/Opus derived artifact",
+./tools/blueprint_items.json:541:    "title": "Add compact binary input log (derived) + JSON summary",
+./tools/blueprint_items.json:565:    "title": "Storage compaction for derived artifacts only",
+./tools/blueprint_items.json:653:    "title": "Hash everything that matters (media/metadata/derived)",
+./tools/blueprint_items.json:701:    "title": "Metadata immutable by default; derived never overwrites",
+./docs/STATE.md:18:## Blueprint-derived constraints (implementation status)
+./docs/autocapture_mx_blueprint.md:48:- **Evidence**: captured artifacts + derived spans that can be cited.
+./docs/blueprints/autocapture_nx_blueprint.md:17:- **Append-only evidence**: primary evidence is immutable; derived artifacts are separate records linked to parents.
+./docs/blueprints/autocapture_nx_blueprint.md:35:- Ledger entry written for: `derived.write` (includes parent hash + method + model identity).
+./docs/blueprints/autocapture_nx_blueprint.md:67:- **Phase 3: Storage scaling + durability** — SQLCipher/indices, binary encrypted blobs, atomic writes, recovery, compaction for derived.
+./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/blueprints/autocapture_nx_blueprint.md:143:- [ ] **I066** (Phase 4) — [Hash everything that matters (media/metadata/derived)](#i066)
+./docs/blueprints/autocapture_nx_blueprint.md:149:- [ ] **I072** (Phase 4) — [Metadata immutable by default; derived never overwrites](#i072)
+./docs/blueprints/autocapture_nx_blueprint.md:185:- [ ] **I108** (Phase 3) — [Add compact binary input log (derived) + JSON summary](#i108)
+./docs/blueprints/autocapture_nx_blueprint.md:187:- [ ] **I110** (Phase 2) — [Store audio as PCM/FLAC/Opus derived artifact](#i110)
+./docs/blueprints/autocapture_nx_blueprint.md:207:- [ ] **I130** (Phase 3) — [Storage compaction for derived artifacts only](#i130)
+./docs/blueprints/autocapture_nx_blueprint.md:534:  - Writer batches writes into derived artifact blocks; ledger/journal at batch boundaries.
+./docs/blueprints/autocapture_nx_blueprint.md:548:  - Test: extraction creates `derived.*` record; parent unchanged (hash stable)
+./docs/blueprints/autocapture_nx_blueprint.md:550:  - Introduce evidence/derived record types; enforce immutability for evidence.
+./docs/blueprints/autocapture_nx_blueprint.md:551:  - Extraction writes derived records (Pattern B) and links to parent via derivation graph.
+./docs/blueprints/autocapture_nx_blueprint.md:893:  - Prefer dropping derived/per-frame detail over dropping segment boundaries.
+./docs/blueprints/autocapture_nx_blueprint.md:986:  - correlation references stored in derived artifacts
+./docs/blueprints/autocapture_nx_blueprint.md:1089:  - Record device identity and mode in derived artifact metadata.
+./docs/blueprints/autocapture_nx_blueprint.md:1094:### I110 — Store audio as PCM/FLAC/Opus derived artifact
+./docs/blueprints/autocapture_nx_blueprint.md:1099:  - audio stored as derived artifact blocks with clear encoding
+./docs/blueprints/autocapture_nx_blueprint.md:1104:  - Treat audio as derived artifact if sourced from callback stream; ledger derivation.
+./docs/blueprints/autocapture_nx_blueprint.md:1157:SQLCipher/indices, binary encrypted blobs, atomic writes, recovery, compaction for derived.
+./docs/blueprints/autocapture_nx_blueprint.md:1229:  - Adopt chunked AEAD: each chunk uses derived nonce (base + counter).
+./docs/blueprints/autocapture_nx_blueprint.md:1245:  - Add mutability policy by record_type: evidence immutable; derived immutable;
+./docs/blueprints/autocapture_nx_blueprint.md:1351:  - Seal references all constituent blob hashes and derived indexes (if any).
+./docs/blueprints/autocapture_nx_blueprint.md:1372:### I108 — Add compact binary input log (derived) + JSON summary
+./docs/blueprints/autocapture_nx_blueprint.md:1377:  - input pipeline writes compact binary derived log + JSON summary records
+./docs/blueprints/autocapture_nx_blueprint.md:1411:  - Track bytes/day for evidence and derived separately.
+./docs/blueprints/autocapture_nx_blueprint.md:1417:### I130 — Storage compaction for derived artifacts only
+./docs/blueprints/autocapture_nx_blueprint.md:1422:  - compaction applies only to derived artifacts and rebuildable indexes
+./docs/blueprints/autocapture_nx_blueprint.md:1427:  - Define derived compaction strategies: recompress text indexes, prune caches,
+./docs/blueprints/autocapture_nx_blueprint.md:1428:  - dedupe derived blobs using content hashes.
+./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/blueprints/autocapture_nx_blueprint.md:1493:  - Extraction only runs on candidates; results stored as derived artifacts (I38).
+./docs/blueprints/autocapture_nx_blueprint.md:1503:  - schema: `derived.text.*` records
+./docs/blueprints/autocapture_nx_blueprint.md:1506:  - Test: derived text record includes parent reference and span_ref
+./docs/blueprints/autocapture_nx_blueprint.md:1512:  - All extraction outputs are provenance-tracked derived artifacts.
+./docs/blueprints/autocapture_nx_blueprint.md:1537:  - Test: derived artifacts have corresponding ledger derivation entries
+./docs/blueprints/autocapture_nx_blueprint.md:1540:  - output hash and derived record id.
+./docs/blueprints/autocapture_nx_blueprint.md:1601:  - All primary capture, audio, window, input, and derived artifacts conform.
+./docs/blueprints/autocapture_nx_blueprint.md:1606:### I066 — Hash everything that matters (media/metadata/derived)
+./docs/blueprints/autocapture_nx_blueprint.md:1618:  - Every evidence/derived object is hash-addressable and verifiable.
+./docs/blueprints/autocapture_nx_blueprint.md:1696:### I072 — Metadata immutable by default; derived never overwrites
+./docs/blueprints/autocapture_nx_blueprint.md:1703:  - Gate-IMMUT catches any overwrite on evidence/derived records
+./docs/blueprints/autocapture_nx_blueprint.md:1719:  - Test: derived artifacts create derivation edge to parent
+./docs/blueprints/autocapture_nx_blueprint.md:1724:  - Any derived output can be traced back to its precise evidence parents.
+./docs/blueprints/autocapture_nx_blueprint.md:1732:  - model identity schema and recording in derived artifacts
+./docs/blueprints/autocapture_nx_blueprint.md:1735:  - Test: derived artifacts contain model_name + model_digest + params
+./docs/blueprints/autocapture_nx_blueprint.md:1877:  - Emit periodic `telemetry.capture` records (derived/monitoring).
+./docs/blueprints/autocapture_nx_blueprint.md:1938:  - Persist checkpoints in derived store; ledger transitions record progress.
+./docs/blueprints/autocapture_nx_blueprint.md:2134:  - Test: rotating one key does not break others; derived artifacts remain readable as policy dictates
+./docs/blueprints/autocapture_nx_blueprint.md:2275:  - Ensure CLI output is derived from structured responses.
+./docs/blueprints/autocapture_nx_blueprint.md:2302:  - alerts derived from journal/telemetry streams
+./docs/blueprints/autocapture_nx_blueprint.md:2307:  - Store alerts as derived records; show current and historical alerts.
+./docs/reports/grep_journal.txt:26:./docs/blueprints/autocapture_nx_blueprint.md:534:  - Writer batches writes into derived artifact blocks; ledger/journal at batch boundaries.
+./docs/reports/grep_journal.txt:44:./docs/blueprints/autocapture_nx_blueprint.md:2302:  - alerts derived from journal/telemetry streams
+./docs/reports/grep_journal.txt:88:./docs/reports/grep_ledger.txt:111:./docs/blueprints/autocapture_nx_blueprint.md:534:  - Writer batches writes into derived artifact blocks; ledger/journal at batch boundaries.
+./docs/autocapture_nx_blueprint_final.md:248:Remove media TTL and deletion features for local evidence. Any “sanitization” is implemented as **derived egress/export views** that do not mutate or remove local evidence.
+./docs/autocapture_nx_blueprint_final.md:523:- `frame.keyframe`: extracted still frame for indexing, derived
+./docs/autocapture_nx_blueprint_final.md:524:- `text.ocr_span`: OCR text + offsets, derived
+./docs/autocapture_nx_blueprint_final.md:525:- `text.vlm_span`: VLM extracted UI text/layout, derived
+./docs/autocapture_nx_blueprint_final.md:574:- `facts[]`: each fact is `{type, ts_utc, fields}` where `fields` is a map and all user-derived string values are tokenized.
+./docs/autocapture_nx_blueprint_final.md:726:All derived outputs are stored as new immutable atoms linked to source segments/frames.
+./docs/autocapture_nx_blueprint_final.md:879:- optional local entity table derived from OCR/VLM outputs
+./docs/autocapture_nx_blueprint_final.md:925:- If pixels must be sent, generate a derived sanitized image view that replaces detected sensitive text regions with typed tokens. This derived view is never used for local memory; it is egress-only.
+./docs/autocapture_nx_blueprint_final.md:1014:- Never reuse the same derived key across media, metadata, and entity tokenization.
+./docs/reports/grep_ledger.txt:111:./docs/blueprints/autocapture_nx_blueprint.md:534:  - Writer batches writes into derived artifact blocks; ledger/journal at batch boundaries.
+./docs/reports/grep_ledger.txt:126:./docs/blueprints/autocapture_nx_blueprint.md:1104:  - Treat audio as derived artifact if sourced from callback stream; ledger derivation.
+./docs/reports/grep_ledger.txt:138:./docs/blueprints/autocapture_nx_blueprint.md:1537:  - Test: derived artifacts have corresponding ledger derivation entries
+./docs/reports/grep_ledger.txt:151:./docs/blueprints/autocapture_nx_blueprint.md:1938:  - Persist checkpoints in derived store; ledger transitions record progress.
+./docs/reports/blueprint_items.md:57:| I110 | Phase 2: Capture pipeline refactor | Store audio as PCM/FLAC/Opus derived artifact |  |  |  |
+./docs/reports/blueprint_items.md:74:| I108 | Phase 3: Storage scaling + durability | Add compact binary input log (derived) + JSON summary |  |  |  |
+./docs/reports/blueprint_items.md:77:| I130 | Phase 3: Storage scaling + durability | Storage compaction for derived artifacts only |  |  |  |
+./docs/reports/blueprint_items.md:88:| I066 | Phase 4: Retrieval + provenance + citations | Hash everything that matters (media/metadata/derived) |  |  |  |
+./docs/reports/blueprint_items.md:94:| I072 | Phase 4: Retrieval + provenance + citations | Metadata immutable by default; derived never overwrites |  |  |  |
+./docs/reports/grep_evidence.txt:31:./docs/autocapture_nx_blueprint_final.md:248:Remove media TTL and deletion features for local evidence. Any “sanitization” is implemented as **derived egress/export views** that do not mutate or remove local evidence.
+./docs/reports/grep_evidence.txt:53:./docs/blueprints/autocapture_nx_blueprint.md:17:- **Append-only evidence**: primary evidence is immutable; derived artifacts are separate records linked to parents.
+./docs/reports/grep_evidence.txt:67:./docs/blueprints/autocapture_nx_blueprint.md:550:  - Introduce evidence/derived record types; enforce immutability for evidence.
+./docs/reports/grep_evidence.txt:76:./docs/blueprints/autocapture_nx_blueprint.md:1245:  - Add mutability policy by record_type: evidence immutable; derived immutable;
+./docs/reports/grep_evidence.txt:84:./docs/blueprints/autocapture_nx_blueprint.md:1411:  - Track bytes/day for evidence and derived separately.
+./docs/reports/grep_evidence.txt:102:./docs/blueprints/autocapture_nx_blueprint.md:1618:  - Every evidence/derived object is hash-addressable and verifiable.
+./docs/reports/grep_evidence.txt:108:./docs/blueprints/autocapture_nx_blueprint.md:1703:  - Gate-IMMUT catches any overwrite on evidence/derived records
+./docs/reports/grep_evidence.txt:109:./docs/blueprints/autocapture_nx_blueprint.md:1724:  - Any derived output can be traced back to its precise evidence parents.
+./autocapture/storage/sqlcipher.py:23:        # For now, use encrypted store with derived keys.

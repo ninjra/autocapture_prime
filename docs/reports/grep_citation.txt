@@ -1,0 +1,288 @@
+# rg -n /citation/
+./autocapture_plugins/mx.training.default.yaml:34:        produces_citations: true
+./autocapture_plugins/mx.training.default.yaml:35:        citation_granularity: claim
+./contracts/user_surface.md:22:  - Runs deterministic time parsing, retrieval, optional on-demand extraction, and claim-level citations.
+./config/plugin_locks.json:28:    "builtin.citation.basic": {
+./autocapture_plugins/mx.research.default.yaml:34:        produces_citations: true
+./autocapture_plugins/mx.research.default.yaml:35:        citation_granularity: claim
+./autocapture_plugins/mx.research.default.yaml:63:        produces_citations: true
+./autocapture_plugins/mx.research.default.yaml:64:        citation_granularity: claim
+./config/default.json:70:      "citation.validator",
+./config/default.json:102:      "builtin.citation.basic",
+./config/default.json:145:      "builtin.citation.basic",
+./config/default.json:186:      "builtin.citation.basic": true,
+./config/default.json:227:        "builtin.citation.basic",
+./autocapture_plugins/mx.prompts.default.yaml:34:        produces_citations: true
+./autocapture_plugins/mx.prompts.default.yaml:35:        citation_granularity: claim
+./tests/test_verifier_enforced.py:7:    def test_requires_citations(self) -> None:
+./tests/test_verifier_enforced.py:9:        claims = [{"text": "hello", "citations": []}]
+./contracts/reasoning_packet.schema.json:59:    "citations_stub": {
+./autocapture_plugins/mx.core.web_ui.yaml:34:        produces_citations: true
+./autocapture_plugins/mx.core.web_ui.yaml:35:        citation_granularity: claim
+./autocapture_plugins/mx.core.web_ui.yaml:63:        produces_citations: true
+./autocapture_plugins/mx.core.web_ui.yaml:64:        citation_granularity: claim
+./contracts/plugin_sdk.md:50:- `citation.validator`
+./autocapture_plugins/mx.core.vector_local.yaml:34:        produces_citations: true
+./autocapture_plugins/mx.core.vector_local.yaml:35:        citation_granularity: span
+./autocapture_plugins/mx.core.storage_sqlite.yaml:34:        produces_citations: true
+./autocapture_plugins/mx.core.storage_sqlite.yaml:35:        citation_granularity: span
+./autocapture_plugins/mx.core.storage_sqlite.yaml:63:        produces_citations: true
+./autocapture_plugins/mx.core.storage_sqlite.yaml:64:        citation_granularity: span
+./autocapture_plugins/mx.core.storage_sqlite.yaml:92:        produces_citations: true
+./autocapture_plugins/mx.core.storage_sqlite.yaml:93:        citation_granularity: span
+./autocapture_plugins/mx.core.retrieval_tiers.yaml:34:        produces_citations: true
+./autocapture_plugins/mx.core.retrieval_tiers.yaml:35:        citation_granularity: span
+./autocapture_plugins/mx.core.retrieval_tiers.yaml:63:        produces_citations: true
+./autocapture_plugins/mx.core.retrieval_tiers.yaml:64:        citation_granularity: span
+./autocapture_plugins/mx.core.ocr_local.yaml:34:        produces_citations: true
+./autocapture_plugins/mx.core.ocr_local.yaml:35:        citation_granularity: span
+./autocapture_plugins/mx.core.llm_openai_compat.yaml:34:        produces_citations: true
+./autocapture_plugins/mx.core.llm_openai_compat.yaml:35:        citation_granularity: claim
+./autocapture_plugins/mx.core.llm_local.yaml:34:        produces_citations: true
+./autocapture_plugins/mx.core.llm_local.yaml:35:        citation_granularity: claim
+./autocapture_plugins/mx.core.llm_local.yaml:63:        produces_citations: true
+./autocapture_plugins/mx.core.llm_local.yaml:64:        citation_granularity: claim
+./contracts/ir_pins.json:6:    "citation.validator",
+./contracts/ir_pins.json:73:      "id": "builtin.citation.basic"
+./autocapture_plugins/mx.core.export_import.yaml:34:        produces_citations: true
+./autocapture_plugins/mx.core.export_import.yaml:35:        citation_granularity: event
+./autocapture_plugins/mx.core.export_import.yaml:63:        produces_citations: true
+./autocapture_plugins/mx.core.export_import.yaml:64:        citation_granularity: event
+./autocapture/memory/__init__.py:5:from .citations import Citation, CitationValidator
+./tools/blueprint_items.json:572:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:580:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:588:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:596:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:604:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:612:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:620:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:628:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:636:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:637:    "title": "Fail closed if citations do not resolve",
+./tools/blueprint_items.json:644:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:652:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:660:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:668:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:676:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:684:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:692:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:700:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:708:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:716:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:724:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:732:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:740:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:741:    "title": "Replay mode validates citations without model calls",
+./tools/blueprint_items.json:748:    "phase": "Phase 4: Retrieval + provenance + citations",
+./tools/blueprint_items.json:756:    "phase": "Phase 4: Retrieval + provenance + citations",
+./autocapture_plugins/mx.core.embed_local.yaml:34:        produces_citations: false
+./autocapture_plugins/mx.core.embed_local.yaml:35:        citation_granularity: event
+./autocapture/memory/verifier.py:1:"""Answer verification for citations."""
+./autocapture/memory/verifier.py:5:from autocapture.memory.citations import CitationValidator, Citation
+./autocapture/memory/verifier.py:14:            citations = [Citation(**c) if isinstance(c, dict) else c for c in claim.get("citations", [])]
+./autocapture/memory/verifier.py:15:            if not citations:
+./autocapture/memory/verifier.py:16:                raise ValueError("Claim missing citations")
+./autocapture/memory/verifier.py:17:            self._validator.validate(citations, span_ids)
+./tests/test_citation_validation.py:3:from autocapture.memory.citations import Citation, CitationValidator
+./autocapture/web/routes/citations.py:15:@router.post("/api/citations/overlay")
+./autocapture_plugins/mx.core.egress_sanitizer.yaml:34:        produces_citations: false
+./autocapture_plugins/mx.core.egress_sanitizer.yaml:35:        citation_granularity: event
+./tests/test_citation_overlay_contract.py:11:        resp = client.post("/api/citations/overlay", json={"span_id": "s1"})
+./plugins/builtin/egress_gateway/plugin.py:44:            "citations_stub": payload.get("citations_stub", []),
+./autocapture/web/api.py:8:from autocapture.web.routes import health, query, settings, citations, plugins, metrics
+./autocapture/web/api.py:17:    app.include_router(citations.router)
+./autocapture/promptops/evaluate.py:13:    require_citations: bool = True,
+./autocapture/promptops/evaluate.py:17:    citation_hits = 0
+./autocapture/promptops/evaluate.py:24:        needs_citation = example.get("requires_citation", require_citations)
+./autocapture/promptops/evaluate.py:25:        if needs_citation:
+./autocapture/promptops/evaluate.py:26:            if "[citation]" in prompt.lower() or "[source]" in prompt.lower():
+./autocapture/promptops/evaluate.py:27:                citation_hits += 1
+./autocapture/promptops/evaluate.py:29:    citation_coverage = citation_hits / total if total else 1.0
+./autocapture/promptops/evaluate.py:30:    ok = pass_rate >= min_pass_rate and (citation_coverage > 0 or not require_citations)
+./autocapture/promptops/evaluate.py:34:        "citation_coverage": citation_coverage,
+./autocapture_plugins/mx.core.compression_and_verify.yaml:34:        produces_citations: false
+./autocapture_plugins/mx.core.compression_and_verify.yaml:35:        citation_granularity: event
+./autocapture_plugins/mx.core.compression_and_verify.yaml:63:        produces_citations: true
+./autocapture_plugins/mx.core.compression_and_verify.yaml:64:        citation_granularity: claim
+./tests/test_answer_builder.py:5:from plugins.builtin.citation_basic.plugin import CitationValidator
+./tests/test_answer_builder.py:9:    def test_build_with_citations(self):
+./tests/test_answer_builder.py:12:            if name == "citation.validator":
+./tests/test_answer_builder.py:19:            "citations": [{"span_id": "s1", "source": "local", "offset_start": 0, "offset_end": 10}],
+./autocapture_plugins/mx.core.capture_win.yaml:34:        produces_citations: false
+./autocapture_plugins/mx.core.capture_win.yaml:35:        citation_granularity: event
+./autocapture_plugins/mx.core.capture_win.yaml:63:        produces_citations: false
+./autocapture_plugins/mx.core.capture_win.yaml:64:        citation_granularity: event
+./autocapture_plugins/mx.core.capture_win.yaml:92:        produces_citations: false
+./autocapture_plugins/mx.core.capture_win.yaml:93:        citation_granularity: event
+./autocapture/memory/citations.py:15:    def validate(self, citations: list[Citation], span_ids: set[str]) -> None:
+./autocapture/memory/citations.py:16:        for citation in citations:
+./autocapture/memory/citations.py:17:            if citation.span_id not in span_ids:
+./autocapture/memory/citations.py:18:                raise ValueError(f"Unknown span id: {citation.span_id}")
+./autocapture/memory/answer_orchestrator.py:1:"""Answer orchestrator for claim-level citations."""
+./tests/test_promptops_validation.py:20:        examples = [{"required_tokens": ["KEY"], "requires_citation": True}]
+./tests/test_promptops_validation.py:21:        result = evaluate_prompt("Use KEY [citation]", examples, min_pass_rate=1.0)
+./autocapture/ux/facade.py:45:            return {"answer": {"claims": []}, "citations": [], "provenance": context}
+./autocapture/ux/facade.py:50:                "citations": [{"span_id": span_id} for span_id in span_ids],
+./autocapture/ux/facade.py:54:        return {"answer": answer, "citations": claims[0]["citations"], "provenance": context}
+./plugins/builtin/citation_basic/plugin.py:15:        return {"citation.validator": self}
+./plugins/builtin/citation_basic/plugin.py:17:    def validate(self, citations: list[dict[str, Any]]) -> bool:
+./plugins/builtin/citation_basic/plugin.py:18:        for citation in citations:
+./plugins/builtin/citation_basic/plugin.py:19:            if not isinstance(citation, dict):
+./plugins/builtin/citation_basic/plugin.py:22:                if field not in citation:
+./plugins/builtin/citation_basic/plugin.py:23:                    raise ValueError(f"Missing citation field: {field}")
+./plugins/builtin/citation_basic/plugin.json:2:  "plugin_id": "builtin.citation.basic",
+./plugins/builtin/citation_basic/plugin.json:7:      "kind": "citation.validator",
+./plugins/builtin/answer_basic/plugin.json:23:  "depends_on": ["builtin.citation.basic"],
+./plugins/builtin/answer_basic/plugin.py:1:"""Answer builder plugin with claim-level citations."""
+./plugins/builtin/answer_basic/plugin.py:18:        validator = self.context.get_capability("citation.validator")
+./plugins/builtin/answer_basic/plugin.py:22:            citations = claim.get("citations", [])
+./plugins/builtin/answer_basic/plugin.py:23:            validator.validate(citations)
+./autocapture_nx/kernel/query.py:95:                "citations": [
+./docs/autocapture_mx_implementation_plan.md:47:| C | MOD-012..017 | ingest -> indexing -> retrieval -> context -> answers | tests/test_span_ids_stable.py; tests/test_fts_query_returns_hits.py; tests/test_vector_index_roundtrip.py; tests/test_context_pack_formats.py; tests/test_citation_validation.py |
+./docs/autocapture_mx_implementation_plan.md:48:| D | MOD-018..021 | gateway + web + citation overlay + UX + settings | tests/test_gateway_schema_enforced.py; tests/test_gateway_policy_block_cloud_default.py; tests/test_citation_overlay_contract.py; tests/test_ux_facade_parity.py; tests/test_settings_preview_tokens.py |
+./docs/autocapture_mx_implementation_plan.md:85:| MX-ANS-0001 | tests/test_citation_validation.py; tests/test_verifier_enforced.py; tests/test_conflict_reporting.py | autocapture/memory/answer_orchestrator.py; autocapture/memory/citations.py; autocapture/memory/verifier.py; autocapture/memory/conflict.py |
+./docs/autocapture_mx_implementation_plan.md:89:| MX-WEB-0001 | http_endpoint GET /api/health; POST /api/query | autocapture/web/api.py; autocapture/web/routes/query.py; autocapture/web/routes/citations.py; autocapture/web/routes/plugins.py; autocapture/web/routes/health.py; autocapture/web/routes/metrics.py |
+./docs/autocapture_mx_implementation_plan.md:90:| MX-CIT-OVERLAY-0001 | tests/test_citation_overlay_contract.py | autocapture/web/routes/citations.py |
+./docs/autocapture_mx_implementation_plan.md:224:- Artifacts: autocapture/memory/answer_orchestrator.py; autocapture/memory/citations.py; autocapture/memory/verifier.py; autocapture/memory/conflict.py
+./docs/autocapture_mx_implementation_plan.md:225:- Validation: unit_test tests/test_citation_validation.py; tests/test_verifier_enforced.py; tests/test_conflict_reporting.py
+./docs/autocapture_mx_implementation_plan.md:226:- Minimal implementation: claim-level citations + verifier + conflict reporting.
+./docs/autocapture_mx_implementation_plan.md:244:- Artifacts: autocapture/web/api.py; autocapture/web/routes/query.py; autocapture/web/routes/citations.py; autocapture/web/routes/plugins.py; autocapture/web/routes/health.py; autocapture/web/routes/metrics.py
+./docs/autocapture_mx_implementation_plan.md:249:- Artifacts: autocapture/web/routes/citations.py
+./docs/autocapture_mx_implementation_plan.md:250:- Validation: unit_test tests/test_citation_overlay_contract.py
+./docs/autocapture_mx_implementation_plan.md:251:- Minimal implementation: citation overlay API returns bbox metadata and deterministic image or placeholder.
+./docs/autocapture_nx_blueprint_final.md:43:Time parsing, query planning, retrieval tie-breaks, citation mapping, and sanitization must be deterministic for identical inputs.
+./docs/autocapture_nx_blueprint_final.md:67:**Invariant P4.1 Claim-level citations**  
+./docs/autocapture_nx_blueprint_final.md:68:Answers are emitted as claims with citations referencing immutable local evidence spans.
+./docs/autocapture_nx_blueprint_final.md:96:Cloud calls use a **sanitized reasoning packet** built locally. Retrieval, citation construction, and final answer assembly remain local.
+./docs/autocapture_nx_blueprint_final.md:105:- P2 Accurate, P4 Citable: no local evidence loss; citations remain faithful.
+./docs/autocapture_nx_blueprint_final.md:133:- P2 Accurate, P4 Citable: correct time windows and stable citations.
+./docs/autocapture_nx_blueprint_final.md:434:- Gate: citation emission requires ledger+anchor verification.
+./docs/autocapture_nx_blueprint_final.md:811:### Answer graph and citations
+./docs/autocapture_nx_blueprint_final.md:813:- Produce claim objects with citations referencing immutable text spans.
+./docs/autocapture_nx_blueprint_final.md:814:- Validator fails closed if citations cannot be resolved.
+./docs/autocapture_nx_blueprint_final.md:817:- P4 Citable: claim-level citations are verifiable.
+./docs/autocapture_nx_blueprint_final.md:827:- Golden query suite and citation validation suite.
+./docs/autocapture_nx_blueprint_final.md:854:- optional `citations_stub[]` (IDs only, no raw text)
+./docs/autocapture_mx_blueprint.md:40:- **P4 Citable**: deterministic evidence + claim-level citations, validation, and provenance ledger.
+./docs/autocapture_mx_blueprint.md:50:- **Claim**: an atomic statement in an answer that must be supported by citations.
+./docs/autocapture_mx_blueprint.md:181:    citations.py
+./docs/autocapture_mx_blueprint.md:204:      citations.py
+./docs/autocapture_mx_blueprint.md:331:  - `produces_citations`: true|false
+./docs/autocapture_mx_blueprint.md:332:  - `citation_granularity`: `event | span | claim`
+./docs/autocapture_mx_blueprint.md:427:MX uses deterministic IDs to maximize cache hits and citation stability:
+./docs/autocapture_mx_blueprint.md:448:- traceability from answer → citations → spans → captures → blobs.
+./docs/autocapture_mx_blueprint.md:556:All extracted tables produce spans with `kind=table_cell` and citations map back to source bbox or cell coordinates.
+./docs/autocapture_mx_blueprint.md:647:- `citations`: claim → list of span references
+./docs/autocapture_mx_blueprint.md:654:- model must output structured JSON with claims and citations.
+./docs/autocapture_mx_blueprint.md:655:- citations reference span_ids only (not raw text).
+./docs/autocapture_mx_blueprint.md:662:- compute coverage score (claims with at least one valid citation).
+./docs/autocapture_mx_blueprint.md:678:- include timestamps and citations for both sides,
+./docs/autocapture_mx_blueprint.md:724:- returning citation overlay images (bbox highlighting)
+./docs/autocapture_mx_blueprint.md:765:  - citation coverage metrics
+./docs/autocapture_mx_blueprint.md:820:- citation integrity simulation
+./docs/autocapture_mx_blueprint.md:1207:    title: Claim-level citations + citation validation + verifier enforced
+./docs/autocapture_mx_blueprint.md:1211:      - autocapture/memory/citations.py
+./docs/autocapture_mx_blueprint.md:1216:        target: tests/test_citation_validation.py
+./docs/autocapture_mx_blueprint.md:1268:      - autocapture/web/routes/citations.py
+./docs/autocapture_mx_blueprint.md:1280:        expects_json_keys: ["answer", "citations", "provenance"]
+./docs/autocapture_mx_blueprint.md:1286:      - autocapture/web/routes/citations.py
+./docs/autocapture_mx_blueprint.md:1289:        target: tests/test_citation_overlay_contract.py
+./docs/autocapture_mx_blueprint.md:1402:- A user query produces claim-level citations with valid span IDs and overlays.
+./docs/mx_gap_matrix.md:206:### MX-ANS-0001 — Claim-level citations + citation validation + verifier enforced
+./docs/mx_gap_matrix.md:208:- Existing (NX): plugins/builtin/answer_basic/plugin.py; plugins/builtin/citation_basic/plugin.py; autocapture_nx/kernel/query.py
+./docs/mx_gap_matrix.md:209:- Missing (MX paths/tests): autocapture/memory/answer_orchestrator.py; autocapture/memory/citations.py; autocapture/memory/verifier.py; autocapture/memory/conflict.py; tests/test_citation_validation.py; tests/test_verifier_enforced.py; tests/test_conflict_reporting.py
+./docs/mx_gap_matrix.md:211:  - Artifacts: autocapture/memory/answer_orchestrator.py; autocapture/memory/citations.py; autocapture/memory/verifier.py; autocapture/memory/conflict.py
+./docs/mx_gap_matrix.md:212:  - Validators: unit_test tests/test_citation_validation.py; unit_test tests/test_verifier_enforced.py; unit_test tests/test_conflict_reporting.py
+./docs/mx_gap_matrix.md:241:- Missing (MX paths/tests): autocapture/web/api.py; autocapture/web/routes/query.py; autocapture/web/routes/citations.py; autocapture/web/routes/plugins.py; autocapture/web/routes/health.py; autocapture/web/routes/metrics.py; tests/test_* web validators
+./docs/mx_gap_matrix.md:243:  - Artifacts: autocapture/web/api.py; autocapture/web/routes/query.py; autocapture/web/routes/citations.py; autocapture/web/routes/plugins.py; autocapture/web/routes/health.py; autocapture/web/routes/metrics.py
+./docs/mx_gap_matrix.md:249:- Missing (MX paths/tests): autocapture/web/routes/citations.py; tests/test_citation_overlay_contract.py
+./docs/mx_gap_matrix.md:251:  - Artifacts: autocapture/web/routes/citations.py
+./docs/mx_gap_matrix.md:252:  - Validators: unit_test tests/test_citation_overlay_contract.py
+./docs/mx_equivalence_map.md:141:- Proof: `plugins/builtin/answer_basic/plugin.py`; `plugins/builtin/citation_basic/plugin.py`; `autocapture_nx/kernel/query.py`; `tests/test_answer_builder.py`; `tests/test_query.py`
+./docs/mx_equivalence_map.md:166:- Proof: no citation overlay API in NX.
+./docs/mx_equivalence_map.md:167:- Gap to MX: implement citations route + tests.
+./docs/assumptions_checklist.md:56:   - Pillars at risk: P2 (accuracy of redaction/sanitization), P3 (privacy leakage), P4 (citation correctness)
+./docs/assumptions_checklist.md:133:    - Pillars at risk: P2 (operator visibility), P3 (secure UI), P4 (citation UI fidelity)
+./docs/assumptions_checklist.md:144:    - Pillars at risk: P2 (accuracy), P4 (citation relevance), P1 (efficiency)
+./docs/assumptions_checklist.md:189:- MX implementation plan explicitly permits placeholder citation overlay images. `docs/autocapture_mx_implementation_plan.md:192`
+./docs/reports/grep_derived.txt:12:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_derived.txt:39:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_derived.txt:80:./docs/reports/blueprint_items.md:88:| I066 | Phase 4: Retrieval + provenance + citations | Hash everything that matters (media/metadata/derived) |  |  |  |
+./docs/reports/grep_derived.txt:81:./docs/reports/blueprint_items.md:94:| I072 | Phase 4: Retrieval + provenance + citations | Metadata immutable by default; derived never overwrites |  |  |  |
+./docs/reports/grep_ledger.txt:66:./docs/autocapture_mx_blueprint.md:40:- **P4 Citable**: deterministic evidence + claim-level citations, validation, and provenance ledger.
+./docs/reports/grep_ledger.txt:146:./docs/blueprints/autocapture_nx_blueprint.md:1671:  - citation schema: include evidence hash + ledger/anchor refs
+./docs/reports/grep_ledger.txt:175:./docs/autocapture_nx_blueprint_final.md:434:- Gate: citation emission requires ledger+anchor verification.
+./docs/reports/grep_ledger.txt:197:./docs/reports/blueprint_items.md:98:| I076 | Phase 4: Retrieval + provenance + citations | Proof bundles export (evidence + ledger slice + anchors) |  |  |  |
+./docs/reports/blueprint_items.md:78:| I035 | Phase 4: Retrieval + provenance + citations | Replace full-scan query with tiered indexed retrieval |  |  |  |
+./docs/reports/blueprint_items.md:79:| I036 | Phase 4: Retrieval + provenance + citations | Deterministic retrieval ordering (stable sort keys) |  |  |  |
+./docs/reports/blueprint_items.md:80:| I037 | Phase 4: Retrieval + provenance + citations | Candidate-first extraction (retrieve then extract) |  |  |  |
+./docs/reports/blueprint_items.md:81:| I038 | Phase 4: Retrieval + provenance + citations | Derived artifact records for OCR/VLM outputs |  |  |  |
+./docs/reports/blueprint_items.md:82:| I039 | Phase 4: Retrieval + provenance + citations | Ledger query executions (inputs/outputs) |  |  |  |
+./docs/reports/blueprint_items.md:83:| I040 | Phase 4: Retrieval + provenance + citations | Ledger extraction operations (inputs/outputs) |  |  |  |
+./docs/reports/blueprint_items.md:84:| I041 | Phase 4: Retrieval + provenance + citations | Citations point to immutable evidence IDs + spans |  |  |  |
+./docs/reports/blueprint_items.md:85:| I042 | Phase 4: Retrieval + provenance + citations | Citation resolver validates hashes/anchors/spans |  |  |  |
+./docs/reports/blueprint_items.md:86:| I043 | Phase 4: Retrieval + provenance + citations | Fail closed if citations do not resolve |  |  |  |
+./docs/reports/blueprint_items.md:87:| I065 | Phase 4: Retrieval + provenance + citations | Define canonical evidence model (EvidenceObject) |  |  |  |
+./docs/reports/blueprint_items.md:88:| I066 | Phase 4: Retrieval + provenance + citations | Hash everything that matters (media/metadata/derived) |  |  |  |
+./docs/reports/blueprint_items.md:89:| I067 | Phase 4: Retrieval + provenance + citations | Ledger every state transition |  |  |  |
+./docs/reports/blueprint_items.md:90:| I068 | Phase 4: Retrieval + provenance + citations | Anchor on schedule (N entries or M minutes) |  |  |  |
+./docs/reports/blueprint_items.md:91:| I069 | Phase 4: Retrieval + provenance + citations | Immutable per-run manifest (config+locks+versions) |  |  |  |
+./docs/reports/blueprint_items.md:92:| I070 | Phase 4: Retrieval + provenance + citations | Citation objects carry verifiable pointers |  |  |  |
+./docs/reports/blueprint_items.md:93:| I071 | Phase 4: Retrieval + provenance + citations | Citation resolver CLI/API |  |  |  |
+./docs/reports/blueprint_items.md:94:| I072 | Phase 4: Retrieval + provenance + citations | Metadata immutable by default; derived never overwrites |  |  |  |
+./docs/reports/blueprint_items.md:95:| I073 | Phase 4: Retrieval + provenance + citations | Persist derivation graphs (parent→child links) |  |  |  |
+./docs/reports/blueprint_items.md:96:| I074 | Phase 4: Retrieval + provenance + citations | Record model identity for ML outputs |  |  |  |
+./docs/reports/blueprint_items.md:97:| I075 | Phase 4: Retrieval + provenance + citations | Deterministic text normalization before hashing |  |  |  |
+./docs/reports/blueprint_items.md:98:| I076 | Phase 4: Retrieval + provenance + citations | Proof bundles export (evidence + ledger slice + anchors) |  |  |  |
+./docs/reports/blueprint_items.md:99:| I077 | Phase 4: Retrieval + provenance + citations | Replay mode validates citations without model calls |  |  |  |
+./docs/reports/blueprint_items.md:100:| I118 | Phase 4: Retrieval + provenance + citations | Index versioning for retrieval reproducibility |  |  |  |
+./docs/reports/blueprint_items.md:101:| I127 | Phase 4: Retrieval + provenance + citations | Record python/OS/package versions into run manifest |  |  |  |
+./docs/spec/autocapture_mx_spec.yaml:338:    title: Claim-level citations + citation validation + verifier enforced
+./docs/spec/autocapture_mx_spec.yaml:342:      - autocapture/memory/citations.py
+./docs/spec/autocapture_mx_spec.yaml:347:        target: tests/test_citation_validation.py
+./docs/spec/autocapture_mx_spec.yaml:399:      - autocapture/web/routes/citations.py
+./docs/spec/autocapture_mx_spec.yaml:411:        expects_json_keys: ["answer", "citations", "provenance"]
+./docs/spec/autocapture_mx_spec.yaml:417:      - autocapture/web/routes/citations.py
+./docs/spec/autocapture_mx_spec.yaml:420:        target: tests/test_citation_overlay_contract.py
+./docs/reports/grep_evidence.txt:10:./docs/autocapture_mx_blueprint.md:40:- **P4 Citable**: deterministic evidence + claim-level citations, validation, and provenance ledger.
+./docs/reports/grep_evidence.txt:24:./docs/autocapture_nx_blueprint_final.md:68:Answers are emitted as claims with citations referencing immutable local evidence spans.
+./docs/reports/grep_evidence.txt:27:./docs/autocapture_nx_blueprint_final.md:105:- P2 Accurate, P4 Citable: no local evidence loss; citations remain faithful.
+./docs/reports/grep_evidence.txt:68:./docs/blueprints/autocapture_nx_blueprint.md:553:  - No query path mutates primary evidence; citations remain stable over time.
+./docs/reports/grep_evidence.txt:86:./docs/blueprints/autocapture_nx_blueprint.md:1430:  - Storage is optimized without compromising evidence immutability or citations.
+./docs/reports/grep_evidence.txt:92:./docs/blueprints/autocapture_nx_blueprint.md:1550:  - citation schema uses evidence_id + span_ref + hashes
+./docs/reports/grep_evidence.txt:94:./docs/blueprints/autocapture_nx_blueprint.md:1565:  - citation resolver service + CLI validates evidence and provenance
+./docs/reports/grep_evidence.txt:97:./docs/blueprints/autocapture_nx_blueprint.md:1582:  - Golden tests: unresolved citations produce `state=no_evidence` or `state=partial`
+./docs/reports/grep_evidence.txt:107:./docs/blueprints/autocapture_nx_blueprint.md:1671:  - citation schema: include evidence hash + ledger/anchor refs
+./docs/reports/grep_evidence.txt:121:./docs/reports/blueprint_items.md:84:| I041 | Phase 4: Retrieval + provenance + citations | Citations point to immutable evidence IDs + spans |  |  |  |
+./docs/reports/grep_evidence.txt:122:./docs/reports/blueprint_items.md:87:| I065 | Phase 4: Retrieval + provenance + citations | Define canonical evidence model (EvidenceObject) |  |  |  |
+./docs/reports/grep_evidence.txt:123:./docs/reports/blueprint_items.md:98:| I076 | Phase 4: Retrieval + provenance + citations | Proof bundles export (evidence + ledger slice + anchors) |  |  |  |
+./docs/reports/grep_evidence.txt:129:./docs/reports/grep_ledger.txt:66:./docs/autocapture_mx_blueprint.md:40:- **P4 Citable**: deterministic evidence + claim-level citations, validation, and provenance ledger.
+./docs/reports/grep_evidence.txt:137:./docs/reports/grep_ledger.txt:146:./docs/blueprints/autocapture_nx_blueprint.md:1671:  - citation schema: include evidence hash + ledger/anchor refs
+./docs/reports/grep_evidence.txt:145:./docs/reports/grep_ledger.txt:197:./docs/reports/blueprint_items.md:98:| I076 | Phase 4: Retrieval + provenance + citations | Proof bundles export (evidence + ledger slice + anchors) |  |  |  |
+./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/blueprints/autocapture_nx_blueprint.md:120:- [ ] **I043** (Phase 4) — [Fail closed if citations do not resolve](#i043)
+./docs/blueprints/autocapture_nx_blueprint.md:154:- [ ] **I077** (Phase 4) — [Replay mode validates citations without model calls](#i077)
+./docs/blueprints/autocapture_nx_blueprint.md:553:  - No query path mutates primary evidence; citations remain stable over time.
+./docs/blueprints/autocapture_nx_blueprint.md:988:  - Test: correlation graph includes references from text/citation to input bursts
+./docs/blueprints/autocapture_nx_blueprint.md:1425:  - Test: compaction reduces size; citations still resolve
+./docs/blueprints/autocapture_nx_blueprint.md:1430:  - Storage is optimized without compromising evidence immutability or citations.
+./docs/blueprints/autocapture_nx_blueprint.md:1433:## Phase 4: Retrieval + provenance + citations
+./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/blueprints/autocapture_nx_blueprint.md:1550:  - citation schema uses evidence_id + span_ref + hashes
+./docs/blueprints/autocapture_nx_blueprint.md:1552:  - Schema test: citations cannot be created without required fields
+./docs/blueprints/autocapture_nx_blueprint.md:1565:  - citation resolver service + CLI validates evidence and provenance
+./docs/blueprints/autocapture_nx_blueprint.md:1572:  - Every citation displayed in UI can be validated locally on demand.
+./docs/blueprints/autocapture_nx_blueprint.md:1575:### I043 — Fail closed if citations do not resolve
+./docs/blueprints/autocapture_nx_blueprint.md:1580:  - answer pipeline refuses to return `state=ok` if citations unresolved
+./docs/blueprints/autocapture_nx_blueprint.md:1582:  - Golden tests: unresolved citations produce `state=no_evidence` or `state=partial`
+./docs/blueprints/autocapture_nx_blueprint.md:1671:  - citation schema: include evidence hash + ledger/anchor refs
+./docs/blueprints/autocapture_nx_blueprint.md:1673:  - Resolver rejects citations missing required verification fields
+./docs/blueprints/autocapture_nx_blueprint.md:1686:  - CLI/API endpoints: `verify citation`, `resolve citation`
+./docs/blueprints/autocapture_nx_blueprint.md:1688:  - Golden: resolver output stable and correct for known citations
+./docs/blueprints/autocapture_nx_blueprint.md:1693:  - Users can verify citations with one command.
+./docs/blueprints/autocapture_nx_blueprint.md:1773:### I077 — Replay mode validates citations without model calls
+./docs/blueprints/autocapture_nx_blueprint.md:1778:  - replay tool validates retrieval/citations without model calls
+./docs/blueprints/autocapture_nx_blueprint.md:1780:  - Golden: replay reproduces expected citations and verification results
+./docs/blueprints/autocapture_nx_blueprint.md:2260:  - Responses are structured and include answer state + citations.
+./docs/blueprints/autocapture_nx_blueprint.md:2290:  - Minimal but complete views: status, timeline, query with citations,
+./docs/blueprints/autocapture_nx_blueprint.md:2292:  - All displays resolve citations via resolver (I71/I42).

@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
-from autocapture_nx.kernel.canonical_json import dumps
 from autocapture_nx.kernel.crypto import derive_key
-from autocapture_nx.kernel.hashing import sha256_text
 
 
 def rotate_keys(system) -> dict[str, Any]:
@@ -30,21 +27,13 @@ def rotate_keys(system) -> dict[str, Any]:
     if hasattr(entity, "rotate"):
         rotated["entity_map"] = entity.rotate(entity_key)
 
-    policy_snapshot_hash = sha256_text(dumps(system.config))
-    ts = datetime.now(timezone.utc).isoformat()
-    ledger = system.get("ledger.writer")
-    entry = {
-        "schema_version": 1,
-        "entry_id": f"key_rotation_{new_id}",
-        "ts_utc": ts,
-        "stage": "security",
-        "inputs": [old_id],
-        "outputs": [new_id],
-        "policy_snapshot_hash": policy_snapshot_hash,
-    }
-    ledger_hash = ledger.append(entry)
-    anchor = system.get("anchor.writer")
-    anchor.anchor(ledger_hash)
+    event_builder = system.get("event.builder")
+    ledger_hash = event_builder.ledger_entry(
+        "security",
+        inputs=[old_id],
+        outputs=[new_id],
+        payload={"event": "key_rotation"},
+    )
 
     return {
         "old_key_id": old_id,

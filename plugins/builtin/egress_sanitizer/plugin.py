@@ -74,7 +74,9 @@ class EgressSanitizer(PluginBase):
         crypto_cfg = storage_cfg.get("crypto", {})
         root_key_path = crypto_cfg.get("root_key_path", "data/vault/root.key")
         keyring_path = crypto_cfg.get("keyring_path", "data/vault/keyring.json")
-        keyring = KeyRing.load(keyring_path, legacy_root_path=root_key_path)
+        encryption_required = storage_cfg.get("encryption_required", False)
+        require_protection = bool(encryption_required and os.name == "nt")
+        keyring = KeyRing.load(keyring_path, legacy_root_path=root_key_path, require_protection=require_protection)
         _key_id, root = keyring.active_key()
         self._entity_key = derive_key(root, "entity_tokens")
         return self._entity_key

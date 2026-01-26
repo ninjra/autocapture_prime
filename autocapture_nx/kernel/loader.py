@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,8 @@ from autocapture_nx.kernel.config import ConfigPaths, load_config, validate_conf
 from autocapture_nx.kernel.paths import default_config_dir, resolve_repo_path
 from autocapture_nx.kernel.errors import ConfigError
 from autocapture_nx.kernel.hashing import sha256_directory, sha256_file
+from autocapture_nx.kernel.event_builder import EventBuilder
+from autocapture_nx.kernel.ids import ensure_run_id
 from autocapture_nx.plugin_system.registry import PluginRegistry
 
 from .system import System
@@ -33,18 +36,81 @@ class Kernel:
 
     def boot(self) -> System:
         self.config = load_config(self.config_paths, safe_mode=self.safe_mode)
+        ensure_run_id(self.config)
+        self._verify_contract_lock()
         registry = PluginRegistry(self.config, safe_mode=self.safe_mode)
         plugins, capabilities = registry.load_plugins()
 
         updated = self._apply_meta_plugins(self.config, plugins)
         if updated != self.config:
+            ensure_run_id(updated)
             validate_config(self.config_paths.schema_path, updated)
             self.config = updated
             registry = PluginRegistry(self.config, safe_mode=self.safe_mode)
             plugins, capabilities = registry.load_plugins()
 
+        builder = EventBuilder(
+            self.config,
+            capabilities.get("journal.writer"),
+            capabilities.get("ledger.writer"),
+            capabilities.get("anchor.writer"),
+        )
+        capabilities.register("event.builder", builder, network_allowed=False)
+        self._record_run_start(builder)
         self.system = System(config=self.config, plugins=plugins, capabilities=capabilities)
         return self.system
+
+    def _verify_contract_lock(self) -> None:
+        lock_path = resolve_repo_path("contracts/lock.json")
+        if not lock_path.exists():
+            raise ConfigError("missing contracts/lock.json")
+        lock_data = json.loads(lock_path.read_text(encoding="utf-8"))
+        files = lock_data.get("files", {})
+        mismatches = []
+        for rel, expected in files.items():
+            file_path = resolve_repo_path(rel)
+            if not file_path.exists():
+                mismatches.append(f"missing:{rel}")
+                continue
+            actual = sha256_file(file_path)
+            if actual != expected:
+                mismatches.append(f"hash_mismatch:{rel}")
+        if mismatches:
+            raise ConfigError(f"contract lock mismatch: {', '.join(mismatches[:5])}")
+
+    def shutdown(self) -> None:
+        if self.system is None:
+            return
+        builder = self.system.get("event.builder")
+        builder.ledger_entry("system", inputs=[], outputs=[], payload={"event": "system.stop"})
+        self._write_run_state(builder.run_id, "stopped")
+
+    def _run_state_path(self) -> Path:
+        data_dir = self.config.get("storage", {}).get("data_dir", "data")
+        return Path(data_dir) / "run_state.json"
+
+    def _write_run_state(self, run_id: str, state: str) -> None:
+        path = self._run_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"run_id": run_id, "state": state, "ts_utc": datetime.now(timezone.utc).isoformat()}
+        path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+    def _record_run_start(self, builder: EventBuilder) -> None:
+        path = self._run_state_path()
+        if path.exists():
+            try:
+                previous = json.loads(path.read_text(encoding="utf-8"))
+                if previous.get("state") == "running":
+                    builder.ledger_entry(
+                        "system",
+                        inputs=[],
+                        outputs=[],
+                        payload={"event": "system.crash", "previous_run_id": previous.get("run_id")},
+                    )
+            except Exception:
+                pass
+        builder.ledger_entry("system", inputs=[], outputs=[], payload={"event": "system.start"})
+        self._write_run_state(builder.run_id, "running")
 
     def _apply_meta_plugins(self, config: dict[str, Any], plugins: list) -> dict[str, Any]:
         updated = dict(config)
@@ -131,6 +197,15 @@ class Kernel:
                 name="required_capabilities",
                 ok=not missing,
                 detail="ok" if not missing else f"missing: {missing}",
+            )
+        )
+        backend = config.get("capture", {}).get("video", {}).get("backend")
+        supported_backends = {"mss"}
+        checks.append(
+            DoctorCheck(
+                name="capture_backend",
+                ok=backend in supported_backends,
+                detail="ok" if backend in supported_backends else f"unsupported: {backend}",
             )
         )
         if config.get("storage", {}).get("encryption_required", False):

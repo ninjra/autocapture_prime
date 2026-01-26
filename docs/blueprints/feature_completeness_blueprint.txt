@@ -1,0 +1,509 @@
+```text
+Context:
+  format_version: 1
+  timestamp_utc: "2026-01-26T00:00:00Z"
+  input_hash: "sha256:TBD"
+  environment:
+    os: "Windows 11 (host) + WSL2 Linux (guest)"
+    shell: "bash"
+    gpu: "<unknown unless user specifies>"
+    repo_state: "<unknown; will be verified by Codex CLI steps>"
+    configuration_assumptions:
+      network_access: "restricted/offline; do not depend on external downloads"
+      privileges: "non-root"
+      line_endings: "avoid unintended CRLF/LF churn; preserve repo conventions"
+  input_refs:
+    - "docs/specs/feature_completeness_spec.md (authoritative requirements surface)"
+    - "docs/blueprint/feature_completeness_blueprint.md (authoritative module/ADR blueprint)"
+    - "User constraints: plugin-forward, local-first, single-user/single-machine, deny-network-by-default (only egress gateway), fail-closed invariants, append-only journal+ledger hash chain+anchors, export/import parity, doctor parity, API+UI parity, no stubs/TODOs"
+  execution_constraints:
+    performance: "incremental; cache-aware; run fastest checks first; expand only as needed"
+    security: "no secrets; sanitize logs; avoid unsafe shell patterns; enforce deny-by-default networking; fail-closed on invariant violations"
+    reproducibility: "deterministic outputs (canonical JSON hashing); respect existing lockfiles; avoid network downloads"
+    minimal_diffs: true
+  diagnostics:
+    timestamp_precision: "date"
+    normalization: "none"
+    assumptions:
+      - "Repo contains an NX kernel + plugin system (likely under autocapture_nx) and builtin plugins (likely under plugins/builtin/), but exact layout must be verified locally."
+      - "Spec/blueprint files exist at provided paths and are the single source of truth for parity/completeness."
+      - "Python toolchain (test runner, linters) can be inferred from local repo config (pyproject.toml, requirements, CI files)."
+    risk_flags:
+      - "unknown-repo-layout"
+      - "unknown-test-runner"
+      - "windows-specific-features-developed-in-wsl"
+      - "large-scope-change"
+  assumed_tools:
+    - git
+    - python
+    - to-detect:pytest
+    - to-detect:ruff
+    - to-detect:mypy
+    - to-detect:fastapi
+    - to-detect:uvicorn
+    - to-detect:alembic
+    - to-detect:docker
+
+analysis:
+  - intent:
+      Establish local evidence for current Prime state and the authoritative requirements/blueprint, then produce a concrete gap matrix mapping required modules (MOD-001..MOD-040) + ADRs to existing files and missing implementation.
+  - scope:
+      Repo inspection + lightweight reporting only; no behavioral changes until the plan is grounded in local evidence.
+  - constraints:
+      Offline-only; do not fetch Autocapture; do not copy code; use docs/specs + docs/blueprint as the reference surface; avoid churn; preserve existing repo conventions.
+  - success_criteria:
+      - Confirm both docs exist and are readable: docs/specs/feature_completeness_spec.md and docs/blueprint/feature_completeness_blueprint.md.
+      - Produce a “Gap Matrix” artifact that maps each MOD/ADR requirement to current repo paths or marks “missing”.
+      - Identify the existing CLI entrypoint and current command surface so parity work can integrate without renames.
+  - actions:
+      - Verify clean baseline:
+          - Run: `git status --porcelain=v1` and capture output.
+          - Run: `git rev-parse --show-toplevel` to confirm repo root.
+      - Discover repo structure and packaging:
+          - Run: `ls -la`
+          - Run: `find . -maxdepth 3 -type f -name "pyproject.toml" -o -name "setup.cfg" -o -name "requirements*.txt" -o -name "pytest.ini" -o -name "tox.ini" -o -name ".ruff.toml" -o -name "mypy.ini" -o -name "alembic.ini"`
+          - Run: `find . -maxdepth 4 -type d -name "autocapture_nx" -o -name "plugins" -o -name "docs" -o -name "infra" -o -name "contracts" -o -name "src"`
+          - Inspect the packaging layout (src/ vs flat) and note it in the gap matrix.
+      - Confirm the authoritative docs and extract module inventory:
+          - Open/read: `docs/specs/feature_completeness_spec.md`
+          - Open/read: `docs/blueprint/feature_completeness_blueprint.md`
+          - From the blueprint, extract the canonical list: MOD-001..MOD-040 + ADR-001..ADR-010 + required CLI commands + API routes + invariants.
+      - Locate existing implementations (or absence) by searching for module names & key contract phrases:
+          - Run ripgrep (or grep) for: `MOD-0`, `KernelBootArgs`, `EffectiveConfig`, `PluginManifest`, `LedgerEntryV1`, `ReasoningPacketV1`, `TimeIntentParser`, `/api/context-pack`, `/api/query`, `doctor`, `egress`, `sanitiz`, `qdrant`, `ffmpeg`, `dxcam`, `mss`, `FTS5`, `OCRSpan`, `RetrievalResult`.
+      - Generate a local gap report file (do not overdesign; keep it actionable):
+          - Create: `docs/blueprint/feature_completeness_gap_matrix.md`
+          - Include a table with columns: Requirement (MOD/ADR/SRC), Required Interfaces, Current Files/Status, Missing Pieces, Planned Target Files.
+          - Ensure the gap report references only local evidence (paths and captured command outputs).
+  - rollback:
+      - No code changes expected. If any files were created during analysis and you decide to defer, remove them and restore: `git checkout -- . && git clean -fd`.
+  - citations:
+      - docs/specs/feature_completeness_spec.md
+      - docs/blueprint/feature_completeness_blueprint.md
+      - Output of `git status --porcelain=v1`
+      - Output of repo discovery commands (find/rg)
+
+plan:
+  - intent:
+      Convert the gap matrix into an implementation blueprint for Codex CLI execution: phased milestones, target packages, plugin boundaries, and an acceptance checklist that guarantees “no stubs/TODOs” and full Autocapture-parity ideas coverage as defined by the provided docs.
+  - scope:
+      Planning docs + validators + scaffolding decisions (directory layout, module boundaries, plugin IDs) grounded in the existing repo structure.
+  - constraints:
+      - Must preserve plugin-forward kernel composition (NX loads config/enforces policy; capabilities are plugins).
+      - Must remain local-first; cloud never receives raw PII; sanitization only on egress; deny network by default.
+      - Must be single-user, single-machine.
+      - Must be fail-closed for security invariants and exit code contract (0/1/2).
+      - Must avoid deferral language and avoid introducing TODO/TBD/stubs.
+  - success_criteria:
+      - An implementation tracker exists with checkboxes for every MOD and ADR and explicit “done” criteria.
+      - A doc/code validator exists that enforces the “no TODO/TBD/later/stub” rule and the blueprint/spec validation checklist.
+      - A deterministic contract-lock mechanism plan exists (where contracts live, how hashes are generated/verified).
+  - actions:
+      - Create an implementation tracker:
+          - Add: `docs/blueprint/feature_completeness_implementation_tracker.md`
+          - Include:
+              - “Milestone 0: Contracts + locks + config”
+              - “Milestone 1: Kernel/plugin enforcement + network guard”
+              - … through “Milestone N: UI/overlay/infra/evals/CI gates”
+              - For each MOD/ADR: target file(s), tests required, doctor checks required.
+      - Add validation tooling (repo-local; no external deps if possible):
+          - Create: `tools/validate_feature_docs.py` (or similar) that:
+              - Confirms required docs exist at the given paths.
+              - Confirms blueprint has exactly 4 top-level sections in required order.
+              - Fails if banned deferral words appear in the blueprint/spec (except within explicitly marked quoted blocks if needed).
+              - Confirms each SRC-### appears exactly once in Coverage_Map (as required by blueprint checklist).
+              - Confirms each Object entry includes Sources + Interface_Definition (lightweight regex/parse is fine).
+              - Optionally: verify “logic-heavy modules have sample table” if blueprint defines how to detect them.
+          - Wire it into CI or pre-commit style checks if such infrastructure exists; otherwise wire into `python -m tools.validate_feature_docs`.
+      - Decide contract location and lock strategy based on repo conventions:
+          - If repo already has a `contracts/` directory, use it; otherwise create `contracts/` at root.
+          - Define contract lock file path (e.g., `contracts/contract_locks.json`) and regeneration command/script (e.g., `tools/lock_contracts.py`).
+      - Decide module/package layout:
+          - Follow existing layout; if repo uses `src/`, place new packages under `src/`.
+          - Prefer adding new modules under existing namespaces (e.g., `autocapture_nx`, plus a new `autocapture_mx` / `prime_mx` package) rather than reshuffling existing code.
+  - rollback:
+      - Revert planning-only artifacts if they diverge from repo conventions: `git checkout -- docs/blueprint docs/specs tools`.
+  - citations:
+      - docs/blueprint/feature_completeness_gap_matrix.md
+      - docs/blueprint/feature_completeness_blueprint.md
+      - Existing repo packaging files (pyproject.toml/setup.cfg/requirements*.txt)
+
+implement:
+  - intent:
+      Implement (not stub) every missing subsystem and nuance described in the blueprint/spec, using Prime as the new vehicle, keeping kernel/plugin-forward composition, enforcing security invariants (deny-by-default network; egress-only permission), and delivering full CLI/API/UI/export/doctor parity.
+  - scope:
+      End-to-end implementation across core kernel, plugins, storage, capture, indexing/retrieval, answering, egress, API, UI/overlay, diagnostics, infra, and eval/CI gates.
+  - constraints:
+      - No copying Autocapture code; only implement ideas/interfaces.
+      - No TODO/TBD/stub language left in code or docs.
+      - Fail-closed invariants (network, leak checks, encryption when required, contract locks, allowlist/hash locks, append-only journal/ledger).
+      - Must keep deterministic hashing (canonical JSON for ledger + effective config hashes).
+      - Must preserve single-machine, local-first posture; sanitize only on egress; glossary stored locally only.
+  - success_criteria:
+      - Every MOD-### interface in the blueprint exists in code (same names/signatures/fields), integrated into runnable CLI + API.
+      - `autocapture doctor` covers required parity checks and returns correct exit codes (0/1/2).
+      - `autocapture query "<text>"` works locally with retrieval + evidence + citations (no-evidence => no claims).
+      - Export/import ZIP roundtrips deterministically and matches required bundle structure.
+      - Network is denied by default and can only be temporarily enabled by the egress gateway; leak checks block remote sends.
+      - Journal + ledger are append-only; ledger hash chain + anchors function and are validated in doctor/tests.
+  - actions:
+      - Implementation approach (mandatory iteration loop):
+          - For each milestone below:
+              1) Implement the smallest coherent vertical slice
+              2) Run targeted unit tests/lints
+              3) Fix failures
+              4) Expand coverage and integrate with CLI/API
+      - Milestone 0 — Contracts + locks + canonical JSON primitives:
+          - Create/confirm contract files per blueprint “Contracts_Pinned” (config schema, plugin manifest schema, journal/ledger schemas, reasoning packet schema, time intent schema, phase-0 contracts).
+          - Implement canonical JSON serializer helper used by:
+              - Effective config hashing (MOD-001)
+              - Ledger hashing (MOD-006)
+          - Implement contract lock generation + verification:
+              - Kernel boot must verify contract hashes match the lock file; mismatch => invariant failure.
+          - Ensure any “schema_hash” fields are computed as sha256 of the schema file bytes (as specified).
+      - Milestone 1 — NX Kernel Boot + EffectiveConfig + System container (MOD-001, MOD-003):
+          - Add/complete KernelBootArgs / EffectiveConfig / Kernel.boot/load_effective_config/validate_config.
+          - Implement JSON default + JSON override merge into “effective config”.
+          - Validate effective config against pinned config schema (choose validator based on existing dependencies; if none, implement a minimal schema validator for required fields).
+          - Construct System container and register core capabilities (logger/metrics/journal/ledger/config/policy) before plugin activation.
+      - Milestone 2 — Plugin registry enforcement + safe mode + allowlist/hash locks + permissions (MOD-002, MOD-031):
+          - Discover plugin manifests from builtin plugin directories and any configured plugin roots.
+          - Validate manifests against pinned manifest schema.
+          - Enforce allowlist + hash locks using config + lock file (as per security contract):
+              - manifest_sha256 must match
+              - artifact_sha256 must match (define deterministic directory hashing algorithm; document it; ensure stable ordering)
+          - Implement safe mode to restrict to builtin/default pack only.
+          - Enforce permission model:
+              - Expose only allowed capabilities to plugins; especially deny network to all except egress gateway plugin.
+      - Milestone 3 — Global deny-by-default network guard + egress-only allow context (supports MOD-028, ADR-008):
+          - Implement a process-wide network guard mechanism that:
+              - Denies outbound sockets by default (fail-closed).
+              - Allows outbound sockets only within an egress-gateway controlled context (thread-local or contextvar).
+              - Logs redacted audit events when blocks occur (no PII).
+          - Ensure this is enabled early in Kernel boot (before plugin activation).
+          - Add tests proving:
+              - Non-egress code cannot open sockets.
+              - EgressGateway can (when allowed) under explicit context.
+      - Milestone 4 — Journal + ledger + anchor (MOD-005, MOD-006, ADR-009):
+          - Implement append-only JSONL writer for journal with schema validation and monotonic sequence.
+          - Implement ledger writer:
+              - Hash chain using canonical JSON; store prev_hash; compute entry_hash; persist append-only.
+              - Provide head hash retrieval.
+          - Implement anchor writer:
+              - Append-only anchor store recording ledger head hashes.
+          - Ensure both are used for critical operations (config load, plugin load decisions, key rotation, egress decisions).
+      - Milestone 5 — Keyring + derivation + rotation (MOD-004):
+          - Implement root key storage:
+              - Windows: DPAPI-protected root key file (use ctypes WinAPI; no hard dependency on pywin32).
+              - Non-Windows dev/test: provide a secure test-mode keystore that does not persist plaintext (e.g., ephemeral in-memory key when PRIME_TEST_MODE=1); document limitations.
+          - Implement derive_key(root_key, purpose) (HKDF or HMAC-based KDF with explicit purpose separation).
+          - Implement rotate_keys(system):
+              - Generate new root key / key id
+              - Rewrap encrypted stores (metadata/media/entity map) as applicable
+              - Record rotation in ledger + anchor
+      - Milestone 6 — Typed storage + migrations + tombstones (MOD-039, MOD-040, ADR-007):
+          - Implement MetadataStore with schema_version, migrations, and typed records for:
+              - frames (CaptureFrame)
+              - segments (SegmentRecord)
+              - spans (OCRSpan/VLM spans)
+              - tombstone flags (never physically delete evidence; only hide/tombstone)
+          - Implement encryption-at-rest when required by config:
+              - Encrypt sensitive fields/records using derived keys; store non-sensitive indexes separately if needed.
+          - Implement RetentionService:
+              - preview(start,end,filters) returns affected counts
+              - apply_tombstone(request_id) marks tombstones and emits ledger entries
+              - cleanup_derived() purges derived caches (e.g., embedding cache) but never raw evidence
+      - Milestone 7 — Capture orchestration parity (MOD-008..MOD-016, ADR-003):
+          - Implement Screen capture backends:
+              - DXCAMBackend primary; MSSBackend fallback
+              - Backend selection logic and doctor checks for availability
+          - Implement DuplicateDetector using exact hash + pHash threshold + time window grouping
+          - Implement SegmentRecorder using FFmpeg:
+              - segment_seconds default 60 (per config)
+              - NVENC optional; configure based on availability
+              - deterministic segment manifests with sha256 and metadata
+          - Implement ForegroundTracker:
+              - app name, window title, url/domain when available
+              - ensure deterministic enrichment eventing
+          - Implement RawInputListener + Idle Gate:
+              - track idle_seconds without capturing keystroke content (only timestamps/state)
+          - Implement RuntimeGovernor:
+              - modes FULLSCREEN_HARD_PAUSE / ACTIVE_INTERACTIVE / IDLE_DRAIN with deterministic transitions
+          - Implement PrivacyPolicy tagging (no local masking/exclusion):
+              - local_capture_allowed remains true under D1 unless user explicitly pauses capture
+              - egress_allowed defaults false unless sanitized
+              - flags and reasons recorded for UI/egress policy
+      - Milestone 8 — OCR + spans + VLM extraction (MOD-017, MOD-018, MOD-022):
+          - Implement OcrExtractor that produces OCRDocument + OCRSpan with bbox_px/conf/text/engine/frame provenance.
+          - Store spans immutably in SpansStore; provide get_span/list_spans_for_frame.
+          - Implement VlmExtractor fully (not stubbed):
+              - must execute if configured with a local model path/provider present
+              - outputs are structured and provenance-linked
+              - doctor must verify model/provider readiness
+      - Milestone 9 — Embeddings + lexical + vector index (MOD-019..MOD-021, ADR-010):
+          - Implement Embedder:
+              - prefer fastembed first; fallback to sentence-transformers
+              - doctor checks for which backend is active and model availability
+          - Implement LexicalIndex:
+              - SQLite FTS5 primary
+              - deterministic fallback when FTS5 unavailable (document limitations, but keep functional)
+          - Implement VectorIndex:
+              - Local default backend (single-machine) and Qdrant optional adapter
+              - health() must report meaningful status
+              - doctor must check qdrant only when enabled
+      - Milestone 10 — Time intent + hybrid retrieval + answer builder (MOD-023..MOD-026, ADR-004):
+          - Implement TimeIntentParser deterministically (no LLM):
+              - support relative terms (today/yesterday/morning/afternoon)
+              - explicit ranges (“between 3pm and 4pm Friday”) using tzid
+              - produce assumptions list as per schema
+          - Implement RetrievalEngine:
+              - parse time intent, apply filters, run lexical+vector search
+              - fuse results; optional rerank if configured
+              - emit RetrievalResult with score breakdown and non_citable flag as required
+          - Implement AnswerBuilder:
+              - evidence-first, claim-level citations
+              - enforce “no evidence → no claim”
+              - produce warnings (no_evidence, low_evidence_count, etc.)
+          - Implement ClaimValidators:
+              - no-evidence validator deterministic
+              - provenance validator checks all citations resolve to stored spans/frames/segments
+              - entailment/conflict validators must be functional using configured local model/provider (or deterministic ruleset if spec allows); record warnings and ledger entries
+              - integrity validator checks ledger consistency and evidence hash availability
+      - Milestone 11 — Gateway model + LLM client routed via policy and egress (MOD-027, ADR-006):
+          - Implement StageRouter driven by config (stage_id -> provider/model/base_url/allow_cloud/max_concurrency).
+          - Implement LlmClient:
+              - Local stages: may call local subprocess/library without network, or if HTTP loopback is used then route via EgressGateway in “local” mode (no sanitization) with explicit allowlist for loopback destinations.
+              - Cloud stages: must go through EgressGateway with ReasoningPacketV1 sanitization and leak checks.
+              - All stage calls must emit ledger entries and respect network guard.
+      - Milestone 12 — Egress sanitizer + reasoning packet + send (MOD-028, ADR-008):
+          - Implement EgressSanitizer:
+              - Replace detected entities with typed tokens ⟦ENT:<TYPE>:<TOKEN>⟧
+              - Produce glossary token->plaintext (stored locally only)
+              - Implement leak checks; if leak detected => block egress (raise invariant violation; exit code 2 at CLI boundary)
+          - Implement EgressGateway.build_packet and send:
+              - Packet includes sanitized_context, citations, glossary, metadata
+              - send() must be the only path that enables outbound network context
+              - Ensure remote payload never contains plaintext PII
+      - Milestone 13 — FastAPI server + required routes + middleware (MOD-032, MOD-025, MOD-029):
+          - Implement create_app(system) with routes at minimum:
+              - GET /healthz, GET /readyz, GET /api/state
+              - POST /api/events/ingest
+              - POST /api/query
+              - POST /api/context-pack
+              - GET /api/plugins
+              - POST /api/plugins/enable/{plugin_id}
+              - POST /api/plugins/disable/{plugin_id}
+              - GET /api/storage
+              - POST /api/citations/overlay
+          - Implement middleware:
+              - request id, security headers, local auth (single-user), rate limiting (best-effort)
+          - Implement MemoryService.build_snapshot and integrate with /api/context-pack response contract (Context Pack v1).
+          - Implement CitationOverlayService for overlay API.
+      - Milestone 14 — UI/UX + overlay tracker (MOD-033, MOD-034):
+          - Provide a functional web UI served from the API process:
+              - timeline/explorer view
+              - search/query view using /api/query and /api/context-pack
+              - plugin enable/disable controls
+              - storage + doctor outputs visibility
+              - citation overlay toggles and evidence deep-linking
+          - Implement OverlayTracker:
+              - Render CitationOverlayItems on screen as transparent overlay on Windows (and a best-effort cross-platform fallback), integrating with citation overlay API.
+      - Milestone 15 — Export/import parity (MOD-030, ADR-005):
+          - Implement ExportService.export_zip producing a ZIP containing:
+              - events.jsonl
+              - manifest.json
+              - settings.json
+              - config.json (redacted)
+              - plus media blobs optionally (encrypted unless decrypt_media=true)
+          - Implement ImportService.import_zip with deterministic roundtrip correctness:
+              - preserve provenance and references
+              - avoid ID collisions
+              - record ledger entries for import operations
+      - Milestone 16 — Doctor + diagnostics + observability (MOD-035, MOD-036):
+          - Implement DoctorService.run checks for:
+              - DB availability/migrations/encryption
+              - qdrant (if enabled)
+              - ffmpeg availability and NVENC capability (if configured)
+              - capture backend availability
+              - OCR engine/model readiness
+              - embeddings backend readiness
+              - vector + lexical index health
+              - LLM stages readiness (local vs cloud policy)
+              - API server readiness (if running)
+              - metrics/logging health
+              - raw input listener availability (without capturing sensitive content)
+          - Implement summarize_exit_code mapping:
+              - 0: OK
+              - 1: runtime/config error
+              - 2: invariant failure (security, contract lock mismatch, leak checks, encryption-required missing)
+          - Implement Metrics with Prometheus exposition and redacted JSONL logs (PII-safe).
+      - Milestone 17 — Eval harness + CI gates (MOD-037):
+          - Implement retrieval evals and “no-evidence” gates.
+          - Add CI gate runner that fails on regressions (grounding, evidence, leakage, integrity).
+          - Integrate with existing CI config (detect GitHub Actions or other CI from repo).
+      - Milestone 18 — Installer/infra scaffolding (MOD-038):
+          - Add `infra/compose.yaml` including optional qdrant + prometheus + loki + grafana as per blueprint.
+          - Add `infra/prometheus.yml`.
+          - Add docs: `docs/windows_setup.md` covering:
+              - model paths under D:\autocapture\models
+              - optional ffmpeg + NVENC
+              - running API/UI/overlay
+              - network policy and egress behavior
+      - Cross-cutting enforcement (apply throughout):
+          - Ensure every plugin and contract file is hash-locked and verified.
+          - Ensure “secrets never persisted plaintext” (redact configs on export; never log secrets; sanitize outbound packets).
+          - Ensure no stubs/TODOs remain:
+              - Add/extend a repository check (script or linter rule) failing on TODO/TBD/later/future work/stub markers in first-party code + docs.
+  - rollback:
+      - Use small, reversible commits; if a milestone fails, revert the milestone commit(s) on the branch.
+      - Keep working tree clean between milestones; use `git restore` for local resets.
+  - citations:
+      - docs/specs/feature_completeness_spec.md
+      - docs/blueprint/feature_completeness_blueprint.md
+      - docs/blueprint/feature_completeness_gap_matrix.md
+      - Any newly created contract files under contracts/ (paths)
+      - Any plugin manifest/lock files under config/ or plugins/ (paths)
+
+test:
+  - intent:
+      Prove correctness, determinism, and fail-closed security invariants via automated tests; ensure CLI/API/UI core flows work locally; validate export/import roundtrip; validate “no-evidence → no-claim” and leak-blocking behavior.
+  - scope:
+      Unit tests + integration tests + doc validators + CI gates; platform-conditional coverage for Windows-only features.
+  - constraints:
+      - Offline; do not download models/deps during tests.
+      - Tests must be deterministic (time frozen where needed; canonical JSON hashing stable).
+      - Windows-only components must be tested via mocks/fakes when running in WSL/CI Linux, while still providing real Windows implementations.
+  - success_criteria:
+      - Test suite passes in the repo’s standard runner.
+      - Doc validator passes (blueprint/spec checklist; no deferral markers).
+      - Security invariants tests pass (network denied; egress leak blocks; hash locks enforced).
+      - Export/import roundtrip tests pass deterministically.
+  - actions:
+      - Detect test runner and lint/type tools from repo config; then run in escalating order:
+          1) Fast checks: format/lint (if present)
+          2) Unit tests for primitives (canonical JSON, hashing, sanitizer, time intent)
+          3) Integration tests for storage/retrieval/answer builder/API routes
+          4) Optional heavier suites (eval harness) only if required by CI gates
+      - Add targeted tests (minimum set aligned with blueprint samples):
+          - Time intent parser cases matching SAMPLE-001.
+          - Duplicate detector decisions matching SAMPLE-002.
+          - Retrieval fusion behavior matching SAMPLE-003.
+          - Answer builder “no evidence → no claim” matching SAMPLE-004.
+          - Egress sanitizer tokenization + leak blocking matching SAMPLE-005.
+          - Export/import ZIP structure and roundtrip matching SAMPLE-006.
+          - Runtime governor transitions matching SAMPLE-007.
+          - Plugin enable/disable + allowlist/hash lock enforcement matching SAMPLE-008.
+      - Add invariant tests:
+          - Journal append-only sequence monotonicity.
+          - Ledger hash chain correctness and anchor head updates.
+          - Network guard denies non-egress socket attempts.
+      - API tests:
+          - FastAPI TestClient checks for required routes and response contracts (healthz/readyz/state/query/context-pack/plugins/storage/citations overlay).
+      - Doctor tests:
+          - Validate severity mapping and exit code summarization (0/1/2).
+  - rollback:
+      - If tests fail due to missing optional deps in WSL, adjust code to degrade gracefully (WARN/FAIL in doctor) without stubbing functionality on Windows; keep tests using mocks and clear skip markers tied to platform detection.
+  - citations:
+      - tests/ (new or existing) paths
+      - tools/validate_feature_docs.py output
+      - Captured outputs from test runs (pytest/runner logs)
+
+document:
+  - intent:
+      Ensure repo documentation fully explains Prime’s successor architecture, security posture, plugin workflow (allowlist/hash locks), doctor diagnostics, API/UX usage, and export/import format, with no deferral language.
+  - scope:
+      Docs updates/additions in docs/ plus any in-repo operator/developer guides; ensure docs/specs and docs/blueprint remain authoritative and consistent.
+  - constraints:
+      - No secrets in docs; replace any encountered secrets with [REDACTED_SECRET].
+      - No TODO/TBD/later language in docs.
+      - Must accurately reflect implemented behavior and contracts.
+  - success_criteria:
+      - docs/windows_setup.md exists and matches blueprint infra requirements.
+      - README (or primary docs index) references:
+          - how to run CLI commands (doctor/run/query/plugins/keys/export/import)
+          - how to run API/UI
+          - security model (deny network by default; egress sanitization)
+      - Contract lock workflow documented (how to regenerate locks safely).
+  - actions:
+      - Ensure docs paths are correct and referenced:
+          - docs/specs/feature_completeness_spec.md
+          - docs/blueprint/feature_completeness_blueprint.md
+      - Add/extend:
+          - docs/windows_setup.md (per MOD-038)
+          - docs/security_model.md (network guard, egress sanitizer tokens/glossary, leak checks, fail-closed behavior)
+          - docs/plugin_development.md (manifest schema, entrypoints, permissions, allowlist/hash locks, safe mode)
+          - docs/export_import.md (ZIP bundle contents, redaction, roundtrip expectations)
+          - docs/api.md (route list + basic request/response shapes)
+      - Update any existing docs index to point at these.
+  - rollback:
+      - Revert doc changes that don’t match implementation; ensure validator script passes before final commit.
+  - citations:
+      - docs/specs/feature_completeness_spec.md
+      - docs/blueprint/feature_completeness_blueprint.md
+      - docs/windows_setup.md
+      - infra/compose.yaml, infra/prometheus.yml (if added)
+
+commit:
+  - intent:
+      Produce a clean, reviewable git history capturing the full parity implementation with tests and docs, suitable for a single PR.
+  - scope:
+      Branching, commits, and commit messages; ensure working tree is clean; ensure no generated artifacts accidentally committed (unless intentionally required like lock files).
+  - constraints:
+      - Minimal diffs where possible, but completeness > minimalism.
+      - No secrets committed.
+      - Ensure line endings are preserved (avoid CRLF churn).
+  - success_criteria:
+      - All changes committed on a feature branch.
+      - Commit(s) include: implementation, tests, docs, infra, validators, updated lock files.
+      - `git status` clean.
+  - actions:
+      - Create branch: `git checkout -b feature/prime-autocapture-parity`
+      - Stage changes intentionally:
+          - Ensure contract lock files and plugin lock files are included if they are required enforcement artifacts.
+      - Commit in logical chunks (recommended):
+          - "contracts+locks: pin schemas and canonical hashing"
+          - "kernel+plugins: allowlist/hash locks + network guard"
+          - "storage+capture+indexing: typed stores, capture pipeline, OCR/embeddings"
+          - "retrieval+answering+egress: hybrid retrieval, evidence-first answers, reasoning packet"
+          - "api+ui+overlay: fastapi routes, web ui, overlay tracker"
+          - "doctor+observability+evals+infra: diagnostics parity, metrics, ci gates, compose"
+      - Before final commit, run the repo’s format/lint/test suite and capture outputs for PR notes.
+  - rollback:
+      - If a commit introduces regressions, use `git revert <sha>` (preferred) or interactive rebase (only if local and safe).
+  - citations:
+      - Output of `git status --porcelain=v1`
+      - Output of test/lint runs recorded in PR notes
+
+PR:
+  - intent:
+      Open exactly one GitHub pull request containing all changes required to make Prime a complete successor implementing all missing Autocapture subsystems/nuances per the provided spec/blueprint.
+  - scope:
+      Push branch and create PR with a comprehensive description and checklist tied to MOD/ADR completion.
+  - constraints:
+      - Exactly one PR.
+      - If remote/push/permissions are unavailable, stop after local commit on branch and report the blocker in diagnostics (do not attempt workarounds requiring network policy violations).
+  - success_criteria:
+      - A single PR exists, linking to:
+          - gap matrix
+          - implementation tracker
+          - key docs (security model, windows setup)
+          - test outputs summary
+      - PR description includes:
+          - Completed MOD-001..MOD-040 checklist
+          - ADR compliance notes (ADR-001..ADR-010)
+          - Security invariants verification (network guard + egress leak blocking + contract/plugin locks)
+          - Export/import roundtrip proof
+  - actions:
+      - Push branch (if permitted): `git push -u origin feature/prime-autocapture-parity`
+      - Create PR via available tooling:
+          - Prefer `gh pr create` if installed/configured, otherwise use whatever repo standard is (but do not browse externally).
+      - PR template content:
+          - “What changed” summary by milestone
+          - “How to test” commands
+          - “Security” section explicitly noting deny-by-default network and egress-only permissions
+          - “Contracts/Locks” section noting contract lock + plugin lock updates
+  - rollback:
+      - If PR creation is blocked, keep branch local and provide: branch name, commit SHAs, and the exact error output from push/PR attempts.
+  - citations:
+      - Branch name and commit SHAs (from `git log --oneline --decorate -n 20`)
+      - Output/error from push/PR creation attempt (if blocked)
+```

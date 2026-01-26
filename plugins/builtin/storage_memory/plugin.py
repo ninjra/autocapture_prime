@@ -6,6 +6,7 @@ import json
 import os
 from typing import Any
 
+from autocapture_nx.kernel.metadata_store import ImmutableMetadataStore
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 
 
@@ -16,6 +17,10 @@ class InMemoryStore:
     def put(self, key: str, value: Any) -> None:
         self._data[key] = value
 
+    def put_stream(self, key: str, stream, chunk_size: int = 1024 * 1024) -> None:
+        _ = chunk_size
+        self.put(key, stream.read())
+
     def get(self, key: str, default: Any = None) -> Any:
         return self._data.get(key, default)
 
@@ -23,7 +28,7 @@ class InMemoryStore:
         return dict(self._data)
 
     def keys(self) -> list[str]:
-        return list(self._data.keys())
+        return sorted(self._data.keys())
 
 
 class EntityMapStore:
@@ -54,7 +59,7 @@ class StorageMemoryPlugin(PluginBase):
         data_dir = context.config.get("storage", {}).get("data_dir", "data")
         os.makedirs(data_dir, exist_ok=True)
         persist = context.config.get("storage", {}).get("entity_map", {}).get("persist", False)
-        self._metadata = InMemoryStore()
+        self._metadata = ImmutableMetadataStore(InMemoryStore())
         self._media = InMemoryStore()
         self._entity_map = EntityMapStore(persist=persist, data_dir=data_dir)
 

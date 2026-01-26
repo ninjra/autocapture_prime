@@ -42,11 +42,14 @@ class KeyRotationTests(unittest.TestCase):
             config = load_config(paths, safe_mode=False)
             kernel = Kernel(paths, safe_mode=False)
             system = kernel.boot()
-            store = system.get("storage.metadata")
-            store.put("rec1", {"value": 123})
-            self.assertEqual(store.get("rec1")["value"], 123)
-            rotate_keys(system)
-            self.assertEqual(store.get("rec1")["value"], 123)
+            try:
+                store = system.get("storage.metadata")
+                store.put("rec1", {"record_type": "derived.test", "value": 123})
+                self.assertEqual(store.get("rec1")["value"], 123)
+                rotate_keys(system)
+                self.assertEqual(store.get("rec1")["value"], 123)
+            finally:
+                kernel.shutdown()
 
 
 if __name__ == "__main__":

@@ -39,6 +39,10 @@ def main() -> int:
     env.setdefault("PYTHONPATH", ".")
     root = Path(__file__).resolve().parents[1]
     test_root = root / ".dev" / "test_env"
+    if test_root.exists():
+        import shutil
+
+        shutil.rmtree(test_root)
     config_dir = test_root / "config"
     data_dir = test_root / "data"
     config_dir.mkdir(parents=True, exist_ok=True)

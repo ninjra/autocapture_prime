@@ -1,0 +1,13 @@
+# rg -n /network.*policy|policy.*network/
+./docs/mx_equivalence_map.md:62:- Gap to MX: add `autocapture/plugins/policy_gate.py` and `autocapture/core/http.py` as sole network surface.
+./docs/blueprints/autocapture_nx_blueprint.md:9:- **P3 Secure**: offline-by-default; network only when policy allows; fail closed for encryption/auth; least privilege for plugins.
+./docs/blueprints/autocapture_nx_blueprint.md:172:- [ ] **I095** (Phase 0) — [Doctor validates locks, storage, anchors, and network policy](#i095)
+./docs/blueprints/autocapture_nx_blueprint.md:420:### I095 — Doctor validates locks, storage, anchors, and network policy
+./docs/blueprints/autocapture_nx_blueprint.md:431:  - anchor signing availability, network policy, path resolution.
+./docs/reports/blueprint_items.md:18:| I095 | Phase 0: Scaffolding and gates | Doctor validates locks, storage, anchors, and network policy |  |  |  |
+./docs/reports/grep_anchor.txt:4:./tools/blueprint_items.json:93:    "title": "Doctor validates locks, storage, anchors, and network policy",
+./docs/reports/grep_anchor.txt:23:./docs/blueprints/autocapture_nx_blueprint.md:172:- [ ] **I095** (Phase 0) — [Doctor validates locks, storage, anchors, and network policy](#i095)
+./docs/reports/grep_anchor.txt:28:./docs/blueprints/autocapture_nx_blueprint.md:420:### I095 — Doctor validates locks, storage, anchors, and network policy
+./docs/reports/grep_anchor.txt:29:./docs/blueprints/autocapture_nx_blueprint.md:431:  - anchor signing availability, network policy, path resolution.
+./docs/reports/grep_anchor.txt:112:./docs/reports/blueprint_items.md:18:| I095 | Phase 0: Scaffolding and gates | Doctor validates locks, storage, anchors, and network policy |  |  |  |
+./tools/blueprint_items.json:93:    "title": "Doctor validates locks, storage, anchors, and network policy",

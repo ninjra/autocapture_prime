@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from autocapture_nx import __version__ as kernel_version
 from autocapture_nx.kernel.config import SchemaLiteValidator
 from autocapture_nx.kernel.errors import PluginError
 from autocapture_nx.kernel.hashing import sha256_directory, sha256_file
@@ -16,6 +17,45 @@ from autocapture_nx.kernel.paths import plugins_dir, resolve_repo_path, load_jso
 from .api import PluginContext
 from .host import SubprocessPlugin
 from .runtime import network_guard
+
+
+def _parse_version(version: str) -> tuple[int, ...]:
+    parts = []
+    for part in version.strip().lstrip("v").split("."):
+        if part.isdigit():
+            parts.append(int(part))
+        else:
+            num = ""
+            for ch in part:
+                if ch.isdigit():
+                    num += ch
+                else:
+                    break
+            if num:
+                parts.append(int(num))
+    return tuple(parts)
+
+
+def _version_satisfies(current: str, requirement: str) -> bool:
+    ops = (">=", "<=", ">", "<", "==")
+    op = "=="
+    target = requirement.strip()
+    for candidate in ops:
+        if target.startswith(candidate):
+            op = candidate
+            target = target[len(candidate) :].strip()
+            break
+    current_v = _parse_version(current)
+    target_v = _parse_version(target)
+    if op == ">=":
+        return current_v >= target_v
+    if op == "<=":
+        return current_v <= target_v
+    if op == ">":
+        return current_v > target_v
+    if op == "<":
+        return current_v < target_v
+    return current_v == target_v
 
 
 @dataclass
@@ -100,6 +140,19 @@ class PluginRegistry:
             raise PluginError("Missing plugin manifest schema")
         self._validator.validate(schema, manifest)
 
+    def _check_compat(self, manifest: dict[str, Any]) -> None:
+        compat = manifest.get("compat", {})
+        requires_kernel = compat.get("requires_kernel")
+        if requires_kernel and not _version_satisfies(kernel_version, requires_kernel):
+            raise PluginError(f"Plugin {manifest.get('plugin_id')} requires kernel {requires_kernel}, have {kernel_version}")
+        required_schemas = compat.get("requires_schema_versions", [])
+        if required_schemas:
+            schema_version = self.config.get("schema_version")
+            if schema_version not in required_schemas:
+                raise PluginError(
+                    f"Plugin {manifest.get('plugin_id')} requires schema versions {required_schemas}, have {schema_version}"
+                )
+
     def _check_lock(self, plugin_id: str, manifest_path: Path, plugin_root: Path, lockfile: dict[str, Any]) -> None:
         locks_cfg = self.config.get("plugins", {}).get("locks", {})
         if not locks_cfg.get("enforce", True):
@@ -141,6 +194,7 @@ class PluginRegistry:
             with manifest_path.open("r", encoding="utf-8") as handle:
                 manifest = json.load(handle)
             self._validate_manifest(manifest)
+            self._check_compat(manifest)
             plugin_id = manifest["plugin_id"]
             manifests_by_id[plugin_id] = (manifest_path, manifest)
 

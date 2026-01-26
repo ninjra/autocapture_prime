@@ -1,0 +1,308 @@
+# rg -n /manifest/
+./tools/blueprint_items.json:493:    "title": "Add per-run storage manifest records",
+./tools/blueprint_items.json:677:    "title": "Immutable per-run manifest (config+locks+versions)",
+./tools/blueprint_items.json:757:    "title": "Record python/OS/package versions into run manifest",
+./tools/blueprint_items.json:845:    "title": "Enforce least privilege per plugin manifest",
+./tools/hypervisor/scripts/update_plugin_locks.py:15:    for manifest_path in root.rglob("plugin.json"):
+./tools/hypervisor/scripts/update_plugin_locks.py:16:        with open(manifest_path, "r", encoding="utf-8") as handle:
+./tools/hypervisor/scripts/update_plugin_locks.py:17:            manifest = json.load(handle)
+./tools/hypervisor/scripts/update_plugin_locks.py:18:        plugin_id = manifest["plugin_id"]
+./tools/hypervisor/scripts/update_plugin_locks.py:19:        plugin_root = manifest_path.parent
+./tools/hypervisor/scripts/update_plugin_locks.py:21:            "manifest_sha256": sha256_file(manifest_path),
+./contracts/plugin_sdk.md:16:- `hash_lock`: `{ manifest_sha256, artifact_sha256 }`
+./contracts/plugin_sdk.md:72:A manifest or artifact hash mismatch fails closed.
+./tools/hypervisor/scripts/update_contract_lock.py:17:    "contracts/plugin_manifest.schema.json",
+./contracts/plugin_manifest.schema.json:62:      "required": ["manifest_sha256", "artifact_sha256"],
+./contracts/plugin_manifest.schema.json:64:        "manifest_sha256": {"type": "string"},
+./plugins/builtin/window_metadata_windows/plugin.json:25:    "manifest_sha256": "",
+./plugins/builtin/journal_basic/plugin.json:25:    "manifest_sha256": "",
+./tools/hypervisor/hypervisor.py:111:            {"step": 2, "scope": "module_wiring_and_manifests"},
+./contracts/lock.json:7:    "contracts/plugin_manifest.schema.json": "719cc843507297d2294d8de9a8e00fa8f662f435377e8b9e830932e7d75a41d1",
+./tests/test_training_manifest_schema.py:9:    def test_manifest_hash(self) -> None:
+./tests/test_training_manifest_schema.py:12:        manifest = pipeline.run(
+./tests/test_training_manifest_schema.py:19:        stripped = dict(manifest)
+./tests/test_training_manifest_schema.py:20:        manifest_hash = stripped.pop("manifest_hash")
+./tests/test_training_manifest_schema.py:21:        self.assertEqual(manifest_hash, hash_canonical(stripped))
+./tests/test_training_manifest_schema.py:22:        self.assertEqual(manifest["method"], "lora")
+./docs/spec/autocapture_mx_spec.yaml:53:    title: Plugin manifest schema + manager + discovery
+./docs/spec/autocapture_mx_spec.yaml:56:      - autocapture/plugins/manifest.py
+./docs/spec/autocapture_mx_spec.yaml:63:        target: autocapture.plugins.manifest:ExtensionManifest
+./docs/spec/autocapture_mx_spec.yaml:442:    title: Export/import bundles with manifest + hash verification
+./docs/spec/autocapture_mx_spec.yaml:473:    title: Training pipelines (LoRA + DPO) with reproducible manifests
+./docs/spec/autocapture_mx_spec.yaml:482:        target: tests/test_training_manifest_schema.py
+./plugins/builtin/vlm_stub/plugin.json:25:    "manifest_sha256": "",
+./plugins/builtin/input_windows/plugin.json:25:    "manifest_sha256": "",
+./autocapture/plugins/__init__.py:4:from .manifest import ExtensionManifest, PluginManifest
+./autocapture_nx/plugin_system/registry.py:23:    manifest: dict[str, Any]
+./autocapture_nx/plugin_system/registry.py:72:    def discover_manifests(self) -> list[Path]:
+./autocapture_nx/plugin_system/registry.py:76:        manifests: list[Path] = []
+./autocapture_nx/plugin_system/registry.py:80:            for manifest in root.rglob("plugin.json"):
+./autocapture_nx/plugin_system/registry.py:81:                manifests.append(manifest)
+./autocapture_nx/plugin_system/registry.py:82:        return sorted(manifests)
+./autocapture_nx/plugin_system/registry.py:92:    def _validate_manifest(self, manifest: dict[str, Any]) -> None:
+./autocapture_nx/plugin_system/registry.py:93:        schema_path = Path("contracts/plugin_manifest.schema.json")
+./autocapture_nx/plugin_system/registry.py:95:            raise PluginError("Missing plugin manifest schema")
+./autocapture_nx/plugin_system/registry.py:98:        self._validator.validate(schema, manifest)
+./autocapture_nx/plugin_system/registry.py:100:    def _check_lock(self, plugin_id: str, manifest_path: Path, plugin_root: Path, lockfile: dict[str, Any]) -> None:
+./autocapture_nx/plugin_system/registry.py:108:        manifest_hash = sha256_file(manifest_path)
+./autocapture_nx/plugin_system/registry.py:110:        if manifest_hash != expected.get("manifest_sha256"):
+./autocapture_nx/plugin_system/registry.py:111:            raise PluginError(f"Plugin {plugin_id} manifest hash mismatch")
+./autocapture_nx/plugin_system/registry.py:115:    def _check_permissions(self, manifest: dict[str, Any]) -> None:
+./autocapture_nx/plugin_system/registry.py:116:        perms = manifest.get("permissions", {})
+./autocapture_nx/plugin_system/registry.py:123:            if manifest.get("plugin_id") not in allowed:
+./autocapture_nx/plugin_system/registry.py:127:        manifests = self.discover_manifests()
+./autocapture_nx/plugin_system/registry.py:136:        manifests_by_id: dict[str, tuple[Path, dict[str, Any]]] = {}
+./autocapture_nx/plugin_system/registry.py:137:        for manifest_path in manifests:
+./autocapture_nx/plugin_system/registry.py:138:            with manifest_path.open("r", encoding="utf-8") as handle:
+./autocapture_nx/plugin_system/registry.py:139:                manifest = json.load(handle)
+./autocapture_nx/plugin_system/registry.py:140:            self._validate_manifest(manifest)
+./autocapture_nx/plugin_system/registry.py:141:            plugin_id = manifest["plugin_id"]
+./autocapture_nx/plugin_system/registry.py:142:            manifests_by_id[plugin_id] = (manifest_path, manifest)
+./autocapture_nx/plugin_system/registry.py:147:        def is_enabled(pid: str, manifest: dict[str, Any]) -> bool:
+./autocapture_nx/plugin_system/registry.py:152:            return bool(manifest.get("enabled", True))
+./autocapture_nx/plugin_system/registry.py:156:            for pid, (_path, manifest) in manifests_by_id.items()
+./autocapture_nx/plugin_system/registry.py:157:            if pid in allowlist and is_enabled(pid, manifest)
+./autocapture_nx/plugin_system/registry.py:160:        for plugin_id, (manifest_path, manifest) in manifests_by_id.items():
+./autocapture_nx/plugin_system/registry.py:165:            depends = manifest.get("depends_on", [])
+./autocapture_nx/plugin_system/registry.py:171:            self._check_permissions(manifest)
+./autocapture_nx/plugin_system/registry.py:172:            self._check_lock(plugin_id, manifest_path, manifest_path.parent, lockfile)
+./autocapture_nx/plugin_system/registry.py:174:            entrypoints = manifest.get("entrypoints", [])
+./autocapture_nx/plugin_system/registry.py:178:                module_path = manifest_path.parent / entry["path"]
+./autocapture_nx/plugin_system/registry.py:182:                network_allowed = bool(manifest.get("permissions", {}).get("network", False))
+./autocapture_nx/plugin_system/registry.py:211:                loaded.append(LoadedPlugin(plugin_id, manifest, instance, caps))
+./autocapture/plugins/manifest.py:1:"""MX plugin manifest loader."""
+./autocapture/plugins/manifest.py:35:        data = _load_manifest(path)
+./autocapture/plugins/manifest.py:54:            raise ValueError(f"plugin_id missing in manifest {path}")
+./autocapture/plugins/manifest.py:56:            raise ValueError(f"schema_version missing in manifest {path}")
+./autocapture/plugins/manifest.py:68:def _load_manifest(path: Path) -> dict[str, Any]:
+./plugins/builtin/time_basic/plugin.json:25:    "manifest_sha256": "",
+./plugins/builtin/embedder_stub/plugin.json:25:    "manifest_sha256": "",
+./autocapture/plugins/manager.py:14:from autocapture.plugins.manifest import ExtensionManifest, PluginManifest
+./autocapture/plugins/manager.py:20:    manifest: ExtensionManifest
+./autocapture/plugins/manager.py:28:        self._manifests: list[PluginManifest] = []
+./autocapture/plugins/manager.py:30:        self._manifest_mtimes: dict[Path, float] = {}
+./autocapture/plugins/manager.py:31:        self._manifest_hashes: dict[Path, str] = {}
+./autocapture/plugins/manager.py:36:        manifests = []
+./autocapture/plugins/manager.py:37:        for path in self._manifest_paths():
+./autocapture/plugins/manager.py:38:            manifests.append(PluginManifest.from_path(path))
+./autocapture/plugins/manager.py:39:            self._manifest_mtimes[path] = path.stat().st_mtime_ns
+./autocapture/plugins/manager.py:40:            self._manifest_hashes[path] = hashlib.sha256(path.read_bytes()).hexdigest()
+./autocapture/plugins/manager.py:41:        self._manifests = manifests
+./autocapture/plugins/manager.py:43:    def _manifest_paths(self) -> list[Path]:
+./autocapture/plugins/manager.py:72:        for manifest in self._manifests:
+./autocapture/plugins/manager.py:73:            pid = manifest.plugin_id
+./autocapture/plugins/manager.py:79:                if not self._safe_extensions(manifest.extensions):
+./autocapture/plugins/manager.py:104:        for manifest in self._manifests:
+./autocapture/plugins/manager.py:107:                    "plugin_id": manifest.plugin_id,
+./autocapture/plugins/manager.py:108:                    "enabled": manifest.plugin_id in enabled,
+./autocapture/plugins/manager.py:109:                    "path": str(manifest.path),
+./autocapture/plugins/manager.py:117:        for manifest in self._manifests:
+./autocapture/plugins/manager.py:118:            for ext in manifest.extensions:
+./autocapture/plugins/manager.py:121:                        "plugin_id": manifest.plugin_id,
+./autocapture/plugins/manager.py:125:                        "enabled": manifest.plugin_id in enabled,
+./autocapture/plugins/manager.py:131:        """Reload manifests if they changed. Returns plugin_ids reloaded."""
+./autocapture/plugins/manager.py:133:        for path, last_mtime in list(self._manifest_mtimes.items()):
+./autocapture/plugins/manager.py:138:            if mtime != last_mtime or digest != self._manifest_hashes.get(path):
+./autocapture/plugins/manager.py:139:                manifest = PluginManifest.from_path(path)
+./autocapture/plugins/manager.py:140:                self._manifest_mtimes[path] = mtime
+./autocapture/plugins/manager.py:141:                self._manifest_hashes[path] = digest
+./autocapture/plugins/manager.py:142:                self._manifests = [m for m in self._manifests if m.path != path] + [manifest]
+./autocapture/plugins/manager.py:143:                reloaded.append(manifest.plugin_id)
+./autocapture/plugins/manager.py:144:                self._reload_plugins.add(manifest.plugin_id)
+./autocapture/plugins/manager.py:148:                    if key[0] != manifest.plugin_id
+./autocapture/plugins/manager.py:177:        for manifest in self._manifests:
+./autocapture/plugins/manager.py:178:            if manifest.plugin_id not in enabled:
+./autocapture/plugins/manager.py:180:            for ext in manifest.extensions:
+./autocapture/plugins/manager.py:185:                cache_key = (manifest.plugin_id, ext.name)
+./autocapture/plugins/manager.py:188:                force_reload = manifest.plugin_id in self._reload_plugins
+./autocapture/plugins/manager.py:190:                instance = factory(manifest.plugin_id)
+./autocapture/plugins/manager.py:192:                    self._reload_plugins.discard(manifest.plugin_id)
+./autocapture/plugins/manager.py:193:                wrapped = ExtensionInstance(plugin_id=manifest.plugin_id, manifest=ext, instance=instance)
+./autocapture/plugins/manager.py:199:def load_json_manifest(path: Path) -> dict[str, Any]:
+./docs/reports/grep_run_id.txt:10:./tests/test_training_manifest_schema.py:15:            run_id="run1",
+./docs/reports/grep_run_id.txt:22:./docs/blueprints/autocapture_nx_blueprint.md:569:  - Store run manifest linking run_id to config/locks hashes.
+./config/plugin_locks.json:6:      "manifest_sha256": "0983d3c43969956fe163ad5522e546dc358d4266ff11cb48a65983a1b089d275"
+./config/plugin_locks.json:10:      "manifest_sha256": "3bb311faa2c183e006daf9bc5078a1f1fc645819fd3a64567882c09cd01f5377"
+./config/plugin_locks.json:14:      "manifest_sha256": "aa4a1f71cbc98f5b6426ade5d9b6baf4b2515182025a8ac63a0f1a85254a9dc5"
+./config/plugin_locks.json:18:      "manifest_sha256": "653f16211636d316c0122bb48950f103785fc78a73a3cb3640bf28992a31c98c"
+./config/plugin_locks.json:22:      "manifest_sha256": "dfd93a018a6ae8be6643b466b6428684850a09f7f6cb2c14b37ff4ab2764a6b1"
+./config/plugin_locks.json:26:      "manifest_sha256": "997b7a6361d4fe9b80430ff1a5a3901d5cfd644f874f527697c949f3b08b99ee"
+./config/plugin_locks.json:30:      "manifest_sha256": "cb48bdae548b35499b17aa5a3056d193a4dfad08ebfdf4618c2a8d666bbfa49d"
+./config/plugin_locks.json:34:      "manifest_sha256": "2d1f4ac75785367341fcf85b69c069ea7f6e2df154c94532c0ac406f969bb03e"
+./config/plugin_locks.json:38:      "manifest_sha256": "0c05fc860366ee07b7f205729cf99c338da3c5add1421d8dd2b1966dbd718604"
+./config/plugin_locks.json:42:      "manifest_sha256": "3d16a9d6082e1b82a1c2982ffbed8aa0746c08595695de60fd224c15adacef7e"
+./config/plugin_locks.json:46:      "manifest_sha256": "e69a9c4b3e2a84b5f8754d627e08c2536c8dcab2aa4719d1d7d14e35e38d7290"
+./config/plugin_locks.json:50:      "manifest_sha256": "0ed20ca9d613875b2826ee5a6c24787657e38e3d8375fded1bde754486d20f2d"
+./config/plugin_locks.json:54:      "manifest_sha256": "a89c520c2466d5447307801123d31b711bcbd9817f8879bad0ae36cb6e2a6710"
+./config/plugin_locks.json:58:      "manifest_sha256": "6b1a9d9a44ff0438161e7174f94bd83dc4a28bd61733969ab81d6a261a55dc19"
+./config/plugin_locks.json:62:      "manifest_sha256": "5074a3d07a62b138f6500ec66aaebee391c594f773fad42e815020cad8f0371c"
+./config/plugin_locks.json:66:      "manifest_sha256": "760b546eec7cfb470b8294b367f6cc8983f1dc2f56ce910532127b42e9c0415f"
+./config/plugin_locks.json:70:      "manifest_sha256": "fc61c13835e4bb4bc8aa1b140182acf99c28d073b4ba10ae780ada31ac50075d"
+./config/plugin_locks.json:74:      "manifest_sha256": "beab6c861e444131b49f7c94a81b103b6b818c1b9f8084e8589273bbf115d58c"
+./config/plugin_locks.json:78:      "manifest_sha256": "3b46a20002e542903ba199ca73a8d001343868cc1c713f2b2b0832792a6909e8"
+./config/plugin_locks.json:82:      "manifest_sha256": "602910e91604d26da71999c9a070648af3fd747df64d0ca9dfc80a10f5b560e7"
+./config/plugin_locks.json:86:      "manifest_sha256": "9c041b1533d1ef0a340e9f6731863f6b28099e00a3e38e812d231d8145e89f7f"
+./config/plugin_locks.json:90:      "manifest_sha256": "185c820ed062ae573d5b2dd2a43cf97269edae847b89ac6e2d056fca34057dd0"
+./config/plugin_locks.json:94:      "manifest_sha256": "2dc41efa6788c77bd0061e6d4d3252bcb6a95621db15f0390f8f78f25699ff39"
+./config/plugin_locks.json:98:      "manifest_sha256": "589c8ece39e10e5b632219a2562dc804757081039d72dd69a73efd5d217bd0eb"
+./config/plugin_locks.json:102:      "manifest_sha256": "0f1f5e7b982be90c443da55a15372ed2de529331b724cc985d7cc2d3b7c69027"
+./config/plugin_locks.json:106:      "manifest_sha256": "514435fea51bd3979cdde368a86dd935f6713c71973d0d01b6b82f3fe012c1ea"
+./config/plugin_locks.json:110:      "manifest_sha256": "97fd0cece7f1261f058634c0a353f5f564d562729f2b6372d1cfa86cfdf2327b"
+./config/plugin_locks.json:114:      "manifest_sha256": "eabf1eef357f1b1d13879c8f9a3b60f8f9a87714e920aaefd75f6d14c63bb0ad"
+./config/plugin_locks.json:118:      "manifest_sha256": "99b8c34b07d0ce3c099f58778653977af996b6e4cd1aa58713dda3e829baae4c"
+./autocapture/codex/validators.py:162:def _iter_plugin_manifests(root: Path) -> list[Path]:
+./autocapture/codex/validators.py:173:    from autocapture.plugins.manifest import PluginManifest
+./autocapture/codex/validators.py:175:    manifests = _iter_plugin_manifests(Path("autocapture_plugins"))
+./autocapture/codex/validators.py:177:    for manifest in manifests:
+./autocapture/codex/validators.py:178:        data = PluginManifest.from_path(manifest)
+./autocapture/codex/validators.py:188:    from autocapture.plugins.manifest import PluginManifest
+./autocapture/codex/validators.py:190:    manifests = _iter_plugin_manifests(Path("autocapture_plugins"))
+./autocapture/codex/validators.py:192:    for manifest in manifests:
+./autocapture/codex/validators.py:193:        data = PluginManifest.from_path(manifest)
+./docs/reports/grep_ledger.txt:127:./docs/blueprints/autocapture_nx_blueprint.md:1286:  - per-run manifest records (Pattern A) stored and ledgered
+./docs/reports/grep_ledger.txt:150:./docs/blueprints/autocapture_nx_blueprint.md:1793:  - indexes record version/digest in manifest and query ledger entries
+./plugins/builtin/time_advanced/plugin.json:25:    "manifest_sha256": "",
+./plugins/builtin/egress_sanitizer/plugin.json:25:    "manifest_sha256": "",
+./docs/mx_equivalence_map.md:36:- Proof: `autocapture_nx/plugin_system/registry.py` (manifest discovery + validation + lockfile); `contracts/plugin_manifest.schema.json`; `tests/test_plugin_loader.py`
+./docs/mx_equivalence_map.md:37:- Gap to MX: implement MX plugin manager/manifest/kinds modules and list output schema; add no-import discovery test.
+./docs/mx_equivalence_map.md:46:- Proof: NX plugin IDs are `builtin.*` not `mx.*`; no `autocapture_plugins/` manifests.
+./docs/reports/grep_evidence.txt:69:./docs/blueprints/autocapture_nx_blueprint.md:797:  - Store it in run manifest and reference it in evidence records.
+./docs/reports/grep_evidence.txt:83:./docs/blueprints/autocapture_nx_blueprint.md:1394:  - Test: migrate copies all evidence and manifests; verification passes
+./docs/reports/grep_evidence.txt:106:./docs/blueprints/autocapture_nx_blueprint.md:1656:  - run manifest evidence record written early and finalized at end
+./docs/reports/blueprint_items.md:68:| I033 | Phase 3: Storage scaling + durability | Add per-run storage manifest records |  |  |  |
+./docs/reports/blueprint_items.md:91:| I069 | Phase 4: Retrieval + provenance + citations | Immutable per-run manifest (config+locks+versions) |  |  |  |
+./docs/reports/blueprint_items.md:101:| I127 | Phase 4: Retrieval + provenance + citations | Record python/OS/package versions into run manifest |  |  |  |
+./docs/reports/blueprint_items.md:112:| I052 | Phase 6: Security + egress hardening | Enforce least privilege per plugin manifest |  |  |  |
+./docs/reports/grep_citation.txt:229:./docs/reports/blueprint_items.md:91:| I069 | Phase 4: Retrieval + provenance + citations | Immutable per-run manifest (config+locks+versions) |  |  |  |
+./docs/reports/grep_citation.txt:239:./docs/reports/blueprint_items.md:101:| I127 | Phase 4: Retrieval + provenance + citations | Record python/OS/package versions into run manifest |  |  |  |
+./plugins/builtin/storage_sqlcipher/plugin.json:25:    "manifest_sha256": "",
+./docs/plugin_model.md:10:Plugins live under `plugins/` and declare a manifest `plugin.json` (see `contracts/plugin_sdk.md`).
+./docs/plugin_model.md:13:- they are enabled (explicitly or via manifest)
+./plugins/builtin/egress_gateway/plugin.json:25:    "manifest_sha256": "",
+./docs/mx_gap_matrix.md:38:### MX-PLUGIN-0001 — Plugin manifest schema + manager + discovery
+./docs/mx_gap_matrix.md:40:- Existing (NX): autocapture_nx/plugin_system/registry.py; contracts/plugin_manifest.schema.json; plugins/**/plugin.json; config/plugin_locks.json
+./docs/mx_gap_matrix.md:41:- Missing (MX paths/tests): autocapture/plugins/manifest.py, manager.py, kinds.py; tests/test_plugin_discovery_no_import.py; CLI JSON schema
+./docs/mx_gap_matrix.md:43:  - Artifacts: autocapture/plugins/manifest.py; autocapture/plugins/manager.py; autocapture/plugins/kinds.py
+./docs/mx_gap_matrix.md:57:- Missing (MX paths/tests): autocapture_plugins/ manifests with mx.* IDs; tests for required IDs/kinds; plugins verify-defaults CLI
+./docs/mx_gap_matrix.md:270:### MX-EXPORT-0001 — Export/import bundles with manifest + hash verification
+./docs/mx_gap_matrix.md:294:### MX-TRAIN-0001 — Training pipelines (LoRA + DPO) with reproducible manifests
+./docs/mx_gap_matrix.md:297:- Missing (MX paths/tests): autocapture/training/pipelines.py; autocapture/training/lora.py; autocapture/training/dpo.py; autocapture/training/datasets.py; tests/test_training_manifest_schema.py
+./docs/mx_gap_matrix.md:300:  - Validators: unit_test tests/test_training_manifest_schema.py
+./docs/blueprints/autocapture_nx_blueprint.md:110:- [ ] **I033** (Phase 3) — [Add per-run storage manifest records](#i033)
+./docs/blueprints/autocapture_nx_blueprint.md:129:- [ ] **I052** (Phase 6) — [Enforce least privilege per plugin manifest](#i052)
+./docs/blueprints/autocapture_nx_blueprint.md:146:- [ ] **I069** (Phase 4) — [Immutable per-run manifest (config+locks+versions)](#i069)
+./docs/blueprints/autocapture_nx_blueprint.md:204:- [ ] **I127** (Phase 4) — [Record python/OS/package versions into run manifest](#i127)
+./docs/blueprints/autocapture_nx_blueprint.md:231:  - builtin plugin manifests declare optional deps
+./docs/blueprints/autocapture_nx_blueprint.md:569:  - Store run manifest linking run_id to config/locks hashes.
+./docs/blueprints/autocapture_nx_blueprint.md:797:  - Store it in run manifest and reference it in evidence records.
+./docs/blueprints/autocapture_nx_blueprint.md:1019:  - manifest and seal records only written after success
+./docs/blueprints/autocapture_nx_blueprint.md:1281:### I033 — Add per-run storage manifest records
+./docs/blueprints/autocapture_nx_blueprint.md:1286:  - per-run manifest records (Pattern A) stored and ledgered
+./docs/blueprints/autocapture_nx_blueprint.md:1288:  - Test: manifest exists for each run and includes expected hashes
+./docs/blueprints/autocapture_nx_blueprint.md:1293:  - Each run is reproducible/auditable from a single manifest.
+./docs/blueprints/autocapture_nx_blueprint.md:1394:  - Test: migrate copies all evidence and manifests; verification passes
+./docs/blueprints/autocapture_nx_blueprint.md:1651:### I069 — Immutable per-run manifest (config+locks+versions)
+./docs/blueprints/autocapture_nx_blueprint.md:1656:  - run manifest evidence record written early and finalized at end
+./docs/blueprints/autocapture_nx_blueprint.md:1658:  - Test: manifest includes config/plugin/contracts hashes + versions
+./docs/blueprints/autocapture_nx_blueprint.md:1663:  - A single manifest summarizes and identifies the full run context.
+./docs/blueprints/autocapture_nx_blueprint.md:1793:  - indexes record version/digest in manifest and query ledger entries
+./docs/blueprints/autocapture_nx_blueprint.md:1798:  - Store in manifest and attach to query executions for reproducibility.
+./docs/blueprints/autocapture_nx_blueprint.md:1803:### I127 — Record python/OS/package versions into run manifest
+./docs/blueprints/autocapture_nx_blueprint.md:1808:  - run manifest captures environment versions
+./docs/blueprints/autocapture_nx_blueprint.md:1810:  - Test: manifest contains python version, OS build, package versions list
+./docs/blueprints/autocapture_nx_blueprint.md:2001:  - Host enforces allowlist of capability methods per plugin manifest.
+./docs/blueprints/autocapture_nx_blueprint.md:2006:### I052 — Enforce least privilege per plugin manifest
+./docs/blueprints/autocapture_nx_blueprint.md:2011:  - plugin manifest declares required capabilities; loader enforces deny-by-default
+./docs/blueprints/autocapture_nx_blueprint.md:2015:  - Add manifest field `capabilities_required`.
+./docs/blueprints/autocapture_nx_blueprint.md:2027:  - manifest-declared read/readwrite paths enforced
+./docs/blueprints/autocapture_nx_blueprint.md:2197:  - At runtime, report installed package versions and compare to manifest where feasible.
+./docs/autocapture_nx_blueprint_final.md:272:Extend plugin manifests with explicit permissions. Network is denied to all plugins except the egress gateway. Add compatibility constraints and dependency locking.
+./docs/autocapture_nx_blueprint_final.md:481:- `hash_lock`: `{ manifest_sha256, artifact_sha256 }`
+./plugins/builtin/devtools_diffusion/plugin.json:25:    "manifest_sha256": "",
+./plugins/builtin/storage_memory/plugin.json:25:    "manifest_sha256": "",
+./docs/autocapture_mx_implementation_plan.md:17:- Plugin manifests: JSON `plugin.json` with schema `contracts/plugin_manifest.schema.json`, lockfile `config/plugin_locks.json`.
+./docs/autocapture_mx_implementation_plan.md:45:| A | MOD-001..005 | autocapture CLI + config + core utils + plugin system + autocapture_plugins manifests | tests/test_config_defaults.py; tests/test_plugin_discovery_no_import.py; tests/test_plugin_kinds_registry.py; tests/test_policy_gate.py |
+./docs/autocapture_mx_implementation_plan.md:64:| MX-PLUGIN-0001 | python_import PluginManager + ExtensionManifest; tests/test_plugin_discovery_no_import.py; autocapture plugins list --json | autocapture/plugins/manifest.py; autocapture/plugins/manager.py; autocapture/plugins/kinds.py |
+./docs/autocapture_mx_implementation_plan.md:96:| MX-TRAIN-0001 | tests/test_training_manifest_schema.py | autocapture/training/pipelines.py; autocapture/training/lora.py; autocapture/training/dpo.py; autocapture/training/datasets.py |
+./docs/autocapture_mx_implementation_plan.md:119:- Artifacts: autocapture/plugins/manifest.py; autocapture/plugins/manager.py; autocapture/plugins/kinds.py
+./docs/autocapture_mx_implementation_plan.md:121:- Minimal implementation: manifest parsing/validation, discovery without importing plugin code, list command returns plugins + extensions.
+./docs/autocapture_mx_implementation_plan.md:131:- Minimal implementation: built-in manifests for required mx.* IDs, enabled by default, kind coverage passes.
+./docs/autocapture_mx_implementation_plan.md:266:- Minimal implementation: export/import bundles with manifest + hash verification.
+./docs/autocapture_mx_implementation_plan.md:280:- Validation: unit_test tests/test_training_manifest_schema.py
+./docs/autocapture_mx_implementation_plan.md:281:- Minimal implementation: reproducible manifests for LoRA + DPO (stub workloads OK).
+./docs/autocapture_mx_blueprint.md:6:**Compatibility baseline:** Ninjra Autocapture plugin + policy patterns (manifests, policy gate, retrieval tiering, PromptOps, CI gates), extended and enforced for the Autocapture “4 Pillars”.
+./docs/autocapture_mx_blueprint.md:130:    manifest.py
+./docs/autocapture_mx_blueprint.md:251:- `autocapture_plugins/` follows the Ninjra-style manifest convention.
+./docs/autocapture_mx_blueprint.md:252:- Plugin code can live in core package or separate wheels; manifests are the single discovery surface.
+./docs/autocapture_mx_blueprint.md:295:Each manifest file is YAML with:
+./docs/autocapture_mx_blueprint.md:335:- Discovery reads manifest YAML without importing plugin code.
+./docs/autocapture_mx_blueprint.md:341:- watching manifest timestamps,
+./docs/autocapture_mx_blueprint.md:356:- plugin manifests from external directories are ignored.
+./docs/autocapture_mx_blueprint.md:376:All built-in plugin manifests live in `autocapture_plugins/` and are enabled by default unless blocked
+./docs/autocapture_mx_blueprint.md:412:Each built-in manifest declares pillar metadata and is covered by Codex validation.
+./docs/autocapture_mx_blueprint.md:733:- a manifest JSON (schema versioned)
+./docs/autocapture_mx_blueprint.md:744:- manifest schema
+./docs/autocapture_mx_blueprint.md:786:- reproducible run manifests (JSON with hashes)
+./docs/autocapture_mx_blueprint.md:854:- plugin manifest loading
+./docs/autocapture_mx_blueprint.md:922:    title: Plugin manifest schema + manager + discovery
+./docs/autocapture_mx_blueprint.md:925:      - autocapture/plugins/manifest.py
+./docs/autocapture_mx_blueprint.md:932:        target: autocapture.plugins.manifest:ExtensionManifest
+./docs/autocapture_mx_blueprint.md:1311:    title: Export/import bundles with manifest + hash verification
+./docs/autocapture_mx_blueprint.md:1342:    title: Training pipelines (LoRA + DPO) with reproducible manifests
+./docs/autocapture_mx_blueprint.md:1351:        target: tests/test_training_manifest_schema.py
+./autocapture/training/lora.py:1:"""LoRA training pipeline (deterministic manifest)."""
+./autocapture/training/lora.py:56:    manifest = {
+./autocapture/training/lora.py:57:        "manifest_version": 1,
+./autocapture/training/lora.py:66:    manifest_hash = hash_canonical(manifest)
+./autocapture/training/lora.py:67:    manifest["manifest_hash"] = manifest_hash
+./autocapture/training/lora.py:68:    manifest_path = output_dir / "manifest.json"
+./autocapture/training/lora.py:69:    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+./autocapture/training/lora.py:70:    return manifest
+./plugins/builtin/devtools_ast_ir/plugin.json:25:    "manifest_sha256": "",
+./plugins/builtin/backpressure_basic/plugin.json:25:    "manifest_sha256": "",
+./plugins/builtin/storage_encrypted/plugin.json:25:    "manifest_sha256": "",
+./plugins/builtin/capture_windows/plugin.json:30:    "manifest_sha256": "",
+./autocapture_nx/cli.py:62:    manifests = registry.discover_manifests()
+./autocapture_nx/cli.py:67:    for manifest_path in manifests:
+./autocapture_nx/cli.py:68:        with open(manifest_path, "r", encoding="utf-8") as handle:
+./autocapture_nx/cli.py:69:            manifest = json.load(handle)
+./autocapture_nx/cli.py:70:        pid = manifest["plugin_id"]
+./autocapture_nx/cli.py:75:                "enabled": enabled.get(pid, manifest.get("enabled", True)),
+./autocapture_nx/cli.py:76:                "path": str(manifest_path.parent),
+./autocapture/training/dpo.py:1:"""DPO training pipeline (deterministic manifest)."""
+./autocapture/training/dpo.py:56:    manifest = {
+./autocapture/training/dpo.py:57:        "manifest_version": 1,
+./autocapture/training/dpo.py:66:    manifest_hash = hash_canonical(manifest)
+./autocapture/training/dpo.py:67:    manifest["manifest_hash"] = manifest_hash
+./autocapture/training/dpo.py:68:    manifest_path = output_dir / "manifest.json"
+./autocapture/training/dpo.py:69:    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+./autocapture/training/dpo.py:70:    return manifest
+./plugins/builtin/answer_basic/plugin.json:25:    "manifest_sha256": "",
+./tests/test_plugin_network_block.py:27:    manifest = {
+./tests/test_plugin_network_block.py:47:        "hash_lock": {"manifest_sha256": "", "artifact_sha256": ""},
+./tests/test_plugin_network_block.py:50:        json.dump(manifest, handle, indent=2, sort_keys=True)
+./plugins/builtin/citation_basic/plugin.json:25:    "manifest_sha256": "",
+./plugins/builtin/runtime_governor/plugin.json:25:    "manifest_sha256": "",
+./plugins/builtin/audio_windows/plugin.json:25:    "manifest_sha256": "",
+./plugins/builtin/anchor_basic/plugin.json:25:    "manifest_sha256": "",
+./plugins/builtin/capture_stub/plugin.json:25:    "manifest_sha256": "",
+./tests/test_plugin_loader.py:23:    manifest = {
+./tests/test_plugin_loader.py:43:        "hash_lock": {"manifest_sha256": "", "artifact_sha256": ""},
+./tests/test_plugin_loader.py:46:        json.dump(manifest, handle, indent=2, sort_keys=True)
+./plugins/builtin/observability_basic/plugin.json:25:    "manifest_sha256": "",
+./tests/test_plugin_discovery_no_import.py:13:            manifest = root / "mx.test.yaml"
+./tests/test_plugin_discovery_no_import.py:14:            manifest.write_text(
+./tests/test_plugin_hotswap.py:16:            manifest_path = root / "mx.hot.yaml"
+./tests/test_plugin_hotswap.py:21:            manifest_path.write_text(
+./tests/test_plugin_hotswap.py:61:                manifest_path.write_text(
+./plugins/builtin/reranker_stub/plugin.json:25:    "manifest_sha256": "",
+./plugins/builtin/ocr_stub/plugin.json:25:    "manifest_sha256": "",
+./plugins/builtin/retrieval_basic/plugin.json:25:    "manifest_sha256": "",
+./plugins/builtin/meta_configurator_noop/plugin.json:25:    "manifest_sha256": "",
+./plugins/builtin/meta_policy_noop/plugin.json:25:    "manifest_sha256": "",
+./autocapture/storage/archive.py:37:        manifest = {"schema_version": 1, "files": files}
+./autocapture/storage/archive.py:38:        zf.writestr("manifest.json", json.dumps(manifest, indent=2, sort_keys=True))
+./autocapture/storage/archive.py:47:            manifest = json.loads(zf.read("manifest.json"))
+./autocapture/storage/archive.py:49:            return False, ["manifest_missing"]
+./autocapture/storage/archive.py:50:        files = manifest.get("files", {})
+./plugins/builtin/ledger_basic/plugin.json:25:    "manifest_sha256": "",

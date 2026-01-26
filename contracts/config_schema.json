@@ -245,6 +245,18 @@
       },
       "type": "object"
     },
+    "models": {
+      "additionalProperties": false,
+      "properties": {
+        "reranker_path": {
+          "type": ["string", "null"]
+        },
+        "vlm_path": {
+          "type": ["string", "null"]
+        }
+      },
+      "type": "object"
+    },
     "observability": {
       "additionalProperties": false,
       "properties": {
@@ -607,6 +619,9 @@
             "suspend_deadline_ms"
           ],
           "type": "object"
+        },
+        "run_id": {
+          "type": "string"
         },
         "timezone": {
           "type": "string"

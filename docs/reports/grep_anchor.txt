@@ -1,0 +1,204 @@
+# rg -n /anchor/
+./contracts/user_surface.md:28:  - Rotates root keys, rewraps storage, and writes a ledger + anchor entry.
+./tools/blueprint_items.json:61:    "title": "Add golden chain test: ledger verify + anchor verify",
+./tools/blueprint_items.json:93:    "title": "Doctor validates locks, storage, anchors, and network policy",
+./tools/blueprint_items.json:629:    "title": "Citation resolver validates hashes/anchors/spans",
+./tools/blueprint_items.json:733:    "title": "Proof bundles export (evidence + ledger slice + anchors)",
+./tools/blueprint_items.json:909:    "title": "Separate keys by purpose (metadata/media/tokenization/anchor)",
+./tools/blueprint_items.json:925:    "title": "Add verify commands (ledger/anchors/evidence)",
+./docs/STATE.md:22:- Keyring + rotation implemented via `autocapture keys rotate` with ledger + anchor entries.
+./docs/STATE.md:23:- Anchor store defaults to `data_anchor/` path to separate from `storage.data_dir`.
+./docs/configuration.md:29:- `storage.anchor.path` controls the anchor store location (defaults to `data_anchor/`).
+./docs/configuration.md:30:- `storage.anchor.use_dpapi` toggles DPAPI protection for anchor entries on Windows.
+./contracts/security.md:23:- Anchor writer records ledger head hashes in a separate anchor store.
+./docs/blueprints/autocapture_nx_blueprint.md:10:- **P4 Citable**: every non-trivial output must be traceable to immutable evidence with verifiable provenance (hashes, ledger, anchors).
+./docs/blueprints/autocapture_nx_blueprint.md:18:- **Deterministic, verifiable provenance**: hash-chained ledger + anchors + verification CLI.
+./docs/blueprints/autocapture_nx_blueprint.md:37:### Pattern C — Ledger + anchor
+./docs/blueprints/autocapture_nx_blueprint.md:41:- Verification commands recompute chain and validate anchors.
+./docs/blueprints/autocapture_nx_blueprint.md:119:- [ ] **I042** (Phase 4) — [Citation resolver validates hashes/anchors/spans](#i042)
+./docs/blueprints/autocapture_nx_blueprint.md:137:- [ ] **I060** (Phase 6) — [Separate keys by purpose (metadata/media/tokenization/anchor)](#i060)
+./docs/blueprints/autocapture_nx_blueprint.md:139:- [ ] **I062** (Phase 6) — [Add verify commands (ledger/anchors/evidence)](#i062)
+./docs/blueprints/autocapture_nx_blueprint.md:153:- [ ] **I076** (Phase 4) — [Proof bundles export (evidence + ledger slice + anchors)](#i076)
+./docs/blueprints/autocapture_nx_blueprint.md:168:- [ ] **I091** (Phase 0) — [Add golden chain test: ledger verify + anchor verify](#i091)
+./docs/blueprints/autocapture_nx_blueprint.md:172:- [ ] **I095** (Phase 0) — [Doctor validates locks, storage, anchors, and network policy](#i095)
+./docs/blueprints/autocapture_nx_blueprint.md:352:### I091 — Add golden chain test: ledger verify + anchor verify
+./docs/blueprints/autocapture_nx_blueprint.md:357:  - Golden test corpus for ledger chain + anchors
+./docs/blueprints/autocapture_nx_blueprint.md:360:  - Test: produce N entries; verify chain and anchor head deterministically
+./docs/blueprints/autocapture_nx_blueprint.md:363:  - Add deterministic test keys for anchor signing in test env only.
+./docs/blueprints/autocapture_nx_blueprint.md:420:### I095 — Doctor validates locks, storage, anchors, and network policy
+./docs/blueprints/autocapture_nx_blueprint.md:431:  - anchor signing availability, network policy, path resolution.
+./docs/blueprints/autocapture_nx_blueprint.md:1555:  - span_start/end, ledger_head_ref, anchor_ref.
+./docs/blueprints/autocapture_nx_blueprint.md:1560:### I042 — Citation resolver validates hashes/anchors/spans
+./docs/blueprints/autocapture_nx_blueprint.md:1570:  - verify anchor, validate span exists in evidence.
+./docs/blueprints/autocapture_nx_blueprint.md:1641:  - anchor plugin anchors ledger head on schedule
+./docs/blueprints/autocapture_nx_blueprint.md:1643:  - Test: anchors created at configured cadence; verification passes
+./docs/blueprints/autocapture_nx_blueprint.md:1645:  - Anchor cadence: every N entries or M minutes; persist anchor records.
+./docs/blueprints/autocapture_nx_blueprint.md:1671:  - citation schema: include evidence hash + ledger/anchor refs
+./docs/blueprints/autocapture_nx_blueprint.md:1758:### I076 — Proof bundles export (evidence + ledger slice + anchors)
+./docs/blueprints/autocapture_nx_blueprint.md:1768:  - ledger slice covering them, relevant anchors, and verification reports.
+./docs/blueprints/autocapture_nx_blueprint.md:2127:### I060 — Separate keys by purpose (metadata/media/tokenization/anchor)
+./docs/blueprints/autocapture_nx_blueprint.md:2136:  - Define key namespaces: metadata, media, tokenizer, anchors.
+./docs/blueprints/autocapture_nx_blueprint.md:2147:  - anchor plugin uses HMAC/signature over ledger head
+./docs/blueprints/autocapture_nx_blueprint.md:2149:  - Test: anchor verify fails if anchor modified or wrong key used
+./docs/blueprints/autocapture_nx_blueprint.md:2157:### I062 — Add verify commands (ledger/anchors/evidence)
+./docs/blueprints/autocapture_nx_blueprint.md:2162:  - verify CLI/API: `verify ledger`, `verify anchors`, `verify evidence`
+./docs/blueprints/autocapture_nx_blueprint.md:2166:  - Ledger verify: recompute chain; anchor verify: verify signatures; evidence verify: hash checks.
+./contracts/plugin_sdk.md:46:- `anchor.writer`
+./docs/autocapture_nx_blueprint_final.md:71:All pipeline actions are recorded in a hash-chained ledger with periodic anchoring.
+./docs/autocapture_nx_blueprint_final.md:413:### D14 Ledger anchoring in a second trust domain
+./docs/autocapture_nx_blueprint_final.md:430:- Ledger writer + anchor writer + doctor verifier.
+./docs/autocapture_nx_blueprint_final.md:433:- Tamper simulation tests: rewrite DB+ledger but not anchor → detection triggers.
+./docs/autocapture_nx_blueprint_final.md:434:- Gate: citation emission requires ledger+anchor verification.
+./docs/autocapture_nx_blueprint_final.md:449:  - anchor store
+./docs/autocapture_nx_blueprint_final.md:971:### Ledger and anchors
+./docs/autocapture_nx_blueprint_final.md:974:- Anchor store records periodic `(ts_utc, ledger_head_hash, anchor_seq)` entries in a second domain.
+./docs/autocapture_nx_blueprint_final.md:976:Windows anchor implementation options (choose one):
+./docs/autocapture_nx_blueprint_final.md:977:- DPAPI-protected registry value with monotonic `anchor_seq`
+./docs/autocapture_nx_blueprint_final.md:993:- Integrity and anchor verification tests.
+./docs/autocapture_nx_blueprint_final.md:1019:- Rotation events are recorded in the ledger and anchored.
+./docs/autocapture_nx_blueprint_final.md:1060:- ledger integrity + anchor verification
+./docs/autocapture_nx_blueprint_final.md:1151:- anchor verification
+./docs/assumptions_checklist.md:68:   - Current state: anchor path configured in `config/default.json` and checked in `Kernel.doctor`.
+./docs/assumptions_checklist.md:71:     - Add verification that anchor storage is on distinct trust boundary.
+./docs/assumptions_checklist.md:74:     - Doctor checks fail if anchor storage is co-located with data store.
+./docs/assumptions.md:20:   - Test coverage: `tests/test_anchor.py` verifies anchor records are written.
+./tools/hypervisor/DECISIONS.md:40:- Decision: default anchor store to `data_anchor/` with optional DPAPI protection.
+./tools/hypervisor/DECISIONS.md:41:- Rationale: separate trust domain for tamper-evident anchoring.
+./tools/hypervisor/DECISIONS.md:42:- Alternatives: registry/credential manager anchors.
+./tools/hypervisor/DECISIONS.md:43:- Rollback: place anchors under `storage.data_dir` (not recommended).
+./docs/reports/grep_ledger.txt:2:./contracts/user_surface.md:28:  - Rotates root keys, rewraps storage, and writes a ledger + anchor entry.
+./docs/reports/grep_ledger.txt:10:./contracts/security.md:23:- Anchor writer records ledger head hashes in a separate anchor store.
+./docs/reports/grep_ledger.txt:14:./tools/blueprint_items.json:61:    "title": "Add golden chain test: ledger verify + anchor verify",
+./docs/reports/grep_ledger.txt:22:./tools/blueprint_items.json:733:    "title": "Proof bundles export (evidence + ledger slice + anchors)",
+./docs/reports/grep_ledger.txt:23:./tools/blueprint_items.json:925:    "title": "Add verify commands (ledger/anchors/evidence)",
+./docs/reports/grep_ledger.txt:31:./docs/STATE.md:22:- Keyring + rotation implemented via `autocapture keys rotate` with ledger + anchor entries.
+./docs/reports/grep_ledger.txt:37:./plugins/builtin/capture_windows/plugin.py:64:                if not self._check_disk(logger, journal, ledger, anchor, warn_free, critical_free):
+./docs/reports/grep_ledger.txt:38:./plugins/builtin/capture_windows/plugin.py:67:                self._flush_segment(frames, storage_media, storage_meta, journal, ledger, anchor, sequence)
+./docs/reports/grep_ledger.txt:39:./plugins/builtin/capture_windows/plugin.py:76:    def _flush_segment(self, frames, storage_media, storage_meta, journal, ledger, anchor, sequence):
+./docs/reports/grep_ledger.txt:41:./plugins/builtin/capture_windows/plugin.py:118:        anchor.anchor(ledger_hash)
+./docs/reports/grep_ledger.txt:42:./plugins/builtin/capture_windows/plugin.py:120:    def _check_disk(self, logger, journal, ledger, anchor, warn_free, critical_free) -> bool:
+./docs/reports/grep_ledger.txt:44:./plugins/builtin/capture_windows/plugin.py:153:            anchor.anchor(ledger_hash)
+./docs/reports/grep_ledger.txt:59:./plugins/builtin/anchor_basic/plugin.py:1:"""Anchor writer plugin for ledger head hashes."""
+./docs/reports/grep_ledger.txt:60:./plugins/builtin/anchor_basic/plugin.py:33:    def anchor(self, ledger_head_hash: str) -> dict[str, Any]:
+./docs/reports/grep_ledger.txt:61:./plugins/builtin/anchor_basic/plugin.py:37:            "ledger_head_hash": ledger_head_hash,
+./docs/reports/grep_ledger.txt:62:./plugins/builtin/anchor_basic/plugin.json:23:  "depends_on": ["builtin.ledger.basic"],
+./docs/reports/grep_ledger.txt:86:./docs/blueprints/autocapture_nx_blueprint.md:10:- **P4 Citable**: every non-trivial output must be traceable to immutable evidence with verifiable provenance (hashes, ledger, anchors).
+./docs/reports/grep_ledger.txt:87:./docs/blueprints/autocapture_nx_blueprint.md:18:- **Deterministic, verifiable provenance**: hash-chained ledger + anchors + verification CLI.
+./docs/reports/grep_ledger.txt:92:./docs/blueprints/autocapture_nx_blueprint.md:139:- [ ] **I062** (Phase 6) — [Add verify commands (ledger/anchors/evidence)](#i062)
+./docs/reports/grep_ledger.txt:94:./docs/blueprints/autocapture_nx_blueprint.md:153:- [ ] **I076** (Phase 4) — [Proof bundles export (evidence + ledger slice + anchors)](#i076)
+./docs/reports/grep_ledger.txt:97:./docs/blueprints/autocapture_nx_blueprint.md:168:- [ ] **I091** (Phase 0) — [Add golden chain test: ledger verify + anchor verify](#i091)
+./docs/reports/grep_ledger.txt:106:./docs/blueprints/autocapture_nx_blueprint.md:352:### I091 — Add golden chain test: ledger verify + anchor verify
+./docs/reports/grep_ledger.txt:107:./docs/blueprints/autocapture_nx_blueprint.md:357:  - Golden test corpus for ledger chain + anchors
+./docs/reports/grep_ledger.txt:139:./docs/blueprints/autocapture_nx_blueprint.md:1555:  - span_start/end, ledger_head_ref, anchor_ref.
+./docs/reports/grep_ledger.txt:143:./docs/blueprints/autocapture_nx_blueprint.md:1641:  - anchor plugin anchors ledger head on schedule
+./docs/reports/grep_ledger.txt:146:./docs/blueprints/autocapture_nx_blueprint.md:1671:  - citation schema: include evidence hash + ledger/anchor refs
+./docs/reports/grep_ledger.txt:148:./docs/blueprints/autocapture_nx_blueprint.md:1758:### I076 — Proof bundles export (evidence + ledger slice + anchors)
+./docs/reports/grep_ledger.txt:149:./docs/blueprints/autocapture_nx_blueprint.md:1768:  - ledger slice covering them, relevant anchors, and verification reports.
+./docs/reports/grep_ledger.txt:154:./docs/blueprints/autocapture_nx_blueprint.md:2147:  - anchor plugin uses HMAC/signature over ledger head
+./docs/reports/grep_ledger.txt:156:./docs/blueprints/autocapture_nx_blueprint.md:2157:### I062 — Add verify commands (ledger/anchors/evidence)
+./docs/reports/grep_ledger.txt:157:./docs/blueprints/autocapture_nx_blueprint.md:2162:  - verify CLI/API: `verify ledger`, `verify anchors`, `verify evidence`
+./docs/reports/grep_ledger.txt:165:./docs/autocapture_nx_blueprint_final.md:71:All pipeline actions are recorded in a hash-chained ledger with periodic anchoring.
+./docs/reports/grep_ledger.txt:174:./docs/autocapture_nx_blueprint_final.md:433:- Tamper simulation tests: rewrite DB+ledger but not anchor → detection triggers.
+./docs/reports/grep_ledger.txt:175:./docs/autocapture_nx_blueprint_final.md:434:- Gate: citation emission requires ledger+anchor verification.
+./docs/reports/grep_ledger.txt:180:./docs/autocapture_nx_blueprint_final.md:974:- Anchor store records periodic `(ts_utc, ledger_head_hash, anchor_seq)` entries in a second domain.
+./docs/reports/grep_ledger.txt:181:./docs/autocapture_nx_blueprint_final.md:1019:- Rotation events are recorded in the ledger and anchored.
+./docs/reports/grep_ledger.txt:183:./docs/autocapture_nx_blueprint_final.md:1060:- ledger integrity + anchor verification
+./docs/reports/grep_ledger.txt:189:./docs/reports/blueprint_items.md:14:| I091 | Phase 0: Scaffolding and gates | Add golden chain test: ledger verify + anchor verify |  |  |  |
+./docs/reports/grep_ledger.txt:197:./docs/reports/blueprint_items.md:98:| I076 | Phase 4: Retrieval + provenance + citations | Proof bundles export (evidence + ledger slice + anchors) |  |  |  |
+./docs/reports/grep_ledger.txt:198:./docs/reports/blueprint_items.md:122:| I062 | Phase 6: Security + egress hardening | Add verify commands (ledger/anchors/evidence) |  |  |  |
+./docs/reports/grep_ledger.txt:208:./tests/test_anchor.py:17:            self.assertEqual(record["ledger_head_hash"], "deadbeef")
+./docs/reports/grep_ledger.txt:252:./autocapture_nx/kernel/key_rotation.py:47:    anchor.anchor(ledger_hash)
+./docs/reports/blueprint_items.md:14:| I091 | Phase 0: Scaffolding and gates | Add golden chain test: ledger verify + anchor verify |  |  |  |
+./docs/reports/blueprint_items.md:18:| I095 | Phase 0: Scaffolding and gates | Doctor validates locks, storage, anchors, and network policy |  |  |  |
+./docs/reports/blueprint_items.md:85:| I042 | Phase 4: Retrieval + provenance + citations | Citation resolver validates hashes/anchors/spans |  |  |  |
+./docs/reports/blueprint_items.md:98:| I076 | Phase 4: Retrieval + provenance + citations | Proof bundles export (evidence + ledger slice + anchors) |  |  |  |
+./docs/reports/blueprint_items.md:120:| I060 | Phase 6: Security + egress hardening | Separate keys by purpose (metadata/media/tokenization/anchor) |  |  |  |
+./docs/reports/blueprint_items.md:122:| I062 | Phase 6: Security + egress hardening | Add verify commands (ledger/anchors/evidence) |  |  |  |
+./contracts/ir_pins.json:3:    "anchor.writer",
+./contracts/ir_pins.json:49:      "id": "builtin.anchor.basic"
+./docs/reports/grep_journal.txt:75:./docs/reports/grep_ledger.txt:37:./plugins/builtin/capture_windows/plugin.py:64:                if not self._check_disk(logger, journal, ledger, anchor, warn_free, critical_free):
+./docs/reports/grep_journal.txt:76:./docs/reports/grep_ledger.txt:38:./plugins/builtin/capture_windows/plugin.py:67:                self._flush_segment(frames, storage_media, storage_meta, journal, ledger, anchor, sequence)
+./docs/reports/grep_journal.txt:77:./docs/reports/grep_ledger.txt:39:./plugins/builtin/capture_windows/plugin.py:76:    def _flush_segment(self, frames, storage_media, storage_meta, journal, ledger, anchor, sequence):
+./docs/reports/grep_journal.txt:78:./docs/reports/grep_ledger.txt:42:./plugins/builtin/capture_windows/plugin.py:120:    def _check_disk(self, logger, journal, ledger, anchor, warn_free, critical_free) -> bool:
+./docs/reports/grep_journal.txt:123:./plugins/builtin/capture_windows/plugin.py:64:                if not self._check_disk(logger, journal, ledger, anchor, warn_free, critical_free):
+./docs/reports/grep_journal.txt:124:./plugins/builtin/capture_windows/plugin.py:67:                self._flush_segment(frames, storage_media, storage_meta, journal, ledger, anchor, sequence)
+./docs/reports/grep_journal.txt:125:./plugins/builtin/capture_windows/plugin.py:76:    def _flush_segment(self, frames, storage_media, storage_meta, journal, ledger, anchor, sequence):
+./docs/reports/grep_journal.txt:127:./plugins/builtin/capture_windows/plugin.py:120:    def _check_disk(self, logger, journal, ledger, anchor, warn_free, critical_free) -> bool:
+./docs/reports/grep_evidence.txt:52:./docs/blueprints/autocapture_nx_blueprint.md:10:- **P4 Citable**: every non-trivial output must be traceable to immutable evidence with verifiable provenance (hashes, ledger, anchors).
+./docs/reports/grep_evidence.txt:60:./docs/blueprints/autocapture_nx_blueprint.md:139:- [ ] **I062** (Phase 6) — [Add verify commands (ledger/anchors/evidence)](#i062)
+./docs/reports/grep_evidence.txt:62:./docs/blueprints/autocapture_nx_blueprint.md:153:- [ ] **I076** (Phase 4) — [Proof bundles export (evidence + ledger slice + anchors)](#i076)
+./docs/reports/grep_evidence.txt:96:./docs/blueprints/autocapture_nx_blueprint.md:1570:  - verify anchor, validate span exists in evidence.
+./docs/reports/grep_evidence.txt:107:./docs/blueprints/autocapture_nx_blueprint.md:1671:  - citation schema: include evidence hash + ledger/anchor refs
+./docs/reports/grep_evidence.txt:110:./docs/blueprints/autocapture_nx_blueprint.md:1758:### I076 — Proof bundles export (evidence + ledger slice + anchors)
+./docs/reports/grep_evidence.txt:114:./docs/blueprints/autocapture_nx_blueprint.md:2157:### I062 — Add verify commands (ledger/anchors/evidence)
+./docs/reports/grep_evidence.txt:115:./docs/blueprints/autocapture_nx_blueprint.md:2162:  - verify CLI/API: `verify ledger`, `verify anchors`, `verify evidence`
+./docs/reports/grep_evidence.txt:116:./docs/blueprints/autocapture_nx_blueprint.md:2166:  - Ledger verify: recompute chain; anchor verify: verify signatures; evidence verify: hash checks.
+./docs/reports/grep_evidence.txt:123:./docs/reports/blueprint_items.md:98:| I076 | Phase 4: Retrieval + provenance + citations | Proof bundles export (evidence + ledger slice + anchors) |  |  |  |
+./docs/reports/grep_evidence.txt:124:./docs/reports/blueprint_items.md:122:| I062 | Phase 6: Security + egress hardening | Add verify commands (ledger/anchors/evidence) |  |  |  |
+./docs/reports/grep_evidence.txt:127:./docs/reports/grep_ledger.txt:22:./tools/blueprint_items.json:733:    "title": "Proof bundles export (evidence + ledger slice + anchors)",
+./docs/reports/grep_evidence.txt:128:./docs/reports/grep_ledger.txt:23:./tools/blueprint_items.json:925:    "title": "Add verify commands (ledger/anchors/evidence)",
+./docs/reports/grep_evidence.txt:131:./docs/reports/grep_ledger.txt:86:./docs/blueprints/autocapture_nx_blueprint.md:10:- **P4 Citable**: every non-trivial output must be traceable to immutable evidence with verifiable provenance (hashes, ledger, anchors).
+./docs/reports/grep_evidence.txt:132:./docs/reports/grep_ledger.txt:92:./docs/blueprints/autocapture_nx_blueprint.md:139:- [ ] **I062** (Phase 6) — [Add verify commands (ledger/anchors/evidence)](#i062)
+./docs/reports/grep_evidence.txt:133:./docs/reports/grep_ledger.txt:94:./docs/blueprints/autocapture_nx_blueprint.md:153:- [ ] **I076** (Phase 4) — [Proof bundles export (evidence + ledger slice + anchors)](#i076)
+./docs/reports/grep_evidence.txt:137:./docs/reports/grep_ledger.txt:146:./docs/blueprints/autocapture_nx_blueprint.md:1671:  - citation schema: include evidence hash + ledger/anchor refs
+./docs/reports/grep_evidence.txt:138:./docs/reports/grep_ledger.txt:148:./docs/blueprints/autocapture_nx_blueprint.md:1758:### I076 — Proof bundles export (evidence + ledger slice + anchors)
+./docs/reports/grep_evidence.txt:140:./docs/reports/grep_ledger.txt:156:./docs/blueprints/autocapture_nx_blueprint.md:2157:### I062 — Add verify commands (ledger/anchors/evidence)
+./docs/reports/grep_evidence.txt:141:./docs/reports/grep_ledger.txt:157:./docs/blueprints/autocapture_nx_blueprint.md:2162:  - verify CLI/API: `verify ledger`, `verify anchors`, `verify evidence`
+./docs/reports/grep_evidence.txt:145:./docs/reports/grep_ledger.txt:197:./docs/reports/blueprint_items.md:98:| I076 | Phase 4: Retrieval + provenance + citations | Proof bundles export (evidence + ledger slice + anchors) |  |  |  |
+./docs/reports/grep_evidence.txt:146:./docs/reports/grep_ledger.txt:198:./docs/reports/blueprint_items.md:122:| I062 | Phase 6: Security + egress hardening | Add verify commands (ledger/anchors/evidence) |  |  |  |
+./docs/reports/grep_evidence.txt:151:./tools/blueprint_items.json:733:    "title": "Proof bundles export (evidence + ledger slice + anchors)",
+./docs/reports/grep_evidence.txt:152:./tools/blueprint_items.json:925:    "title": "Add verify commands (ledger/anchors/evidence)",
+./contracts/config_schema.json:614:        "anchor": {
+./contracts/config_schema.json:722:        "anchor"
+./docs/reports/grep_citation.txt:159:./docs/autocapture_nx_blueprint_final.md:434:- Gate: citation emission requires ledger+anchor verification.
+./docs/reports/grep_citation.txt:213:./docs/reports/grep_ledger.txt:146:./docs/blueprints/autocapture_nx_blueprint.md:1671:  - citation schema: include evidence hash + ledger/anchor refs
+./docs/reports/grep_citation.txt:214:./docs/reports/grep_ledger.txt:175:./docs/autocapture_nx_blueprint_final.md:434:- Gate: citation emission requires ledger+anchor verification.
+./docs/reports/grep_citation.txt:215:./docs/reports/grep_ledger.txt:197:./docs/reports/blueprint_items.md:98:| I076 | Phase 4: Retrieval + provenance + citations | Proof bundles export (evidence + ledger slice + anchors) |  |  |  |
+./docs/reports/grep_citation.txt:223:./docs/reports/blueprint_items.md:85:| I042 | Phase 4: Retrieval + provenance + citations | Citation resolver validates hashes/anchors/spans |  |  |  |
+./docs/reports/grep_citation.txt:236:./docs/reports/blueprint_items.md:98:| I076 | Phase 4: Retrieval + provenance + citations | Proof bundles export (evidence + ledger slice + anchors) |  |  |  |
+./docs/reports/grep_citation.txt:255:./docs/reports/grep_evidence.txt:107:./docs/blueprints/autocapture_nx_blueprint.md:1671:  - citation schema: include evidence hash + ledger/anchor refs
+./docs/reports/grep_citation.txt:258:./docs/reports/grep_evidence.txt:123:./docs/reports/blueprint_items.md:98:| I076 | Phase 4: Retrieval + provenance + citations | Proof bundles export (evidence + ledger slice + anchors) |  |  |  |
+./docs/reports/grep_citation.txt:260:./docs/reports/grep_evidence.txt:137:./docs/reports/grep_ledger.txt:146:./docs/blueprints/autocapture_nx_blueprint.md:1671:  - citation schema: include evidence hash + ledger/anchor refs
+./docs/reports/grep_citation.txt:261:./docs/reports/grep_evidence.txt:145:./docs/reports/grep_ledger.txt:197:./docs/reports/blueprint_items.md:98:| I076 | Phase 4: Retrieval + provenance + citations | Proof bundles export (evidence + ledger slice + anchors) |  |  |  |
+./docs/reports/grep_citation.txt:278:./docs/blueprints/autocapture_nx_blueprint.md:1671:  - citation schema: include evidence hash + ledger/anchor refs
+./config/plugin_locks.json:4:    "builtin.anchor.basic": {
+./docs/reports/grep_canonical_json.txt:41:./plugins/builtin/anchor_basic/plugin.py:10:from autocapture_nx.kernel.canonical_json import dumps
+./config/default.json:66:      "anchor.writer",
+./config/default.json:96:      "builtin.anchor.basic",
+./config/default.json:140:      "builtin.anchor.basic",
+./config/default.json:180:      "builtin.anchor.basic": true,
+./config/default.json:216:        "builtin.anchor.basic",
+./config/default.json:302:    "anchor": {
+./config/default.json:303:      "path": "data_anchor/anchors.ndjson",
+./plugins/builtin/capture_windows/plugin.py:50:        anchor = self.context.get_capability("anchor.writer")
+./plugins/builtin/capture_windows/plugin.py:64:                if not self._check_disk(logger, journal, ledger, anchor, warn_free, critical_free):
+./plugins/builtin/capture_windows/plugin.py:67:                self._flush_segment(frames, storage_media, storage_meta, journal, ledger, anchor, sequence)
+./plugins/builtin/capture_windows/plugin.py:76:    def _flush_segment(self, frames, storage_media, storage_meta, journal, ledger, anchor, sequence):
+./plugins/builtin/capture_windows/plugin.py:118:        anchor.anchor(ledger_hash)
+./plugins/builtin/capture_windows/plugin.py:120:    def _check_disk(self, logger, journal, ledger, anchor, warn_free, critical_free) -> bool:
+./plugins/builtin/capture_windows/plugin.py:153:            anchor.anchor(ledger_hash)
+./plugins/builtin/capture_windows/plugin.json:26:    "builtin.anchor.basic",
+./plugins/builtin/anchor_basic/plugin.py:18:        anchor_cfg = storage_cfg.get("anchor", {})
+./plugins/builtin/anchor_basic/plugin.py:19:        self._path = anchor_cfg.get("path", os.path.join("data_anchor", "anchors.ndjson"))
+./plugins/builtin/anchor_basic/plugin.py:20:        self._use_dpapi = bool(anchor_cfg.get("use_dpapi", os.name == "nt"))
+./plugins/builtin/anchor_basic/plugin.py:31:        return {"anchor.writer": self}
+./plugins/builtin/anchor_basic/plugin.py:33:    def anchor(self, ledger_head_hash: str) -> dict[str, Any]:
+./plugins/builtin/anchor_basic/plugin.py:35:            "anchor_seq": self._seq,
+./plugins/builtin/anchor_basic/plugin.json:2:  "plugin_id": "builtin.anchor.basic",
+./plugins/builtin/anchor_basic/plugin.json:7:      "kind": "anchor.writer",
+./autocapture_nx/kernel/loader.py:97:        anchor_cfg = config.get("storage", {}).get("anchor", {})
+./autocapture_nx/kernel/loader.py:98:        anchor_path = anchor_cfg.get("path")
+./autocapture_nx/kernel/loader.py:99:        if anchor_path:
+./autocapture_nx/kernel/loader.py:101:            anchor_abs = Path(anchor_path).resolve()
+./autocapture_nx/kernel/loader.py:103:                anchor_abs.relative_to(data_dir)
+./autocapture_nx/kernel/loader.py:109:                    name="anchor_separate_domain",
+./autocapture_nx/kernel/loader.py:111:                    detail="anchor store separate from data_dir" if ok else "anchor path within data_dir",
+./tests/test_anchor.py:6:from plugins.builtin.anchor_basic.plugin import AnchorWriter
+./tests/test_anchor.py:10:    def test_anchor_writes(self):
+./tests/test_anchor.py:12:            anchor_path = os.path.join(tmp, "anchor", "anchors.ndjson")
+./tests/test_anchor.py:13:            config = {"storage": {"data_dir": tmp, "anchor": {"path": anchor_path, "use_dpapi": False}}}
+./tests/test_anchor.py:15:            writer = AnchorWriter("anchor", ctx)
+./tests/test_anchor.py:16:            record = writer.anchor("deadbeef")
+./tests/test_anchor.py:18:            self.assertTrue(os.path.exists(anchor_path))
+./autocapture_nx/kernel/key_rotation.py:46:    anchor = system.get("anchor.writer")
+./autocapture_nx/kernel/key_rotation.py:47:    anchor.anchor(ledger_hash)

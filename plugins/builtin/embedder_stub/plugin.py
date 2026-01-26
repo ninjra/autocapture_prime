@@ -23,9 +23,9 @@ class EmbedderLocal(PluginBase):
             from sentence_transformers import SentenceTransformer
         except Exception as exc:
             raise RuntimeError(f"Missing embedder dependency: {exc}")
-        model_path = os.path.join("D:\\autocapture", "models", "embeddings")
-        if not os.path.isdir(model_path):
-            raise RuntimeError(f"Missing embedder model files at {model_path}")
+        model_path = self.context.config.get("indexing", {}).get("embedder_model")
+        if not model_path or not os.path.isdir(model_path):
+            raise RuntimeError("Missing embedder model files; set indexing.embedder_model to a local path")
         try:
             self._model = SentenceTransformer(model_path)
         except Exception as exc:

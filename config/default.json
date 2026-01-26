@@ -21,7 +21,7 @@
       "mode": "raw"
     },
     "video": {
-      "backend": "desktop_duplication_nvenc",
+      "backend": "mss",
       "enabled": true,
       "fps_target": 30,
       "resolution": "native",
@@ -58,6 +58,7 @@
     "required_capabilities": [
       "egress.gateway",
       "privacy.egress_sanitizer",
+      "event.builder",
       "storage.metadata",
       "storage.media",
       "storage.entity_map",
@@ -77,6 +78,10 @@
   },
   "llm": {
     "model": "sshleifer/tiny-gpt2"
+  },
+  "models": {
+    "reranker_path": null,
+    "vlm_path": null
   },
   "observability": {
     "allow_evidence": false,

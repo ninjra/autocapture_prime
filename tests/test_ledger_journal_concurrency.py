@@ -18,6 +18,7 @@ def _context(tmp: str) -> PluginContext:
             "anchor": {"path": str(Path(tmp) / "anchors.ndjson"), "use_dpapi": False},
         }
     }
+    config["runtime"] = {"run_id": "run1", "timezone": "UTC"}
     return PluginContext(config=config, get_capability=lambda _k: None, logger=lambda _m: None)
 
 

@@ -10,21 +10,33 @@ from plugins.builtin.journal_basic.plugin import JournalWriter
 class LedgerJournalTests(unittest.TestCase):
     def test_ledger_requires_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
-            ctx = PluginContext(config={"storage": {"data_dir": tmp}}, get_capability=lambda _k: None, logger=lambda _m: None)
+            ctx = PluginContext(
+                config={"storage": {"data_dir": tmp}, "runtime": {"run_id": "run1", "timezone": "UTC"}},
+                get_capability=lambda _k: None,
+                logger=lambda _m: None,
+            )
             ledger = LedgerWriter("ledger", ctx)
             with self.assertRaises(ValueError):
                 ledger.append({"schema_version": 1})
 
     def test_journal_requires_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
-            ctx = PluginContext(config={"storage": {"data_dir": tmp}}, get_capability=lambda _k: None, logger=lambda _m: None)
+            ctx = PluginContext(
+                config={"storage": {"data_dir": tmp}, "runtime": {"run_id": "run1", "timezone": "UTC"}},
+                get_capability=lambda _k: None,
+                logger=lambda _m: None,
+            )
             journal = JournalWriter("journal", ctx)
             with self.assertRaises(ValueError):
                 journal.append({"schema_version": 1})
 
     def test_ledger_hash_chain(self):
         with tempfile.TemporaryDirectory() as tmp:
-            ctx = PluginContext(config={"storage": {"data_dir": tmp}}, get_capability=lambda _k: None, logger=lambda _m: None)
+            ctx = PluginContext(
+                config={"storage": {"data_dir": tmp}, "runtime": {"run_id": "run1", "timezone": "UTC"}},
+                get_capability=lambda _k: None,
+                logger=lambda _m: None,
+            )
             ledger = LedgerWriter("ledger", ctx)
             entry1 = {
                 "schema_version": 1,

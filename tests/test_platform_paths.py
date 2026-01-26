@@ -61,6 +61,7 @@ class PlatformPathTests(unittest.TestCase):
                 kernel = Kernel(default_config_paths(), safe_mode=True)
                 kernel.boot()
                 checks = kernel.doctor()
+                kernel.shutdown()
             finally:
                 if original_config is None:
                     os.environ.pop("AUTOCAPTURE_CONFIG_DIR", None)

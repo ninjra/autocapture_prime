@@ -43,9 +43,17 @@ def extract_on_demand(system, time_window: dict[str, Any] | None, limit: int = 5
     processed = 0
     for record_id in getattr(metadata, "keys", lambda: [])():
         record = metadata.get(record_id, {})
+        record_type = str(record.get("record_type", ""))
+        if not record_type.startswith("evidence.capture."):
+            continue
         if not _within_window(record.get("ts_utc"), time_window):
             continue
-        if record.get("text"):
+        run_id = record_id.split("/", 1)[0] if "/" in record_id else None
+        if not run_id and hasattr(system, "config"):
+            run_id = getattr(system, "config", {}).get("runtime", {}).get("run_id")
+        run_id = run_id or "run"
+        derived_id = f"{run_id}/derived.text/{record_id.replace('/', '_')}"
+        if metadata.get(derived_id):
             continue
         blob = media.get(record_id)
         if not blob:
@@ -64,8 +72,15 @@ def extract_on_demand(system, time_window: dict[str, Any] | None, limit: int = 5
         except Exception:
             continue
         if text:
-            record["text"] = text
-            metadata.put(record_id, record)
+            metadata.put(
+                derived_id,
+                {
+                    "record_type": "derived.text",
+                    "ts_utc": record.get("ts_utc"),
+                    "text": text,
+                    "source_id": record_id,
+                },
+            )
             processed += 1
         if processed >= limit:
             break
@@ -87,7 +102,8 @@ def run_query(system, query: str) -> dict[str, Any]:
     claims = []
     metadata = system.get("storage.metadata")
     for result in results:
-        record = metadata.get(result["record_id"], {})
+        derived_id = result.get("derived_id")
+        record = metadata.get(derived_id or result["record_id"], {})
         text = record.get("text", "")
         claims.append(
             {

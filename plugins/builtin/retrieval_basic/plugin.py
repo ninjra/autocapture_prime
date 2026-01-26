@@ -33,7 +33,12 @@ class RetrievalStrategy(PluginBase):
                 if end and ts > end:
                     continue
             score = 1 if query_lower in text else 0
-            results.append({"record_id": record_id, "score": score, "ts_utc": ts})
+            source_id = record.get("source_id") or record_id
+            derived_id = record_id if source_id != record_id else None
+            result = {"record_id": source_id, "score": score, "ts_utc": ts}
+            if derived_id:
+                result["derived_id"] = derived_id
+            results.append(result)
 
         def ts_key(ts: str | None) -> float:
             if not ts:

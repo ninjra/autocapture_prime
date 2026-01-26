@@ -14,8 +14,12 @@ $repoRoot = $repoRoot.ToString()
 Set-Location $repoRoot
 
 $env:PYTHONPATH = $repoRoot
-$env:AUTOCAPTURE_CONFIG_DIR = Join-Path $repoRoot ".dev\\test_env\\config"
-$env:AUTOCAPTURE_DATA_DIR = Join-Path $repoRoot ".dev\\test_env\\data"
+$testRoot = Join-Path $repoRoot ".dev\\test_env"
+if (Test-Path $testRoot) {
+    Remove-Item -Recurse -Force $testRoot | Out-Null
+}
+$env:AUTOCAPTURE_CONFIG_DIR = Join-Path $testRoot "config"
+$env:AUTOCAPTURE_DATA_DIR = Join-Path $testRoot "data"
 New-Item -ItemType Directory -Path $env:AUTOCAPTURE_CONFIG_DIR -Force | Out-Null
 New-Item -ItemType Directory -Path $env:AUTOCAPTURE_DATA_DIR -Force | Out-Null
 

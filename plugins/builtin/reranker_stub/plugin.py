@@ -23,9 +23,9 @@ class RerankerStub(PluginBase):
             from sentence_transformers import CrossEncoder
         except Exception as exc:
             raise RuntimeError(f"Missing reranker dependency: {exc}")
-        model_path = os.path.join("D:\\autocapture", "models", "reranker")
-        if not os.path.isdir(model_path):
-            raise RuntimeError(f"Missing reranker model files at {model_path}")
+        model_path = self.context.config.get("models", {}).get("reranker_path")
+        if not model_path or not os.path.isdir(model_path):
+            raise RuntimeError("Missing reranker model files; set models.reranker_path to a local path")
         try:
             self._model = CrossEncoder(model_path)
         except Exception as exc:

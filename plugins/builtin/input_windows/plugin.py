@@ -37,45 +37,32 @@ class InputTrackerWindows(PluginBase):
         except Exception as exc:
             raise RuntimeError(f"Missing input dependency: {exc}")
 
-        journal = self.context.get_capability("journal.writer")
+        event_builder = self.context.get_capability("event.builder")
         mode = self.context.config.get("capture", {}).get("input_tracking", {}).get("mode", "raw")
         if mode == "off":
             return
-        seq = {"val": 0}
 
         def on_key_press(key):
             ts = datetime.now(timezone.utc).isoformat()
             self._last_event_ts = time.time()
-            journal.append(
-                {
-                    "schema_version": 1,
-                    "event_id": f"key_{seq['val']}",
-                    "sequence": seq["val"],
-                    "ts_utc": ts,
-                    "tzid": "UTC",
-                    "offset_minutes": 0,
-                    "event_type": "input.key",
-                    "payload": {"key": str(key), "action": "press"} if mode == "raw" else {"action": "press"},
-                }
+            event_builder.journal_event(
+                "input.key",
+                {"key": str(key), "action": "press"} if mode == "raw" else {"action": "press"},
+                ts_utc=ts,
             )
-            seq["val"] += 1
 
         def on_click(x, y, button, pressed):
             ts = datetime.now(timezone.utc).isoformat()
             self._last_event_ts = time.time()
-            journal.append(
-                {
-                    "schema_version": 1,
-                    "event_id": f"mouse_{seq['val']}",
-                    "sequence": seq["val"],
-                    "ts_utc": ts,
-                    "tzid": "UTC",
-                    "offset_minutes": 0,
-                    "event_type": "input.mouse",
-                    "payload": {"x": x, "y": y, "button": str(button), "pressed": pressed} if mode == "raw" else {"pressed": pressed},
-                }
+            payload = {"button": str(button), "pressed": pressed}
+            if mode == "raw":
+                payload["x"] = int(x)
+                payload["y"] = int(y)
+            event_builder.journal_event(
+                "input.mouse",
+                payload,
+                ts_utc=ts,
             )
-            seq["val"] += 1
 
         self._listener = {
             "keyboard": keyboard.Listener(on_press=on_key_press),

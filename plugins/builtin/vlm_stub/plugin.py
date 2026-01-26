@@ -23,9 +23,9 @@ class VLMStub(PluginBase):
             from transformers import AutoProcessor, AutoModelForVision2Seq
         except Exception as exc:
             raise RuntimeError(f"Missing VLM dependency: {exc}")
-        model_path = os.path.join("D:\\autocapture", "models", "vlm")
-        if not os.path.isdir(model_path):
-            raise RuntimeError(f"Missing VLM model files at {model_path}")
+        model_path = self.context.config.get("models", {}).get("vlm_path")
+        if not model_path or not os.path.isdir(model_path):
+            raise RuntimeError("Missing VLM model files; set models.vlm_path to a local path")
         try:
             processor = AutoProcessor.from_pretrained(model_path)
             model = AutoModelForVision2Seq.from_pretrained(model_path)

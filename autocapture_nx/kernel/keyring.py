@@ -34,13 +34,13 @@ def _unprotect(data: bytes, protected: bool) -> bytes:
     if not protected:
         return data
     if os.name != "nt":
-        return data
+        raise RuntimeError("DPAPI unprotect requires Windows")
     try:
         from autocapture_nx.windows.dpapi import unprotect
 
         return unprotect(data)
-    except Exception:
-        return data
+    except Exception as exc:
+        raise RuntimeError("DPAPI unprotect failed") from exc
 
 
 @dataclass
@@ -56,13 +56,14 @@ class KeyRecord:
 
 
 class KeyRing:
-    def __init__(self, path: str, active_key_id: str, records: list[KeyRecord]) -> None:
+    def __init__(self, path: str, active_key_id: str, records: list[KeyRecord], require_protection: bool = False) -> None:
         self.path = path
         self.active_key_id = active_key_id
         self.records = records
+        self.require_protection = require_protection
 
     @classmethod
-    def load(cls, path: str, legacy_root_path: Optional[str] = None) -> "KeyRing":
+    def load(cls, path: str, legacy_root_path: Optional[str] = None, require_protection: bool = False) -> "KeyRing":
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as handle:
                 data = json.load(handle)
@@ -75,31 +76,35 @@ class KeyRing:
                 )
                 for item in data.get("keys", [])
             ]
-            return cls(path, data.get("active_key_id", records[0].key_id if records else ""), records)
+            ring = cls(path, data.get("active_key_id", records[0].key_id if records else ""), records, require_protection=require_protection)
+            ring._verify_protection()
+            return ring
 
         if legacy_root_path and os.path.exists(legacy_root_path):
             root = load_root_key(legacy_root_path)
-            ring = cls._from_key(path, root, key_id="legacy")
+            ring = cls._from_key(path, root, key_id="legacy", require_protection=require_protection)
             ring.save()
             return ring
 
         root = os.urandom(32)
-        ring = cls._from_key(path, root)
+        ring = cls._from_key(path, root, require_protection=require_protection)
         ring.save()
         return ring
 
     @classmethod
-    def _from_key(cls, path: str, key: bytes, key_id: Optional[str] = None) -> "KeyRing":
+    def _from_key(cls, path: str, key: bytes, key_id: Optional[str] = None, require_protection: bool = False) -> "KeyRing":
         key_id = key_id or _new_id()
         created_ts = datetime.now(timezone.utc).isoformat()
         protected_key, protected = _protect(key)
+        if require_protection and os.name == "nt" and not protected:
+            raise RuntimeError("DPAPI protection required but unavailable")
         record = KeyRecord(
             key_id=key_id,
             created_ts=created_ts,
             key_b64=base64.b64encode(protected_key).decode("ascii"),
             protected=protected,
         )
-        return cls(path, key_id, [record])
+        return cls(path, key_id, [record], require_protection=require_protection)
 
     def save(self) -> None:
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
@@ -136,6 +141,8 @@ class KeyRing:
         created_ts = datetime.now(timezone.utc).isoformat()
         key = os.urandom(32)
         protected_key, protected = _protect(key)
+        if self.require_protection and os.name == "nt" and not protected:
+            raise RuntimeError("DPAPI protection required but unavailable")
         self.records.append(
             KeyRecord(
                 key_id=key_id,
@@ -147,3 +154,16 @@ class KeyRing:
         self.active_key_id = key_id
         self.save()
         return key_id
+
+    def _verify_protection(self) -> None:
+        if not self.require_protection:
+            return
+        if os.name != "nt":
+            raise RuntimeError("DPAPI protection required on Windows only")
+        for record in self.records:
+            if not record.protected:
+                raise RuntimeError("DPAPI protection required but key is unprotected")
+            try:
+                _ = record.key_bytes()
+            except Exception as exc:
+                raise RuntimeError("DPAPI unprotect failed") from exc
