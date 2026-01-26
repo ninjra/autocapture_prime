@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .errors import ConfigError
+from .paths import apply_path_defaults, load_json, normalize_config_paths
 
 
 @dataclass(frozen=True)
@@ -21,10 +21,10 @@ class ConfigPaths:
 
 
 def _load_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
+    try:
+        return load_json(path)
+    except FileNotFoundError:
         raise ConfigError(f"Missing config file: {path}")
-    with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -122,12 +122,18 @@ def validate_config(schema_path: Path, data: dict[str, Any]) -> None:
 
 def load_config(paths: ConfigPaths, safe_mode: bool) -> dict[str, Any]:
     defaults = _load_json(paths.default_path)
+    defaults_data_dir = defaults.get("storage", {}).get("data_dir")
     if safe_mode:
         config = deepcopy(defaults)
         config.setdefault("plugins", {})["safe_mode"] = True
+        user_config: dict[str, Any] = {}
     else:
         user_config = _load_json(paths.user_path) if paths.user_path.exists() else {}
         config = _deep_merge(defaults, user_config)
+    merged_data_dir = config.get("storage", {}).get("data_dir")
+    config = apply_path_defaults(config, user_overrides=user_config)
+    legacy_dirs = [value for value in (defaults_data_dir, merged_data_dir) if isinstance(value, str)]
+    config = normalize_config_paths(config, legacy_data_dir=legacy_dirs)
     validate_config(paths.schema_path, config)
     return config
 

@@ -7,28 +7,34 @@ import os
 from pathlib import Path
 from typing import Any
 
+from autocapture_nx.kernel.paths import default_config_dir
+
 from .models import ConfigPaths
 
 
 def _find_repo_root(start: Path | None = None) -> Path:
+    override = os.getenv("AUTOCAPTURE_ROOT")
+    if override:
+        return Path(override).expanduser().resolve()
     cursor = start or Path(__file__).resolve()
     for parent in [cursor, *cursor.parents]:
         if (parent / "pyproject.toml").exists():
             return parent
-    return Path.cwd()
+    if len(cursor.parents) >= 2:
+        return cursor.parents[2]
+    return cursor.parent
 
 
 def default_config_paths(root: Path | None = None) -> ConfigPaths:
     base = _find_repo_root(root)
     default_rel = "config/default.json"
-    user_rel = "config/user.json"
     schema_rel = "contracts/config_schema.json"
-    backup_rel = "config/backup"
+    config_root = default_config_dir()
     return ConfigPaths(
         default_path=(base / default_rel).resolve(),
-        user_path=(base / user_rel).resolve(),
+        user_path=(config_root / "user.json").resolve(),
         schema_path=(base / schema_rel).resolve(),
-        backup_dir=(base / backup_rel).resolve(),
+        backup_dir=(config_root / "backup").resolve(),
     )
 
 

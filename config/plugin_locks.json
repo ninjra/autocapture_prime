@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-01-25T21:08:21.431109+00:00",
+  "generated_at": "2026-01-26T01:44:36.565590+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "15a258e23ffb0b8ee91e9f6955272db5d7992f024ef54ac98580010152b40012",
@@ -42,8 +42,8 @@
       "manifest_sha256": "3d16a9d6082e1b82a1c2982ffbed8aa0746c08595695de60fd224c15adacef7e"
     },
     "builtin.embedder.stub": {
-      "artifact_sha256": "dbe1d91c3c4afc1c1b6505d1ed1a7c2b8083d7eac640c1fcf15879ca6ca455ed",
-      "manifest_sha256": "e69a9c4b3e2a84b5f8754d627e08c2536c8dcab2aa4719d1d7d14e35e38d7290"
+      "artifact_sha256": "fc886b805b357f62908577713e92380e26f564a39d238abb0b38f5a9159f2451",
+      "manifest_sha256": "621109dbd68227803abd44d91348ab4d552e761759b82f14715291bbfbaddff9"
     },
     "builtin.journal.basic": {
       "artifact_sha256": "bd583aacf77584ce36ef3be3b77d2e5a2f45b720dc9b7c14b8abfd36ddd1dd25",
@@ -74,8 +74,8 @@
       "manifest_sha256": "beab6c861e444131b49f7c94a81b103b6b818c1b9f8084e8589273bbf115d58c"
     },
     "builtin.reranker.stub": {
-      "artifact_sha256": "042b4bfc4cb2435e9cbdf67635874a6487320288c0233ed0f0a11afa448949c8",
-      "manifest_sha256": "3b46a20002e542903ba199ca73a8d001343868cc1c713f2b2b0832792a6909e8"
+      "artifact_sha256": "121f084c2df1254d213ef58119c1d6056325fac8e9853b5ce6771b5b366fc310",
+      "manifest_sha256": "db76828b9b7a323ad61f1093de4e07665caaa2ce51427b35f240fe6071372ca1"
     },
     "builtin.retrieval.basic": {
       "artifact_sha256": "7f8d83082167f39e613e4f3f8d1f33d4efc89f8dbc3a907ccb1d153b34d331ab",
@@ -110,8 +110,8 @@
       "manifest_sha256": "97fd0cece7f1261f058634c0a353f5f564d562729f2b6372d1cfa86cfdf2327b"
     },
     "builtin.vlm.stub": {
-      "artifact_sha256": "aeb5f4ae11afbccb3bc26073b9ba55c4cef24b9e52df1be472e049f799273628",
-      "manifest_sha256": "eabf1eef357f1b1d13879c8f9a3b60f8f9a87714e920aaefd75f6d14c63bb0ad"
+      "artifact_sha256": "8ae553da6e4e5b905fb861259b7613a9cce53b1d2862bc643010c9c20d9d17c5",
+      "manifest_sha256": "a536db71339aa60a3c11786af7452a0e5ee63ec6942d3d001c20fef0276ca982"
     },
     "builtin.window.metadata.windows": {
       "artifact_sha256": "e7dd2f5d79e4d71ace902d59d8060f293e31774403378778fa31fd2c2b589951",

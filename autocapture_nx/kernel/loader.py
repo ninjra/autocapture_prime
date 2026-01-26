@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from autocapture_nx.kernel.config import ConfigPaths, load_config, validate_config
+from autocapture_nx.kernel.paths import default_config_dir, resolve_repo_path
 from autocapture_nx.kernel.errors import ConfigError
 from autocapture_nx.plugin_system.registry import PluginRegistry
 
@@ -65,6 +67,50 @@ class Kernel:
         checks: list[DoctorCheck] = []
         config = self.system.config
         plugin_ids = {p.plugin_id for p in self.system.plugins}
+
+        paths_cfg = config.get("paths", {})
+        if isinstance(paths_cfg, dict):
+            for key in ("config_dir", "data_dir"):
+                path_value = paths_cfg.get(key)
+                if not path_value:
+                    checks.append(
+                        DoctorCheck(
+                            name=f"{key}_present",
+                            ok=False,
+                            detail="missing",
+                        )
+                    )
+                    continue
+                path = Path(path_value)
+                if not path.exists():
+                    try:
+                        path.mkdir(parents=True, exist_ok=True)
+                    except Exception as exc:  # pragma: no cover - depends on filesystem permissions
+                        checks.append(
+                            DoctorCheck(
+                                name=f"{key}_exists",
+                                ok=False,
+                                detail=f"missing ({exc})",
+                            )
+                        )
+                        continue
+                if not path.is_dir():
+                    checks.append(
+                        DoctorCheck(
+                            name=f"{key}_is_dir",
+                            ok=False,
+                            detail="not a directory",
+                        )
+                    )
+                    continue
+                writable = os.access(path, os.W_OK)
+                checks.append(
+                    DoctorCheck(
+                        name=f"{key}_writable",
+                        ok=writable,
+                        detail="ok" if writable else "not writable",
+                    )
+                )
 
         default_pack = set(config.get("plugins", {}).get("default_pack", []))
         if config.get("plugins", {}).get("safe_mode", False):
@@ -136,9 +182,10 @@ class Kernel:
 
 
 def default_config_paths() -> ConfigPaths:
+    config_root = default_config_dir()
     return ConfigPaths(
-        default_path=Path("config/default.json"),
-        user_path=Path("config/user.json"),
-        schema_path=Path("contracts/config_schema.json"),
-        backup_dir=Path("config/backup"),
+        default_path=resolve_repo_path("config/default.json"),
+        user_path=(config_root / "user.json").resolve(),
+        schema_path=resolve_repo_path("contracts/config_schema.json"),
+        backup_dir=(config_root / "backup").resolve(),
     )

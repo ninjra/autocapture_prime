@@ -56,6 +56,10 @@
       "type": "array",
       "items": {"type": "string"}
     },
+    "optional_deps": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
     "hash_lock": {
       "type": "object",
       "additionalProperties": false,
