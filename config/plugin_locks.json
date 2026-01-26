@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-01-26T01:44:36.565590+00:00",
+  "generated_at": "2026-01-26T03:55:18.779686+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "15a258e23ffb0b8ee91e9f6955272db5d7992f024ef54ac98580010152b40012",
@@ -46,11 +46,11 @@
       "manifest_sha256": "621109dbd68227803abd44d91348ab4d552e761759b82f14715291bbfbaddff9"
     },
     "builtin.journal.basic": {
-      "artifact_sha256": "bd583aacf77584ce36ef3be3b77d2e5a2f45b720dc9b7c14b8abfd36ddd1dd25",
+      "artifact_sha256": "12d927b9bfdf1fe263ad2d93540f367929df12c439988e86539fa9fe17e44d76",
       "manifest_sha256": "0ed20ca9d613875b2826ee5a6c24787657e38e3d8375fded1bde754486d20f2d"
     },
     "builtin.ledger.basic": {
-      "artifact_sha256": "04e23aec49af1359f13c4db91eb801eab31e0313101dd2223281b9685f3f7f10",
+      "artifact_sha256": "6e2af85af420a7191b15519006705e66c5b0df322301be943127c85706b4ec0a",
       "manifest_sha256": "a89c520c2466d5447307801123d31b711bcbd9817f8879bad0ae36cb6e2a6710"
     },
     "builtin.meta.configurator.noop": {

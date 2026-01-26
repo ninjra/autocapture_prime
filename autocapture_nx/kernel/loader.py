@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import Any
 from autocapture_nx.kernel.config import ConfigPaths, load_config, validate_config
 from autocapture_nx.kernel.paths import default_config_dir, resolve_repo_path
 from autocapture_nx.kernel.errors import ConfigError
+from autocapture_nx.kernel.hashing import sha256_directory, sha256_file
 from autocapture_nx.plugin_system.registry import PluginRegistry
 
 from .system import System
@@ -140,6 +142,85 @@ class Kernel:
                     detail="encrypted storage loaded" if ok else "encrypted storage missing",
                 )
             )
+        lock_path = resolve_repo_path("contracts/lock.json")
+        if not lock_path.exists():
+            checks.append(
+                DoctorCheck(
+                    name="contracts_lock",
+                    ok=False,
+                    detail="missing contracts/lock.json",
+                )
+            )
+        else:
+            lock_data = json.loads(lock_path.read_text(encoding="utf-8"))
+            files = lock_data.get("files", {})
+            mismatches = []
+            for rel, expected in files.items():
+                file_path = resolve_repo_path(rel)
+                if not file_path.exists():
+                    mismatches.append(f"missing:{rel}")
+                    continue
+                actual = sha256_file(file_path)
+                if actual != expected:
+                    mismatches.append(f"hash_mismatch:{rel}")
+            checks.append(
+                DoctorCheck(
+                    name="contracts_lock",
+                    ok=len(mismatches) == 0,
+                    detail="ok" if not mismatches else ", ".join(mismatches[:5]),
+                )
+            )
+        locks_cfg = config.get("plugins", {}).get("locks", {})
+        if not locks_cfg.get("enforce", True):
+            checks.append(
+                DoctorCheck(
+                    name="plugin_locks",
+                    ok=True,
+                    detail="locks disabled",
+                )
+            )
+        else:
+            try:
+                registry = PluginRegistry(config, safe_mode=self.safe_mode)
+                lockfile = registry.load_lockfile()
+                manifest_paths = registry.discover_manifests()
+                manifests_by_id: dict[str, Path] = {}
+                for manifest_path in manifest_paths:
+                    with manifest_path.open("r", encoding="utf-8") as handle:
+                        manifest = json.load(handle)
+                    manifests_by_id[manifest.get("plugin_id", "")] = manifest_path
+                mismatches = []
+                plugins = lockfile.get("plugins", {})
+                for pid in sorted(plugin_ids):
+                    manifest_path = manifests_by_id.get(pid)
+                    if manifest_path is None:
+                        mismatches.append(f"missing_manifest:{pid}")
+                        continue
+                    expected = plugins.get(pid)
+                    if not isinstance(expected, dict):
+                        mismatches.append(f"missing_lock:{pid}")
+                        continue
+                    manifest_hash = sha256_file(manifest_path)
+                    artifact_hash = sha256_directory(manifest_path.parent)
+                    if manifest_hash != expected.get("manifest_sha256"):
+                        mismatches.append(f"manifest_hash:{pid}")
+                    if artifact_hash != expected.get("artifact_sha256"):
+                        mismatches.append(f"artifact_hash:{pid}")
+                checks.append(
+                    DoctorCheck(
+                        name="plugin_locks",
+                        ok=len(mismatches) == 0,
+                        detail="ok" if not mismatches else ", ".join(mismatches[:5]),
+                    )
+                )
+            except Exception as exc:
+                checks.append(
+                    DoctorCheck(
+                        name="plugin_locks",
+                        ok=False,
+                        detail=str(exc),
+                    )
+                )
         anchor_cfg = config.get("storage", {}).get("anchor", {})
         anchor_path = anchor_cfg.get("path")
         if anchor_path:

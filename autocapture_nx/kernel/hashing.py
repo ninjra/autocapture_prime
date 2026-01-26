@@ -23,18 +23,18 @@ def sha256_directory(path: str | Path) -> str:
     """Hash a directory deterministically by path + contents."""
     root = Path(path)
     digest = hashlib.sha256()
-    def _iter_files():
-        for file_path in root.rglob("*"):
-            if not file_path.is_file():
-                continue
-            if "__pycache__" in file_path.parts:
-                continue
-            if file_path.suffix == ".pyc":
-                continue
-            yield file_path
-
-    for file_path in sorted(_iter_files()):
+    entries: list[tuple[str, Path]] = []
+    for file_path in root.rglob("*"):
+        if not file_path.is_file():
+            continue
+        if "__pycache__" in file_path.parts:
+            continue
+        if file_path.suffix == ".pyc":
+            continue
         rel = file_path.relative_to(root).as_posix()
+        entries.append((rel, file_path))
+
+    for rel, file_path in sorted(entries, key=lambda item: item[0]):
         digest.update(rel.encode("utf-8"))
         with open(file_path, "rb") as handle:
             for chunk in iter(lambda: handle.read(8192), b""):

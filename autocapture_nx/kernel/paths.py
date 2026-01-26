@@ -102,14 +102,31 @@ def default_data_dir() -> Path:
     return Path(PlatformDirs(_APP_NAME, appauthor=False).user_data_dir)
 
 
+def _resource_text_from(pkg: str, rel_path: str) -> str | None:
+    try:
+        target = resources.files(pkg).joinpath(rel_path)
+    except Exception:
+        return None
+    if target.is_file():
+        return target.read_text(encoding="utf-8")
+    return None
+
+
 def _resource_text(rel_path: str) -> str | None:
-    for pkg in ("autocapture_nx",):
-        try:
-            target = resources.files(pkg).joinpath(rel_path)
-        except Exception:
-            continue
-        if target.is_file():
-            return target.read_text(encoding="utf-8")
+    prefix_map = {
+        "config/": "config",
+        "contracts/": "contracts",
+        "plugins/": "plugins",
+    }
+    for prefix, pkg in prefix_map.items():
+        if rel_path.startswith(prefix):
+            subpath = rel_path[len(prefix):]
+            text = _resource_text_from(pkg, subpath)
+            if text is not None:
+                return text
+    text = _resource_text_from("autocapture_nx", rel_path)
+    if text is not None:
+        return text
     return None
 
 

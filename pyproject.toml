@@ -40,6 +40,8 @@ vision = [
 
 [tool.setuptools]
 packages = [
+  "config",
+  "contracts",
   "autocapture",
   "autocapture.config",
   "autocapture.core",
@@ -65,7 +67,13 @@ packages = [
   "autocapture_nx.kernel",
   "autocapture_nx.plugin_system",
   "autocapture_nx.windows",
+  "plugins",
 ]
+
+[tool.setuptools.package-data]
+config = ["*.json"]
+contracts = ["*.json", "*.md"]
+plugins = ["builtin/**"]
 
 [tool.autocapture]
 config_default_path = "config/default.json"

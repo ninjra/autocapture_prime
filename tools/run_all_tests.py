@@ -19,6 +19,14 @@ def _run(cmd: list[str], env: dict[str, str]) -> int:
 def _commands() -> Iterable[list[str]]:
     py = sys.executable
     return [
+        [py, "tools/gate_deps_lock.py"],
+        [py, "tools/gate_canon.py"],
+        [py, "tools/gate_concurrency.py"],
+        [py, "tools/gate_ledger.py"],
+        [py, "tools/gate_perf.py"],
+        [py, "tools/gate_security.py"],
+        [py, "tools/gate_static.py"],
+        [py, "tools/gate_doctor.py"],
         [py, "-m", "autocapture_nx", "doctor"],
         [py, "-m", "autocapture_nx", "--safe-mode", "doctor"],
         [py, "-m", "unittest", "tests/test_blueprint_spec_validation.py", "-q"],
