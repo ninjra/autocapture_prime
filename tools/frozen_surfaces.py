@@ -1,5 +1,7 @@
 """Frozen surface gate and churn report."""
 
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import argparse

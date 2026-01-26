@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
 
 from autocapture_nx.kernel.crypto import EncryptedBlob, decrypt_bytes, derive_key, encrypt_bytes
 from autocapture_nx.kernel.keyring import KeyRing

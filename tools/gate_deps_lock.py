@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from tools.generate_dep_lock import LOCK_PATH, build_lock
 

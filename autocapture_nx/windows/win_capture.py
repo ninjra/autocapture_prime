@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Iterator
+from typing import Callable, Iterator
 
 
 @dataclass
@@ -34,7 +34,8 @@ def iter_screenshots(
     if callable(fps):
         fps_provider = fps
     else:
-        fps_provider = lambda: fps
+        def fps_provider() -> int:
+            return fps
 
     if frame_source is None:
         if os.name != "nt":

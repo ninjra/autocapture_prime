@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import atexit
 import json
-import os
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, IO
 
 from autocapture_nx.kernel.errors import PermissionError, PluginError
 from autocapture_nx.windows.win_sandbox import assign_job_object
@@ -57,7 +56,7 @@ class RemoteCapability:
 
 class PluginProcess:
     def __init__(self, plugin_path: Path, callable_name: str, plugin_id: str, network_allowed: bool, config: dict[str, Any]) -> None:
-        self._proc = subprocess.Popen(
+        self._proc: subprocess.Popen[str] | None = subprocess.Popen(
             [
                 sys.executable,
                 "-m",
@@ -74,8 +73,8 @@ class PluginProcess:
         if self._proc.stdin is None or self._proc.stdout is None:
             raise PluginError("Failed to start plugin host")
         assign_job_object(self._proc.pid)
-        self._stdin = self._proc.stdin
-        self._stdout = self._proc.stdout
+        self._stdin: IO[str] = self._proc.stdin
+        self._stdout: IO[str] = self._proc.stdout
         self._req_id = 0
         self._stdin.write(json.dumps(config) + "\n")
         self._stdin.flush()
@@ -144,7 +143,7 @@ class PluginProcess:
 
 class SubprocessPlugin:
     def __init__(self, plugin_path: Path, callable_name: str, plugin_id: str, network_allowed: bool, config: dict[str, Any]):
-        self._host = PluginProcess(plugin_path, callable_name, plugin_id, network_allowed, config)
+        self._host: PluginProcess | None = PluginProcess(plugin_path, callable_name, plugin_id, network_allowed, config)
         atexit.register(self.close)
         self._caps: dict[str, RemoteCapability] = {}
         for name, methods in self._host.capabilities().items():
@@ -157,6 +156,7 @@ class SubprocessPlugin:
         if getattr(self, "_host", None) is None:
             return
         try:
+            assert self._host is not None
             self._host.close()
         finally:
             self._host = None

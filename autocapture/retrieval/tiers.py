@@ -8,7 +8,6 @@ from autocapture.indexing.lexical import LexicalIndex
 from autocapture.indexing.vector import VectorIndex
 from autocapture.retrieval.fusion import rrf_fusion
 from autocapture.retrieval.rerank import Reranker
-from autocapture.retrieval.signals import RetrievalTrace
 
 
 class TieredRetriever:

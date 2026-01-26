@@ -53,7 +53,7 @@ def assign_job_object(pid: int) -> None:
     if os.name != "nt":
         return
     global _job_handle
-    kernel32 = ctypes.windll.kernel32
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
     if _job_handle is None:
         _job_handle = kernel32.CreateJobObjectW(None, None)
         info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext

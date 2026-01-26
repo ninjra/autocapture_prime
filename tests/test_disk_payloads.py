@@ -51,9 +51,6 @@ class _EventBuilder:
 class DiskPayloadTests(unittest.TestCase):
     def test_disk_payloads_are_integers(self) -> None:
         logger = _Logger()
-        journal = _Journal()
-        ledger = _Ledger()
-        anchor = _Anchor()
         event_builder = _EventBuilder()
 
         config = {"storage": {"data_dir": "."}}

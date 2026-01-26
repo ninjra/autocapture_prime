@@ -37,7 +37,6 @@ class KernelEffectiveConfigTests(unittest.TestCase):
             default_path = root / "default.json"
             user_path = root / "user.json"
             schema_path = root / "schema.json"
-            backup_dir = root / "backup"
 
             default = json.loads(Path("config/default.json").read_text(encoding="utf-8"))
             schema = json.loads(Path("contracts/config_schema.json").read_text(encoding="utf-8"))

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from autocapture.storage.database import EncryptedMetadataStore
@@ -18,7 +17,7 @@ def open_metadata_store(config: dict[str, Any]) -> EncryptedMetadataStore:
     path = storage_cfg.get("metadata_path", "data/metadata.db")
     keyring = load_keyring(config)
     try:
-        import pysqlcipher3  # type: ignore
+        pass  # type: ignore
         # SQLCipher integration can be added when library is available.
         # For now, use encrypted store with derived keys.
     except Exception:

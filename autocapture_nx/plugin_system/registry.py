@@ -6,7 +6,7 @@ import importlib.util
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from autocapture_nx import __version__ as kernel_version
 from autocapture_nx.kernel.config import SchemaLiteValidator
@@ -18,6 +18,9 @@ from .api import PluginContext
 from .host import SubprocessPlugin
 from .manifest import PluginManifest
 from .runtime import network_guard
+
+if TYPE_CHECKING:
+    from autocapture_nx.kernel.system import System
 
 
 def _parse_version(version: str) -> tuple[int, ...]:
@@ -215,7 +218,7 @@ class PluginRegistry:
         allowed_ids = {manifest.plugin_id for manifest in manifests}
         return [plugin for plugin in loaded if plugin.plugin_id in allowed_ids]
 
-    def register_capabilities(self, plugins: list[Any], system: "System") -> None:
+    def register_capabilities(self, plugins: list[Any], system: System) -> None:
         from autocapture_nx.kernel.system import System as SystemType
 
         if not isinstance(system, SystemType):

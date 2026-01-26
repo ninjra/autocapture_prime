@@ -9,7 +9,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Iterable
 
 from autocapture.codex.report import RequirementReport, ValidatorReport
 from autocapture.codex.spec import RequirementSpec, ValidatorSpec

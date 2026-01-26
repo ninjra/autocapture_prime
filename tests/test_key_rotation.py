@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from autocapture_nx.kernel.config import ConfigPaths, load_config
+from autocapture_nx.kernel.config import ConfigPaths
 from autocapture_nx.kernel.key_rotation import rotate_keys
 from autocapture_nx.kernel.loader import Kernel
 
@@ -39,7 +39,6 @@ class KeyRotationTests(unittest.TestCase):
             }
             with open(paths.user_path, "w", encoding="utf-8") as handle:
                 json.dump(user_override, handle)
-            config = load_config(paths, safe_mode=False)
             kernel = Kernel(paths, safe_mode=False)
             system = kernel.boot()
             try:

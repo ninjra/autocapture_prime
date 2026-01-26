@@ -7,7 +7,6 @@ import json
 import sys
 
 from autocapture_nx.kernel.config import (
-    ConfigPaths,
     load_config,
     reset_user_config,
     restore_user_config,

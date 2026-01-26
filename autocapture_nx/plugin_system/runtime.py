@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import socket
+from typing import Any, cast
 
 from autocapture_nx.kernel.errors import PermissionError
 
@@ -21,10 +22,10 @@ def network_guard(enabled: bool):
     def _blocked(*_args, **_kwargs):
         raise PermissionError("Network access is denied for this plugin")
 
-    socket.socket = _blocked  # type: ignore[assignment]
-    socket.create_connection = _blocked  # type: ignore[assignment]
+    setattr(socket, "socket", cast(Any, _blocked))
+    setattr(socket, "create_connection", cast(Any, _blocked))
     try:
         yield
     finally:
-        socket.socket = original_socket  # type: ignore[assignment]
-        socket.create_connection = original_create_connection  # type: ignore[assignment]
+        setattr(socket, "socket", original_socket)
+        setattr(socket, "create_connection", original_create_connection)

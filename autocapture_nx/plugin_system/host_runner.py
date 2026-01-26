@@ -38,8 +38,8 @@ def _encode(obj: Any) -> Any:
 def main() -> None:
     if len(sys.argv) < 5:
         raise SystemExit("usage: host_runner <plugin_path> <callable> <plugin_id> <network_allowed>")
-    plugin_path, callable_name, plugin_id, network_allowed = sys.argv[1:5]
-    network_allowed = network_allowed.lower() == "true"
+    plugin_path, callable_name, plugin_id, network_allowed_text = sys.argv[1:5]
+    network_allowed = network_allowed_text.lower() == "true"
 
     spec = importlib.util.spec_from_file_location("plugin_module", plugin_path)
     if spec is None or spec.loader is None:

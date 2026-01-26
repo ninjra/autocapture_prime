@@ -156,7 +156,7 @@ class SegmentWriter:
         self._container_type = container_type
         self._encoder = encoder
         self._ffmpeg_path = ffmpeg_path
-        self._writer = None
+        self._writer: AviMjpegWriter | ZipFrameWriter | FfmpegWriter | None = None
         self._width = 0
         self._height = 0
         self._frame_count = 0
@@ -210,6 +210,7 @@ class SegmentWriter:
             self._ts_start_utc = frame.ts_utc
             self._mono_start = frame.ts_monotonic
         encode_start = time.monotonic()
+        assert self._writer is not None
         self._writer.add_frame(frame.data)
         encode_elapsed = int(max(0.0, (time.monotonic() - encode_start) * 1000))
         self._encode_ms_total += encode_elapsed
@@ -227,6 +228,7 @@ class SegmentWriter:
             self._mono_start,
             self._mono_end,
         )
+        assert self._writer is not None
         self._writer.close(duration_ms)
         os.replace(self._tmp_path, self._final_path)
         return SegmentArtifact(

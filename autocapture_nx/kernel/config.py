@@ -56,7 +56,7 @@ class SchemaLiteValidator:
             self._validate_number(schema, data, path)
 
     def _validate_type(self, expected: str | list[str], data: Any, path: str) -> None:
-        type_map = {
+        type_map: dict[str, type | tuple[type, ...]] = {
             "object": dict,
             "array": list,
             "string": str,

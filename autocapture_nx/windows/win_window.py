@@ -17,12 +17,12 @@ class WindowInfo:
 
 
 def _get_foreground_window() -> int:
-    user32 = ctypes.windll.user32
+    user32 = ctypes.windll.user32  # type: ignore[attr-defined]
     return user32.GetForegroundWindow()
 
 
 def _get_window_text(hwnd: int) -> str:
-    user32 = ctypes.windll.user32
+    user32 = ctypes.windll.user32  # type: ignore[attr-defined]
     length = user32.GetWindowTextLengthW(hwnd)
     buf = ctypes.create_unicode_buffer(length + 1)
     user32.GetWindowTextW(hwnd, buf, length + 1)
@@ -30,13 +30,13 @@ def _get_window_text(hwnd: int) -> str:
 
 
 def _get_process_path(hwnd: int) -> str:
-    user32 = ctypes.windll.user32
+    user32 = ctypes.windll.user32  # type: ignore[attr-defined]
     pid = ctypes.c_ulong()
     user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
 
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    kernel32 = ctypes.windll.kernel32
-    psapi = ctypes.windll.psapi
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    psapi = ctypes.windll.psapi  # type: ignore[attr-defined]
     handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
     if not handle:
         return ""
@@ -55,7 +55,7 @@ class RECT(ctypes.Structure):
 
 
 def _get_window_rect(hwnd: int) -> tuple[int, int, int, int]:
-    user32 = ctypes.windll.user32
+    user32 = ctypes.windll.user32  # type: ignore[attr-defined]
     rect = RECT()
     if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
         return (rect.left, rect.top, rect.right, rect.bottom)

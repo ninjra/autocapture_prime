@@ -193,6 +193,7 @@ class AviMjpegWriter:
 
 class AviMjpegReader:
     def __init__(self, source: bytes | BinaryIO) -> None:
+        self._fp: BinaryIO
         if isinstance(source, (bytes, bytearray)):
             self._fp = io.BytesIO(source)
             self._close_fp = True

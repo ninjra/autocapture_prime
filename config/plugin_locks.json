@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-01-26T19:11:12.180241+00:00",
+  "generated_at": "2026-01-26T19:34:06.868095+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "15a258e23ffb0b8ee91e9f6955272db5d7992f024ef54ac98580010152b40012",
@@ -66,7 +66,7 @@
       "manifest_sha256": "760b546eec7cfb470b8294b367f6cc8983f1dc2f56ce910532127b42e9c0415f"
     },
     "builtin.ocr.stub": {
-      "artifact_sha256": "8b229359555a9228391270a16cbf498df1fe7fbbef16dc92c212c3e815c84f2d",
+      "artifact_sha256": "6de483890ff5e46bf640d226fce119f995315c9c62eabfae066867846dc37a5b",
       "manifest_sha256": "fc61c13835e4bb4bc8aa1b140182acf99c28d073b4ba10ae780ada31ac50075d"
     },
     "builtin.privacy.egress_sanitizer": {
@@ -86,7 +86,7 @@
       "manifest_sha256": "9c041b1533d1ef0a340e9f6731863f6b28099e00a3e38e812d231d8145e89f7f"
     },
     "builtin.storage.encrypted": {
-      "artifact_sha256": "f7505de45004765d55e5bb459d689e0ccbd8d3625d3f4c1ce8bcb3897b304b67",
+      "artifact_sha256": "e3f1e3c0f35da83c5a7469242838fe3e02192c557ce7d955f21100eef3fdc482",
       "manifest_sha256": "185c820ed062ae573d5b2dd2a43cf97269edae847b89ac6e2d056fca34057dd0"
     },
     "builtin.storage.memory": {

@@ -20,7 +20,7 @@ def main(argv=None) -> int:
     add.add_argument("rule_id")
     add.add_argument("--payload", default="{}")
 
-    list_cmd = sub.add_parser("list")
+    sub.add_parser("list")
 
     args = parser.parse_args(argv)
     ledger = RulesLedger(Path(args.ledger))

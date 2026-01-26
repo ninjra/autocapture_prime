@@ -1,6 +1,5 @@
 import json
 import os
-import socket
 import tempfile
 import unittest
 from pathlib import Path

@@ -467,12 +467,12 @@ class EncryptedBlobStore:
             if path.endswith(BLOB_EXT):
                 with open(path, "rb") as handle:
                     try:
-                        blob = _unpack_blob(handle)
+                        blob_raw = _unpack_blob(handle)
                     except Exception:
                         continue
-                for key in self._key_provider.candidates(blob.key_id):
+                for key in self._key_provider.candidates(blob_raw.key_id):
                     try:
-                        return decrypt_bytes_raw(key, blob)
+                        return decrypt_bytes_raw(key, blob_raw)
                     except Exception:
                         continue
                 if self._require_decrypt:
@@ -500,10 +500,10 @@ class EncryptedBlobStore:
             if path.endswith(".json"):
                 with open(path, "r", encoding="utf-8") as handle:
                     data = json.load(handle)
-                blob = EncryptedBlob(**data)
-                for key in self._key_provider.candidates(blob.key_id):
+                blob_json = EncryptedBlob(**data)
+                for key in self._key_provider.candidates(blob_json.key_id):
                     try:
-                        return decrypt_bytes(key, blob)
+                        return decrypt_bytes(key, blob_json)
                     except Exception:
                         continue
                 if self._require_decrypt:
@@ -529,8 +529,8 @@ class EncryptedBlobStore:
                                 if not line:
                                     continue
                                 chunk_data = json.loads(line)
-                                blob = EncryptedBlob(**chunk_data)
-                                payload.extend(decrypt_bytes(key, blob))
+                                blob_json = EncryptedBlob(**chunk_data)
+                                payload.extend(decrypt_bytes(key, blob_json))
                             return bytes(payload)
                         except Exception:
                             continue
