@@ -84,12 +84,11 @@ def cmd_plugins_list(args: argparse.Namespace) -> int:
     for item in mx_plugins:
         if item["plugin_id"] not in plugins:
             plugins[item["plugin_id"]] = item
-    _print_json(
-        {
-            "plugins": sorted(plugins.values(), key=lambda r: r["plugin_id"]),
-            "extensions": mx_manager.list_extensions(),
-        }
-    )
+    payload = {
+        "plugins": sorted(plugins.values(), key=lambda r: r["plugin_id"]),
+        "extensions": mx_manager.list_extensions(),
+    }
+    _print_json(payload)
     return 0
 
 
@@ -224,6 +223,32 @@ def cmd_keys_rotate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_provenance_verify(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from autocapture.config.defaults import default_config_paths
+    from autocapture.config.load import load_config
+    from autocapture.pillars.citable import verify_ledger
+
+    if args.path:
+        ledger_path = Path(args.path)
+    else:
+        config = load_config(default_config_paths(), safe_mode=args.safe_mode)
+        data_dir = Path(config.get("storage", {}).get("data_dir", "data"))
+        ledger_path = data_dir / "ledger.ndjson"
+
+    if not ledger_path.exists():
+        print(f"OK ledger_missing: {ledger_path}")
+        return 0
+
+    ok, errors = verify_ledger(ledger_path)
+    if ok:
+        print("OK ledger_verified")
+        return 0
+    _print_json({"ok": False, "errors": errors, "path": str(ledger_path)})
+    return 2
+
+
 def cmd_codex(args: argparse.Namespace) -> int:
     from autocapture.codex.cli import main as codex_main
 
@@ -251,6 +276,7 @@ def build_parser() -> argparse.ArgumentParser:
     plugins = sub.add_parser("plugins")
     plugins_sub = plugins.add_subparsers(dest="plugins_cmd", required=True)
     plugins_list = plugins_sub.add_parser("list")
+    plugins_list.add_argument("--json", action="store_true", default=False)
     plugins_list.set_defaults(func=cmd_plugins_list)
     plugins_approve = plugins_sub.add_parser("approve")
     plugins_approve.set_defaults(func=cmd_plugins_approve)
@@ -279,6 +305,12 @@ def build_parser() -> argparse.ArgumentParser:
     keys_sub = keys.add_subparsers(dest="keys_cmd", required=True)
     rotate = keys_sub.add_parser("rotate")
     rotate.set_defaults(func=cmd_keys_rotate)
+
+    provenance = sub.add_parser("provenance")
+    provenance_sub = provenance.add_subparsers(dest="provenance_cmd", required=True)
+    provenance_verify = provenance_sub.add_parser("verify")
+    provenance_verify.add_argument("--path", default="")
+    provenance_verify.set_defaults(func=cmd_provenance_verify)
 
     codex = sub.add_parser("codex")
     codex.add_argument("codex_args", nargs=argparse.REMAINDER)

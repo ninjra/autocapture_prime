@@ -53,7 +53,15 @@ class PluginManager:
                     continue
                 for ext in (".yaml", ".yml", ".json"):
                     paths.extend(sorted(root.rglob(f"*{ext}")))
-        return paths
+        seen: set[str] = set()
+        unique: list[Path] = []
+        for path in paths:
+            key = str(path.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(path)
+        return unique
 
     def _enabled_plugins(self) -> set[str]:
         allowlist = set(self.config.get("plugins", {}).get("allowlist", []))

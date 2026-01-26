@@ -62,8 +62,15 @@ def _validator_unit_test(spec: ValidatorSpec) -> ValidatorReport:
     return ValidatorReport(type=spec.type, ok=ok, detail=detail or "ok", data={"target": target})
 
 
+def _is_self_codex_validate(command: Iterable[str]) -> bool:
+    cmd = list(command)
+    return len(cmd) >= 3 and cmd[0] == "autocapture" and cmd[1] == "codex" and cmd[2] == "validate"
+
+
 def _validator_cli_exit(spec: ValidatorSpec) -> ValidatorReport:
     command = spec.config.get("command", [])
+    if _is_self_codex_validate(command) and os.getenv("AUTOCAPTURE_CODEX_SKIP_SELF_VALIDATE") == "1":
+        return ValidatorReport(type=spec.type, ok=True, detail="self_skip", data={"command": list(command)})
     expected = int(spec.config.get("expected_exit_code", 0))
     result = _run_command(command)
     ok = result.returncode == expected

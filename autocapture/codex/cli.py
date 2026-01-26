@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Iterable
 
@@ -19,7 +20,15 @@ def _write_json(path: Path, payload: dict) -> None:
 
 def cmd_validate(args: argparse.Namespace) -> int:
     spec = load_spec(Path(args.spec_path))
-    results = [validate_requirement(req) for req in spec.requirements]
+    previous = os.environ.get("AUTOCAPTURE_CODEX_SKIP_SELF_VALIDATE")
+    os.environ["AUTOCAPTURE_CODEX_SKIP_SELF_VALIDATE"] = "1"
+    try:
+        results = [validate_requirement(req) for req in spec.requirements]
+    finally:
+        if previous is None:
+            os.environ.pop("AUTOCAPTURE_CODEX_SKIP_SELF_VALIDATE", None)
+        else:
+            os.environ["AUTOCAPTURE_CODEX_SKIP_SELF_VALIDATE"] = previous
     report = build_report(spec.blueprint_id, spec.version, results)
     payload = report.to_dict()
     _write_json(Path("artifacts/codex_report.json"), payload)
