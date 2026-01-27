@@ -170,10 +170,28 @@ def run_query(system, query: str) -> dict[str, Any]:
             event_builder = system.get("event.builder")
         except Exception:
             event_builder = None
+    promptops_result = None
+    promptops_cfg = system.config.get("promptops", {}) if hasattr(system, "config") else {}
+    query_text = query
+    if isinstance(promptops_cfg, dict) and bool(promptops_cfg.get("enabled", True)):
+        try:
+            from autocapture.promptops.engine import PromptOpsLayer
 
-    intent = parser.parse(query)
+            layer = PromptOpsLayer(system.config)
+            strategy = promptops_cfg.get("query_strategy", "none")
+            promptops_result = layer.prepare_prompt(
+                query,
+                prompt_id="query",
+                strategy=str(strategy) if strategy is not None else "none",
+                persist=False,
+            )
+            query_text = promptops_result.prompt
+        except Exception:
+            query_text = query
+
+    intent = parser.parse(query_text)
     time_window = intent.get("time_window")
-    results = retrieval.search(query, time_window=time_window)
+    results = retrieval.search(query_text, time_window=time_window)
     on_query = system.config.get("processing", {}).get("on_query", {})
     allow_extract = bool(on_query.get("allow_decode_extract", False))
     require_idle = bool(on_query.get("require_idle", True))
@@ -207,7 +225,7 @@ def run_query(system, query: str) -> dict[str, Any]:
                 collected_ids=extracted_ids,
                 candidate_ids=[result.get("record_id") for result in results if result.get("record_id")],
             )
-            results = retrieval.search(query, time_window=time_window)
+            results = retrieval.search(query_text, time_window=time_window)
 
     claims = []
     metadata = system.get("storage.metadata")
@@ -235,11 +253,13 @@ def run_query(system, query: str) -> dict[str, Any]:
         payload = {
             "event": "query.execute",
             "run_id": run_id,
-            "query": query,
+            "query": query_text,
+            "query_original": query,
             "time_window": time_window,
             "result_count": int(len(results)),
             "result_ids": result_ids,
             "extracted_count": int(len(extracted_ids)),
+            "promptops_applied": bool(promptops_result and promptops_result.applied),
         }
         event_builder.ledger_entry(
             "query.execute",

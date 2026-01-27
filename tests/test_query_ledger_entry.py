@@ -38,6 +38,7 @@ class _System:
         self.config = {
             "runtime": {"run_id": "run1"},
             "processing": {"on_query": {"allow_decode_extract": False}},
+            "promptops": {"enabled": False},
         }
         self._caps = {
             "time.intent_parser": _Parser(),
