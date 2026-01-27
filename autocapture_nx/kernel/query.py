@@ -44,6 +44,7 @@ def extract_on_demand(
     allow_ocr: bool = True,
     allow_vlm: bool = True,
     collected_ids: list[str] | None = None,
+    candidate_ids: list[str] | None = None,
 ) -> int:
     media = system.get("storage.media")
     metadata = system.get("storage.metadata")
@@ -57,7 +58,11 @@ def extract_on_demand(
             event_builder = None
 
     processed = 0
-    for record_id in getattr(metadata, "keys", lambda: [])():
+    if candidate_ids is not None:
+        record_ids = list(dict.fromkeys(candidate_ids))
+    else:
+        record_ids = list(getattr(metadata, "keys", lambda: [])())
+    for record_id in record_ids:
         record = metadata.get(record_id, {})
         record_type = str(record.get("record_type", ""))
         if not record_type.startswith("evidence.capture."):
@@ -200,6 +205,7 @@ def run_query(system, query: str) -> dict[str, Any]:
                 allow_ocr=allow_ocr,
                 allow_vlm=allow_vlm,
                 collected_ids=extracted_ids,
+                candidate_ids=[result.get("record_id") for result in results if result.get("record_id")],
             )
             results = retrieval.search(query, time_window=time_window)
 
