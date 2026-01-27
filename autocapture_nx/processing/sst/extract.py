@@ -306,6 +306,7 @@ def extract_spreadsheets(
     row_headers = {t["norm_text"] for row in rows for t in row["tokens"] if RE_ROW.match(t["norm_text"])}
     if not col_headers or not row_headers:
         return []
+    header_map = _header_map(header_rows, table)
     top_row_cells = tuple(c for c in table["cells"] if c["r"] == 0)
     active_cell = _detect_active_cell(tokens, table)
     formula_bar = _detect_formula_bar(tokens, table)
@@ -318,6 +319,7 @@ def extract_spreadsheets(
             "active_cell": active_cell,
             "formula_bar": formula_bar,
             "headers": {"columns": tuple(sorted(col_headers)), "rows": tuple(sorted(row_headers))},
+            "header_map": header_map,
             "top_row_cells": top_row_cells,
         }
     ]
@@ -656,6 +658,33 @@ def _detect_formula_bar(tokens: list[dict[str, Any]], table: dict[str, Any]) -> 
     text = " ".join(str(t.get("text", "")) for t in line_tokens).strip()
     bar_bbox = bbox_union(t["bbox"] for t in line_tokens)
     return {"bbox": bar_bbox, "text": norm_text(text)}
+
+
+def _header_map(header_rows: list[dict[str, Any]], table: dict[str, Any]) -> dict[str, str]:
+    col_edges = table.get("col_x")
+    if not isinstance(col_edges, (list, tuple)):
+        return {}
+    mapping: dict[int, str] = {}
+    for row in header_rows:
+        for token in row.get("tokens", []):
+            text = str(token.get("norm_text", ""))
+            if not RE_COL.match(text):
+                continue
+            bbox = token.get("bbox")
+            if not bbox:
+                continue
+            mid_x = (bbox[0] + bbox[2]) // 2
+            idx = _index_for_mid(mid_x, col_edges)
+            if idx >= 0:
+                mapping[idx] = text
+    return {str(k): mapping[k] for k in sorted(mapping.keys())}
+
+
+def _index_for_mid(mid: int, edges: list[int] | tuple[int, ...]) -> int:
+    for idx in range(max(0, len(edges) - 1)):
+        if edges[idx] <= mid < edges[idx + 1]:
+            return idx
+    return -1
 
 
 def _col_to_index(col: str) -> int:

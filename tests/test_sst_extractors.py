@@ -51,6 +51,7 @@ class SSTExtractorTests(unittest.TestCase):
         sheet = sheets[0]
         self.assertIsNotNone(sheet.get("active_cell"))
         self.assertIsNotNone(sheet.get("formula_bar"))
+        self.assertIn("A", sheet.get("header_map", {}).values())
 
 
 if __name__ == "__main__":
