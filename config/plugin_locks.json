@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-01-27T00:17:47.074176+00:00",
+  "generated_at": "2026-01-27T00:57:27.012421+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "15a258e23ffb0b8ee91e9f6955272db5d7992f024ef54ac98580010152b40012",
@@ -26,7 +26,7 @@
       "manifest_sha256": "997b7a6361d4fe9b80430ff1a5a3901d5cfd644f874f527697c949f3b08b99ee"
     },
     "builtin.citation.basic": {
-      "artifact_sha256": "70f963c9b80a3cfb251d133b719bf04ce3fccba9b9ecfcf46a73ad2dc06fcb63",
+      "artifact_sha256": "09bcf25b2155fdfb8c67a6e6732540b8cbf566003ed995e544e410b0065fbdda",
       "manifest_sha256": "cb48bdae548b35499b17aa5a3056d193a4dfad08ebfdf4618c2a8d666bbfa49d"
     },
     "builtin.devtools.ast_ir": {
