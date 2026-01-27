@@ -17,6 +17,7 @@ BBox = tuple[int, int, int, int]
 
 RE_COL = re.compile(r"^[A-Z]{1,3}$")
 RE_ROW = re.compile(r"^[0-9]{1,5}$")
+RE_CELL_REF = re.compile(r"^[A-Z]{1,3}[0-9]{1,5}$")
 RE_NUMBER = re.compile(r"^[0-9]+(\.[0-9]+)?$")
 RE_SQL = re.compile(r"\b(SELECT|FROM|WHERE|JOIN|GROUP|ORDER|INSERT|UPDATE|DELETE)\b", re.IGNORECASE)
 RE_CODE_PUNCT = re.compile(r"[{}();=]")
@@ -262,6 +263,7 @@ def extract_tables(
     table_bbox = bbox_union(c["bbox"] for c in cells)
     table_id = encode_record_id_component(f"table-{state_id}-{table_bbox}")
     csv_text = _cells_to_csv(cells, rows_n, cols_n)
+    merges = _detect_merges(tokens, row_edges, col_edges)
     return [
         {
             "table_id": table_id,
@@ -271,7 +273,14 @@ def extract_tables(
             "cols": cols_n,
             "row_y": tuple(row_edges),
             "col_x": tuple(col_edges),
-            "merges": tuple(),
+            "merges": tuple(merges),
+            "grid": {
+                "rows": rows_n,
+                "cols": cols_n,
+                "row_y": tuple(row_edges),
+                "col_x": tuple(col_edges),
+                "merges": tuple(merges),
+            },
             "cells": tuple(cells),
             "csv": csv_text,
             "kind": "table",
@@ -298,14 +307,16 @@ def extract_spreadsheets(
     if not col_headers or not row_headers:
         return []
     top_row_cells = tuple(c for c in table["cells"] if c["r"] == 0)
+    active_cell = _detect_active_cell(tokens, table)
+    formula_bar = _detect_formula_bar(tokens, table)
     spreadsheet_id = encode_record_id_component(f"sheet-{state_id}-{table['table_id']}")
     return [
         {
             **table,
             "table_id": spreadsheet_id,
             "kind": "spreadsheet",
-            "active_cell": None,
-            "formula_bar": None,
+            "active_cell": active_cell,
+            "formula_bar": formula_bar,
             "headers": {"columns": tuple(sorted(col_headers)), "rows": tuple(sorted(row_headers))},
             "top_row_cells": top_row_cells,
         }
@@ -331,13 +342,33 @@ def extract_code_blocks(
     bbox = bbox_union(line["bbox"] for line in lines_sorted)
     code_id = encode_record_id_component(f"code-{state_id}-{bbox}")
     indent_unit = _indent_unit(tokens)
+    token_map = {t["token_id"]: t for t in tokens}
     rendered_lines = []
+    line_numbers: list[str | None] = []
     for line in lines_sorted:
-        indent_spaces = max(0, (line["bbox"][0] - bbox[0]) // max(1, indent_unit))
-        rendered_lines.append((" " * indent_spaces) + line["text"])
+        line_tokens = [token_map[tid] for tid in line.get("token_ids", []) if tid in token_map]
+        line_tokens.sort(key=lambda t: (t["bbox"][0], t["bbox"][1], t["token_id"]))
+        number = None
+        if line_tokens and RE_ROW.match(line_tokens[0]["norm_text"]):
+            if len(line_tokens) > 1:
+                num_bbox = line_tokens[0]["bbox"]
+                line_width = max(1, line["bbox"][2] - line["bbox"][0])
+                if (num_bbox[2] - num_bbox[0]) <= max(6, line_width // 5):
+                    number = line_tokens[0]["norm_text"]
+                    line_tokens = line_tokens[1:]
+        line_numbers.append(number)
+        if not line_tokens:
+            continue
+        indent_spaces = max(0, (line_tokens[0]["bbox"][0] - bbox[0]) // max(1, indent_unit))
+        text = " ".join(t["text"] for t in line_tokens if t.get("text"))
+        rendered_lines.append((" " * indent_spaces) + norm_text(text))
     code_text = "\n".join(rendered_lines).strip()
     language = "sql" if RE_SQL.search(code_text) else "unknown"
+    diagnostics: list[str] = []
     confidence = 8500 if language == "sql" else 6500
+    if language == "sql" and not _sql_balance_ok(code_text):
+        diagnostics.append("sql_unbalanced")
+        confidence = 4500
     return [
         {
             "code_id": code_id,
@@ -346,9 +377,11 @@ def extract_code_blocks(
             "language": language,
             "text": code_text,
             "lines": tuple(rendered_lines),
+            "line_numbers": tuple(line_numbers),
             "caret": None,
             "selection": None,
             "confidence_bp": confidence,
+            "diagnostics": tuple(diagnostics),
         }
     ]
 
@@ -413,13 +446,17 @@ def parse_ui_elements(
         block_tokens = [t["token_id"] for t in tokens if t.get("block_id") == block["block_id"]]
         add_child("unknown", block["bbox"], block.get("text"), block_tokens)
     for table in tables:
-        add_child("table", table["bbox"], None, ())
+        token_ids = [t["token_id"] for t in tokens if _mid_in_bbox(t["bbox"], table["bbox"])]
+        add_child("table", table["bbox"], None, token_ids)
     for sheet in spreadsheets:
-        add_child("grid", sheet["bbox"], None, ())
+        token_ids = [t["token_id"] for t in tokens if _mid_in_bbox(t["bbox"], sheet["bbox"])]
+        add_child("grid", sheet["bbox"], None, token_ids)
     for code in code_blocks:
-        add_child("code", code["bbox"], code.get("language"), ())
+        token_ids = [t["token_id"] for t in tokens if _mid_in_bbox(t["bbox"], code["bbox"])]
+        add_child("code", code["bbox"], code.get("language"), token_ids)
     for chart in charts:
-        add_child("chart", chart["bbox"], None, ())
+        token_ids = [t["token_id"] for t in tokens if _mid_in_bbox(t["bbox"], chart["bbox"])]
+        add_child("chart", chart["bbox"], None, token_ids)
 
     # Attach orphan tokens to the root deterministically.
     root_refs = tuple(sorted({t["token_id"] for t in tokens if not t.get("block_id")}))
@@ -528,6 +565,122 @@ def _cells_to_csv(cells: list[dict[str, Any]], rows: int, cols: int) -> str:
     for row in grid:
         writer.writerow(row)
     return buf.getvalue().strip()
+
+
+def _detect_merges(tokens: list[dict[str, Any]], row_edges: list[int], col_edges: list[int]) -> list[dict[str, int]]:
+    if not tokens:
+        return []
+    merges: set[tuple[int, int, int, int]] = set()
+    row_count = max(0, len(row_edges) - 1)
+    col_count = max(0, len(col_edges) - 1)
+    for token in tokens:
+        text = str(token.get("norm_text") or token.get("text") or "")
+        if not text:
+            continue
+        bbox = token.get("bbox")
+        if not bbox or len(bbox) != 4:
+            continue
+        rows = _spanned_indices(bbox[1], bbox[3], row_edges)
+        cols = _spanned_indices(bbox[0], bbox[2], col_edges)
+        if len(rows) <= 1 and len(cols) <= 1:
+            continue
+        r1, r2 = min(rows), max(rows)
+        c1, c2 = min(cols), max(cols)
+        if 0 <= r1 <= r2 < row_count and 0 <= c1 <= c2 < col_count:
+            merges.add((r1, c1, r2, c2))
+    return [{"r1": r1, "c1": c1, "r2": r2, "c2": c2} for r1, c1, r2, c2 in sorted(merges)]
+
+
+def _spanned_indices(start: int, end: int, edges: list[int]) -> list[int]:
+    indices: list[int] = []
+    for idx in range(max(0, len(edges) - 1)):
+        a = edges[idx]
+        b = edges[idx + 1]
+        if end <= a or start >= b:
+            continue
+        indices.append(idx)
+    return indices
+
+
+def _detect_active_cell(tokens: list[dict[str, Any]], table: dict[str, Any]) -> dict[str, Any] | None:
+    cells = table.get("cells") or []
+    cell_map = {(int(c["r"]), int(c["c"])): c for c in cells if isinstance(c, dict)}
+    rows = int(table.get("rows", 0) or 0)
+    cols = int(table.get("cols", 0) or 0)
+    if not rows or not cols:
+        return None
+    candidates = [t for t in tokens if RE_CELL_REF.match(str(t.get("norm_text", "")))]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda t: (t["bbox"][1], t["bbox"][0], t["token_id"]))
+    for token in candidates:
+        ref = str(token.get("norm_text", "")).upper()
+        col_part = "".join(ch for ch in ref if ch.isalpha())
+        row_part = "".join(ch for ch in ref if ch.isdigit())
+        if not col_part or not row_part:
+            continue
+        col_idx = _col_to_index(col_part)
+        try:
+            row_idx = int(row_part) - 1
+        except Exception:
+            continue
+        if col_idx < 0 or row_idx < 0 or col_idx >= cols or row_idx >= rows:
+            continue
+        cell = cell_map.get((row_idx, col_idx))
+        if cell is None:
+            continue
+        return {"ref": ref, "r": row_idx, "c": col_idx, "bbox": cell.get("bbox")}
+    return None
+
+
+def _detect_formula_bar(tokens: list[dict[str, Any]], table: dict[str, Any]) -> dict[str, Any] | None:
+    bbox = table.get("bbox")
+    if not bbox:
+        return None
+    y1, y2 = bbox[1], bbox[3]
+    height = max(1, y2 - y1)
+    upper_limit = y1 + max(1, height // 4)
+    anchor = None
+    for token in tokens:
+        text = str(token.get("norm_text") or token.get("text") or "").lower()
+        if text in {"fx", "f(x)"} and token.get("bbox") and token["bbox"][1] <= upper_limit:
+            anchor = token
+            break
+    if anchor is None:
+        return None
+    anchor_y = (anchor["bbox"][1] + anchor["bbox"][3]) // 2
+    line_tokens = [t for t in tokens if abs(((t["bbox"][1] + t["bbox"][3]) // 2) - anchor_y) <= 8]
+    if not line_tokens:
+        return None
+    line_tokens.sort(key=lambda t: (t["bbox"][0], t["token_id"]))
+    text = " ".join(str(t.get("text", "")) for t in line_tokens).strip()
+    bar_bbox = bbox_union(t["bbox"] for t in line_tokens)
+    return {"bbox": bar_bbox, "text": norm_text(text)}
+
+
+def _col_to_index(col: str) -> int:
+    value = 0
+    for ch in col.upper():
+        if not ("A" <= ch <= "Z"):
+            return -1
+        value = value * 26 + (ord(ch) - ord("A") + 1)
+    return value - 1
+
+
+def _sql_balance_ok(text: str) -> bool:
+    paren = 0
+    single = 0
+    double = 0
+    for ch in text:
+        if ch == "(":
+            paren += 1
+        elif ch == ")":
+            paren -= 1
+        elif ch == "'":
+            single ^= 1
+        elif ch == "\"":
+            double ^= 1
+    return paren == 0 and single == 0 and double == 0
 
 
 def _line_code_score(line: dict[str, Any]) -> int:
