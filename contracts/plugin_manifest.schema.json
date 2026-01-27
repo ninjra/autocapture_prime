@@ -56,6 +56,18 @@
       "type": "array",
       "items": {"type": "string"}
     },
+    "conflicts_with": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "replaces": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "stages": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
     "optional_deps": {
       "type": "array",
       "items": {"type": "string"}

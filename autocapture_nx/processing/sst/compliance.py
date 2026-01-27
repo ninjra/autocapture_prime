@@ -21,6 +21,20 @@ PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 RE_REDACTED = re.compile(r"\[REDACTED:[^]]+\]")
 
 
+def redact_text(text: str, *, enabled: bool) -> tuple[str, int]:
+    if not enabled:
+        return text, 0
+    return _redact_text(text)
+
+
+def redact_value(value: Any, *, enabled: bool) -> tuple[Any, int]:
+    if not enabled:
+        return value, 0
+    metrics = {"redactions": 0, "dropped": 0}
+    redacted = _redact_obj(value, metrics)
+    return redacted, int(metrics["redactions"])
+
+
 def redact_artifacts(
     *,
     state: dict[str, Any],
@@ -165,4 +179,3 @@ def _redact_text(text: str) -> tuple[str, int]:
 
         out = pattern.sub(repl, out)
     return out, count
-

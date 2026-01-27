@@ -32,6 +32,12 @@ DEFAULT_CAPABILITY_POLICY: dict[str, Any] = {
 }
 
 
+def _normalize_pair(a: str, b: str) -> tuple[str, str]:
+    if a <= b:
+        return a, b
+    return b, a
+
+
 def _parse_version(version: str) -> tuple[int, ...]:
     parts = []
     for part in version.strip().lstrip("v").split("."):
@@ -120,28 +126,61 @@ class MultiCapabilityProxy:
     ) -> None:
         self.capability = capability
         self._policy = dict(policy)
-        self._providers: list[tuple[str, CapabilityProxy]] = []
+        self._providers: dict[str, CapabilityProxy] = {}
         for plugin_id, proxy in providers:
             self.add_provider(plugin_id, proxy)
 
+    @property
+    def policy(self) -> dict[str, Any]:
+        return dict(self._policy)
+
+    @property
+    def fanout(self) -> bool:
+        return bool(self._policy.get("fanout", True))
+
     def add_provider(self, plugin_id: str, proxy: CapabilityProxy) -> None:
-        for existing_id, _ in self._providers:
-            if existing_id == plugin_id:
-                raise PluginError(f"Duplicate provider {plugin_id} for capability {self.capability}")
-        self._providers.append((plugin_id, proxy))
-        max_providers = int(self._policy.get("max_providers", 0) or 0)
+        if plugin_id in self._providers:
+            raise PluginError(f"Duplicate provider {plugin_id} for capability {self.capability}")
+        self._providers[plugin_id] = proxy
+
+    def _ordered_ids(self) -> list[str]:
+        ids = sorted(self._providers)
+        allowed_ids = self._policy.get("provider_ids", [])
+        if isinstance(allowed_ids, list) and allowed_ids:
+            allowed = {str(pid) for pid in allowed_ids}
+            ids = [pid for pid in ids if pid in allowed]
+            if not ids:
+                raise PluginError(f"No allowed providers for {self.capability} after provider_ids filter")
+        preferred_ids = self._policy.get("preferred", [])
+        if isinstance(preferred_ids, list) and preferred_ids:
+            preferred = [pid for pid in preferred_ids if pid in ids]
+            preferred_set = set(preferred)
+            tail = [pid for pid in ids if pid not in preferred_set]
+            ids = preferred + tail
+        try:
+            max_providers = int(self._policy.get("max_providers", 0) or 0)
+        except Exception:
+            max_providers = 0
         if max_providers > 0:
-            self._providers = self._providers[:max_providers]
+            ids = ids[:max_providers]
+        return ids
 
     def items(self) -> list[tuple[str, CapabilityProxy]]:
-        return list(self._providers)
+        ids = self._ordered_ids()
+        return [(pid, self._providers[pid]) for pid in ids]
 
     def provider_ids(self) -> list[str]:
-        return [plugin_id for plugin_id, _proxy in self._providers]
+        return [plugin_id for plugin_id, _proxy in self.items()]
+
+    def primary(self) -> tuple[str, CapabilityProxy]:
+        items = self.items()
+        if not items:
+            raise PluginError(f"No providers available for capability {self.capability}")
+        return items[0]
 
     def call_all(self, method: str, *args, **kwargs) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
-        for plugin_id, proxy in self._providers:
+        for plugin_id, proxy in self.items():
             attr = getattr(proxy, method, None)
             if attr is None:
                 continue
@@ -185,6 +224,21 @@ class PluginRegistry:
         self._validator = SchemaLiteValidator()
         plugins_cfg = config.get("plugins", {}) if isinstance(config, dict) else {}
         self._capability_policies = plugins_cfg.get("capabilities", {}) if isinstance(plugins_cfg, dict) else {}
+        conflicts_cfg = plugins_cfg.get("conflicts", {}) if isinstance(plugins_cfg, dict) else {}
+        self._conflicts_enforce = True
+        self._conflicts_allow_pairs: set[tuple[str, str]] = set()
+        if isinstance(conflicts_cfg, dict):
+            self._conflicts_enforce = bool(conflicts_cfg.get("enforce", True))
+            allow_pairs = conflicts_cfg.get("allow_pairs", [])
+            if isinstance(allow_pairs, list):
+                for pair in allow_pairs:
+                    if not isinstance(pair, (list, tuple)) or len(pair) < 2:
+                        continue
+                    a = str(pair[0]).strip()
+                    b = str(pair[1]).strip()
+                    if not a or not b or a == b:
+                        continue
+                    self._conflicts_allow_pairs.add(_normalize_pair(a, b))
 
     def discover_manifest_paths(self) -> list[Path]:
         paths = [plugins_dir() / "builtin"]
@@ -284,6 +338,57 @@ class PluginRegistry:
                 raise PluginError(f"Plugin {manifest.plugin_id} manifest hash mismatch")
             if artifact_hash != expected.get("artifact_sha256"):
                 raise PluginError(f"Plugin {manifest.plugin_id} artifact hash mismatch")
+
+    def _pair_allowed(self, a: str, b: str) -> bool:
+        return _normalize_pair(a, b) in self._conflicts_allow_pairs
+
+    def _declared_conflicts(self, manifest: dict[str, Any]) -> set[str]:
+        conflicts = manifest.get("conflicts_with", [])
+        replaces = manifest.get("replaces", [])
+        out: set[str] = set()
+        if isinstance(conflicts, list):
+            out.update(str(pid).strip() for pid in conflicts if str(pid).strip())
+        if isinstance(replaces, list):
+            out.update(str(pid).strip() for pid in replaces if str(pid).strip())
+        plugin_id = str(manifest.get("plugin_id", "")).strip()
+        if plugin_id:
+            out.discard(plugin_id)
+        return out
+
+    def _conflict_pairs(
+        self,
+        manifests_by_id: dict[str, tuple[Path, dict[str, Any]]],
+        enabled_set: set[str],
+    ) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+        blocked: set[tuple[str, str]] = set()
+        allowed: set[tuple[str, str]] = set()
+        for plugin_id in sorted(enabled_set):
+            manifest_entry = manifests_by_id.get(plugin_id)
+            if manifest_entry is None:
+                continue
+            _path, manifest = manifest_entry
+            for other in sorted(self._declared_conflicts(manifest)):
+                if other not in enabled_set:
+                    continue
+                pair = _normalize_pair(plugin_id, other)
+                if self._pair_allowed(*pair):
+                    allowed.add(pair)
+                else:
+                    blocked.add(pair)
+        return blocked, allowed
+
+    def _check_conflicts(
+        self,
+        manifests_by_id: dict[str, tuple[Path, dict[str, Any]]],
+        enabled_set: set[str],
+    ) -> None:
+        if not self._conflicts_enforce:
+            return
+        blocked, _allowed = self._conflict_pairs(manifests_by_id, enabled_set)
+        if not blocked:
+            return
+        pairs = ", ".join(f"{a} <-> {b}" for a, b in sorted(blocked))
+        raise PluginError(f"Plugin conflicts detected: {pairs}")
 
     def _capability_policy(self, capability: str) -> dict[str, Any]:
         raw = self._capability_policies.get(capability, {}) if isinstance(self._capability_policies, dict) else {}
@@ -452,6 +557,8 @@ class PluginRegistry:
             for pid, (_path, manifest) in manifests_by_id.items()
             if pid in allowlist and is_enabled(pid, manifest)
         }
+
+        self._check_conflicts(manifests_by_id, enabled_set)
 
         for plugin_id, (manifest_path, manifest) in manifests_by_id.items():
             if plugin_id not in allowlist:

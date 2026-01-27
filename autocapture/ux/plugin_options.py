@@ -15,6 +15,13 @@ CAPABILITY_POLICY_FIELDS = {
     "max_providers",
 }
 
+STAGE_POLICY_FIELDS = {
+    "enabled",
+    "provider_ids",
+    "fanout",
+    "max_providers",
+}
+
 
 def _label_from_path(path: str) -> str:
     return path.split(".")[-1].replace("_", " ").title()
@@ -35,6 +42,21 @@ def _capability_policy_target(path: str) -> tuple[str, str] | None:
     return None
 
 
+def _stage_policy_target(path: str) -> tuple[str, str] | None:
+    parts = path.split(".")
+    if len(parts) < 5:
+        return None
+    if parts[0] != "processing" or parts[1] != "sst" or parts[2] != "stage_providers":
+        return None
+    for idx in range(3, len(parts)):
+        if parts[idx] in STAGE_POLICY_FIELDS:
+            stage = ".".join(parts[3:idx])
+            field = parts[idx]
+            if stage:
+                return stage, field
+    return None
+
+
 def _get_by_path(data: dict[str, Any], path: str) -> Any:
     cap_target = _capability_policy_target(path)
     if cap_target is not None:
@@ -42,6 +64,16 @@ def _get_by_path(data: dict[str, Any], path: str) -> Any:
         plugins_cfg = data.get("plugins", {}) if isinstance(data, dict) else {}
         caps_cfg = plugins_cfg.get("capabilities", {}) if isinstance(plugins_cfg, dict) else {}
         policy = caps_cfg.get(capability, {}) if isinstance(caps_cfg, dict) else {}
+        if isinstance(policy, dict):
+            return policy.get(field)
+        return None
+    stage_target = _stage_policy_target(path)
+    if stage_target is not None:
+        stage, field = stage_target
+        processing_cfg = data.get("processing", {}) if isinstance(data, dict) else {}
+        sst_cfg = processing_cfg.get("sst", {}) if isinstance(processing_cfg, dict) else {}
+        stage_cfg = sst_cfg.get("stage_providers", {}) if isinstance(sst_cfg, dict) else {}
+        policy = stage_cfg.get(stage, {}) if isinstance(stage_cfg, dict) else {}
         if isinstance(policy, dict):
             return policy.get(field)
         return None
@@ -60,6 +92,16 @@ def _schema_for_path(schema: dict[str, Any], path: str) -> dict[str, Any] | None
         plugins_schema = schema.get("properties", {}).get("plugins", {})
         caps_schema = plugins_schema.get("properties", {}).get("capabilities", {})
         policy_schema = caps_schema.get("additionalProperties", {})
+        if isinstance(policy_schema, dict):
+            return policy_schema.get("properties", {}).get(field)
+        return None
+    stage_target = _stage_policy_target(path)
+    if stage_target is not None:
+        _stage, field = stage_target
+        processing_schema = schema.get("properties", {}).get("processing", {})
+        sst_schema = processing_schema.get("properties", {}).get("sst", {})
+        stage_schema = sst_schema.get("properties", {}).get("stage_providers", {})
+        policy_schema = stage_schema.get("additionalProperties", {})
         if isinstance(policy_schema, dict):
             return policy_schema.get("properties", {}).get(field)
         return None
@@ -149,8 +191,94 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "processing.sst.table_min_rows",
         "processing.sst.table_min_cols",
         "processing.sst.redact_enabled",
+        "plugins.conflicts.enforce",
+        "plugins.conflicts.allow_pairs",
         "plugins.capabilities.processing.pipeline.mode",
         "plugins.capabilities.processing.pipeline.preferred",
+        "plugins.capabilities.processing.pipeline.provider_ids",
+        "plugins.capabilities.processing.pipeline.fanout",
+        "plugins.capabilities.processing.pipeline.max_providers",
+        "plugins.capabilities.processing.stage.hooks.mode",
+        "plugins.capabilities.processing.stage.hooks.preferred",
+        "plugins.capabilities.processing.stage.hooks.provider_ids",
+        "plugins.capabilities.processing.stage.hooks.fanout",
+        "plugins.capabilities.processing.stage.hooks.max_providers",
+        "processing.sst.stage_providers.ingest.frame.enabled",
+        "processing.sst.stage_providers.ingest.frame.provider_ids",
+        "processing.sst.stage_providers.ingest.frame.fanout",
+        "processing.sst.stage_providers.ingest.frame.max_providers",
+        "processing.sst.stage_providers.preprocess.normalize.enabled",
+        "processing.sst.stage_providers.preprocess.normalize.provider_ids",
+        "processing.sst.stage_providers.preprocess.normalize.fanout",
+        "processing.sst.stage_providers.preprocess.normalize.max_providers",
+        "processing.sst.stage_providers.preprocess.tile.enabled",
+        "processing.sst.stage_providers.preprocess.tile.provider_ids",
+        "processing.sst.stage_providers.preprocess.tile.fanout",
+        "processing.sst.stage_providers.preprocess.tile.max_providers",
+        "processing.sst.stage_providers.ocr.onnx.enabled",
+        "processing.sst.stage_providers.ocr.onnx.provider_ids",
+        "processing.sst.stage_providers.ocr.onnx.fanout",
+        "processing.sst.stage_providers.ocr.onnx.max_providers",
+        "processing.sst.stage_providers.vision.vlm.enabled",
+        "processing.sst.stage_providers.vision.vlm.provider_ids",
+        "processing.sst.stage_providers.vision.vlm.fanout",
+        "processing.sst.stage_providers.vision.vlm.max_providers",
+        "processing.sst.stage_providers.layout.assemble.enabled",
+        "processing.sst.stage_providers.layout.assemble.provider_ids",
+        "processing.sst.stage_providers.layout.assemble.fanout",
+        "processing.sst.stage_providers.layout.assemble.max_providers",
+        "processing.sst.stage_providers.extract.table.enabled",
+        "processing.sst.stage_providers.extract.table.provider_ids",
+        "processing.sst.stage_providers.extract.table.fanout",
+        "processing.sst.stage_providers.extract.table.max_providers",
+        "processing.sst.stage_providers.extract.spreadsheet.enabled",
+        "processing.sst.stage_providers.extract.spreadsheet.provider_ids",
+        "processing.sst.stage_providers.extract.spreadsheet.fanout",
+        "processing.sst.stage_providers.extract.spreadsheet.max_providers",
+        "processing.sst.stage_providers.extract.code.enabled",
+        "processing.sst.stage_providers.extract.code.provider_ids",
+        "processing.sst.stage_providers.extract.code.fanout",
+        "processing.sst.stage_providers.extract.code.max_providers",
+        "processing.sst.stage_providers.extract.chart.enabled",
+        "processing.sst.stage_providers.extract.chart.provider_ids",
+        "processing.sst.stage_providers.extract.chart.fanout",
+        "processing.sst.stage_providers.extract.chart.max_providers",
+        "processing.sst.stage_providers.ui.parse.enabled",
+        "processing.sst.stage_providers.ui.parse.provider_ids",
+        "processing.sst.stage_providers.ui.parse.fanout",
+        "processing.sst.stage_providers.ui.parse.max_providers",
+        "processing.sst.stage_providers.track.cursor.enabled",
+        "processing.sst.stage_providers.track.cursor.provider_ids",
+        "processing.sst.stage_providers.track.cursor.fanout",
+        "processing.sst.stage_providers.track.cursor.max_providers",
+        "processing.sst.stage_providers.build.state.enabled",
+        "processing.sst.stage_providers.build.state.provider_ids",
+        "processing.sst.stage_providers.build.state.fanout",
+        "processing.sst.stage_providers.build.state.max_providers",
+        "processing.sst.stage_providers.match.ids.enabled",
+        "processing.sst.stage_providers.match.ids.provider_ids",
+        "processing.sst.stage_providers.match.ids.fanout",
+        "processing.sst.stage_providers.match.ids.max_providers",
+        "processing.sst.stage_providers.build.delta.enabled",
+        "processing.sst.stage_providers.build.delta.provider_ids",
+        "processing.sst.stage_providers.build.delta.fanout",
+        "processing.sst.stage_providers.build.delta.max_providers",
+        "processing.sst.stage_providers.infer.action.enabled",
+        "processing.sst.stage_providers.infer.action.provider_ids",
+        "processing.sst.stage_providers.infer.action.fanout",
+        "processing.sst.stage_providers.infer.action.max_providers",
+        "processing.sst.stage_providers.compliance.redact.enabled",
+        "processing.sst.stage_providers.compliance.redact.provider_ids",
+        "processing.sst.stage_providers.compliance.redact.fanout",
+        "processing.sst.stage_providers.compliance.redact.max_providers",
+        "processing.sst.stage_providers.persist.bundle.enabled",
+        "processing.sst.stage_providers.persist.bundle.provider_ids",
+        "processing.sst.stage_providers.persist.bundle.fanout",
+        "processing.sst.stage_providers.persist.bundle.max_providers",
+        "processing.sst.stage_providers.index.text.enabled",
+        "processing.sst.stage_providers.index.text.provider_ids",
+        "processing.sst.stage_providers.index.text.fanout",
+        "processing.sst.stage_providers.index.text.max_providers",
     ],
     "builtin.time.advanced": [
         "time.timezone",

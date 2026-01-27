@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import copy
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from autocapture.indexing.factory import build_indexes
+from autocapture_nx.kernel.canonical_json import CanonicalJSONError, dumps as canonical_dumps
 from autocapture_nx.kernel.ids import encode_record_id_component
 
 from .action import infer_action
-from .compliance import redact_artifacts
+from .compliance import redact_artifacts, redact_text, redact_value
 from .delta import build_delta
 from .extract import (
     extract_charts,
@@ -27,7 +29,7 @@ from .match import match_ids
 from .persist import SSTPersistence, config_hash
 from .segment import SegmentDecision, decide_boundary
 from .state import build_state
-from .utils import hash_canonical, norm_text, ts_utc_to_ms
+from .utils import clamp_bbox, hash_canonical, norm_text, ts_utc_to_ms
 
 
 ShouldAbortFn = Callable[[], bool]
@@ -55,6 +57,36 @@ class _PrevContext:
     cursor: dict[str, Any] | None
 
 
+_STAGE_NAMES: tuple[str, ...] = (
+    "ingest.frame",
+    "preprocess.normalize",
+    "preprocess.tile",
+    "ocr.onnx",
+    "vision.vlm",
+    "layout.assemble",
+    "extract.table",
+    "extract.spreadsheet",
+    "extract.code",
+    "extract.chart",
+    "ui.parse",
+    "track.cursor",
+    "build.state",
+    "match.ids",
+    "build.delta",
+    "infer.action",
+    "compliance.redact",
+    "persist.bundle",
+    "index.text",
+)
+
+_STAGE_POLICY_DEFAULT: dict[str, Any] = {
+    "enabled": True,
+    "provider_ids": tuple(),
+    "fanout": True,
+    "max_providers": 0,
+}
+
+
 class SSTPipeline:
     """Deterministic vision-only screen semantic trace pipeline."""
 
@@ -67,6 +99,7 @@ class SSTPipeline:
         self._metadata = self._cap("storage.metadata")
         self._ocr = self._cap("ocr.engine")
         self._vlm = self._cap("vision.extractor")
+        self._stage_hooks = self._cap("processing.stage.hooks")
         self._events = self._cap("event.builder")
         self._logger = self._cap("observability.logger")
         self._lexical = None
@@ -221,17 +254,73 @@ class SSTPipeline:
         deadline_ts: float | None,
     ) -> "_HeavyResult":
         diagnostics: list[dict[str, Any]] = []
+        frame_width = int(normalized.width)
+        frame_height = int(normalized.height)
+        stage_payload: dict[str, Any] = {
+            "run_id": run_id,
+            "record_id": record_id,
+            "ts_ms": ts_ms,
+            "frame_bbox": frame_bbox,
+            "frame_width": frame_width,
+            "frame_height": frame_height,
+            "image_sha256": normalized.image_sha256,
+            "phash": normalized.phash,
+            "boundary": decision.boundary,
+            "boundary_reason": decision.reason,
+            "record": record,
+            "window_title": window_title,
+            "frame_bytes": frame_bytes,
+        }
+
+        self._run_stage_hooks(
+            stage="ingest.frame",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        self._run_stage_hooks(
+            stage="preprocess.normalize",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+
         patches = tile_image(
             normalized.image_rgb,
             tile_max_px=int(self._sst_cfg["tile_max_px"]),
             overlap_px=int(self._sst_cfg["tile_overlap_px"]),
             add_full_frame=bool(self._sst_cfg["tile_add_full_frame"]),
         )
+        baseline_patches = patches
+        stage_payload["patches"] = baseline_patches
+        self._run_stage_hooks(
+            stage="preprocess.tile",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        patches = stage_payload.get("patches", baseline_patches)
+        if not isinstance(patches, list):
+            diagnostics.append({"kind": "sst.stage_hook_invalid_patches", "stage": "preprocess.tile"})
+            patches = baseline_patches
+
         tokens, ocr_diag = run_ocr_tokens(
             patches=patches,
             ocr_capability=self._ocr,
-            frame_width=normalized.width,
-            frame_height=normalized.height,
+            frame_width=frame_width,
+            frame_height=frame_height,
             min_conf_bp=int(self._sst_cfg["ocr_min_conf_bp"]),
             nms_iou_bp=int(self._sst_cfg["ocr_nms_iou_bp"]),
             max_tokens=int(self._sst_cfg["ocr_max_tokens"]),
@@ -241,8 +330,66 @@ class SSTPipeline:
             deadline_ts=deadline_ts,
         )
         diagnostics.extend(ocr_diag.items)
-        tokens.extend(self._vlm_tokens(normalized.width, normalized.height, frame_bytes, allow_vlm, should_abort, deadline_ts))
+        tokens = _sanitize_tokens(
+            tokens,
+            frame_width=frame_width,
+            frame_height=frame_height,
+            diagnostics=diagnostics,
+            stage="ocr.onnx",
+            provider_id_hint="ocr.engine",
+        )
+        stage_payload["tokens"] = tokens
+        self._run_stage_hooks(
+            stage="ocr.onnx",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        tokens = _tokens_from_payload(
+            stage_payload,
+            fallback=tokens,
+            frame_width=frame_width,
+            frame_height=frame_height,
+            diagnostics=diagnostics,
+            stage="ocr.onnx",
+            provider_id_hint="stage_hook",
+        )
+        tokens.extend(
+            _sanitize_tokens(
+                self._vlm_tokens(frame_width, frame_height, frame_bytes, allow_vlm, should_abort, deadline_ts),
+                frame_width=frame_width,
+                frame_height=frame_height,
+                diagnostics=diagnostics,
+                stage="vision.vlm",
+                provider_id_hint="vision.extractor",
+            )
+        )
+        stage_payload["tokens"] = tokens
+        self._run_stage_hooks(
+            stage="vision.vlm",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        tokens = _tokens_from_payload(
+            stage_payload,
+            fallback=tokens,
+            frame_width=frame_width,
+            frame_height=frame_height,
+            diagnostics=diagnostics,
+            stage="vision.vlm",
+            provider_id_hint="stage_hook",
+        )
         tokens = _stable_tokens(tokens)
+        stage_payload["tokens"] = tokens
         ocr_tokens = len(tokens)
 
         text_lines, text_blocks = assemble_layout(
@@ -251,6 +398,40 @@ class SSTPipeline:
             block_gap_px=int(self._sst_cfg["layout_block_gap_px"]),
             align_tolerance_px=int(self._sst_cfg["layout_align_tol_px"]),
         )
+        stage_payload["text_lines"] = text_lines
+        stage_payload["text_blocks"] = text_blocks
+        self._run_stage_hooks(
+            stage="layout.assemble",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        tokens = _tokens_from_payload(
+            stage_payload,
+            fallback=tokens,
+            frame_width=frame_width,
+            frame_height=frame_height,
+            diagnostics=diagnostics,
+            stage="layout.assemble",
+            provider_id_hint="stage_hook",
+        )
+        tokens = _stable_tokens(tokens)
+        # Re-run layout after hooks so token line/block ids stay coherent.
+        text_lines, text_blocks = assemble_layout(
+            tokens,
+            line_y_threshold_px=int(self._sst_cfg["layout_line_y_px"]),
+            block_gap_px=int(self._sst_cfg["layout_block_gap_px"]),
+            align_tolerance_px=int(self._sst_cfg["layout_align_tol_px"]),
+        )
+        stage_payload["tokens"] = tokens
+        stage_payload["text_lines"] = text_lines
+        stage_payload["text_blocks"] = text_blocks
+        ocr_tokens = len(tokens)
+
         tables = extract_tables(
             tokens=tokens,
             state_id="pending",
@@ -260,23 +441,94 @@ class SSTPipeline:
             row_gap_px=int(self._sst_cfg["table_row_gap_px"]),
             col_gap_px=int(self._sst_cfg["table_col_gap_px"]),
         )
+        baseline_tables = tables
+        stage_payload["tables"] = baseline_tables
+        self._run_stage_hooks(
+            stage="extract.table",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        tables = stage_payload.get("tables", baseline_tables)
+        if not isinstance(tables, list):
+            diagnostics.append({"kind": "sst.stage_hook_invalid_tables", "stage": "extract.table"})
+            tables = baseline_tables
+        stage_payload["tables"] = tables
+
         spreadsheets = extract_spreadsheets(
             tokens=tokens,
             tables=tables,
             state_id="pending",
             header_scan_rows=int(self._sst_cfg["sheet_header_scan_rows"]),
         )
+        baseline_spreadsheets = spreadsheets
+        stage_payload["spreadsheets"] = baseline_spreadsheets
+        self._run_stage_hooks(
+            stage="extract.spreadsheet",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        spreadsheets = stage_payload.get("spreadsheets", baseline_spreadsheets)
+        if not isinstance(spreadsheets, list):
+            diagnostics.append({"kind": "sst.stage_hook_invalid_spreadsheets", "stage": "extract.spreadsheet"})
+            spreadsheets = baseline_spreadsheets
+        stage_payload["spreadsheets"] = spreadsheets
+
         code_blocks = extract_code_blocks(
             tokens=tokens,
             text_lines=text_lines,
             state_id="pending",
             min_keywords=int(self._sst_cfg["code_min_keywords"]),
         )
+        baseline_code_blocks = code_blocks
+        stage_payload["code_blocks"] = baseline_code_blocks
+        self._run_stage_hooks(
+            stage="extract.code",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        code_blocks = stage_payload.get("code_blocks", baseline_code_blocks)
+        if not isinstance(code_blocks, list):
+            diagnostics.append({"kind": "sst.stage_hook_invalid_code_blocks", "stage": "extract.code"})
+            code_blocks = baseline_code_blocks
+        stage_payload["code_blocks"] = code_blocks
+
         charts = extract_charts(
             tokens=tokens,
             state_id="pending",
             min_ticks=int(self._sst_cfg["chart_min_ticks"]),
         )
+        baseline_charts = charts
+        stage_payload["charts"] = baseline_charts
+        self._run_stage_hooks(
+            stage="extract.chart",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        charts = stage_payload.get("charts", baseline_charts)
+        if not isinstance(charts, list):
+            diagnostics.append({"kind": "sst.stage_hook_invalid_charts", "stage": "extract.chart"})
+            charts = baseline_charts
+        stage_payload["charts"] = charts
 
         element_graph = parse_ui_elements(
             state_id="pending",
@@ -288,15 +540,50 @@ class SSTPipeline:
             code_blocks=code_blocks,
             charts=charts,
         )
-        cursor = track_cursor(record, normalized.width, normalized.height)
+        baseline_element_graph = element_graph
+        stage_payload["element_graph"] = baseline_element_graph
+        self._run_stage_hooks(
+            stage="ui.parse",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        element_graph = stage_payload.get("element_graph", baseline_element_graph)
+        if not isinstance(element_graph, dict):
+            diagnostics.append({"kind": "sst.stage_hook_invalid_element_graph", "stage": "ui.parse"})
+            element_graph = baseline_element_graph
+        stage_payload["element_graph"] = element_graph
+
+        cursor = track_cursor(record, frame_width, frame_height)
+        baseline_cursor = cursor
+        stage_payload["cursor"] = baseline_cursor
+        self._run_stage_hooks(
+            stage="track.cursor",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        cursor = stage_payload.get("cursor", baseline_cursor)
+        if cursor is not None and not isinstance(cursor, dict):
+            diagnostics.append({"kind": "sst.stage_hook_invalid_cursor", "stage": "track.cursor"})
+            cursor = baseline_cursor
+        stage_payload["cursor"] = cursor
 
         state = build_state(
             run_id=run_id,
             frame_id=record_id,
             ts_ms=ts_ms,
             phash=normalized.phash,
-            width=normalized.width,
-            height=normalized.height,
+            width=frame_width,
+            height=frame_height,
             tokens=tokens,
             element_graph=element_graph,
             text_lines=text_lines,
@@ -308,13 +595,67 @@ class SSTPipeline:
             cursor=cursor,
             window_title=window_title,
         )
+        baseline_state = state
+        stage_payload["state"] = baseline_state
+        self._run_stage_hooks(
+            stage="build.state",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        state = stage_payload.get("state", baseline_state)
+        if not isinstance(state, dict):
+            diagnostics.append({"kind": "sst.stage_hook_invalid_state", "stage": "build.state"})
+            state = baseline_state
+        stage_payload["state"] = state
+
         state = match_ids(prev_ctx.state if prev_ctx else None, state)
+        baseline_state = state
+        stage_payload["state"] = baseline_state
+        self._run_stage_hooks(
+            stage="match.ids",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        state = stage_payload.get("state", baseline_state)
+        if not isinstance(state, dict):
+            diagnostics.append({"kind": "sst.stage_hook_invalid_state", "stage": "match.ids"})
+            state = baseline_state
+        stage_payload["state"] = state
+
         delta_event = build_delta(
             prev_state=prev_ctx.state if prev_ctx else None,
             state=state,
             bbox_shift_px=int(self._sst_cfg["delta_bbox_shift_px"]),
             table_match_iou_bp=int(self._sst_cfg["delta_table_match_iou_bp"]),
         )
+        baseline_delta_event = delta_event
+        stage_payload["delta_event"] = baseline_delta_event
+        self._run_stage_hooks(
+            stage="build.delta",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        delta_event = stage_payload.get("delta_event", baseline_delta_event)
+        if delta_event is not None and not isinstance(delta_event, dict):
+            diagnostics.append({"kind": "sst.stage_hook_invalid_delta", "stage": "build.delta"})
+            delta_event = baseline_delta_event
+        stage_payload["delta_event"] = delta_event
+
         action_event = infer_action(
             delta_event=delta_event,
             cursor_prev=prev_ctx.cursor if prev_ctx else None,
@@ -322,6 +663,23 @@ class SSTPipeline:
             prev_state=prev_ctx.state if prev_ctx else None,
             state=state,
         )
+        baseline_action_event = action_event
+        stage_payload["action_event"] = baseline_action_event
+        self._run_stage_hooks(
+            stage="infer.action",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        action_event = stage_payload.get("action_event", baseline_action_event)
+        if action_event is not None and not isinstance(action_event, dict):
+            diagnostics.append({"kind": "sst.stage_hook_invalid_action", "stage": "infer.action"})
+            action_event = baseline_action_event
+        stage_payload["action_event"] = action_event
 
         state_redacted, delta_event, action_event, compliance_metrics = redact_artifacts(
             state=state,
@@ -335,6 +693,83 @@ class SSTPipeline:
             diagnostics.append({"kind": "sst.dropped"})
             return _HeavyResult(0, 0, ocr_tokens, tuple(diagnostics), None, cursor, tuple())
         state = state_redacted
+        baseline_state = state
+        baseline_delta_event = delta_event
+        baseline_action_event = action_event
+        stage_payload["state"] = baseline_state
+        stage_payload["delta_event"] = baseline_delta_event
+        stage_payload["action_event"] = baseline_action_event
+
+        self._run_stage_hooks(
+            stage="compliance.redact",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        state = stage_payload.get("state", baseline_state)
+        delta_event = stage_payload.get("delta_event", baseline_delta_event)
+        action_event = stage_payload.get("action_event", baseline_action_event)
+        if not isinstance(state, dict):
+            diagnostics.append({"kind": "sst.stage_hook_invalid_state", "stage": "compliance.redact"})
+            state = baseline_state
+        if delta_event is not None and not isinstance(delta_event, dict):
+            diagnostics.append({"kind": "sst.stage_hook_invalid_delta", "stage": "compliance.redact"})
+            delta_event = baseline_delta_event
+        if action_event is not None and not isinstance(action_event, dict):
+            diagnostics.append({"kind": "sst.stage_hook_invalid_action", "stage": "compliance.redact"})
+            action_event = baseline_action_event
+
+        # Re-apply redaction after hooks to prevent re-introducing sensitive text.
+        state_redacted, delta_event, action_event, compliance_post = redact_artifacts(
+            state=state,
+            delta_event=delta_event,
+            action_event=action_event,
+            enabled=bool(self._sst_cfg["redact_enabled"]),
+            denylist_app_hints=list(self._sst_cfg["redact_denylist"]),
+        )
+        if compliance_post.get("redactions") or compliance_post.get("dropped"):
+            diagnostics.append({"kind": "sst.compliance_post", **compliance_post})
+        if state_redacted is None:
+            diagnostics.append({"kind": "sst.dropped"})
+            return _HeavyResult(0, 0, ocr_tokens, tuple(diagnostics), None, cursor, tuple())
+        state = state_redacted
+        stage_payload["state"] = state
+        stage_payload["delta_event"] = delta_event
+        stage_payload["action_event"] = action_event
+        if "extra_docs" not in stage_payload:
+            stage_payload["extra_docs"] = []
+
+        self._run_stage_hooks(
+            stage="index.text",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        extra_docs = _collect_extra_docs(stage_payload, diagnostics=diagnostics, stage="index.text")
+        stage_payload["extra_docs"] = extra_docs
+
+        self._run_stage_hooks(
+            stage="persist.bundle",
+            payload=stage_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        extra_docs = _collect_extra_docs(stage_payload, diagnostics=diagnostics, stage="persist.bundle", fallback=extra_docs)
+        extra_docs, extra_redactions = _redact_extra_docs(extra_docs, enabled=bool(self._sst_cfg["redact_enabled"]))
+        if extra_redactions:
+            diagnostics.append({"kind": "sst.extra_doc_redactions", "redactions": extra_redactions})
 
         persist = self._ensure_persistence()
         stats = persist.persist_state_bundle(
@@ -346,6 +781,7 @@ class SSTPipeline:
             prev_record_id=prev_ctx.record_id if prev_ctx else None,
             delta_event=delta_event,
             action_event=action_event,
+            extra_docs=extra_docs,
         )
         diagnostics.append(
             {
@@ -353,6 +789,7 @@ class SSTPipeline:
                 "derived_records": stats.derived_records,
                 "indexed_docs": stats.indexed_docs,
                 "boundary": decision.boundary,
+                "extra_docs": len(extra_docs),
             }
         )
         return _HeavyResult(
@@ -364,6 +801,138 @@ class SSTPipeline:
             cursor,
             stats.derived_ids,
         )
+
+    def _unwrap_target(self, cap: Any) -> Any:
+        target = cap
+        if hasattr(target, "target"):
+            try:
+                target = getattr(target, "target")
+            except Exception:
+                return cap
+        return target
+
+    def _stage_policy(self, stage: str) -> dict[str, Any]:
+        policies = self._sst_cfg.get("stage_providers", {})
+        policy = policies.get(stage) if isinstance(policies, dict) else None
+        merged = dict(_STAGE_POLICY_DEFAULT)
+        if isinstance(policy, dict):
+            merged.update(policy)
+        if (not isinstance(policies, dict) or stage not in policies) and hasattr(self._unwrap_target(self._stage_hooks), "fanout"):
+            try:
+                merged["fanout"] = bool(getattr(self._unwrap_target(self._stage_hooks), "fanout"))
+            except Exception:
+                merged["fanout"] = merged.get("fanout", True)
+        merged["provider_ids"] = tuple(str(pid) for pid in merged.get("provider_ids", ()) if str(pid))
+        try:
+            merged["max_providers"] = int(merged.get("max_providers", 0) or 0)
+        except Exception:
+            merged["max_providers"] = 0
+        merged["fanout"] = bool(merged.get("fanout", True))
+        merged["enabled"] = bool(merged.get("enabled", True))
+        return merged
+
+    def _stage_providers(self, stage: str, diagnostics: list[dict[str, Any]]) -> tuple[dict[str, Any], list[tuple[str, Any]]]:
+        if self._stage_hooks is None:
+            return dict(_STAGE_POLICY_DEFAULT), []
+        policy = self._stage_policy(stage)
+        if not policy["enabled"]:
+            return policy, []
+        target = self._unwrap_target(self._stage_hooks)
+        providers: list[tuple[str, Any]] = []
+        try:
+            if hasattr(target, "items"):
+                providers = list(target.items())
+            else:
+                providers = [("processing.stage.hooks", self._stage_hooks)]
+        except Exception as exc:
+            diagnostics.append({"kind": "sst.stage_hook_error", "stage": stage, "error": str(exc)})
+            return policy, []
+        filtered: list[tuple[str, Any]] = []
+        for provider_id, provider in providers:
+            if not _provider_supports_stage(provider, stage, diagnostics, provider_id=str(provider_id)):
+                continue
+            filtered.append((str(provider_id), provider))
+        providers = filtered
+        provider_ids = policy.get("provider_ids", ())
+        if provider_ids:
+            allowed = set(provider_ids)
+            providers = [item for item in providers if item[0] in allowed]
+            if not providers:
+                diagnostics.append(
+                    {
+                        "kind": "sst.stage_hook_no_allowed_providers",
+                        "stage": stage,
+                        "provider_ids": sorted(allowed),
+                    }
+                )
+                return policy, []
+        max_providers = int(policy.get("max_providers", 0) or 0)
+        if max_providers > 0:
+            providers = providers[:max_providers]
+        return policy, providers
+
+    def _run_stage_hooks(
+        self,
+        *,
+        stage: str,
+        payload: dict[str, Any],
+        diagnostics: list[dict[str, Any]],
+        run_id: str,
+        record_id: str,
+        frame_bbox: tuple[int, int, int, int],
+        frame_width: int,
+        frame_height: int,
+    ) -> dict[str, Any]:
+        policy, providers = self._stage_providers(stage, diagnostics)
+        if not providers:
+            return payload
+        applied: list[str] = []
+        for provider_id, provider in providers:
+            run_stage = getattr(provider, "run_stage", None)
+            if not callable(run_stage):
+                diagnostics.append(
+                    {"kind": "sst.stage_hook_missing_run_stage", "stage": stage, "provider_id": provider_id}
+                )
+                continue
+            snapshot = copy.deepcopy(payload)
+            try:
+                result = run_stage(stage, snapshot)
+            except Exception as exc:
+                diagnostics.append({"kind": "sst.stage_hook_error", "stage": stage, "provider_id": provider_id, "error": str(exc)})
+                continue
+            if result is None:
+                continue
+            if not isinstance(result, dict):
+                diagnostics.append(
+                    {
+                        "kind": "sst.stage_hook_invalid_result",
+                        "stage": stage,
+                        "provider_id": provider_id,
+                        "result_type": type(result).__name__,
+                    }
+                )
+                continue
+            prepared = _prepare_stage_result(
+                stage=stage,
+                result=result,
+                provider_id=provider_id,
+                run_id=run_id,
+                record_id=record_id,
+                frame_bbox=frame_bbox,
+                frame_width=frame_width,
+                frame_height=frame_height,
+                diagnostics=diagnostics,
+            )
+            prepared = _filter_canonical_keys(prepared, stage=stage, provider_id=provider_id, diagnostics=diagnostics)
+            if not prepared:
+                continue
+            _merge_payload(payload, prepared, provider_id=provider_id, stage=stage, diagnostics=diagnostics)
+            applied.append(provider_id)
+            if not policy.get("fanout", True):
+                break
+        if applied:
+            diagnostics.append({"kind": "sst.stage_hook", "stage": stage, "providers": applied})
+        return payload
 
     def _vlm_tokens(
         self,
@@ -487,6 +1056,526 @@ class _HeavyResult:
     derived_ids: tuple[str, ...]
 
 
+def _provider_supports_stage(provider: Any, stage: str, diagnostics: list[dict[str, Any]], *, provider_id: str) -> bool:
+    stages_fn = getattr(provider, "stages", None)
+    if not callable(stages_fn):
+        return True
+    try:
+        stages = stages_fn()
+    except Exception as exc:
+        diagnostics.append(
+            {"kind": "sst.stage_hook_stage_error", "stage": stage, "provider_id": provider_id, "error": str(exc)}
+        )
+        return False
+    if not isinstance(stages, (list, tuple, set)):
+        diagnostics.append(
+            {
+                "kind": "sst.stage_hook_stage_invalid",
+                "stage": stage,
+                "provider_id": provider_id,
+                "stages_type": type(stages).__name__,
+            }
+        )
+        return False
+    allowed = {str(item).strip() for item in stages if str(item).strip()}
+    if not allowed:
+        return True
+    return stage in allowed
+
+
+def _tokens_from_payload(
+    payload: dict[str, Any],
+    *,
+    fallback: list[dict[str, Any]],
+    frame_width: int,
+    frame_height: int,
+    diagnostics: list[dict[str, Any]],
+    stage: str,
+    provider_id_hint: str,
+) -> list[dict[str, Any]]:
+    raw = payload.get("tokens", fallback)
+    if not isinstance(raw, list):
+        diagnostics.append(
+            {
+                "kind": "sst.stage_hook_invalid_tokens",
+                "stage": stage,
+                "provider_id": provider_id_hint,
+                "tokens_type": type(raw).__name__,
+            }
+        )
+        raw = fallback
+    tokens = _sanitize_tokens(
+        raw,
+        frame_width=frame_width,
+        frame_height=frame_height,
+        diagnostics=diagnostics,
+        stage=stage,
+        provider_id_hint=provider_id_hint,
+    )
+    payload["tokens"] = tokens
+    return tokens
+
+
+def _collect_extra_docs(
+    payload: dict[str, Any],
+    *,
+    diagnostics: list[dict[str, Any]],
+    stage: str,
+    fallback: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    raw = payload.get("extra_docs", fallback or [])
+    if not isinstance(raw, list):
+        diagnostics.append(
+            {"kind": "sst.stage_hook_invalid_extra_docs", "stage": stage, "docs_type": type(raw).__name__}
+        )
+        raw = fallback or []
+    docs = [doc for doc in raw if isinstance(doc, dict)]
+    dropped = len(raw) - len(docs)
+    if dropped:
+        diagnostics.append({"kind": "sst.stage_hook_extra_docs_dropped", "stage": stage, "dropped": dropped})
+    return docs
+
+
+def _redact_extra_docs(extra_docs: list[dict[str, Any]], *, enabled: bool) -> tuple[list[dict[str, Any]], int]:
+    if not enabled:
+        return list(extra_docs), 0
+    redactions = 0
+    out: list[dict[str, Any]] = []
+    for doc in extra_docs:
+        if not isinstance(doc, dict):
+            continue
+        text = str(doc.get("text", ""))
+        red_text, count_text = redact_text(text, enabled=enabled)
+        meta = doc.get("meta", {})
+        red_meta, count_meta = redact_value(meta, enabled=enabled)
+        redactions += int(count_text) + int(count_meta)
+        next_doc = dict(doc)
+        next_doc["text"] = red_text
+        next_doc["meta"] = red_meta if isinstance(red_meta, dict) else {}
+        out.append(next_doc)
+    return out, redactions
+
+
+def _prepare_stage_result(
+    *,
+    stage: str,
+    result: dict[str, Any],
+    provider_id: str,
+    run_id: str,
+    record_id: str,
+    frame_bbox: tuple[int, int, int, int],
+    frame_width: int,
+    frame_height: int,
+    diagnostics: list[dict[str, Any]],
+) -> dict[str, Any]:
+    out = dict(result)
+    if "tokens" in out:
+        tokens_raw = out.get("tokens")
+        if isinstance(tokens_raw, list):
+            out["tokens"] = _sanitize_tokens(
+                tokens_raw,
+                frame_width=frame_width,
+                frame_height=frame_height,
+                diagnostics=diagnostics,
+                stage=stage,
+                provider_id_hint=provider_id,
+            )
+        else:
+            diagnostics.append(
+                {
+                    "kind": "sst.stage_hook_invalid_tokens",
+                    "stage": stage,
+                    "provider_id": provider_id,
+                    "tokens_type": type(tokens_raw).__name__,
+                }
+            )
+            out.pop("tokens", None)
+    if "extra_docs" in out:
+        docs_raw = out.get("extra_docs")
+        if isinstance(docs_raw, list):
+            out["extra_docs"] = _sanitize_extra_docs(
+                docs_raw,
+                stage=stage,
+                provider_id=provider_id,
+                run_id=run_id,
+                record_id=record_id,
+                frame_bbox=frame_bbox,
+                frame_width=frame_width,
+                frame_height=frame_height,
+                diagnostics=diagnostics,
+            )
+        else:
+            diagnostics.append(
+                {
+                    "kind": "sst.stage_hook_invalid_extra_docs",
+                    "stage": stage,
+                    "provider_id": provider_id,
+                    "docs_type": type(docs_raw).__name__,
+                }
+            )
+            out.pop("extra_docs", None)
+    return out
+
+
+def _filter_canonical_keys(
+    result: dict[str, Any],
+    *,
+    stage: str,
+    provider_id: str,
+    diagnostics: list[dict[str, Any]],
+) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in result.items():
+        key_str = str(key)
+        try:
+            canonical_value, dropped = _canonicalize_value(value)
+        except CanonicalJSONError as exc:
+            diagnostics.append(
+                {
+                    "kind": "sst.stage_hook_noncanonical",
+                    "stage": stage,
+                    "provider_id": provider_id,
+                    "key": key_str,
+                    "error": str(exc),
+                }
+            )
+            continue
+        if dropped:
+            diagnostics.append(
+                {
+                    "kind": "sst.stage_hook_noncanonical_dropped",
+                    "stage": stage,
+                    "provider_id": provider_id,
+                    "key": key_str,
+                    "dropped": dropped,
+                }
+            )
+        out[key_str] = canonical_value
+    return out
+
+
+def _canonicalize_value(value: Any) -> tuple[Any, int]:
+    dropped = 0
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for key in sorted(value.keys(), key=lambda k: str(k)):
+            try:
+                canonical_value, sub_dropped = _canonicalize_value(value[key])
+            except CanonicalJSONError:
+                dropped += 1
+                continue
+            dropped += sub_dropped
+            out[str(key)] = canonical_value
+        return out, dropped
+    if isinstance(value, list):
+        out_list: list[Any] = []
+        for item in value:
+            try:
+                canonical_item, sub_dropped = _canonicalize_value(item)
+            except CanonicalJSONError:
+                dropped += 1
+                continue
+            dropped += sub_dropped
+            out_list.append(canonical_item)
+        return out_list, dropped
+    if isinstance(value, tuple):
+        out_items: list[Any] = []
+        for item in value:
+            try:
+                canonical_item, sub_dropped = _canonicalize_value(item)
+            except CanonicalJSONError:
+                dropped += 1
+                continue
+            dropped += sub_dropped
+            out_items.append(canonical_item)
+        return tuple(out_items), dropped
+    if isinstance(value, float):
+        raise CanonicalJSONError("Floats are not permitted in canonical JSON")
+    try:
+        canonical_dumps(value)
+    except Exception as exc:
+        raise CanonicalJSONError(str(exc)) from exc
+    return value, dropped
+
+
+def _sanitize_tokens(
+    tokens: list[Any],
+    *,
+    frame_width: int,
+    frame_height: int,
+    diagnostics: list[dict[str, Any]],
+    stage: str,
+    provider_id_hint: str,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    dropped = 0
+    provider_default = provider_id_hint or "stage_hook"
+    for idx, token in enumerate(tokens):
+        if not isinstance(token, dict):
+            dropped += 1
+            continue
+        text_raw = str(token.get("text", ""))
+        norm = norm_text(str(token.get("norm_text", text_raw)))
+        if not norm:
+            dropped += 1
+            continue
+        bbox_raw = token.get("bbox")
+        bbox = _coerce_bbox(bbox_raw, frame_width=frame_width, frame_height=frame_height)
+        if bbox is None:
+            dropped += 1
+            continue
+        provider_id = str(token.get("provider_id") or provider_default)
+        patch_id = str(token.get("patch_id") or "full_frame")
+        confidence_bp = _coerce_bp(token.get("confidence_bp", token.get("confidence", 0)))
+        token_id = str(token.get("token_id") or "").strip()
+        if not token_id:
+            seed = {
+                "text": norm,
+                "bbox": bbox,
+                "provider_id": provider_id,
+                "patch_id": patch_id,
+            }
+            try:
+                digest = hash_canonical(seed)[:12]
+            except Exception:
+                digest = hash_canonical({"text": norm, "provider_id": provider_id})[:12]
+            token_id = encode_record_id_component(f"hook-{provider_id}-{digest}")
+        flags_raw = token.get("flags", {})
+        monospace_likely = False
+        is_number = False
+        if isinstance(flags_raw, dict):
+            monospace_likely = bool(flags_raw.get("monospace_likely", False))
+            is_number = bool(flags_raw.get("is_number", False))
+        source = str(token.get("source") or "stage_hook")
+        next_token: dict[str, Any] = {
+            "token_id": token_id,
+            "text": text_raw,
+            "norm_text": norm,
+            "bbox": bbox,
+            "confidence_bp": confidence_bp,
+            "source": source,
+            "flags": {
+                "monospace_likely": monospace_likely,
+                "is_number": is_number,
+            },
+            "provider_id": provider_id,
+            "patch_id": patch_id,
+        }
+        line_id = token.get("line_id")
+        if line_id:
+            next_token["line_id"] = str(line_id)
+        block_id = token.get("block_id")
+        if block_id:
+            next_token["block_id"] = str(block_id)
+        out.append(next_token)
+    if dropped:
+        diagnostics.append(
+            {
+                "kind": "sst.stage_hook_tokens_sanitized",
+                "stage": stage,
+                "provider_id": provider_id_hint,
+                "dropped": dropped,
+                "kept": len(out),
+            }
+        )
+    return out
+
+
+def _sanitize_extra_docs(
+    docs: list[Any],
+    *,
+    stage: str,
+    provider_id: str,
+    run_id: str,
+    record_id: str,
+    frame_bbox: tuple[int, int, int, int],
+    frame_width: int,
+    frame_height: int,
+    diagnostics: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    dropped = 0
+    for doc in docs:
+        if not isinstance(doc, dict):
+            dropped += 1
+            continue
+        text = str(doc.get("text", "")).strip()
+        if not text:
+            dropped += 1
+            continue
+        doc_kind = str(doc.get("doc_kind", "extra") or "extra").strip() or "extra"
+        meta = doc.get("meta", {})
+        if not isinstance(meta, dict):
+            meta = {}
+        provider_value = str(doc.get("provider_id") or provider_id)
+        stage_value = str(doc.get("stage") or stage)
+        confidence_bp = _coerce_bp(doc.get("confidence_bp", 8000))
+        bboxes = _sanitize_bboxes(doc.get("bboxes") or doc.get("bbox"), frame_bbox, frame_width, frame_height)
+        doc_id = str(doc.get("doc_id", "")).strip()
+        if not doc_id:
+            meta_hash = ""
+            try:
+                meta_hash = hash_canonical(meta)[:8]
+            except Exception:
+                meta_hash = ""
+            seed = {
+                "text": text,
+                "doc_kind": doc_kind,
+                "provider_id": provider_value,
+                "stage": stage_value,
+                "record_id": record_id,
+                "meta_hash": meta_hash,
+            }
+            try:
+                digest = hash_canonical(seed)[:16]
+            except Exception:
+                digest = hash_canonical({"text": text, "provider_id": provider_value})[:16]
+            component = encode_record_id_component(f"{provider_value}-{digest}")
+            doc_id = f"{run_id}/derived.sst.text/extra/{component}"
+        out.append(
+            {
+                "doc_id": doc_id,
+                "text": text,
+                "doc_kind": doc_kind,
+                "meta": meta,
+                "provider_id": provider_value,
+                "stage": stage_value,
+                "confidence_bp": confidence_bp,
+                "bboxes": bboxes,
+            }
+        )
+    if dropped:
+        diagnostics.append(
+            {
+                "kind": "sst.stage_hook_extra_docs_sanitized",
+                "stage": stage,
+                "provider_id": provider_id,
+                "dropped": dropped,
+                "kept": len(out),
+            }
+        )
+    return out
+
+
+def _coerce_bbox(value: Any, *, frame_width: int, frame_height: int) -> tuple[int, int, int, int] | None:
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        return None
+    try:
+        x1 = int(round(float(value[0])))
+        y1 = int(round(float(value[1])))
+        x2 = int(round(float(value[2])))
+        y2 = int(round(float(value[3])))
+    except Exception:
+        return None
+    return clamp_bbox((x1, y1, x2, y2), width=frame_width, height=frame_height)
+
+
+def _sanitize_bboxes(
+    raw: Any,
+    frame_bbox: tuple[int, int, int, int],
+    frame_width: int,
+    frame_height: int,
+) -> tuple[tuple[int, int, int, int], ...]:
+    boxes: list[tuple[int, int, int, int]] = []
+    if isinstance(raw, (list, tuple)) and raw:
+        first = raw[0]
+        if isinstance(first, (list, tuple)) and len(first) == 4:
+            for item in raw:
+                bbox = _coerce_bbox(item, frame_width=frame_width, frame_height=frame_height)
+                if bbox is not None:
+                    boxes.append(bbox)
+        else:
+            bbox = _coerce_bbox(raw, frame_width=frame_width, frame_height=frame_height)
+            if bbox is not None:
+                boxes.append(bbox)
+    if not boxes:
+        boxes.append(
+            clamp_bbox(frame_bbox, width=frame_width, height=frame_height)
+        )
+    return tuple(boxes)
+
+
+def _coerce_bp(value: Any) -> int:
+    try:
+        bp = int(round(float(value)))
+    except Exception:
+        bp = 0
+    if bp < 0:
+        return 0
+    if bp > 10000:
+        return 10000
+    return bp
+
+
+def _merge_payload(
+    base: dict[str, Any],
+    update: dict[str, Any],
+    *,
+    provider_id: str,
+    stage: str,
+    diagnostics: list[dict[str, Any]],
+) -> None:
+    for key, value in update.items():
+        if key not in base:
+            base[key] = value
+            continue
+        existing = base[key]
+        if isinstance(existing, dict) and isinstance(value, dict):
+            _merge_payload(existing, value, provider_id=provider_id, stage=stage, diagnostics=diagnostics)
+            continue
+        if isinstance(existing, list) and isinstance(value, list):
+            base[key] = _dedupe_list(existing + value)
+            continue
+        if existing == value:
+            continue
+        shadow = _shadow_key(key, base, provider_id)
+        base[shadow] = value
+        diagnostics.append(
+            {
+                "kind": "sst.stage_hook_conflict",
+                "stage": stage,
+                "provider_id": provider_id,
+                "key": key,
+                "shadow_key": shadow,
+            }
+        )
+
+
+def _shadow_key(key: str, base: dict[str, Any], provider_id: str) -> str:
+    suffix = provider_id.replace(".", "_")
+    candidate = f"{key}__{suffix}"
+    if candidate not in base:
+        return candidate
+    idx = 2
+    while True:
+        next_candidate = f"{candidate}_{idx}"
+        if next_candidate not in base:
+            return next_candidate
+        idx += 1
+
+
+def _dedupe_list(items: list[Any]) -> list[Any]:
+    out: list[Any] = []
+    seen: set[str] = set()
+    for item in items:
+        key = _canonical_key(item)
+        if key is None:
+            out.append(item)
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
+def _canonical_key(item: Any) -> str | None:
+    try:
+        return canonical_dumps(item)
+    except Exception:
+        return None
+
+
 def _sst_config(config: dict[str, Any]) -> dict[str, Any]:
     processing = config.get("processing", {}) if isinstance(config, dict) else {}
     sst = processing.get("sst", {}) if isinstance(processing, dict) else {}
@@ -504,6 +1593,31 @@ def _sst_config(config: dict[str, Any]) -> dict[str, Any]:
     denylist = sst.get("redact_denylist", [])
     if not isinstance(denylist, list):
         denylist = []
+
+    stage_cfg = sst.get("stage_providers", {})
+    if not isinstance(stage_cfg, dict):
+        stage_cfg = {}
+
+    def _stage_policy(stage: str) -> dict[str, Any]:
+        raw = stage_cfg.get(stage, {})
+        policy = dict(_STAGE_POLICY_DEFAULT)
+        if isinstance(raw, dict):
+            policy.update(raw)
+        provider_ids = raw.get("provider_ids", []) if isinstance(raw, dict) else []
+        if not isinstance(provider_ids, (list, tuple)):
+            provider_ids = []
+        policy["provider_ids"] = tuple(str(pid) for pid in provider_ids if str(pid))
+        policy["fanout"] = bool(policy.get("fanout", True))
+        policy["enabled"] = bool(policy.get("enabled", True))
+        try:
+            max_providers = int(policy.get("max_providers", 0) or 0)
+        except Exception:
+            max_providers = 0
+        policy["max_providers"] = max(0, max_providers)
+        return policy
+
+    stages = set(_STAGE_NAMES) | {str(stage) for stage in stage_cfg.keys()}
+    stage_policies = {stage: _stage_policy(stage) for stage in sorted(stages)}
 
     return {
         "enabled": _bool("enabled", True),
@@ -538,6 +1652,7 @@ def _sst_config(config: dict[str, Any]) -> dict[str, Any]:
         "delta_table_match_iou_bp": _int("delta_table_match_iou_bp", 3000),
         "redact_enabled": _bool("redact_enabled", True),
         "redact_denylist": tuple(str(x) for x in denylist if x),
+        "stage_providers": stage_policies,
         "schema_version": _int("schema_version", 1),
     }
 

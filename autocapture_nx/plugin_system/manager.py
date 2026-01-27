@@ -22,6 +22,12 @@ class PluginStatus:
     version: str
     permissions: Dict[str, Any]
     depends_on: List[str]
+    conflicts_with: List[str]
+    conflicts_active: List[str]
+    conflicts_allowed: List[str]
+    conflicts_blocked: List[str]
+    conflicts_enforced: bool
+    conflict_ok: bool
 
 
 class PluginManager:
@@ -72,6 +78,51 @@ class PluginManager:
         locks_cfg = self.config.get("plugins", {}).get("locks", {})
         lockfile = self._registry.load_lockfile() if locks_cfg.get("enforce", True) else {"plugins": {}}
         plugin_locks = lockfile.get("plugins", {})
+        conflicts_cfg = self.config.get("plugins", {}).get("conflicts", {})
+        conflicts_enforced = True
+        allow_pairs: set[tuple[str, str]] = set()
+        if isinstance(conflicts_cfg, dict):
+            conflicts_enforced = bool(conflicts_cfg.get("enforce", True))
+            pairs = conflicts_cfg.get("allow_pairs", [])
+            if isinstance(pairs, list):
+                for pair in pairs:
+                    if not isinstance(pair, (list, tuple)) or len(pair) < 2:
+                        continue
+                    a = str(pair[0]).strip()
+                    b = str(pair[1]).strip()
+                    if not a or not b or a == b:
+                        continue
+                    if a <= b:
+                        allow_pairs.add((a, b))
+                    else:
+                        allow_pairs.add((b, a))
+
+        def _declared(manifest: PluginManifest) -> set[str]:
+            declared = {str(pid).strip() for pid in manifest.conflicts_with + manifest.replaces if str(pid).strip()}
+            declared.discard(manifest.plugin_id)
+            return declared
+
+        all_ids = {manifest.plugin_id for manifest in manifests}
+        conflicts_active: dict[str, set[str]] = {pid: set() for pid in all_ids}
+        conflicts_allowed: dict[str, set[str]] = {pid: set() for pid in all_ids}
+        conflicts_blocked: dict[str, set[str]] = {pid: set() for pid in all_ids}
+        declared_by_id: dict[str, set[str]] = {manifest.plugin_id: _declared(manifest) for manifest in manifests}
+
+        for plugin_id in sorted(enabled_ids):
+            declared = declared_by_id.get(plugin_id, set())
+            for other in sorted(declared):
+                if other not in enabled_ids:
+                    continue
+                pair = (plugin_id, other) if plugin_id <= other else (other, plugin_id)
+                conflicts_active[plugin_id].add(other)
+                conflicts_active[other].add(plugin_id)
+                if pair in allow_pairs:
+                    conflicts_allowed[plugin_id].add(other)
+                    conflicts_allowed[other].add(plugin_id)
+                else:
+                    conflicts_blocked[plugin_id].add(other)
+                    conflicts_blocked[other].add(plugin_id)
+
         rows: list[PluginStatus] = []
         for manifest in manifests:
             lock = plugin_locks.get(manifest.plugin_id, {})
@@ -97,6 +148,12 @@ class PluginManager:
                         "network": manifest.permissions.network,
                     },
                     depends_on=list(manifest.depends_on),
+                    conflicts_with=sorted(declared_by_id.get(manifest.plugin_id, set())),
+                    conflicts_active=sorted(conflicts_active.get(manifest.plugin_id, set())),
+                    conflicts_allowed=sorted(conflicts_allowed.get(manifest.plugin_id, set())),
+                    conflicts_blocked=sorted(conflicts_blocked.get(manifest.plugin_id, set())),
+                    conflicts_enforced=conflicts_enforced,
+                    conflict_ok=(not conflicts_blocked.get(manifest.plugin_id) or not conflicts_enforced),
                 )
             )
         return sorted(rows, key=lambda r: r.plugin_id)

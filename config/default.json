@@ -267,6 +267,10 @@
       "enforce": true,
       "lockfile": "config/plugin_locks.json"
     },
+    "conflicts": {
+      "enforce": true,
+      "allow_pairs": []
+    },
     "meta": {
       "configurator_allowed": [],
       "policy_allowed": []
@@ -440,6 +444,13 @@
         "provider_ids": [],
         "fanout": false,
         "max_providers": 1
+      },
+      "processing.stage.hooks": {
+        "mode": "multi",
+        "preferred": [],
+        "provider_ids": [],
+        "fanout": true,
+        "max_providers": 16
       },
       "runtime.governor": {
         "mode": "single",
@@ -649,6 +660,122 @@
       "delta_table_match_iou_bp": 3000,
       "redact_enabled": true,
       "redact_denylist": [],
+      "stage_providers": {
+        "ingest.frame": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        },
+        "preprocess.normalize": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        },
+        "preprocess.tile": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        },
+        "ocr.onnx": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        },
+        "vision.vlm": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        },
+        "layout.assemble": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        },
+        "extract.table": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        },
+        "extract.spreadsheet": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        },
+        "extract.code": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        },
+        "extract.chart": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        },
+        "ui.parse": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        },
+        "track.cursor": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        },
+        "build.state": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        },
+        "match.ids": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        },
+        "build.delta": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        },
+        "infer.action": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        },
+        "compliance.redact": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        },
+        "persist.bundle": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        },
+        "index.text": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
+        }
+      },
       "schema_version": 1
     }
   },

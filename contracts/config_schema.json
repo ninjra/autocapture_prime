@@ -458,6 +458,30 @@
           },
           "type": "object"
         },
+        "conflicts": {
+          "additionalProperties": false,
+          "properties": {
+            "allow_pairs": {
+              "items": {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 2,
+                "minItems": 2,
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "enforce": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enforce",
+            "allow_pairs"
+          ],
+          "type": "object"
+        },
         "default_pack": {
           "items": {
             "type": "string"
@@ -556,6 +580,7 @@
         "safe_mode",
         "allowlist",
         "capabilities",
+        "conflicts",
         "default_pack",
         "enabled",
         "search_paths",
@@ -1009,6 +1034,36 @@
             "redact_enabled": {
               "type": "boolean"
             },
+            "stage_providers": {
+              "additionalProperties": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "fanout": {
+                    "type": "boolean"
+                  },
+                  "max_providers": {
+                    "type": "integer"
+                  },
+                  "provider_ids": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "enabled",
+                  "provider_ids",
+                  "fanout",
+                  "max_providers"
+                ],
+                "type": "object"
+              },
+              "type": "object"
+            },
             "schema_version": {
               "type": "integer"
             },
@@ -1079,6 +1134,7 @@
             "delta_table_match_iou_bp",
             "redact_enabled",
             "redact_denylist",
+            "stage_providers",
             "schema_version"
           ],
           "type": "object"

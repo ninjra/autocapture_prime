@@ -99,6 +99,7 @@ class SSTPersistence:
         prev_record_id: str | None,
         delta_event: dict[str, Any] | None,
         action_event: dict[str, Any] | None,
+        extra_docs: list[dict[str, Any]] | None = None,
     ) -> PersistStats:
         derived_records = 0
         indexed_docs = 0
@@ -160,6 +161,55 @@ class SSTPersistence:
                 derived_records += 1
                 derived_ids.append(doc_id)
             self._index_text(doc_id, doc_text)
+            indexed_docs += 1
+            indexed_ids.append(doc_id)
+
+        for doc in extra_docs or ():
+            if not isinstance(doc, dict):
+                continue
+            text = str(doc.get("text", "")).strip()
+            if not text:
+                continue
+            doc_id = str(doc.get("doc_id", "")).strip()
+            if not doc_id:
+                digest = sha256_text(text)[:16]
+                doc_component = encode_record_id_component(f"extra-{state_id}-{digest}")
+                doc_id = f"{run_id}/derived.sst.text/extra/{doc_component}"
+            doc_kind = str(doc.get("doc_kind", "extra") or "extra").strip() or "extra"
+            meta = doc.get("meta", {})
+            if not isinstance(meta, dict):
+                meta = {}
+            provider_id = str(doc.get("provider_id", "")).strip()
+            stage = str(doc.get("stage", "")).strip()
+            confidence_bp = _bp_int(doc.get("confidence_bp", 8000))
+            bboxes = _extra_doc_bboxes(doc, default_bbox=frame_bbox)
+            payload: dict[str, Any] = {
+                "record_type": "derived.sst.text.extra",
+                "state_id": state_id,
+                "doc_kind": doc_kind,
+                "text": text,
+                **meta,
+            }
+            if provider_id:
+                payload["provider_id"] = provider_id
+            if stage:
+                payload["stage"] = stage
+            doc_payload = self._envelope(
+                artifact_id=doc_id,
+                kind="TextDoc",
+                ts_ms=int(state["ts_ms"]),
+                record_id=record_id,
+                state_ids=(state_id,),
+                bboxes=bboxes,
+                image_sha256=image_sha256,
+                confidence_bp=confidence_bp,
+                payload=payload,
+            )
+            if self._put_new(doc_id, doc_payload):
+                derived_records += 1
+                derived_ids.append(doc_id)
+                self._emit_event("sst.extra_doc", doc_payload, inputs=(record_id,), outputs=(doc_id,))
+            self._index_text(doc_id, text)
             indexed_docs += 1
             indexed_ids.append(doc_id)
 
@@ -334,6 +384,61 @@ def _state_docs(run_id: str, state: dict[str, Any]) -> Iterable[tuple[str, str, 
         code_component = encode_record_id_component(code_id)
         doc_id = f"{run_id}/derived.sst.text/code/{code_component}"
         yield doc_id, text, {"doc_kind": "code", "code_id": code_id, "language": code.get("language")}
+
+
+def _bp_int(value: Any) -> int:
+    try:
+        bp = int(value)
+    except Exception:
+        bp = 0
+    if bp < 0:
+        return 0
+    if bp > 10000:
+        return 10000
+    return bp
+
+
+def _extra_doc_bboxes(doc: dict[str, Any], *, default_bbox: tuple[int, int, int, int]) -> tuple[tuple[int, int, int, int], ...]:
+    def _coerce_bbox(value: Any) -> tuple[int, int, int, int] | None:
+        if not isinstance(value, (list, tuple)) or len(value) != 4:
+            return None
+        try:
+            x1, y1, x2, y2 = (int(value[0]), int(value[1]), int(value[2]), int(value[3]))
+        except Exception:
+            return None
+        if x2 < x1:
+            x1, x2 = x2, x1
+        if y2 < y1:
+            y1, y2 = y2, y1
+        return (x1, y1, x2, y2)
+
+    boxes: list[tuple[int, int, int, int]] = []
+    raw = doc.get("bboxes")
+    if isinstance(raw, (list, tuple)) and raw:
+        first = raw[0]
+        if isinstance(first, (list, tuple)) and len(first) == 4:
+            for item in raw:
+                bbox = _coerce_bbox(item)
+                if bbox is not None:
+                    boxes.append(bbox)
+        else:
+            bbox = _coerce_bbox(raw)
+            if bbox is not None:
+                boxes.append(bbox)
+    if not boxes:
+        bbox = _coerce_bbox(doc.get("bbox"))
+        if bbox is not None:
+            boxes.append(bbox)
+    if not boxes:
+        boxes.append(
+            (
+                int(default_bbox[0]),
+                int(default_bbox[1]),
+                int(default_bbox[2]),
+                int(default_bbox[3]),
+            )
+        )
+    return tuple(boxes)
 
 
 def config_hash(config: dict[str, Any]) -> str:

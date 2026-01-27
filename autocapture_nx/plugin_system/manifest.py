@@ -44,6 +44,9 @@ class PluginManifest:
     permissions: PluginPermissions
     compat: PluginCompat
     depends_on: List[str]
+    conflicts_with: List[str]
+    replaces: List[str]
+    stages: List[str]
     hash_lock: PluginHashLock
     path: Path
 
@@ -83,6 +86,9 @@ class PluginManifest:
             permissions=permissions,
             compat=compat,
             depends_on=list(data.get("depends_on", []) or []),
+            conflicts_with=list(data.get("conflicts_with", []) or []),
+            replaces=list(data.get("replaces", []) or []),
+            stages=list(data.get("stages", []) or []),
             hash_lock=lock,
             path=path,
         )
