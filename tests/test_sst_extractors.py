@@ -1,6 +1,6 @@
 import unittest
 
-from autocapture_nx.processing.sst.extract import extract_code_blocks, extract_spreadsheets, extract_tables
+from autocapture_nx.processing.sst.extract import extract_charts, extract_code_blocks, extract_spreadsheets, extract_tables
 from autocapture_nx.processing.sst.layout import assemble_layout
 
 
@@ -53,6 +53,23 @@ class SSTExtractorTests(unittest.TestCase):
         self.assertIsNotNone(sheet.get("active_cell"))
         self.assertIsNotNone(sheet.get("formula_bar"))
         self.assertIn("A", sheet.get("header_map", {}).values())
+
+    def test_chart_series_fallback(self) -> None:
+        tokens = [
+            _token("y1", "0", (0, 0, 10, 10)),
+            _token("y2", "10", (0, 50, 10, 60)),
+            _token("x1", "1", (20, 90, 30, 100)),
+            _token("x2", "2", (60, 90, 70, 100)),
+            _token("lbl1", "Jan", (20, 80, 40, 90)),
+            _token("lbl2", "Feb", (60, 80, 80, 90)),
+            _token("v1", "5", (25, 40, 35, 50)),
+            _token("v2", "7", (65, 30, 75, 40)),
+        ]
+        charts = extract_charts(tokens=tokens, state_id="s1", min_ticks=2)
+        self.assertTrue(charts)
+        chart = charts[0]
+        self.assertIn(chart["chart_type"], {"bar", "line", "unknown"})
+        self.assertTrue(chart.get("series"))
 
 
 if __name__ == "__main__":

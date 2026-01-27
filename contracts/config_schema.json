@@ -987,6 +987,22 @@
             "chart_min_ticks": {
               "type": "integer"
             },
+            "ui_vlm": {
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "max_providers": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "enabled",
+                "max_providers"
+              ],
+              "type": "object"
+            },
             "code_min_keywords": {
               "type": "integer"
             },
@@ -1146,6 +1162,7 @@
             "sheet_header_scan_rows",
             "code_min_keywords",
             "chart_min_ticks",
+            "ui_vlm",
             "delta_bbox_shift_px",
             "delta_table_match_iou_bp",
             "redact_enabled",

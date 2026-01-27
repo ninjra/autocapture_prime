@@ -290,6 +290,14 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "processing.sst.stage_providers.index.text.fanout",
         "processing.sst.stage_providers.index.text.max_providers",
     ],
+    "builtin.processing.sst.ui_vlm": [
+        "processing.sst.ui_vlm.enabled",
+        "processing.sst.ui_vlm.max_providers",
+        "processing.sst.stage_providers.ui.parse.enabled",
+        "processing.sst.stage_providers.ui.parse.provider_ids",
+        "processing.sst.stage_providers.ui.parse.fanout",
+        "processing.sst.stage_providers.ui.parse.max_providers",
+    ],
     "builtin.time.advanced": [
         "time.timezone",
         "runtime.timezone",

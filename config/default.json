@@ -141,6 +141,7 @@
       "builtin.ocr.stub",
       "builtin.privacy.egress_sanitizer",
       "builtin.processing.sst.pipeline",
+      "builtin.processing.sst.ui_vlm",
       "builtin.reranker.stub",
       "builtin.retrieval.basic",
       "builtin.runtime.governor",
@@ -227,6 +228,7 @@
       "builtin.ocr.stub": true,
       "builtin.privacy.egress_sanitizer": true,
       "builtin.processing.sst.pipeline": true,
+      "builtin.processing.sst.ui_vlm": false,
       "builtin.reranker.stub": true,
       "builtin.retrieval.basic": true,
       "builtin.runtime.governor": true,
@@ -660,6 +662,10 @@
       "sheet_header_scan_rows": 2,
       "code_min_keywords": 1,
       "chart_min_ticks": 2,
+      "ui_vlm": {
+        "enabled": false,
+        "max_providers": 1
+      },
       "delta_bbox_shift_px": 24,
       "delta_table_match_iou_bp": 3000,
       "redact_enabled": true,

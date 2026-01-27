@@ -402,19 +402,28 @@ def extract_charts(
     if len(numeric) < min_ticks:
         return []
     bbox = bbox_union(t["bbox"] for t in numeric)
-    ticks_y = tuple(sorted({t["norm_text"] for t in numeric[: min_ticks * 2]}))
+    y_ticks, x_ticks = _chart_ticks(numeric, bbox)
+    ticks_y = tuple(_tick_labels(y_ticks, axis="y"))
+    ticks_x = tuple(_tick_labels(x_ticks, axis="x"))
+    internal_values = [t for t in numeric if t not in y_ticks and t not in x_ticks]
+    chart_type = _infer_chart_type(internal_values, ticks_x, ticks_y)
+    series = _chart_series(internal_values, tokens, bbox)
     chart_id = encode_record_id_component(f"chart-{state_id}-{bbox}")
-    evidence = {"tick_count": len(ticks_y)}
+    evidence = {
+        "tick_count": len(ticks_y),
+        "x_tick_count": len(ticks_x),
+        "data_label_count": len(internal_values),
+    }
     return [
         {
             "chart_id": chart_id,
             "state_id": state_id,
             "bbox": bbox,
-            "chart_type": "unknown",
-            "labels": tuple(),
-            "ticks_x": tuple(),
+            "chart_type": chart_type,
+            "labels": tuple(item.get("label", "") for item in series[0]["points"]) if series else tuple(),
+            "ticks_x": ticks_x,
             "ticks_y": ticks_y,
-            "series": tuple(),
+            "series": tuple(series),
             "evidence": evidence,
             "confidence_bp": 6000,
         }
@@ -726,6 +735,85 @@ def _sql_balance_ok(text: str) -> bool:
         elif ch == "\"":
             double ^= 1
     return paren == 0 and single == 0 and double == 0
+
+
+def _chart_ticks(numeric: list[dict[str, Any]], bbox: BBox) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    x1, y1, x2, y2 = bbox
+    width = max(1, x2 - x1)
+    height = max(1, y2 - y1)
+    left_limit = x1 + max(1, (width * 2) // 10)
+    bottom_limit = y2 - max(1, (height * 2) // 10)
+    y_ticks = [t for t in numeric if t["bbox"][2] <= left_limit]
+    x_ticks = [t for t in numeric if t["bbox"][1] >= bottom_limit]
+    y_ticks.sort(key=lambda t: (t["bbox"][1], t["bbox"][0], t["token_id"]))
+    x_ticks.sort(key=lambda t: (t["bbox"][0], t["bbox"][1], t["token_id"]))
+    return y_ticks, x_ticks
+
+
+def _tick_labels(tokens: list[dict[str, Any]], *, axis: str) -> list[str]:
+    labels: list[str] = []
+    seen: set[str] = set()
+    ordered = tokens if axis == "y" else tokens
+    for token in ordered:
+        text = str(token.get("norm_text", ""))
+        if not text or text in seen:
+            continue
+        labels.append(text)
+        seen.add(text)
+    return labels
+
+
+def _infer_chart_type(internal_values: list[dict[str, Any]], ticks_x: tuple[str, ...], ticks_y: tuple[str, ...]) -> str:
+    if not internal_values:
+        return "unknown"
+    if len(internal_values) >= max(3, len(ticks_x)):
+        return "bar"
+    if len(ticks_y) >= 2 and len(internal_values) >= 2:
+        return "line"
+    return "unknown"
+
+
+def _chart_series(
+    internal_values: list[dict[str, Any]],
+    tokens: list[dict[str, Any]],
+    bbox: BBox,
+) -> list[dict[str, Any]]:
+    if not internal_values:
+        return []
+    x1, y1, x2, y2 = bbox
+    height = max(1, y2 - y1)
+    bottom_limit = y2 - max(1, (height * 2) // 10)
+    label_tokens = [t for t in tokens if not RE_NUMBER.match(t.get("norm_text", "")) and t["bbox"][1] >= bottom_limit]
+    label_tokens.sort(key=lambda t: (t["bbox"][0], t["bbox"][1], t["token_id"]))
+    points: list[dict[str, Any]] = []
+    ordered = sorted(internal_values, key=lambda t: (t["bbox"][0], t["bbox"][1], t["token_id"]))
+    for idx, token in enumerate(ordered):
+        label = _nearest_label(token, label_tokens) or f"pt-{idx + 1}"
+        points.append(
+            {
+                "label": label,
+                "value_text": str(token.get("norm_text", "")),
+                "bbox": token.get("bbox"),
+            }
+        )
+    return [{"series_id": "series-0", "points": tuple(points)}]
+
+
+def _nearest_label(token: dict[str, Any], labels: list[dict[str, Any]]) -> str | None:
+    if not labels:
+        return None
+    tx = (token["bbox"][0] + token["bbox"][2]) // 2
+    best = None
+    best_dist = None
+    for lab in labels:
+        lx = (lab["bbox"][0] + lab["bbox"][2]) // 2
+        dist = abs(tx - lx)
+        if best_dist is None or dist < best_dist:
+            best_dist = dist
+            best = lab
+    if best is None:
+        return None
+    return str(best.get("text") or best.get("norm_text") or "").strip() or None
 
 
 def _line_code_score(line: dict[str, Any]) -> int:

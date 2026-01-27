@@ -127,6 +127,10 @@
       "id": "builtin.processing.sst.pipeline"
     },
     {
+      "enabled": false,
+      "id": "builtin.processing.sst.ui_vlm"
+    },
+    {
       "enabled": true,
       "id": "builtin.reranker.stub"
     },
