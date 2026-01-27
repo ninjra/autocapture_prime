@@ -34,7 +34,16 @@ class EncryptedStorageTests(unittest.TestCase):
             store.put("record1", {"record_type": "derived.test", "secret": "value", "ts_utc": ts_utc})
             safe_run = _encode_record_id("run1")
             safe_record = _encode_record_id("record1")
-            path = Path(tmp) / "metadata" / safe_run / "2026" / "01" / "26" / f"{safe_record}.json"
+            path = (
+                Path(tmp)
+                / "metadata"
+                / safe_run
+                / "derived"
+                / "2026"
+                / "01"
+                / "26"
+                / f"{safe_record}.json"
+            )
             self.assertTrue(path.exists())
             content = path.read_text(encoding="utf-8")
             self.assertNotIn("value", content)
@@ -77,7 +86,16 @@ class EncryptedStorageTests(unittest.TestCase):
             media.put("media/1", b"hello-world", ts_utc=ts_utc)
             safe_run = _encode_record_id("run1")
             safe_record = _encode_record_id("media/1")
-            path = Path(tmp) / "media" / safe_run / "2026" / "01" / "26" / f"{safe_record}.blob"
+            path = (
+                Path(tmp)
+                / "media"
+                / safe_run
+                / "evidence"
+                / "2026"
+                / "01"
+                / "26"
+                / f"{safe_record}.blob"
+            )
             self.assertTrue(path.exists())
             payload = path.read_bytes()
             self.assertTrue(payload.startswith(BLOB_MAGIC))
@@ -104,7 +122,16 @@ class EncryptedStorageTests(unittest.TestCase):
             media.put_stream("media/2", BytesIO(b"stream-data"), ts_utc=ts_utc)
             safe_run = _encode_record_id("run1")
             safe_record = _encode_record_id("media/2")
-            path = Path(tmp) / "media" / safe_run / "2026" / "01" / "26" / f"{safe_record}.stream"
+            path = (
+                Path(tmp)
+                / "media"
+                / safe_run
+                / "evidence"
+                / "2026"
+                / "01"
+                / "26"
+                / f"{safe_record}.stream"
+            )
             self.assertTrue(path.exists())
             payload = path.read_bytes()
             self.assertTrue(payload.startswith(STREAM_MAGIC))

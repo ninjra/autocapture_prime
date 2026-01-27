@@ -30,7 +30,16 @@ class EncryptedStoreFailLoudTests(unittest.TestCase):
 
             safe_run = _encode_record_id("run1")
             safe_record = _encode_record_id("record1")
-            path = os.path.join(tmp, "metadata", safe_run, "2026", "01", "26", f"{safe_record}.json")
+            path = os.path.join(
+                tmp,
+                "metadata",
+                safe_run,
+                "derived",
+                "2026",
+                "01",
+                "26",
+                f"{safe_record}.json",
+            )
             with open(path, "r", encoding="utf-8") as handle:
                 payload = json.load(handle)
             payload["ciphertext_b64"] = "corrupted"

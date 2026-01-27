@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-01-26T23:52:47.409558+00:00",
+  "generated_at": "2026-01-27T00:11:35.926245+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "15a258e23ffb0b8ee91e9f6955272db5d7992f024ef54ac98580010152b40012",
@@ -106,7 +106,7 @@
       "manifest_sha256": "514435fea51bd3979cdde368a86dd935f6713c71973d0d01b6b82f3fe012c1ea"
     },
     "builtin.tracking.input.windows": {
-      "artifact_sha256": "dfee2fd7eb5f260850427b2c89a27951b15bdbc570ddb2018e5ba18677ebb926",
+      "artifact_sha256": "1b275a89d262ce7676e571e42c367a83b75fb3c04ccf17dd1715dff9de11015b",
       "manifest_sha256": "97fd0cece7f1261f058634c0a353f5f564d562729f2b6372d1cfa86cfdf2327b"
     },
     "builtin.vlm.stub": {

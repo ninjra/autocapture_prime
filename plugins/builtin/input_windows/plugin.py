@@ -158,6 +158,8 @@ class InputTrackerWindows(PluginBase):
             storage_meta = self.context.get_capability("storage.metadata")
         except Exception:
             return
+        if storage_media is None or storage_meta is None:
+            return
         run_id = ensure_run_id(self.context.config)
         seq = self._batch_seq
         self._batch_seq += 1
