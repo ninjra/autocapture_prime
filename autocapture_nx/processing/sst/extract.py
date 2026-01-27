@@ -263,6 +263,7 @@ def extract_tables(
     table_bbox = bbox_union(c["bbox"] for c in cells)
     table_id = encode_record_id_component(f"table-{state_id}-{table_bbox}")
     csv_text = _cells_to_csv(cells, rows_n, cols_n)
+    tsv_text = _cells_to_tsv(cells, rows_n, cols_n)
     merges = _detect_merges(tokens, row_edges, col_edges)
     return [
         {
@@ -283,6 +284,7 @@ def extract_tables(
             },
             "cells": tuple(cells),
             "csv": csv_text,
+            "tsv": tsv_text,
             "kind": "table",
         }
     ]
@@ -564,6 +566,20 @@ def _cells_to_csv(cells: list[dict[str, Any]], rows: int, cols: int) -> str:
             grid[r][c] = str(cell.get("text", ""))
     buf = StringIO()
     writer = csv.writer(buf)
+    for row in grid:
+        writer.writerow(row)
+    return buf.getvalue().strip()
+
+
+def _cells_to_tsv(cells: list[dict[str, Any]], rows: int, cols: int) -> str:
+    grid = [["" for _c in range(cols)] for _r in range(rows)]
+    for cell in cells:
+        r = int(cell["r"])
+        c = int(cell["c"])
+        if 0 <= r < rows and 0 <= c < cols:
+            grid[r][c] = str(cell.get("text", ""))
+    buf = StringIO()
+    writer = csv.writer(buf, delimiter="\t")
     for row in grid:
         writer.writerow(row)
     return buf.getvalue().strip()

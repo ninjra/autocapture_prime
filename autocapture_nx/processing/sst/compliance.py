@@ -124,7 +124,9 @@ def _redact_table(table: dict[str, Any], metrics: dict[str, int]) -> dict[str, A
         cells.append({**cell, "text": text, "norm_text": norm})
     csv_text, count_csv = _redact_text(str(table.get("csv", "")))
     metrics["redactions"] += count_csv
-    return {**table, "cells": tuple(cells), "csv": csv_text}
+    tsv_text, count_tsv = _redact_text(str(table.get("tsv", "")))
+    metrics["redactions"] += count_tsv
+    return {**table, "cells": tuple(cells), "csv": csv_text, "tsv": tsv_text}
 
 
 def _redact_delta(delta_event: dict[str, Any] | None, metrics: dict[str, int]) -> dict[str, Any] | None:

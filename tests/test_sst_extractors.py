@@ -46,6 +46,7 @@ class SSTExtractorTests(unittest.TestCase):
         ]
         tables = extract_tables(tokens=tokens, state_id="s1", min_rows=2, min_cols=2, max_cells=50, row_gap_px=12, col_gap_px=24)
         self.assertTrue(tables)
+        self.assertIn("tsv", tables[0])
         sheets = extract_spreadsheets(tokens=tokens, tables=tables, state_id="s1", header_scan_rows=1)
         self.assertTrue(sheets)
         sheet = sheets[0]
