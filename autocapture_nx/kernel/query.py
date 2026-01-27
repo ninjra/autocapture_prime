@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any
 
 from autocapture.core.hashing import hash_text, normalize_text
+from autocapture_nx.kernel.derived_records import build_derivation_edge, build_text_record, derivation_edge_id
 from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.ids import encode_record_id_component
 
@@ -208,42 +209,66 @@ def extract_on_demand(
                 text = extractor.extract(frame).get("text", "")
             except Exception:
                 continue
-            normalized_text = normalize_text(text)
-            if normalized_text:
-                payload = {
-                    "record_type": f"derived.text.{kind}",
-                    "ts_utc": record.get("ts_utc"),
-                    "text": normalized_text,
-                    "source_id": record_id,
-                    "method": kind,
-                    "provider_id": provider_id,
-                    "content_hash": hash_text(normalized_text),
-                }
-                if normalized_text != text:
-                    payload["text_raw"] = text
+            payload = build_text_record(
+                kind=kind,
+                text=text,
+                source_id=record_id,
+                source_record=record,
+                provider_id=provider_id,
+                config=system.config if hasattr(system, "config") else {},
+                ts_utc=record.get("ts_utc"),
+            )
+            if not payload:
+                continue
+            if hasattr(metadata, "put_new"):
+                try:
+                    metadata.put_new(derived_id, payload)
+                except Exception:
+                    continue
+            else:
+                metadata.put(derived_id, payload)
+            _index_text(derived_id, payload.get("text", ""))
+            if collected_ids is not None:
+                collected_ids.append(derived_id)
+            edge_id = None
+            try:
+                run_id = payload.get("run_id") or record_id.split("/", 1)[0]
+                edge_id = derivation_edge_id(run_id, record_id, derived_id)
+                edge_payload = build_derivation_edge(
+                    run_id=run_id,
+                    parent_id=record_id,
+                    child_id=derived_id,
+                    relation_type="derived_from",
+                    span_ref=payload.get("span_ref", {}),
+                    method=kind,
+                )
                 if hasattr(metadata, "put_new"):
                     try:
-                        metadata.put_new(derived_id, payload)
+                        metadata.put_new(edge_id, edge_payload)
                     except Exception:
-                        continue
+                        edge_id = None
                 else:
-                    metadata.put(derived_id, payload)
-                _index_text(derived_id, normalized_text)
-                if collected_ids is not None:
-                    collected_ids.append(derived_id)
-                if event_builder is not None:
-                    event_payload = dict(payload)
-                    event_payload["derived_id"] = derived_id
-                    event_builder.journal_event("derived.extract", event_payload, event_id=derived_id, ts_utc=payload["ts_utc"])
-                    event_builder.ledger_entry(
-                        "derived.extract",
-                        inputs=[record_id],
-                        outputs=[derived_id],
-                        payload=event_payload,
-                        entry_id=derived_id,
-                        ts_utc=payload["ts_utc"],
-                    )
-                processed += 1
+                    metadata.put(edge_id, edge_payload)
+            except Exception:
+                edge_id = None
+            if event_builder is not None:
+                event_payload = dict(payload)
+                event_payload["derived_id"] = derived_id
+                if edge_id:
+                    event_payload["derivation_edge_id"] = edge_id
+                parent_hash = record.get("content_hash")
+                if parent_hash:
+                    event_payload["parent_content_hash"] = parent_hash
+                event_builder.journal_event("derived.extract", event_payload, event_id=derived_id, ts_utc=payload.get("ts_utc"))
+                event_builder.ledger_entry(
+                    "derived.extract",
+                    inputs=[record_id],
+                    outputs=[derived_id] + ([edge_id] if edge_id else []),
+                    payload=event_payload,
+                    entry_id=derived_id,
+                    ts_utc=payload.get("ts_utc"),
+                )
+            processed += 1
             if processed >= limit:
                 break
         if processed >= limit:
@@ -351,43 +376,17 @@ def run_query(system, query: str) -> dict[str, Any]:
             extraction_ran = True
             results = retrieval.search(query_text, time_window=time_window)
 
-    claims = []
-    for result in results:
-        derived_id = result.get("derived_id")
-        evidence_id = result["record_id"]
-        record = metadata.get(derived_id or evidence_id, {})
-        evidence_record = metadata.get(evidence_id, {})
-        text = record.get("text", "")
-        evidence_hash = evidence_record.get("content_hash")
-        if evidence_hash is None and evidence_record.get("text"):
-            evidence_hash = hash_text(normalize_text(evidence_record.get("text", "")))
-        derived_hash = None
-        if derived_id:
-            derived_record = metadata.get(derived_id, {})
-            derived_hash = derived_record.get("content_hash")
-            if derived_hash is None and derived_record.get("text"):
-                derived_hash = hash_text(normalize_text(derived_record.get("text", "")))
-        claims.append(
-            {
-                "text": text or f"Matched record {evidence_id}",
-                "citations": [
-                    {
-                        "span_id": evidence_id,
-                        "evidence_id": evidence_id,
-                        "evidence_hash": evidence_hash,
-                        "derived_id": derived_id,
-                        "derived_hash": derived_hash,
-                        "source": "local",
-                        "offset_start": 0,
-                        "offset_end": len(text),
-                    }
-                ],
-            }
-        )
-    answer_obj = answer.build(claims)
+    query_ledger_hash = None
+    anchor_ref = None
+    retrieval_trace = retrieval.trace() if hasattr(retrieval, "trace") else []
     if event_builder is not None:
         run_id = system.config.get("runtime", {}).get("run_id", "run")
         result_ids = [result.get("record_id") for result in results if result.get("record_id")]
+        result_refs = [
+            {"evidence_id": result.get("record_id"), "derived_id": result.get("derived_id")}
+            for result in results
+            if result.get("record_id")
+        ]
         payload = {
             "event": "query.execute",
             "run_id": run_id,
@@ -396,17 +395,63 @@ def run_query(system, query: str) -> dict[str, Any]:
             "time_window": time_window,
             "result_count": int(len(results)),
             "result_ids": result_ids,
+            "result_refs": result_refs,
             "extracted_count": int(len(extracted_ids)),
             "candidate_ids": candidate_ids,
             "candidate_limit": int(candidate_limit),
             "extraction_ran": bool(extraction_ran),
             "extraction_allowed": bool(allow_extract),
             "promptops_applied": bool(promptops_result and promptops_result.applied),
+            "retrieval_trace": retrieval_trace,
         }
-        event_builder.ledger_entry(
+        query_ledger_hash = event_builder.ledger_entry(
             "query.execute",
-            inputs=result_ids,
-            outputs=extracted_ids,
+            inputs=[cid for cid in candidate_ids if cid],
+            outputs=result_ids + list(extracted_ids),
             payload=payload,
         )
+        anchor_ref = event_builder.last_anchor() if hasattr(event_builder, "last_anchor") else None
+
+    claims = []
+    for result in results:
+        derived_id = result.get("derived_id")
+        evidence_id = result["record_id"]
+        record = metadata.get(derived_id or evidence_id, {})
+        evidence_record = metadata.get(evidence_id, {})
+        text = record.get("text", "")
+        evidence_hash = evidence_record.get("content_hash") or evidence_record.get("payload_hash")
+        if evidence_hash is None and evidence_record.get("text"):
+            evidence_hash = hash_text(normalize_text(evidence_record.get("text", "")))
+        derived_hash = None
+        span_ref = record.get("span_ref") if isinstance(record, dict) else None
+        if derived_id:
+            derived_record = metadata.get(derived_id, {})
+            derived_hash = derived_record.get("content_hash") or derived_record.get("payload_hash")
+            if derived_hash is None and derived_record.get("text"):
+                derived_hash = hash_text(normalize_text(derived_record.get("text", "")))
+        span_kind = "text" if text else "record"
+        offset_end = len(text) if text else 0
+        claims.append(
+            {
+                "text": text or f"Matched record {evidence_id}",
+                "citations": [
+                    {
+                        "schema_version": 1,
+                        "span_id": evidence_id,
+                        "evidence_id": evidence_id,
+                        "evidence_hash": evidence_hash,
+                        "derived_id": derived_id,
+                        "derived_hash": derived_hash,
+                        "span_kind": span_kind,
+                        "span_ref": span_ref,
+                        "ledger_head": query_ledger_hash,
+                        "anchor_ref": anchor_ref,
+                        "source": "local",
+                        "offset_start": 0,
+                        "offset_end": offset_end,
+                    }
+                ],
+            }
+        )
+    answer_obj = answer.build(claims)
     return {"intent": intent, "results": results, "answer": answer_obj}

@@ -379,9 +379,26 @@ def extract_code_blocks(
     caret_payload: dict[str, Any] | None = None
     selection_payload: dict[str, Any] | None = None
     if image_rgb is not None and (detect_caret or detect_selection):
+        highlight_bbox = bbox
+        if hasattr(image_rgb, "size"):
+            try:
+                img_w, img_h = image_rgb.size
+                bbox_w = max(1, bbox[2] - bbox[0])
+                bbox_h = max(1, bbox[3] - bbox[1])
+                pad_right = max(12, bbox_w)
+                pad_left = max(4, bbox_w // 4)
+                pad_y = max(4, bbox_h // 2)
+                x1 = max(0, bbox[0] - pad_left)
+                y1 = max(0, bbox[1] - pad_y)
+                x2 = min(int(img_w), bbox[2] + pad_right)
+                y2 = min(int(img_h), bbox[3] + pad_y)
+                if x2 > x1 and y2 > y1:
+                    highlight_bbox = (x1, y1, x2, y2)
+            except Exception:
+                highlight_bbox = bbox
         caret_bbox, selection_bbox = _detect_code_highlights(
             image_rgb,
-            bbox,
+            highlight_bbox,
             detect_caret=detect_caret,
             detect_selection=detect_selection,
         )
@@ -466,7 +483,8 @@ def _detect_caret_bbox(image: Any) -> BBox | None:
     best_score = 0.0
     for x in range(1, width - 1):
         mean = means[x]
-        if mean > 235 or mean < 20:
+        spike = mins[x] < 30 and maxs[x] > 150
+        if mean > 235 or mean < 20 or spike:
             contrast = max(abs(mean - means[x - 1]), abs(mean - means[x + 1]))
             local_range = maxs[x] - mins[x]
             score = contrast + max(0.0, 20.0 - local_range)

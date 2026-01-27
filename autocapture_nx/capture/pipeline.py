@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from autocapture_nx.capture.avi import AviMjpegWriter
 from autocapture_nx.capture.queues import BoundedQueue
+from autocapture_nx.kernel.hashing import sha256_canonical
 from autocapture_nx.kernel.ids import encode_record_id_component, prefixed_id
 from autocapture_nx.windows.win_capture import Frame, iter_screenshots
 
@@ -547,8 +548,10 @@ class CapturePipeline:
         jpeg_quality = int(capture_cfg.get("jpeg_quality", 90))
         segment_seconds = int(capture_cfg.get("segment_seconds", 60))
         fps_effective = _safe_div(artifact.frame_count * 1000, artifact.duration_ms or 1)
+        run_id = str(self._config.get("runtime", {}).get("run_id", ""))
         metadata = {
             "record_type": "evidence.capture.segment",
+            "run_id": run_id,
             "segment_id": artifact.segment_id,
             "ts_start_utc": artifact.ts_start_utc,
             "ts_end_utc": artifact.ts_end_utc,
@@ -629,6 +632,7 @@ class CapturePipeline:
                         self._storage_media.put(artifact.segment_id, data)
             if content_hash:
                 metadata["content_hash"] = content_hash
+            metadata["payload_hash"] = sha256_canonical({k: v for k, v in metadata.items() if k != "payload_hash"})
             if hasattr(self._storage_meta, "put_new"):
                 self._storage_meta.put_new(artifact.segment_id, metadata)
             else:

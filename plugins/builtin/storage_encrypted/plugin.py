@@ -380,6 +380,36 @@ class EncryptedJSONStore:
             ids.add(_decode_record_id(token))
         return sorted(ids)
 
+    def query_time_window(
+        self,
+        start_ts: str | None,
+        end_ts: str | None,
+        limit: int | None = None,
+    ) -> list[str]:
+        start_key = _parse_ts(start_ts).timestamp() if start_ts else None
+        end_key = _parse_ts(end_ts).timestamp() if end_ts else None
+        matched: list[tuple[float, str]] = []
+        for record_id in self.keys():
+            try:
+                record = self.get(record_id)
+            except RuntimeError:
+                continue
+            if not isinstance(record, dict):
+                continue
+            ts_val = _extract_ts(record)
+            if not ts_val:
+                continue
+            ts_key = _parse_ts(ts_val).timestamp()
+            if start_key is not None and ts_key < start_key:
+                continue
+            if end_key is not None and ts_key > end_key:
+                continue
+            matched.append((ts_key, record_id))
+        matched.sort(key=lambda item: (item[0], item[1]))
+        if limit is not None:
+            matched = matched[: int(limit)]
+        return [record_id for _ts, record_id in matched]
+
     def delete(self, record_id: str) -> bool:
         removed = False
         for path in self._path_candidates(record_id):

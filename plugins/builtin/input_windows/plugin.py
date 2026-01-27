@@ -14,6 +14,7 @@ import json
 import hashlib
 import struct
 
+from autocapture_nx.kernel.hashing import sha256_canonical
 from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 
@@ -215,6 +216,7 @@ class InputTrackerWindows(PluginBase):
             "counts": payload["counts"],
             "content_hash": content_hash,
         }
+        summary["payload_hash"] = sha256_canonical({k: v for k, v in summary.items() if k != "payload_hash"})
         if hasattr(storage_meta, "put_new"):
             storage_meta.put_new(summary_id, summary)
         else:

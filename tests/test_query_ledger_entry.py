@@ -66,9 +66,10 @@ class QueryLedgerEntryTests(unittest.TestCase):
         self.assertEqual(payload["run_id"], "run1")
         self.assertEqual(payload["query"], "hello")
         self.assertEqual(payload["result_count"], 1)
+        self.assertEqual(payload["result_refs"], [{"evidence_id": "run1/segment/0", "derived_id": None}])
         self.assertEqual(payload["extracted_count"], 0)
         self.assertEqual(entry["inputs"], ["run1/segment/0"])
-        self.assertEqual(entry["outputs"], [])
+        self.assertEqual(entry["outputs"], ["run1/segment/0"])
 
 
 if __name__ == "__main__":

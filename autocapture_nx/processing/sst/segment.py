@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, TYPE_CHECKING
 
-from PIL import Image
+if TYPE_CHECKING:
+    from PIL import Image as PILImage
+else:
+    PILImage = Any
 
 from .utils import hamming_distance
 
@@ -21,7 +25,7 @@ def decide_boundary(
     *,
     phash: str,
     prev_phash: str | None,
-    image_rgb: Image.Image,
+    image_rgb: PILImage,
     prev_downscaled: tuple[int, ...] | None,
     d_stable: int,
     d_boundary: int,
@@ -42,7 +46,8 @@ def decide_boundary(
     return SegmentDecision(False, "diff_stable", dist, diff_bp), downscaled
 
 
-def _downscale_gray(image_rgb: Image.Image, downscale_px: int) -> tuple[int, ...]:
+def _downscale_gray(image_rgb: PILImage, downscale_px: int) -> tuple[int, ...]:
+    Image = _pil()
     small = image_rgb.convert("L").resize((downscale_px, downscale_px), Image.BILINEAR)
     return tuple(int(v) for v in small.tobytes())
 
@@ -56,3 +61,11 @@ def _diff_score_bp(current: tuple[int, ...], prev: tuple[int, ...] | None) -> in
     max_total = 255 * max(1, len(current))
     # Convert to basis points in [0, 10000].
     return int((total * 10000) // max_total)
+
+
+def _pil():
+    try:
+        from PIL import Image as _Image
+    except Exception as exc:  # pragma: no cover - dependency missing
+        raise RuntimeError("Pillow is required for SST segmentation") from exc
+    return _Image

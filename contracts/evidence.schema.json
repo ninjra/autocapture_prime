@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["record_type", "run_id"],
+  "properties": {
+    "record_type": {"type": "string"},
+    "run_id": {"type": "string"},
+    "ts_utc": {"type": "string"},
+    "ts_start_utc": {"type": "string"},
+    "ts_end_utc": {"type": "string"},
+    "content_hash": {"type": "string"},
+    "payload_hash": {"type": "string"},
+    "text": {"type": "string"},
+    "span_ref": {"type": "object"}
+  },
+  "anyOf": [
+    {"required": ["content_hash"]},
+    {"required": ["payload_hash"]}
+  ]
+}

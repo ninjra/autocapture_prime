@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import os
 import platform
+from importlib import metadata as importlib_metadata
+from email.message import Message
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from autocapture_nx.kernel.config import ConfigPaths, load_config, validate_config
 from autocapture_nx.kernel.paths import default_config_dir, resolve_repo_path
@@ -62,8 +64,9 @@ class Kernel:
         self.system: System | None = None
         self._run_started_at: str | None = None
         self._conductor: Any | None = None
+        self._package_versions_cache: dict[str, str] | None = None
 
-    def boot(self) -> System:
+    def boot(self, *, start_conductor: bool = True) -> System:
         effective = self.load_effective_config()
         self.effective_config = effective
         self.config = effective.data
@@ -91,17 +94,18 @@ class Kernel:
         self._record_run_start(builder)
         self._run_recovery(builder)
         self.system = System(config=self.config, plugins=plugins, capabilities=capabilities)
-        try:
-            from autocapture.runtime.conductor import create_conductor
+        if start_conductor:
+            try:
+                from autocapture.runtime.conductor import create_conductor
 
-            conductor = create_conductor(self.system)
-            self._conductor = conductor
-            capabilities.register("runtime.conductor", conductor, network_allowed=False)
-            idle_cfg = self.config.get("processing", {}).get("idle", {})
-            if bool(idle_cfg.get("auto_start", False)):
-                conductor.start()
-        except Exception:
-            self._conductor = None
+                conductor = create_conductor(self.system)
+                self._conductor = conductor
+                capabilities.register("runtime.conductor", conductor, network_allowed=False)
+                idle_cfg = self.config.get("processing", {}).get("idle", {})
+                if bool(idle_cfg.get("auto_start", False)):
+                    conductor.start()
+            except Exception:
+                self._conductor = None
         return self.system
 
     def load_effective_config(self) -> EffectiveConfig:
@@ -120,6 +124,22 @@ class Kernel:
         lockfile_path = resolve_repo_path(locks_cfg.get("lockfile", "config/plugin_locks.json"))
         plugin_lock_hash = sha256_file(lockfile_path) if lockfile_path.exists() else None
         return {"contracts": contracts_hash, "plugins": plugin_lock_hash}
+
+    def _package_versions(self) -> dict[str, str]:
+        if self._package_versions_cache is not None:
+            return dict(self._package_versions_cache)
+        versions: dict[str, str] = {}
+        try:
+            for dist in importlib_metadata.distributions():
+                metadata = cast(Message, dist.metadata)
+                name = metadata.get("Name")
+                if not name:
+                    continue
+                versions[str(name).lower()] = str(dist.version)
+        except Exception:
+            versions = {}
+        self._package_versions_cache = dict(sorted(versions.items()))
+        return dict(self._package_versions_cache)
 
     def _verify_contract_lock(self) -> None:
         lock_path = resolve_repo_path("contracts/lock.json")
@@ -305,10 +325,12 @@ class Kernel:
         media = capabilities.get("storage.media")
         media_backend = type(media).__name__
         storage_cfg = self.config.get("storage", {})
+        packages = self._package_versions()
         manifest = {
             "record_type": "system.run_manifest",
             "run_id": run_id,
             "ts_utc": ts_utc,
+            "kernel_version": kernel_version,
             "config": {
                 "schema_hash": effective.schema_hash if effective else None,
                 "effective_hash": effective.effective_hash if effective else None,
@@ -317,6 +339,8 @@ class Kernel:
             "locks": lock_hashes,
             "plugins": sorted(set(plugin_ids)),
             "plugin_versions": plugin_versions,
+            "packages": packages,
+            "package_fingerprint": sha256_text(dumps(packages)) if packages else None,
             "storage": {
                 "data_dir": storage_cfg.get("data_dir", "data"),
                 "media_dir": storage_cfg.get("media_dir", "data/media"),
@@ -376,6 +400,7 @@ class Kernel:
             if version:
                 plugin_versions[pid] = str(version)
         storage_cfg = self.config.get("storage", {})
+        packages = self._package_versions()
         manifest = {
             "record_type": "system.run_manifest.final",
             "run_id": builder.run_id,
@@ -388,6 +413,8 @@ class Kernel:
             "locks": self._lock_hashes(),
             "plugins": sorted(set(plugin_ids)),
             "plugin_versions": plugin_versions,
+            "packages": packages,
+            "package_fingerprint": sha256_text(dumps(packages)) if packages else None,
             "storage": {
                 "data_dir": storage_cfg.get("data_dir", "data"),
                 "media_dir": storage_cfg.get("media_dir", "data/media"),

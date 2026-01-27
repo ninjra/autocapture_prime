@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from autocapture.config.defaults import default_config_paths
@@ -31,6 +33,17 @@ class UXFacade:
         )
         self._answer = AnswerOrchestrator()
 
+    @contextmanager
+    def _kernel_context(self):
+        from autocapture_nx.kernel.loader import Kernel, default_config_paths as nx_paths
+
+        kernel = Kernel(nx_paths(), safe_mode=False)
+        system = kernel.boot(start_conductor=False)
+        try:
+            yield system
+        finally:
+            kernel.shutdown()
+
     def query(self, text: str) -> dict[str, Any]:
         retrieval = self._retriever.retrieve(text)
         results = retrieval["results"]
@@ -54,6 +67,49 @@ class UXFacade:
         answer = self._answer.build_answer(claims, span_ids)
         return {"answer": answer, "citations": claims[0]["citations"], "provenance": context}
 
+    def resolve_citations(self, citations: list[dict[str, Any]]) -> dict[str, Any]:
+        with self._kernel_context() as system:
+            validator = system.get("citation.validator")
+            return validator.resolve(citations)
+
+    def verify_citations(self, citations: list[dict[str, Any]]) -> dict[str, Any]:
+        result = self.resolve_citations(citations)
+        return {"ok": bool(result.get("ok")), "errors": result.get("errors", [])}
+
+    def export_proof_bundle(
+        self,
+        evidence_ids: list[str],
+        output_path: str,
+        *,
+        citations: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        from dataclasses import asdict
+        from autocapture_nx.kernel.proof_bundle import export_proof_bundle
+
+        with self._kernel_context() as system:
+            config = system.config if hasattr(system, "config") else {}
+            storage_cfg = config.get("storage", {}) if isinstance(config, dict) else {}
+            data_dir = storage_cfg.get("data_dir", "data")
+            ledger_path = Path(data_dir) / "ledger.ndjson"
+            anchor_path = Path(storage_cfg.get("anchor", {}).get("path", "data_anchor/anchors.ndjson"))
+            report = export_proof_bundle(
+                metadata=system.get("storage.metadata"),
+                media=system.get("storage.media"),
+                keyring=system.get("storage.keyring") if system.has("storage.keyring") else None,
+                ledger_path=ledger_path,
+                anchor_path=anchor_path,
+                output_path=output_path,
+                evidence_ids=evidence_ids,
+                citations=citations,
+            )
+            return asdict(report)
+
+    def replay_proof_bundle(self, bundle_path: str) -> dict[str, Any]:
+        from dataclasses import asdict
+        from autocapture_nx.kernel.replay import replay_bundle
+
+        return asdict(replay_bundle(bundle_path))
+
     def settings_schema(self) -> dict[str, Any]:
         return get_schema()
 
@@ -64,7 +120,7 @@ class UXFacade:
         from autocapture_nx.kernel.loader import Kernel, default_config_paths as nx_paths
 
         kernel = Kernel(nx_paths(), safe_mode=False)
-        kernel.boot()
+        kernel.boot(start_conductor=False)
         checks = kernel.doctor()
         report_checks = [DoctorCheck(name=c.name, ok=c.ok, detail=c.detail) for c in checks]
         ok = all(c.ok for c in report_checks)

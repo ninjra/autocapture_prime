@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import Any
+
+from autocapture_nx.kernel.canonical_json import dumps
 
 
 def sha256_file(path: str | Path) -> str:
@@ -49,3 +52,7 @@ def sha256_directory(path: str | Path) -> str:
 
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def sha256_canonical(obj: Any) -> str:
+    return sha256_text(dumps(obj))

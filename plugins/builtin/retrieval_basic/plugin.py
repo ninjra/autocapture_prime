@@ -23,9 +23,14 @@ class RetrievalStrategy(PluginBase):
         self._vector = None
         self._indexes_ready = False
         self._reranker = Reranker()
+        self._last_trace: list[dict[str, Any]] = []
+        self._index_meta: dict[str, Any] = {}
 
     def capabilities(self) -> dict[str, Any]:
         return {"retrieval.strategy": self}
+
+    def trace(self) -> list[dict[str, Any]]:
+        return list(self._last_trace)
 
     def search(self, query: str, time_window: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         store = self.context.get_capability("storage.metadata")
@@ -34,10 +39,21 @@ class RetrievalStrategy(PluginBase):
         query_text = str(query or "").strip()
         if not query_text:
             return []
+        trace: list[dict[str, Any]] = []
         window_events, input_summaries, cursor_samples = _collect_timelines(store)
-        results = self._search_indexed(store, query_text, time_window)
+        candidate_ids = _time_window_candidates(store, time_window, self._config)
+        if candidate_ids is not None:
+            trace.append(
+                {
+                    "tier": "TIME_WINDOW",
+                    "candidates": int(len(candidate_ids)),
+                    "start": (time_window or {}).get("start"),
+                    "end": (time_window or {}).get("end"),
+                }
+            )
+        results, trace = self._search_indexed(store, query_text, time_window, trace, candidate_ids)
         if not results:
-            results = _scan_metadata(store, query_text.lower(), time_window)
+            results = _scan_metadata(store, query_text.lower(), time_window, candidate_ids)
         results.sort(
             key=lambda r: (
                 -float(r.get("score", 0.0)),
@@ -48,6 +64,7 @@ class RetrievalStrategy(PluginBase):
             )
         )
         _attach_timelines(results, store, window_events, input_summaries, cursor_samples)
+        self._last_trace = trace
         return results
 
     def _ensure_indexes(self) -> None:
@@ -58,16 +75,29 @@ class RetrievalStrategy(PluginBase):
             return
         logger = self.context.logger if callable(getattr(self.context, "logger", None)) else None
         self._lexical, self._vector = build_indexes(self._config, logger=logger)
+        self._index_meta = {}
+        if self._lexical is not None and hasattr(self._lexical, "identity"):
+            try:
+                self._index_meta["lexical"] = self._lexical.identity()
+            except Exception:
+                self._index_meta["lexical"] = {"backend": "unknown"}
+        if self._vector is not None and hasattr(self._vector, "identity"):
+            try:
+                self._index_meta["vector"] = self._vector.identity()
+            except Exception:
+                self._index_meta["vector"] = {"backend": "unknown"}
 
     def _search_indexed(
         self,
         store: Any,
         query: str,
         time_window: dict[str, Any] | None,
-    ) -> list[dict[str, Any]]:
+        trace: list[dict[str, Any]],
+        candidate_ids: set[str] | None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         self._ensure_indexes()
         if self._lexical is None and self._vector is None:
-            return []
+            return [], trace
         retrieval_cfg = self._config.get("retrieval", {}) if isinstance(self._config, dict) else {}
         limit = int(retrieval_cfg.get("limit", 25))
         vector_limit = int(retrieval_cfg.get("vector_limit", limit))
@@ -79,18 +109,29 @@ class RetrievalStrategy(PluginBase):
                     lexical_hits = self._lexical.query(query, limit=limit)
             except Exception:
                 lexical_hits = []
+        if candidate_ids is not None:
+            lexical_hits = [hit for hit in lexical_hits if hit.get("doc_id") in candidate_ids]
+        trace.append({"tier": "LEXICAL", "result_count": len(lexical_hits), "index": self._index_meta.get("lexical")})
         if self._vector is not None:
-            try:
-                if not hasattr(self._vector, "count") or self._vector.count() > 0:
-                    vector_hits = [{"doc_id": hit.doc_id, "score": hit.score} for hit in self._vector.query(query, limit=vector_limit)]
-            except Exception:
-                vector_hits = []
+            vector_ok, reason = _allow_vector(self.context, self._config)
+            if vector_ok:
+                try:
+                    if not hasattr(self._vector, "count") or self._vector.count() > 0:
+                        vector_hits = [{"doc_id": hit.doc_id, "score": hit.score} for hit in self._vector.query(query, limit=vector_limit)]
+                except Exception:
+                    vector_hits = []
+                if candidate_ids is not None:
+                    vector_hits = [hit for hit in vector_hits if hit.get("doc_id") in candidate_ids]
+                trace.append({"tier": "VECTOR", "result_count": len(vector_hits), "index": self._index_meta.get("vector")})
+            else:
+                trace.append({"tier": "VECTOR_SKIPPED", "reason": reason})
         if not lexical_hits and not vector_hits:
-            return []
+            return [], trace
 
         snippet_map = {hit.get("doc_id"): hit.get("snippet") for hit in lexical_hits if hit.get("doc_id")}
         if len(lexical_hits) >= self._fast_threshold:
             candidates = lexical_hits
+            trace.append({"tier": "FAST", "result_count": len(candidates)})
         else:
             rankings = []
             if lexical_hits:
@@ -105,13 +146,15 @@ class RetrievalStrategy(PluginBase):
                 fused = []
             if len(fused) >= self._fusion_threshold:
                 candidates = fused
+                trace.append({"tier": "FUSION", "result_count": len(candidates)})
             else:
                 candidates = self._rerank_candidates(query, fused, store)
+                trace.append({"tier": "RERANK", "result_count": len(candidates)})
         for item in candidates:
             doc_id = item.get("doc_id")
             if doc_id and doc_id in snippet_map and "snippet" not in item:
                 item["snippet"] = snippet_map[doc_id]
-        return _map_candidates(candidates, store, time_window)
+        return _map_candidates(candidates, store, time_window), trace
 
     def _rerank_candidates(self, query: str, candidates: list[dict[str, Any]], store: Any) -> list[dict[str, Any]]:
         if not candidates:
@@ -170,9 +213,17 @@ def _within_window(ts: str | None, time_window: dict[str, Any] | None) -> bool:
     return True
 
 
-def _scan_metadata(store: Any, query_lower: str, time_window: dict[str, Any] | None) -> list[dict[str, Any]]:
+def _scan_metadata(
+    store: Any,
+    query_lower: str,
+    time_window: dict[str, Any] | None,
+    candidate_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
-    for record_id in getattr(store, "keys", lambda: [])():
+    record_ids = list(getattr(store, "keys", lambda: [])())
+    if candidate_ids is not None:
+        record_ids = [rid for rid in record_ids if rid in candidate_ids]
+    for record_id in record_ids:
         record = store.get(record_id, {})
         text = str(record.get("text", "")).lower()
         if not query_lower or query_lower not in text:
@@ -293,3 +344,60 @@ def _attach_timelines(
             right = bisect_right(cursor_times, end_ts)
             if right > left:
                 result["cursor_refs"] = [cursor_samples[i][1] for i in range(left, right)]
+
+
+def _time_window_candidates(
+    store: Any,
+    time_window: dict[str, Any] | None,
+    config: dict[str, Any],
+) -> set[str] | None:
+    if not time_window:
+        return None
+    start_ts = time_window.get("start")
+    end_ts = time_window.get("end")
+    if not start_ts and not end_ts:
+        return None
+    retrieval_cfg = config.get("retrieval", {}) if isinstance(config, dict) else {}
+    limit = retrieval_cfg.get("window_limit")
+    try:
+        limit_val = int(limit) if limit is not None else None
+    except Exception:
+        limit_val = None
+    if hasattr(store, "query_time_window"):
+        try:
+            ids = store.query_time_window(start_ts, end_ts, limit=limit_val)
+            return set(ids)
+        except Exception:
+            return None
+    return None
+
+
+def _allow_vector(context: PluginContext, config: dict[str, Any]) -> tuple[bool, str]:
+    retrieval_cfg = config.get("retrieval", {}) if isinstance(config, dict) else {}
+    if isinstance(retrieval_cfg, dict) and not bool(retrieval_cfg.get("vector_enabled", True)):
+        return False, "disabled"
+    require_idle = bool(retrieval_cfg.get("vector_requires_idle", True))
+    idle_threshold = retrieval_cfg.get("vector_idle_seconds")
+    if idle_threshold is None:
+        idle_threshold = config.get("runtime", {}).get("idle_window_s", 45)
+    try:
+        idle_threshold = float(idle_threshold)
+    except Exception:
+        idle_threshold = 45.0
+    if not require_idle:
+        return True, "enabled"
+    tracker = None
+    try:
+        tracker = context.get_capability("tracking.input")
+    except Exception:
+        tracker = None
+    if tracker is None:
+        assume_idle = bool(config.get("runtime", {}).get("activity", {}).get("assume_idle_when_missing", False))
+        return (assume_idle, "missing_tracker" if not assume_idle else "assumed_idle")
+    try:
+        idle_seconds = float(tracker.idle_seconds())
+    except Exception:
+        idle_seconds = 0.0
+    if idle_seconds < idle_threshold:
+        return False, "active"
+    return True, "idle"

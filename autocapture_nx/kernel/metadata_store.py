@@ -15,21 +15,36 @@ def is_derived_record(record: dict[str, Any]) -> bool:
     return record_type.startswith("derived.")
 
 
+def _validate_evidence(value: dict[str, Any], record_id: str) -> None:
+    if not is_evidence_record(value):
+        return
+    if not value.get("run_id"):
+        raise ValueError(f"Evidence record {record_id} missing run_id")
+    if not value.get("content_hash") and not value.get("payload_hash"):
+        raise ValueError(f"Evidence record {record_id} missing content_hash")
+
+
 class ImmutableMetadataStore:
     def __init__(self, store: Any) -> None:
         self._store = store
 
     def put(self, record_id: str, value: Any) -> None:
         existing = self._store.get(record_id)
-        if isinstance(existing, dict) and is_evidence_record(existing):
-            raise RuntimeError(f"Refusing to overwrite evidence record {record_id}")
+        if isinstance(existing, dict) and (is_evidence_record(existing) or is_derived_record(existing)):
+            raise RuntimeError(f"Refusing to overwrite immutable record {record_id}")
         if isinstance(value, dict) and "record_type" not in value:
             raise ValueError(f"Metadata record {record_id} missing record_type")
+        if isinstance(value, dict) and existing is not None and is_derived_record(value):
+            raise RuntimeError(f"Refusing to overwrite immutable record {record_id}")
+        if isinstance(value, dict):
+            _validate_evidence(value, record_id)
         self._store.put(record_id, value)
 
     def put_new(self, record_id: str, value: Any) -> None:
         if isinstance(value, dict) and "record_type" not in value:
             raise ValueError(f"Metadata record {record_id} missing record_type")
+        if isinstance(value, dict):
+            _validate_evidence(value, record_id)
         if hasattr(self._store, "put_new"):
             return self._store.put_new(record_id, value)
         existing = self._store.get(record_id)
@@ -39,12 +54,14 @@ class ImmutableMetadataStore:
 
     def put_replace(self, record_id: str, value: Any) -> None:
         existing = self._store.get(record_id)
-        if isinstance(existing, dict) and is_evidence_record(existing):
-            raise RuntimeError(f"Refusing to overwrite evidence record {record_id}")
-        if isinstance(value, dict) and is_evidence_record(value):
-            raise RuntimeError(f"Refusing to overwrite evidence record {record_id}")
+        if isinstance(existing, dict) and (is_evidence_record(existing) or is_derived_record(existing)):
+            raise RuntimeError(f"Refusing to overwrite immutable record {record_id}")
+        if isinstance(value, dict) and (is_evidence_record(value) or is_derived_record(value)):
+            raise RuntimeError(f"Refusing to overwrite immutable record {record_id}")
         if isinstance(value, dict) and "record_type" not in value:
             raise ValueError(f"Metadata record {record_id} missing record_type")
+        if isinstance(value, dict):
+            _validate_evidence(value, record_id)
         if hasattr(self._store, "put_replace"):
             return self._store.put_replace(record_id, value)
         self._store.put(record_id, value)

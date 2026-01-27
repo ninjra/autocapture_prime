@@ -1,8 +1,12 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from autocapture.core.hashing import hash_text, normalize_text
 from autocapture_nx.plugin_system.api import PluginContext
+from plugins.builtin.anchor_basic.plugin import AnchorWriter
 from plugins.builtin.citation_basic.plugin import CitationValidator
+from plugins.builtin.ledger_basic.plugin import LedgerWriter
 
 
 class _MetaStore:
@@ -18,79 +22,134 @@ class _MetaStore:
 
 class CitationValidatorMetadataTests(unittest.TestCase):
     def test_validator_requires_evidence_record(self) -> None:
-        store = _MetaStore()
-        evidence_text = "evidence-bytes"
-        evidence_hash = hash_text(normalize_text(evidence_text))
-        derived_text = "derived text"
-        derived_hash = hash_text(normalize_text(derived_text))
-        store.put("run1/segment/0", {"record_type": "evidence.capture.segment", "content_hash": evidence_hash})
-        store.put(
-            "run1/derived/0",
-            {"record_type": "derived.text.ocr", "content_hash": derived_hash, "source_id": "run1/segment/0"},
-        )
-
-        def get_capability(name: str):
-            if name == "storage.metadata":
-                return store
-            raise KeyError(name)
-
-        ctx = PluginContext(config={}, get_capability=get_capability, logger=lambda _m: None)
-        validator = CitationValidator("cit", ctx)
-
-        ok = validator.validate(
-            [
+        with tempfile.TemporaryDirectory() as tmp:
+            anchor_path = Path(tmp) / "anchors.ndjson"
+            config = {
+                "storage": {"data_dir": tmp, "anchor": {"path": str(anchor_path), "use_dpapi": False}}
+            }
+            base_ctx = PluginContext(config=config, get_capability=lambda _n: None, logger=lambda _m: None)
+            ledger = LedgerWriter("ledger", base_ctx)
+            entry_hash = ledger.append(
                 {
-                    "span_id": "run1/segment/0",
-                    "evidence_id": "run1/segment/0",
-                    "evidence_hash": evidence_hash,
-                    "derived_id": "run1/derived/0",
-                    "derived_hash": derived_hash,
-                    "source": "local",
-                    "offset_start": 0,
-                    "offset_end": 10,
+                    "record_type": "ledger.entry",
+                    "schema_version": 1,
+                    "entry_id": "run1/ledger/0",
+                    "ts_utc": "2026-01-01T00:00:00+00:00",
+                    "stage": "query.execute",
+                    "inputs": [],
+                    "outputs": [],
+                    "policy_snapshot_hash": "policy",
+                    "payload": {"event": "query.execute"},
                 }
-            ]
-        )
-        self.assertTrue(ok)
-        with self.assertRaises(ValueError):
-            validator.validate(
-                [
-                    {
-                        "span_id": "missing",
-                        "evidence_id": "missing",
-                        "evidence_hash": evidence_hash,
-                        "source": "local",
-                        "offset_start": 0,
-                        "offset_end": 1,
-                    }
-                ]
             )
-        with self.assertRaises(ValueError):
-            validator.validate(
-                [
-                    {
-                        "span_id": "run1/derived/0",
-                        "evidence_id": "run1/derived/0",
-                        "evidence_hash": evidence_hash,
-                        "source": "local",
-                        "offset_start": 0,
-                        "offset_end": 1,
-                    }
-                ]
+            anchor = AnchorWriter("anchor", base_ctx)
+            anchor_record = anchor.anchor(entry_hash)
+            anchor_ref = {
+                "anchor_seq": anchor_record.get("anchor_seq"),
+                "ledger_head_hash": anchor_record.get("ledger_head_hash"),
+            }
+
+            store = _MetaStore()
+            evidence_text = "evidence-bytes"
+            evidence_hash = hash_text(normalize_text(evidence_text))
+            derived_text = "derived text"
+            derived_hash = hash_text(normalize_text(derived_text))
+            store.put(
+                "run1/segment/0",
+                {
+                    "record_type": "evidence.capture.segment",
+                    "content_hash": evidence_hash,
+                    "text": evidence_text,
+                },
             )
-        with self.assertRaises(ValueError):
-            validator.validate(
+            store.put(
+                "run1/derived/0",
+                {
+                    "record_type": "derived.text.ocr",
+                    "content_hash": derived_hash,
+                    "source_id": "run1/segment/0",
+                    "text": derived_text,
+                },
+            )
+
+            def get_capability(name: str):
+                if name == "storage.metadata":
+                    return store
+                raise KeyError(name)
+
+            ctx = PluginContext(config=config, get_capability=get_capability, logger=lambda _m: None)
+            validator = CitationValidator("cit", ctx)
+
+            ok = validator.validate(
                 [
                     {
+                        "schema_version": 1,
                         "span_id": "run1/segment/0",
                         "evidence_id": "run1/segment/0",
-                        "evidence_hash": "bad",
+                        "evidence_hash": evidence_hash,
+                        "derived_id": "run1/derived/0",
+                        "derived_hash": derived_hash,
+                        "span_kind": "text",
+                        "ledger_head": entry_hash,
+                        "anchor_ref": anchor_ref,
                         "source": "local",
                         "offset_start": 0,
-                        "offset_end": 1,
+                        "offset_end": len(derived_text),
                     }
                 ]
             )
+            self.assertTrue(ok)
+            with self.assertRaises(ValueError):
+                validator.validate(
+                    [
+                        {
+                            "schema_version": 1,
+                            "span_id": "missing",
+                            "evidence_id": "missing",
+                            "evidence_hash": evidence_hash,
+                            "span_kind": "record",
+                            "ledger_head": entry_hash,
+                            "anchor_ref": anchor_ref,
+                            "source": "local",
+                            "offset_start": 0,
+                            "offset_end": 1,
+                        }
+                    ]
+                )
+            with self.assertRaises(ValueError):
+                validator.validate(
+                    [
+                        {
+                            "schema_version": 1,
+                            "span_id": "run1/derived/0",
+                            "evidence_id": "run1/derived/0",
+                            "evidence_hash": evidence_hash,
+                            "span_kind": "record",
+                            "ledger_head": entry_hash,
+                            "anchor_ref": anchor_ref,
+                            "source": "local",
+                            "offset_start": 0,
+                            "offset_end": 1,
+                        }
+                    ]
+                )
+            with self.assertRaises(ValueError):
+                validator.validate(
+                    [
+                        {
+                            "schema_version": 1,
+                            "span_id": "run1/segment/0",
+                            "evidence_id": "run1/segment/0",
+                            "evidence_hash": "bad",
+                            "span_kind": "record",
+                            "ledger_head": entry_hash,
+                            "anchor_ref": anchor_ref,
+                            "source": "local",
+                            "offset_start": 0,
+                            "offset_end": 1,
+                        }
+                    ]
+                )
 
 
 if __name__ == "__main__":

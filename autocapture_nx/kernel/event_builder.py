@@ -21,6 +21,12 @@ class EventBuilder:
         self._policy_hash: str | None = None
         self._ledger_seq = 0
         self._lock = threading.Lock()
+        anchor_cfg = config.get("storage", {}).get("anchor", {}) if isinstance(config, dict) else {}
+        self._anchor_every_entries = int(anchor_cfg.get("every_entries", 0)) if anchor is not None else 0
+        self._anchor_every_minutes = float(anchor_cfg.get("every_minutes", 0)) if anchor is not None else 0.0
+        self._anchor_entry_count = 0
+        self._last_anchor_ts: datetime | None = None
+        self._last_anchor: dict[str, Any] | None = None
 
     @property
     def run_id(self) -> str:
@@ -30,6 +36,9 @@ class EventBuilder:
         if hasattr(self._ledger, "head_hash"):
             return self._ledger.head_hash()
         return None
+
+    def last_anchor(self) -> dict[str, Any] | None:
+        return dict(self._last_anchor) if self._last_anchor else None
 
     def policy_snapshot_hash(self) -> str:
         if self._policy_hash is None:
@@ -86,5 +95,22 @@ class EventBuilder:
             entry["payload"] = payload
         ledger_hash = self._ledger.append(entry)
         if self._anchor:
-            self._anchor.anchor(ledger_hash)
+            self._anchor_entry_count += 1
+            now = datetime.fromisoformat(ts_utc)
+            should_anchor = False
+            if self._last_anchor is None:
+                should_anchor = True
+            if self._anchor_every_entries and self._anchor_entry_count >= self._anchor_every_entries:
+                should_anchor = True
+            if self._anchor_every_minutes:
+                if self._last_anchor_ts is None:
+                    should_anchor = True
+                else:
+                    elapsed = (now - self._last_anchor_ts).total_seconds()
+                    if elapsed >= (self._anchor_every_minutes * 60.0):
+                        should_anchor = True
+            if should_anchor:
+                self._last_anchor = self._anchor.anchor(ledger_hash)
+                self._last_anchor_ts = now
+                self._anchor_entry_count = 0
         return ledger_hash

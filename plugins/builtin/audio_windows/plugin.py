@@ -13,6 +13,7 @@ import shutil
 from dataclasses import dataclass, field
 from typing import Any
 
+from autocapture_nx.kernel.hashing import sha256_canonical
 from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 
@@ -103,6 +104,7 @@ class AudioCaptureWindows(PluginBase):
                 payload = {
                     "record_type": "derived.audio.segment",
                     "ts_utc": ts_utc,
+                    "run_id": run_id,
                     "frames": int(frames),
                     "channels": int(channels),
                     "sample_rate": int(samplerate),
@@ -110,6 +112,7 @@ class AudioCaptureWindows(PluginBase):
                     "source": mode,
                     "content_hash": hashlib.sha256(encoded_bytes).hexdigest(),
                 }
+                payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
                 if hasattr(storage_meta, "put_new"):
                     storage_meta.put_new(record_id, payload)
                 else:
@@ -145,6 +148,7 @@ class AudioCaptureWindows(PluginBase):
             payload = {
                 "record_type": "derived.audio.segment",
                 "ts_utc": ts_utc,
+                "run_id": run_id,
                 "frames": int(frames),
                 "channels": int(channels),
                 "sample_rate": int(samplerate),
@@ -152,6 +156,7 @@ class AudioCaptureWindows(PluginBase):
                 "source": mode,
                 "content_hash": hashlib.sha256(encoded_bytes).hexdigest(),
             }
+            payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
             if hasattr(storage_meta, "put_new"):
                 storage_meta.put_new(record_id, payload)
             else:

@@ -26,7 +26,7 @@ def _print_json(data: object) -> None:
 
 def cmd_doctor(args: argparse.Namespace) -> int:
     kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
-    kernel.boot()
+    kernel.boot(start_conductor=False)
     checks = kernel.doctor()
     ok = all(check.ok for check in checks)
     for check in checks:
@@ -261,6 +261,92 @@ def cmd_provenance_verify(args: argparse.Namespace) -> int:
     return 2
 
 
+def cmd_citations_resolve(args: argparse.Namespace) -> int:
+    try:
+        payload = _load_json_payload(args.path, args.json)
+        citations = _extract_citations(payload)
+    except Exception as exc:
+        _print_json({"ok": False, "error": str(exc)})
+        return 1
+    kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
+    system = kernel.boot(start_conductor=False)
+    try:
+        validator = system.get("citation.validator")
+        result = validator.resolve(citations)
+        _print_json(result)
+        return 0 if result.get("ok") else 2
+    finally:
+        kernel.shutdown()
+
+
+def cmd_citations_verify(args: argparse.Namespace) -> int:
+    try:
+        payload = _load_json_payload(args.path, args.json)
+        citations = _extract_citations(payload)
+    except Exception as exc:
+        _print_json({"ok": False, "error": str(exc)})
+        return 1
+    kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
+    system = kernel.boot(start_conductor=False)
+    try:
+        validator = system.get("citation.validator")
+        result = validator.resolve(citations)
+        if result.get("ok"):
+            print("OK citations_verified")
+            return 0
+        _print_json(result)
+        return 2
+    finally:
+        kernel.shutdown()
+
+
+def cmd_proof_export(args: argparse.Namespace) -> int:
+    citations = None
+    if args.citations:
+        try:
+            payload = _load_json_payload(args.citations, None)
+            citations = _extract_citations(payload)
+        except Exception as exc:
+            _print_json({"ok": False, "error": str(exc)})
+            return 1
+    evidence_ids = list(args.evidence_id or [])
+    if not evidence_ids and not citations:
+        _print_json({"ok": False, "error": "missing_evidence_or_citations"})
+        return 1
+    from autocapture_nx.kernel.proof_bundle import export_proof_bundle
+
+    kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
+    system = kernel.boot(start_conductor=False)
+    try:
+        config = system.config if hasattr(system, "config") else {}
+        storage_cfg = config.get("storage", {}) if isinstance(config, dict) else {}
+        data_dir = storage_cfg.get("data_dir", "data")
+        ledger_path = Path(data_dir) / "ledger.ndjson"
+        anchor_path = Path(storage_cfg.get("anchor", {}).get("path", "data_anchor/anchors.ndjson"))
+        report = export_proof_bundle(
+            metadata=system.get("storage.metadata"),
+            media=system.get("storage.media"),
+            keyring=system.get("storage.keyring") if system.has("storage.keyring") else None,
+            ledger_path=ledger_path,
+            anchor_path=anchor_path,
+            output_path=args.out,
+            evidence_ids=evidence_ids,
+            citations=citations,
+        )
+        _print_json(asdict(report))
+        return 0 if report.ok else 2
+    finally:
+        kernel.shutdown()
+
+
+def cmd_replay(args: argparse.Namespace) -> int:
+    from autocapture_nx.kernel.replay import replay_bundle
+
+    report = replay_bundle(args.bundle)
+    _print_json(asdict(report))
+    return 0 if report.ok else 2
+
+
 def cmd_research_run(args: argparse.Namespace) -> int:
     from autocapture.config.defaults import default_config_paths as mx_paths
     from autocapture.config.load import load_config as mx_load
@@ -284,6 +370,27 @@ def _load_user_config(path: Path) -> dict:
 def _write_user_config(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _load_json_payload(path: str | None, raw_json: str | None):
+    if path:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    if raw_json:
+        return json.loads(raw_json)
+    data = sys.stdin.read()
+    if data.strip():
+        return json.loads(data)
+    raise ValueError("missing_json_payload")
+
+
+def _extract_citations(payload: object) -> list[dict]:
+    if isinstance(payload, dict) and "citations" in payload:
+        citations = payload.get("citations")
+    else:
+        citations = payload
+    if not isinstance(citations, list):
+        raise ValueError("citations_not_list")
+    return citations
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -424,6 +531,17 @@ def build_parser() -> argparse.ArgumentParser:
     provenance_verify.add_argument("--path", default="")
     provenance_verify.set_defaults(func=cmd_provenance_verify)
 
+    citations = sub.add_parser("citations")
+    citations_sub = citations.add_subparsers(dest="citations_cmd", required=True)
+    citations_resolve = citations_sub.add_parser("resolve")
+    citations_resolve.add_argument("--path", default="")
+    citations_resolve.add_argument("--json", default="")
+    citations_resolve.set_defaults(func=cmd_citations_resolve)
+    citations_verify = citations_sub.add_parser("verify")
+    citations_verify.add_argument("--path", default="")
+    citations_verify.add_argument("--json", default="")
+    citations_verify.set_defaults(func=cmd_citations_verify)
+
     research = sub.add_parser("research")
     research_sub = research.add_subparsers(dest="research_cmd", required=True)
     research_run = research_sub.add_parser("run")
@@ -448,6 +566,18 @@ def build_parser() -> argparse.ArgumentParser:
     storage_cleanup.add_argument("--path", required=True)
     storage_cleanup.add_argument("--confirm", action="store_true")
     storage_cleanup.set_defaults(func=cmd_storage_cleanup)
+
+    proof = sub.add_parser("proof")
+    proof_sub = proof.add_subparsers(dest="proof_cmd", required=True)
+    proof_export = proof_sub.add_parser("export")
+    proof_export.add_argument("--out", required=True)
+    proof_export.add_argument("--evidence-id", action="append", default=[])
+    proof_export.add_argument("--citations", default="")
+    proof_export.set_defaults(func=cmd_proof_export)
+
+    replay = sub.add_parser("replay")
+    replay.add_argument("--bundle", required=True)
+    replay.set_defaults(func=cmd_replay)
 
     codex = sub.add_parser("codex")
     codex.add_argument("codex_args", nargs=argparse.REMAINDER)

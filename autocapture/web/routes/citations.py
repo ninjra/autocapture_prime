@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from typing import Any
+
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -10,6 +12,10 @@ router = APIRouter()
 
 class OverlayRequest(BaseModel):
     span_id: str | None = None
+
+
+class CitationsRequest(BaseModel):
+    citations: list[dict[str, Any]] = []
 
 
 @router.post("/api/citations/overlay")
@@ -23,3 +29,13 @@ def overlay(req: OverlayRequest):
             }
         ]
     }
+
+
+@router.post("/api/citations/resolve")
+def resolve(req: CitationsRequest, request: Request):
+    return request.app.state.facade.resolve_citations(req.citations)
+
+
+@router.post("/api/citations/verify")
+def verify(req: CitationsRequest, request: Request):
+    return request.app.state.facade.verify_citations(req.citations)

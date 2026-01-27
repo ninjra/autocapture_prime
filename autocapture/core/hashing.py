@@ -10,6 +10,9 @@ import unicodedata
 from typing import Any
 
 
+TEXT_NORM_VERSION = 1
+
+
 class CanonicalJSONError(ValueError):
     """Raised when input cannot be canonicalized."""
 

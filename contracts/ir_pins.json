@@ -75,12 +75,12 @@
       "id": "builtin.capture.windows"
     },
     {
-      "enabled": false,
-      "id": "builtin.cursor.windows"
-    },
-    {
       "enabled": true,
       "id": "builtin.citation.basic"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.cursor.windows"
     },
     {
       "enabled": true,

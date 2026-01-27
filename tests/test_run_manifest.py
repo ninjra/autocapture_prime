@@ -93,6 +93,9 @@ class RunManifestTests(unittest.TestCase):
             self.assertEqual(payload.get("run_id"), builder.run_id)
             self.assertIn("locks", payload)
             self.assertIn("plugins", payload)
+            self.assertIn("packages", payload)
+            self.assertIsInstance(payload.get("packages"), dict)
+            self.assertIn("package_fingerprint", payload)
 
     def test_run_manifest_final_written(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -131,6 +134,9 @@ class RunManifestTests(unittest.TestCase):
             payload = store.data[record_id]
             self.assertEqual(payload.get("record_type"), "system.run_manifest.final")
             self.assertEqual(payload.get("run_id"), builder.run_id)
+            self.assertIn("packages", payload)
+            self.assertIsInstance(payload.get("packages"), dict)
+            self.assertIn("package_fingerprint", payload)
 
 
 if __name__ == "__main__":

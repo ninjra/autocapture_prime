@@ -146,6 +146,31 @@ class SQLCipherStore:
         cur = self._conn.execute("SELECT id FROM metadata ORDER BY id")
         return [row[0] for row in cur.fetchall()]
 
+    def query_time_window(
+        self,
+        start_ts: str | None,
+        end_ts: str | None,
+        limit: int | None = None,
+    ) -> list[str]:
+        self._ensure()
+        clauses = []
+        params: list[Any] = []
+        if start_ts:
+            clauses.append("ts_utc >= ?")
+            params.append(start_ts)
+        if end_ts:
+            clauses.append("ts_utc <= ?")
+            params.append(end_ts)
+        where = ""
+        if clauses:
+            where = "WHERE " + " AND ".join(clauses)
+        sql = f"SELECT id FROM metadata {where} ORDER BY ts_utc, id"
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(int(limit))
+        cur = self._conn.execute(sql, tuple(params))
+        return [row[0] for row in cur.fetchall()]
+
     def delete(self, record_id: str) -> bool:
         self._ensure()
         before = self._conn.total_changes

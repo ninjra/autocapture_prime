@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+from autocapture_nx.kernel.canonical_json import dumps
 from autocapture_nx.kernel.hashing import sha256_text
 from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
@@ -72,6 +73,7 @@ class WindowMetadataWindows(PluginBase):
                 payload = {
                     **_build_window_payload(info),
                 }
+                content_hash = sha256_text(dumps(payload))
                 record_id = prefixed_id(run_id, "window", seq)
                 event_builder.journal_event(
                     "window.meta",
@@ -84,7 +86,9 @@ class WindowMetadataWindows(PluginBase):
                     {
                         "record_type": "evidence.window.meta",
                         "ts_utc": ts,
+                        "run_id": run_id,
                         "text": f"{info.title} {info.process_path}".strip(),
+                        "content_hash": content_hash,
                         "window": payload,
                     },
                 )

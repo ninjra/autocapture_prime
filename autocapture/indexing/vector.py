@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
-import urllib.error
 import urllib.request
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from autocapture.indexing.manifest import bump_manifest, update_manifest_digest, manifest_path
 
 class HashEmbedder:
     def __init__(self, dims: int = 64) -> None:
@@ -19,7 +20,8 @@ class HashEmbedder:
     def embed(self, text: str) -> list[float]:
         vec = [0.0] * self.dims
         for token in text.lower().split():
-            idx = hash(token) % self.dims
+            digest = hashlib.sha256(token.encode("utf-8")).digest()
+            idx = int.from_bytes(digest[:4], "big") % self.dims
             vec[idx] += 1.0
         norm = math.sqrt(sum(v * v for v in vec)) or 1.0
         return [v / norm for v in vec]
@@ -29,6 +31,7 @@ class LocalEmbedder:
     def __init__(self, model_name: str | None = None) -> None:
         self._model = None
         self._fallback = HashEmbedder()
+        self._model_name = model_name
         if model_name:
             try:
                 from sentence_transformers import SentenceTransformer
@@ -42,6 +45,11 @@ class LocalEmbedder:
             return self._fallback.embed(text)
         embedding = self._model.encode([text])[0]
         return [float(v) for v in embedding]
+
+    def identity(self) -> dict[str, Any]:
+        if self._model is None:
+            return {"backend": "hash", "dims": self._fallback.dims}
+        return {"backend": "sentence_transformers", "model_name": self._model_name}
 
 
 class QdrantSidecar:
@@ -93,11 +101,18 @@ class VectorIndex:
         self._conn.execute("CREATE TABLE IF NOT EXISTS vectors (doc_id TEXT PRIMARY KEY, vector TEXT)")
         self._conn.commit()
         self._embedder = embedder
+        self._identity_cache: dict[str, Any] | None = None
+        self._identity_mtime: float | None = None
+        self._manifest_mtime: float | None = None
 
     def index(self, doc_id: str, text: str) -> None:
         vec = self._embedder.embed(text)
         self._conn.execute("REPLACE INTO vectors (doc_id, vector) VALUES (?, ?)", (doc_id, json.dumps(vec)))
         self._conn.commit()
+        try:
+            bump_manifest(self.path, "vector")
+        except Exception:
+            pass
 
     def count(self) -> int:
         cur = self._conn.execute("SELECT COUNT(*) FROM vectors")
@@ -114,6 +129,38 @@ class VectorIndex:
             hits.append(VectorHit(doc_id=doc_id, score=score))
         hits.sort(key=lambda h: (-h.score, h.doc_id))
         return hits[:limit]
+
+    def identity(self) -> dict[str, Any]:
+        try:
+            mtime = self.path.stat().st_mtime
+        except FileNotFoundError:
+            mtime = None
+        try:
+            manifest_mtime = manifest_path(self.path).stat().st_mtime
+        except FileNotFoundError:
+            manifest_mtime = None
+        if (
+            self._identity_cache is None
+            or self._identity_mtime != mtime
+            or self._manifest_mtime != manifest_mtime
+        ):
+            digest = None
+            if self.path.exists():
+                from autocapture_nx.kernel.hashing import sha256_file
+
+                digest = sha256_file(self.path)
+            manifest = update_manifest_digest(self.path, "vector", digest)
+            self._identity_cache = {
+                "backend": "sqlite",
+                "path": str(self.path),
+                "digest": digest,
+                "version": int(manifest.version),
+                "manifest_path": str(manifest_path(self.path)),
+                "embedder": self._embedder.identity(),
+            }
+            self._identity_mtime = mtime
+            self._manifest_mtime = manifest_mtime
+        return dict(self._identity_cache)
 
 
 class QdrantVectorIndex:
@@ -147,6 +194,16 @@ class QdrantVectorIndex:
             hits.append(VectorHit(doc_id=str(item.get("id")), score=float(item.get("score", 0.0))))
         hits.sort(key=lambda h: (-h.score, h.doc_id))
         return hits[:limit]
+
+    def identity(self) -> dict[str, Any]:
+        return {
+            "backend": "qdrant",
+            "url": self.url,
+            "collection": self.collection,
+            "version": None,
+            "digest": None,
+            "embedder": self._embedder.identity(),
+        }
 
 
 def create_vector_backend(plugin_id: str) -> VectorIndex:

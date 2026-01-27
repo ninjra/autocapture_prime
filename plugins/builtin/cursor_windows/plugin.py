@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+from autocapture_nx.kernel.hashing import sha256_canonical
 from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 from autocapture_nx.windows.win_cursor import current_cursor
@@ -138,4 +139,6 @@ def _cursor_record(
         "cursor": _cursor_payload(cursor, include_shape=include_shape),
         "sample_hz": int(sample_hz),
     }
+    payload["content_hash"] = sha256_canonical(payload["cursor"])
+    payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
     return record_id, payload

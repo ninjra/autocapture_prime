@@ -119,7 +119,11 @@
     "limit": 25,
     "vector_limit": 25,
     "fast_threshold": 3,
-    "fusion_threshold": 5
+    "fusion_threshold": 5,
+    "vector_enabled": true,
+    "vector_requires_idle": true,
+    "vector_idle_seconds": 45,
+    "window_limit": 1000
   },
   "plugins": {
     "allowlist": [
@@ -858,7 +862,10 @@
   "storage": {
     "anchor": {
       "path": "data_anchor/anchors.ndjson",
-      "use_dpapi": true
+      "use_dpapi": true,
+      "sign": true,
+      "every_entries": 50,
+      "every_minutes": 5
     },
     "blob_dir": "data/blobs",
     "crypto": {

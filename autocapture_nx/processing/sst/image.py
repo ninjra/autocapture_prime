@@ -6,9 +6,12 @@ import math
 from dataclasses import dataclass
 from functools import lru_cache
 from io import BytesIO
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from PIL import Image
+if TYPE_CHECKING:
+    from PIL import Image as PILImage
+else:
+    PILImage = Any
 
 from .utils import clamp_bbox, sha256_bytes
 
@@ -17,7 +20,7 @@ BBox = tuple[int, int, int, int]
 
 @dataclass(frozen=True)
 class NormalizedImage:
-    image_rgb: Image.Image
+    image_rgb: PILImage
     width: int
     height: int
     image_sha256: str
@@ -34,6 +37,7 @@ def normalize_image(
     if not image_bytes:
         raise RuntimeError("Missing image bytes")
     try:
+        Image = _pil()
         img = Image.open(BytesIO(image_bytes))
         img.load()
     except Exception as exc:  # pragma: no cover - defensive
@@ -54,8 +58,9 @@ def normalize_image(
     return NormalizedImage(img, width, height, image_hash, phash)
 
 
-def perceptual_hash(image_rgb: Image.Image, *, size: int = 8, downscale: int = 32) -> str:
+def perceptual_hash(image_rgb: PILImage, *, size: int = 8, downscale: int = 32) -> str:
     # Grayscale downscale for stable low-frequency features.
+    Image = _pil()
     small = image_rgb.convert("L").resize((downscale, downscale), Image.LANCZOS)
     pixels = list(small.tobytes())
     mat = [pixels[i * downscale : (i + 1) * downscale] for i in range(downscale)]
@@ -78,7 +83,7 @@ def perceptual_hash(image_rgb: Image.Image, *, size: int = 8, downscale: int = 3
 
 
 def tile_image(
-    image_rgb: Image.Image,
+    image_rgb: PILImage,
     *,
     tile_max_px: int,
     overlap_px: int,
@@ -126,6 +131,14 @@ def tile_image(
     _ensure_coverage(tiles, width=width, height=height, add_full_frame=add_full_frame)
     _ensure_unique_ids(tiles)
     return tiles
+
+
+def _pil():
+    try:
+        from PIL import Image as _Image
+    except Exception as exc:  # pragma: no cover - dependency missing
+        raise RuntimeError("Pillow is required for SST image processing") from exc
+    return _Image
 
 
 def _focus_bboxes(
@@ -185,7 +198,7 @@ def _expand_bbox(bbox: BBox, padding_px: int, *, width: int, height: int) -> BBo
     return clamp_bbox((x1 - pad, y1 - pad, x2 + pad, y2 + pad), width=width, height=height)
 
 
-def _make_patch(patch_id: str, bbox: BBox, image_rgb: Image.Image) -> dict[str, Any]:
+def _make_patch(patch_id: str, bbox: BBox, image_rgb: PILImage) -> dict[str, Any]:
     x1, y1, x2, y2 = bbox
     patch = image_rgb.crop((x1, y1, x2, y2))
     buf = BytesIO()

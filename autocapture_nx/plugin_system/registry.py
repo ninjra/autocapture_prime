@@ -543,6 +543,8 @@ class PluginRegistry:
         default_pack = set(self.config.get("plugins", {}).get("default_pack", []))
         hosting_cfg = self.config.get("plugins", {}).get("hosting", {})
         hosting_mode = hosting_cfg.get("mode", "inproc")
+        if self.safe_mode or self.config.get("plugins", {}).get("safe_mode", False):
+            hosting_mode = "inproc"
         inproc_allowlist = set(hosting_cfg.get("inproc_allowlist", []))
 
         manifests_by_id: dict[str, tuple[Path, dict[str, Any]]] = {}

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from autocapture.core.hashing import hash_text, normalize_text
+from autocapture_nx.kernel.derived_records import build_derivation_edge, build_text_record, derivation_edge_id
 from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.ids import encode_record_id_component
 
@@ -248,23 +248,17 @@ class IdleProcessor:
                     if self._logger is not None:
                         self._logger.log("derived.extract_error", {"source_id": record_id, "error": str(exc)})
                     continue
-                normalized_text = normalize_text(text)
-                if not normalized_text:
+                payload = build_text_record(
+                    kind=kind,
+                    text=text,
+                    source_id=record_id,
+                    source_record=record,
+                    provider_id=provider_id,
+                    config=self._config,
+                    ts_utc=ts_utc,
+                )
+                if not payload:
                     continue
-                payload = {
-                    "record_type": f"derived.text.{kind}",
-                    "ts_utc": ts_utc,
-                    "text": normalized_text,
-                    "source_id": record_id,
-                    "method": kind,
-                    "provider_id": provider_id,
-                    "content_hash": hash_text(normalized_text),
-                }
-                if normalized_text != text:
-                    payload["text_raw"] = text
-                model_name = self._config.get("models", {}).get("vlm_path") if kind == "vlm" else None
-                if model_name:
-                    payload["model_id"] = model_name
                 if hasattr(self._metadata, "put_new"):
                     try:
                         self._metadata.put_new(derived_id, payload)
@@ -272,20 +266,46 @@ class IdleProcessor:
                         continue
                 else:
                     self._metadata.put(derived_id, payload)
-                self._index_text(derived_id, normalized_text)
+                self._index_text(derived_id, payload.get("text", ""))
                 stats.processed += 1
                 if kind == "ocr":
                     stats.ocr_ok += 1
                 if kind == "vlm":
                     stats.vlm_ok += 1
+                edge_id = None
+                try:
+                    run_id = payload.get("run_id") or record_id.split("/", 1)[0]
+                    edge_id = derivation_edge_id(run_id, record_id, derived_id)
+                    edge_payload = build_derivation_edge(
+                        run_id=run_id,
+                        parent_id=record_id,
+                        child_id=derived_id,
+                        relation_type="derived_from",
+                        span_ref=payload.get("span_ref", {}),
+                        method=kind,
+                    )
+                    if hasattr(self._metadata, "put_new"):
+                        try:
+                            self._metadata.put_new(edge_id, edge_payload)
+                        except Exception:
+                            edge_id = None
+                    else:
+                        self._metadata.put(edge_id, edge_payload)
+                except Exception:
+                    edge_id = None
                 if self._events is not None:
                     event_payload = dict(payload)
                     event_payload["derived_id"] = derived_id
+                    if edge_id:
+                        event_payload["derivation_edge_id"] = edge_id
+                    parent_hash = record.get("content_hash")
+                    if parent_hash:
+                        event_payload["parent_content_hash"] = parent_hash
                     self._events.journal_event("derived.extract", event_payload, event_id=derived_id, ts_utc=ts_utc)
                     self._events.ledger_entry(
                         "derived.extract",
                         inputs=[record_id],
-                        outputs=[derived_id],
+                        outputs=[derived_id] + ([edge_id] if edge_id else []),
                         payload=event_payload,
                         entry_id=derived_id,
                         ts_utc=ts_utc,

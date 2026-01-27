@@ -20,6 +20,8 @@ CONTRACT_FILES = [
     "contracts/ledger_schema.json",
     "contracts/reasoning_packet.schema.json",
     "contracts/time_intent.schema.json",
+    "contracts/evidence.schema.json",
+    "contracts/citation.schema.json",
 ]
 
 

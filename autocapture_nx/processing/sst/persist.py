@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
 from autocapture_nx.kernel.ids import encode_record_id_component
-from autocapture_nx.kernel.hashing import sha256_text
+from autocapture_nx.kernel.hashing import sha256_canonical, sha256_text
 
 from .utils import hash_canonical
 
@@ -292,8 +292,10 @@ class SSTPersistence:
         confidence_bp: int,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
-        return {
+        run_id = artifact_id.split("/", 1)[0] if "/" in artifact_id else "run"
+        envelope = {
             **payload,
+            "run_id": run_id,
             "artifact_id": artifact_id,
             "kind": kind,
             "schema_version": self._schema_version,
@@ -307,6 +309,10 @@ class SSTPersistence:
             },
             "confidence_bp": int(confidence_bp),
         }
+        if "content_hash" not in envelope:
+            envelope["content_hash"] = sha256_canonical(envelope)
+        envelope["payload_hash"] = sha256_canonical({k: v for k, v in envelope.items() if k != "payload_hash"})
+        return envelope
 
     def _put_new(self, record_id: str, payload: dict[str, Any]) -> bool:
         existing = self._metadata.get(record_id, None)

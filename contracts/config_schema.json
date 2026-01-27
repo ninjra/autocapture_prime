@@ -389,6 +389,18 @@
         "fusion_threshold": {
           "type": "integer"
         },
+        "vector_enabled": {
+          "type": "boolean"
+        },
+        "vector_requires_idle": {
+          "type": "boolean"
+        },
+        "vector_idle_seconds": {
+          "type": "number"
+        },
+        "window_limit": {
+          "type": "integer"
+        },
         "limit": {
           "type": "integer"
         },
@@ -400,7 +412,11 @@
         "limit",
         "vector_limit",
         "fast_threshold",
-        "fusion_threshold"
+        "fusion_threshold",
+        "vector_enabled",
+        "vector_requires_idle",
+        "vector_idle_seconds",
+        "window_limit"
       ],
       "type": "object"
     },
@@ -1354,13 +1370,25 @@
             "path": {
               "type": "string"
             },
+            "sign": {
+              "type": "boolean"
+            },
             "use_dpapi": {
               "type": "boolean"
+            },
+            "every_entries": {
+              "type": "integer"
+            },
+            "every_minutes": {
+              "type": "integer"
             }
           },
           "required": [
             "path",
-            "use_dpapi"
+            "use_dpapi",
+            "sign",
+            "every_entries",
+            "every_minutes"
           ],
           "type": "object"
         },
