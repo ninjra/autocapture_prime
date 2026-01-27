@@ -49,7 +49,22 @@ class _System:
 class RuntimeConductorTests(unittest.TestCase):
     def test_idle_jobs_only_when_idle(self) -> None:
         config = {
-            "runtime": {"idle_window_s": 10, "active_window_s": 2, "mode_enforcement": {"suspend_workers": True}},
+            "runtime": {
+                "idle_window_s": 10,
+                "active_window_s": 2,
+                "mode_enforcement": {"suspend_workers": True},
+                "budgets": {
+                    "window_s": 600,
+                    "window_budget_ms": 8000,
+                    "per_job_max_ms": 2500,
+                    "max_jobs_per_window": 4,
+                    "max_heavy_concurrency": 1,
+                    "preempt_grace_ms": 0,
+                    "min_idle_seconds": 10,
+                    "allow_heavy_during_active": False,
+                },
+                "telemetry": {"enabled": False, "emit_interval_s": 5},
+            },
             "processing": {"idle": {"enabled": True, "sleep_ms": 1}},
             "research": {"enabled": True, "run_on_idle": True, "interval_s": 0},
         }
@@ -66,6 +81,38 @@ class RuntimeConductorTests(unittest.TestCase):
         tracker._idle = 0
         executed = conductor._run_once()
         self.assertNotIn("idle.extract", executed)
+
+    def test_idle_budget_job_limit(self) -> None:
+        config = {
+            "runtime": {
+                "idle_window_s": 5,
+                "active_window_s": 2,
+                "mode_enforcement": {"suspend_workers": True},
+                "budgets": {
+                    "window_s": 600,
+                    "window_budget_ms": 8000,
+                    "per_job_max_ms": 2500,
+                    "max_jobs_per_window": 1,
+                    "max_heavy_concurrency": 1,
+                    "preempt_grace_ms": 0,
+                    "min_idle_seconds": 5,
+                    "allow_heavy_during_active": False,
+                },
+                "telemetry": {"enabled": False, "emit_interval_s": 5},
+            },
+            "processing": {"idle": {"enabled": True, "sleep_ms": 1}},
+            "research": {"enabled": False, "run_on_idle": False, "interval_s": 0},
+        }
+        tracker = _Tracker(idle_seconds=30)
+        system = _System(config, tracker)
+        conductor = RuntimeConductor(system)
+        idle = _IdleProcessor()
+        conductor._idle_processor = idle
+
+        conductor._run_once()
+        self.assertEqual(idle.called, 1)
+        conductor._run_once()
+        self.assertEqual(idle.called, 1)
 
 
 if __name__ == "__main__":

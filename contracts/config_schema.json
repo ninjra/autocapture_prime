@@ -497,6 +497,9 @@
         "hosting": {
           "additionalProperties": false,
           "properties": {
+            "cache_dir": {
+              "type": "string"
+            },
             "inproc_allowlist": {
               "items": {
                 "type": "string"
@@ -505,11 +508,24 @@
             },
             "mode": {
               "type": "string"
+            },
+            "rpc_max_message_bytes": {
+              "type": "integer"
+            },
+            "rpc_timeout_s": {
+              "type": "number"
+            },
+            "sanitize_env": {
+              "type": "boolean"
             }
           },
           "required": [
             "mode",
-            "inproc_allowlist"
+            "inproc_allowlist",
+            "rpc_timeout_s",
+            "rpc_max_message_bytes",
+            "sanitize_env",
+            "cache_dir"
           ],
           "type": "object"
         },
@@ -1168,6 +1184,46 @@
           ],
           "type": "object"
         },
+        "budgets": {
+          "additionalProperties": false,
+          "properties": {
+            "allow_heavy_during_active": {
+              "type": "boolean"
+            },
+            "max_heavy_concurrency": {
+              "type": "integer"
+            },
+            "max_jobs_per_window": {
+              "type": "integer"
+            },
+            "min_idle_seconds": {
+              "type": "integer"
+            },
+            "per_job_max_ms": {
+              "type": "integer"
+            },
+            "preempt_grace_ms": {
+              "type": "integer"
+            },
+            "window_budget_ms": {
+              "type": "integer"
+            },
+            "window_s": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "window_s",
+            "window_budget_ms",
+            "per_job_max_ms",
+            "max_jobs_per_window",
+            "max_heavy_concurrency",
+            "preempt_grace_ms",
+            "min_idle_seconds",
+            "allow_heavy_during_active"
+          ],
+          "type": "object"
+        },
         "gpu": {
           "additionalProperties": false,
           "properties": {
@@ -1206,6 +1262,22 @@
         "run_id": {
           "type": "string"
         },
+        "telemetry": {
+          "additionalProperties": false,
+          "properties": {
+            "emit_interval_s": {
+              "type": "integer"
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "emit_interval_s"
+          ],
+          "type": "object"
+        },
         "timezone": {
           "type": "string"
         }
@@ -1215,7 +1287,9 @@
         "active_window_s",
         "idle_window_s",
         "mode_enforcement",
-        "gpu"
+        "gpu",
+        "budgets",
+        "telemetry"
       ],
       "type": "object"
     },

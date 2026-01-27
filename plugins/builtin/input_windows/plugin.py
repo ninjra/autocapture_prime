@@ -6,6 +6,7 @@ import os
 import threading
 from collections import deque
 import time
+import math
 from datetime import datetime, timezone
 from typing import Any
 
@@ -33,6 +34,7 @@ class InputTrackerWindows(PluginBase):
         self._flush_interval_ms = 250
         self._event_builder = None
         self._batch_seq = 0
+        self._activity_events: deque[float] = deque(maxlen=128)
 
     def capabilities(self) -> dict[str, Any]:
         return {"tracking.input": self}
@@ -57,6 +59,35 @@ class InputTrackerWindows(PluginBase):
             if reset:
                 self._counts = {"key": 0, "mouse": 0}
             return payload
+
+    def activity_signal(self) -> dict[str, Any]:
+        active_window_s = float(self.context.config.get("runtime", {}).get("active_window_s", 3))
+        window_s = max(5.0, active_window_s * 3.0)
+        now = time.time()
+        idle = self.idle_seconds()
+        with self._lock:
+            cutoff = now - window_s
+            while self._activity_events and self._activity_events[0] < cutoff:
+                self._activity_events.popleft()
+            events = list(self._activity_events)
+            last_event_ts = self._last_event_ts
+        rate_hz = (len(events) / window_s) if window_s > 0 else 0.0
+        if idle == float("inf"):
+            freshness = 0.0
+        else:
+            freshness = math.exp(-max(0.0, idle) / max(0.5, active_window_s))
+        target_rate = max(0.5, 6.0 / window_s)
+        rate_score = min(1.0, rate_hz / target_rate) if target_rate > 0 else 0.0
+        score = max(freshness, rate_score)
+        user_active = idle < active_window_s if idle != float("inf") else False
+        return {
+            "idle_seconds": idle,
+            "user_active": user_active,
+            "activity_score": score,
+            "event_rate_hz": rate_hz,
+            "recent_activity": bool(events),
+            "last_event_ts": last_event_ts,
+        }
 
     def start(self) -> None:
         if os.name != "nt":
@@ -122,6 +153,7 @@ class InputTrackerWindows(PluginBase):
                 self._counts[kind] += 1
             self._last_event_ts = time.time()
             self._last_event_ts_utc = ts_utc
+            self._activity_events.append(self._last_event_ts)
 
     def _flush_loop(self) -> None:
         interval_s = max(0.05, self._flush_interval_ms / 1000.0)

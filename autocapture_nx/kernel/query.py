@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 from typing import Any
 
+from autocapture.core.hashing import hash_text, normalize_text
 from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.ids import encode_record_id_component
 
@@ -185,15 +186,19 @@ def extract_on_demand(
                 text = extractor.extract(frame).get("text", "")
             except Exception:
                 continue
-            if text:
+            normalized_text = normalize_text(text)
+            if normalized_text:
                 payload = {
                     "record_type": f"derived.text.{kind}",
                     "ts_utc": record.get("ts_utc"),
-                    "text": text,
+                    "text": normalized_text,
                     "source_id": record_id,
                     "method": kind,
                     "provider_id": provider_id,
+                    "content_hash": hash_text(normalized_text),
                 }
+                if normalized_text != text:
+                    payload["text_raw"] = text
                 if hasattr(metadata, "put_new"):
                     try:
                         metadata.put_new(derived_id, payload)
@@ -201,7 +206,7 @@ def extract_on_demand(
                         continue
                 else:
                     metadata.put(derived_id, payload)
-                _index_text(derived_id, text)
+                _index_text(derived_id, normalized_text)
                 if collected_ids is not None:
                     collected_ids.append(derived_id)
                 if event_builder is not None:

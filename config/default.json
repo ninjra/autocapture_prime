@@ -238,6 +238,7 @@
       "builtin.window.metadata.windows": true
     },
     "hosting": {
+      "cache_dir": "data/cache/plugins",
       "inproc_allowlist": [
         "builtin.egress.gateway",
         "builtin.privacy.egress_sanitizer",
@@ -261,7 +262,10 @@
         "builtin.devtools.diffusion",
         "builtin.devtools.ast_ir"
       ],
-      "mode": "subprocess"
+      "mode": "subprocess",
+      "rpc_max_message_bytes": 2000000,
+      "rpc_timeout_s": 10,
+      "sanitize_env": true
     },
     "locks": {
       "enforce": true,
@@ -799,6 +803,16 @@
     "activity": {
       "assume_idle_when_missing": false
     },
+    "budgets": {
+      "allow_heavy_during_active": false,
+      "max_heavy_concurrency": 1,
+      "max_jobs_per_window": 4,
+      "min_idle_seconds": 45,
+      "per_job_max_ms": 2500,
+      "preempt_grace_ms": 150,
+      "window_budget_ms": 8000,
+      "window_s": 120
+    },
     "gpu": {
       "release_vram_deadline_ms": 250,
       "release_vram_on_active": true
@@ -807,6 +821,10 @@
     "mode_enforcement": {
       "suspend_deadline_ms": 100,
       "suspend_workers": true
+    },
+    "telemetry": {
+      "emit_interval_s": 5,
+      "enabled": true
     },
     "timezone": "America/Denver"
   },

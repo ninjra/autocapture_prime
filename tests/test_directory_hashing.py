@@ -23,11 +23,24 @@ class DirectoryHashingTests(unittest.TestCase):
                     continue
                 rel = path.relative_to(root).as_posix()
                 entries.append((rel, path))
-            for rel, path in sorted(entries, key=lambda item: item[0]):
+            for rel, path in sorted(entries, key=lambda item: (item[0].casefold(), item[0])):
                 expected.update(rel.encode("utf-8"))
                 expected.update(path.read_bytes())
 
             self.assertEqual(sha256_directory(root), expected.hexdigest())
+
+    def test_sha256_directory_rejects_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "target.txt"
+            target.write_text("data", encoding="utf-8")
+            link = root / "link.txt"
+            try:
+                link.symlink_to(target)
+            except OSError:
+                self.skipTest("symlinks not supported in this environment")
+            with self.assertRaises(ValueError):
+                sha256_directory(root)
 
 
 if __name__ == "__main__":

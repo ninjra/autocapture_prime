@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from autocapture.core.hashing import hash_text, normalize_text
 from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.ids import encode_record_id_component
 
@@ -247,16 +248,20 @@ class IdleProcessor:
                     if self._logger is not None:
                         self._logger.log("derived.extract_error", {"source_id": record_id, "error": str(exc)})
                     continue
-                if not text:
+                normalized_text = normalize_text(text)
+                if not normalized_text:
                     continue
                 payload = {
                     "record_type": f"derived.text.{kind}",
                     "ts_utc": ts_utc,
-                    "text": text,
+                    "text": normalized_text,
                     "source_id": record_id,
                     "method": kind,
                     "provider_id": provider_id,
+                    "content_hash": hash_text(normalized_text),
                 }
+                if normalized_text != text:
+                    payload["text_raw"] = text
                 model_name = self._config.get("models", {}).get("vlm_path") if kind == "vlm" else None
                 if model_name:
                     payload["model_id"] = model_name
@@ -267,7 +272,7 @@ class IdleProcessor:
                         continue
                 else:
                     self._metadata.put(derived_id, payload)
-                self._index_text(derived_id, text)
+                self._index_text(derived_id, normalized_text)
                 stats.processed += 1
                 if kind == "ocr":
                     stats.ocr_ok += 1

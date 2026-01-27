@@ -3,6 +3,7 @@ import tempfile
 import unittest
 import zipfile
 
+from autocapture.core.hashing import hash_text, normalize_text
 from autocapture_nx.processing.idle import IdleProcessor
 from autocapture_nx.kernel.ids import encode_record_id_component
 
@@ -115,8 +116,12 @@ class IdleProcessorTests(unittest.TestCase):
             encoded = encode_record_id_component(record_id)
             ocr_provider = encode_record_id_component("ocr.engine")
             vlm_provider = encode_record_id_component("vision.extractor")
-            self.assertIn(f"run1/derived.text.ocr/{ocr_provider}/{encoded}", metadata.data)
-            self.assertIn(f"run1/derived.text.vlm/{vlm_provider}/{encoded}", metadata.data)
+            ocr_id = f"run1/derived.text.ocr/{ocr_provider}/{encoded}"
+            vlm_id = f"run1/derived.text.vlm/{vlm_provider}/{encoded}"
+            self.assertIn(ocr_id, metadata.data)
+            self.assertIn(vlm_id, metadata.data)
+            self.assertEqual(metadata.data[ocr_id]["content_hash"], hash_text(normalize_text("ocr text")))
+            self.assertEqual(metadata.data[vlm_id]["content_hash"], hash_text(normalize_text("vlm text")))
 
 
 if __name__ == "__main__":

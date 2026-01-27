@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-01-27T15:30:57.961081+00:00",
+  "generated_at": "2026-01-27T17:06:40.924345+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "15a258e23ffb0b8ee91e9f6955272db5d7992f024ef54ac98580010152b40012",
@@ -86,7 +86,7 @@
       "manifest_sha256": "602910e91604d26da71999c9a070648af3fd747df64d0ca9dfc80a10f5b560e7"
     },
     "builtin.runtime.governor": {
-      "artifact_sha256": "1efcf26c31117b616943585651b759ce09afbb763e1884caac27201fa7d0cf3e",
+      "artifact_sha256": "0122f25ef394f48d529f7c4cf518fe4205fba944d5fac70e4c7d8f6da60a1394",
       "manifest_sha256": "9c041b1533d1ef0a340e9f6731863f6b28099e00a3e38e812d231d8145e89f7f"
     },
     "builtin.storage.encrypted": {
@@ -110,7 +110,7 @@
       "manifest_sha256": "514435fea51bd3979cdde368a86dd935f6713c71973d0d01b6b82f3fe012c1ea"
     },
     "builtin.tracking.input.windows": {
-      "artifact_sha256": "1b275a89d262ce7676e571e42c367a83b75fb3c04ccf17dd1715dff9de11015b",
+      "artifact_sha256": "17c9232947f32412414d5c688f6f7035d58cfc117fef8065bd1656ef506adcfe",
       "manifest_sha256": "97fd0cece7f1261f058634c0a353f5f564d562729f2b6372d1cfa86cfdf2327b"
     },
     "builtin.vlm.stub": {

@@ -2,6 +2,7 @@ import io
 import unittest
 import zipfile
 
+from autocapture.core.hashing import hash_text, normalize_text
 from autocapture_nx.kernel.query import extract_on_demand
 from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.plugin_system.api import PluginContext
@@ -72,6 +73,8 @@ class QueryDerivedRecordTests(unittest.TestCase):
         self.assertEqual(derived_ocr["source_id"], record_id)
         self.assertEqual(derived_vlm["text"], "vlm text")
         self.assertEqual(derived_ocr["text"], "ocr text")
+        self.assertEqual(derived_vlm["content_hash"], hash_text(normalize_text("vlm text")))
+        self.assertEqual(derived_ocr["content_hash"], hash_text(normalize_text("ocr text")))
 
     def test_retrieval_returns_source_id_for_derived_records(self) -> None:
         metadata = _MetadataStore()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import unicodedata
 from typing import Any
 
@@ -62,3 +63,12 @@ def hash_canonical(obj: Any) -> str:
 
 def hash_text(text: str) -> str:
     return hash_bytes(text.encode("utf-8"))
+
+
+def normalize_text(text: str) -> str:
+    """Normalize text deterministically before hashing/indexing."""
+
+    norm = unicodedata.normalize("NFC", str(text))
+    norm = norm.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in norm.split("\n")]
+    return "\n".join(lines).strip()
