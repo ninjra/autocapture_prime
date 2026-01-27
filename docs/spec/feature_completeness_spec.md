@@ -388,7 +388,7 @@
 * SRC-058: MOD-008; MOD-012
 * SRC-059: MOD-035; MOD-036
   Validation_Checklist:
-* Ensure exactly 4 top-level sections exist in this BLUEPRINT.md and are in the required order.
+* Ensure exactly 4 top-level sections exist in data/full.md and are in the required order.
 * Ensure no “TODO”, “TBD”, “later”, “future work”, or stub language appears as deferral.
 * Ensure every Object entry in Section 2 includes Sources and an explicit Interface_Definition.
 * Ensure every ADR in Section 3 includes Sources.

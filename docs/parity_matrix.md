@@ -1,8 +1,7 @@
 # Parity matrix (MOD/ADR/SRC)
 
-Source: `BLUEPRINT.md` (generated from `data/full.md`).
-Legacy I-item coverage is embedded in `BLUEPRINT.md` under `Legacy_I_Item_Crosswalk`.
-Validator `tools/validate_blueprint.py` enforces crosswalk completeness, uniqueness, and required MOD/Test fields.
+Source: `data/full.md`.
+Legacy I-item coverage is embedded in `data/full.md` under `Legacy_I_Item_Crosswalk`.
 
 ## Modules
 
@@ -65,5 +64,3 @@ Validator `tools/validate_blueprint.py` enforces crosswalk completeness, uniquen
 | ADR-010 | Vector index backend defaults local; Qdrant is optional opt-in | SRC-057, SRC-015 | - | unverified | - |
 
 ## SRC Index (from BLUEPRINT)
-
-Coverage map uniqueness and presence are enforced by `tools/validate_blueprint.py`.
