@@ -10,7 +10,7 @@ from typing import Any, TYPE_CHECKING
 
 from autocapture_nx import __version__ as kernel_version
 from autocapture_nx.kernel.config import SchemaLiteValidator
-from autocapture_nx.kernel.errors import PluginError
+from autocapture_nx.kernel.errors import PermissionError, PluginError
 from autocapture_nx.kernel.hashing import sha256_directory, sha256_file
 from autocapture_nx.kernel.paths import plugins_dir, resolve_repo_path, load_json
 
@@ -75,6 +75,19 @@ def _version_satisfies(current: str, requirement: str) -> bool:
     if op == "<":
         return current_v < target_v
     return current_v == target_v
+
+
+def _capability_guard(capabilities, plugin_id: str, required_capabilities: set[str] | None):
+    if required_capabilities is None:
+        return capabilities.get
+    allowed = set(required_capabilities)
+
+    def _get_capability(name: str):
+        if name not in allowed:
+            raise PermissionError(f"Plugin {plugin_id} not allowed to access capability {name}")
+        return capabilities.get(name)
+
+    return _get_capability
 
 
 @dataclass
@@ -583,8 +596,21 @@ class PluginRegistry:
                     raise PluginError(f"Missing entrypoint module {module_path}")
                 module_name = f"autocapture_plugin_{plugin_id.replace('.', '_')}"
                 network_allowed = bool(manifest.get("permissions", {}).get("network", False))
+                required_caps_raw = manifest.get("required_capabilities", None)
+                if isinstance(required_caps_raw, list):
+                    required_capabilities = {str(cap) for cap in required_caps_raw if str(cap).strip()}
+                else:
+                    required_capabilities = None
                 if hosting_mode == "subprocess" and plugin_id not in inproc_allowlist:
-                    instance = SubprocessPlugin(module_path, entry["callable"], plugin_id, network_allowed, self.config)
+                    instance = SubprocessPlugin(
+                        module_path,
+                        entry["callable"],
+                        plugin_id,
+                        network_allowed,
+                        self.config,
+                        capabilities=capabilities,
+                        allowed_capabilities=required_capabilities,
+                    )
                     caps = instance.capabilities()
                 else:
                     spec = importlib.util.spec_from_file_location(module_name, module_path)
@@ -601,7 +627,7 @@ class PluginRegistry:
 
                     context = PluginContext(
                         config=self.config,
-                        get_capability=capabilities.get,
+                        get_capability=_capability_guard(capabilities, plugin_id, required_capabilities),
                         logger=lambda msg: None,
                     )
                     with network_guard(network_allowed):

@@ -1,5 +1,6 @@
 import unittest
 
+from autocapture.core.hashing import hash_text, normalize_text
 from autocapture_nx.plugin_system.api import PluginContext
 from plugins.builtin.citation_basic.plugin import CitationValidator
 
@@ -18,8 +19,15 @@ class _MetaStore:
 class CitationValidatorMetadataTests(unittest.TestCase):
     def test_validator_requires_evidence_record(self) -> None:
         store = _MetaStore()
-        store.put("run1/segment/0", {"record_type": "evidence.capture.segment"})
-        store.put("run1/derived/0", {"record_type": "derived.text.ocr"})
+        evidence_text = "evidence-bytes"
+        evidence_hash = hash_text(normalize_text(evidence_text))
+        derived_text = "derived text"
+        derived_hash = hash_text(normalize_text(derived_text))
+        store.put("run1/segment/0", {"record_type": "evidence.capture.segment", "content_hash": evidence_hash})
+        store.put(
+            "run1/derived/0",
+            {"record_type": "derived.text.ocr", "content_hash": derived_hash, "source_id": "run1/segment/0"},
+        )
 
         def get_capability(name: str):
             if name == "storage.metadata":
@@ -29,18 +37,60 @@ class CitationValidatorMetadataTests(unittest.TestCase):
         ctx = PluginContext(config={}, get_capability=get_capability, logger=lambda _m: None)
         validator = CitationValidator("cit", ctx)
 
-        ok = validator.validate([
-            {"span_id": "run1/segment/0", "source": "local", "offset_start": 0, "offset_end": 10}
-        ])
+        ok = validator.validate(
+            [
+                {
+                    "span_id": "run1/segment/0",
+                    "evidence_id": "run1/segment/0",
+                    "evidence_hash": evidence_hash,
+                    "derived_id": "run1/derived/0",
+                    "derived_hash": derived_hash,
+                    "source": "local",
+                    "offset_start": 0,
+                    "offset_end": 10,
+                }
+            ]
+        )
         self.assertTrue(ok)
         with self.assertRaises(ValueError):
-            validator.validate([
-                {"span_id": "missing", "source": "local", "offset_start": 0, "offset_end": 1}
-            ])
+            validator.validate(
+                [
+                    {
+                        "span_id": "missing",
+                        "evidence_id": "missing",
+                        "evidence_hash": evidence_hash,
+                        "source": "local",
+                        "offset_start": 0,
+                        "offset_end": 1,
+                    }
+                ]
+            )
         with self.assertRaises(ValueError):
-            validator.validate([
-                {"span_id": "run1/derived/0", "source": "local", "offset_start": 0, "offset_end": 1}
-            ])
+            validator.validate(
+                [
+                    {
+                        "span_id": "run1/derived/0",
+                        "evidence_id": "run1/derived/0",
+                        "evidence_hash": evidence_hash,
+                        "source": "local",
+                        "offset_start": 0,
+                        "offset_end": 1,
+                    }
+                ]
+            )
+        with self.assertRaises(ValueError):
+            validator.validate(
+                [
+                    {
+                        "span_id": "run1/segment/0",
+                        "evidence_id": "run1/segment/0",
+                        "evidence_hash": "bad",
+                        "source": "local",
+                        "offset_start": 0,
+                        "offset_end": 1,
+                    }
+                ]
+            )
 
 
 if __name__ == "__main__":

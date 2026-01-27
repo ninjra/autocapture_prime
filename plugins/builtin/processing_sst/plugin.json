@@ -23,9 +23,16 @@
     ]
   },
   "depends_on": [],
+  "required_capabilities": [
+    "storage.metadata",
+    "ocr.engine",
+    "vision.extractor",
+    "processing.stage.hooks",
+    "event.builder",
+    "observability.logger"
+  ],
   "hash_lock": {
     "manifest_sha256": "",
     "artifact_sha256": ""
   }
 }
-

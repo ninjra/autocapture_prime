@@ -4,13 +4,13 @@
     "contracts/ir_pins.json": "7a8199c33416acdd1cf52f20901a138003df841117f2dc1c5bdd339d0c0a051f",
     "contracts/journal_schema.json": "8f380b9ebc3f4cfa903c14c32e907c55410e3fc65418f27e32761f1a45fa930a",
     "contracts/ledger_schema.json": "4dcc4657309e1326c739fb924a6cf2ef00d994f88de7a5833a30628fa493ccc8",
-    "contracts/plugin_manifest.schema.json": "7b737a9571cf258e37a1199d0cb056e24172ba6ee6228869ae771c7fe85fc080",
+    "contracts/plugin_manifest.schema.json": "dde19c5a1d1da2afa04758041dfb72c8ee6a433d3c549c241b8e08483dc92a38",
     "contracts/plugin_sdk.md": "4d409f66370d62cb938b9349c312cac18acc1cfc62700503c8f748cf436e5b04",
     "contracts/reasoning_packet.schema.json": "25ab514324b82bd15e267417f3a2cd4ddcb945ff4fa66206fd8f0840fd27f1cd",
     "contracts/security.md": "6946f3233c891fc66998872219d818caa9119449fd4e7ff9e28bb9259f5e6599",
     "contracts/time_intent.schema.json": "6696c55883e35e0f2eb0689d61b7a05c637959d1d53ba7d8f985bbc2d5e397d8",
     "contracts/user_surface.md": "f814b6a390dd01903e45fadaa99db2203f9f15f7791ef5b4acb245149ee4ad22"
   },
-  "generated_at": "2026-01-27T17:06:31.517546+00:00",
+  "generated_at": "2026-01-27T17:33:08.436820+00:00",
   "version": 1
 }

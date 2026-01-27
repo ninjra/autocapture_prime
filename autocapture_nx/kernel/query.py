@@ -39,6 +39,28 @@ def _within_window(ts: str | None, window: dict[str, Any] | None) -> bool:
     return True
 
 
+def _ts_value(ts: str | None) -> float:
+    parsed = _parse_ts(ts)
+    if parsed is None:
+        return 0.0
+    return float(parsed.timestamp())
+
+
+def _evidence_candidates(metadata: Any, time_window: dict[str, Any] | None, limit: int) -> list[str]:
+    evidence: list[tuple[float, str]] = []
+    for record_id in getattr(metadata, "keys", lambda: [])():
+        record = metadata.get(record_id, {})
+        record_type = str(record.get("record_type", ""))
+        if not record_type.startswith("evidence.capture."):
+            continue
+        ts = record.get("ts_start_utc") or record.get("ts_utc")
+        if not _within_window(ts, time_window):
+            continue
+        evidence.append((_ts_value(ts), str(record_id)))
+    evidence.sort(key=lambda item: (-item[0], item[1]))
+    return [record_id for _ts, record_id in evidence[: max(0, int(limit))]]
+
+
 def _capability_providers(capability: Any | None, default_provider: str) -> list[tuple[str, Any]]:
     if capability is None:
         return []
@@ -285,6 +307,7 @@ def run_query(system, query: str) -> dict[str, Any]:
 
     intent = parser.parse(query_text)
     time_window = intent.get("time_window")
+    metadata = system.get("storage.metadata")
     results = retrieval.search(query_text, time_window=time_window)
     on_query = system.config.get("processing", {}).get("on_query", {})
     allow_extract = bool(on_query.get("allow_decode_extract", False))
@@ -292,6 +315,12 @@ def run_query(system, query: str) -> dict[str, Any]:
     allow_ocr = bool(on_query.get("extractors", {}).get("ocr", True))
     allow_vlm = bool(on_query.get("extractors", {}).get("vlm", False))
     extracted_ids: list[str] = []
+    extraction_ran = False
+    candidate_limit = int(on_query.get("candidate_limit", 10))
+    candidate_ids = [result.get("record_id") for result in results if result.get("record_id")]
+    if not candidate_ids and metadata is not None:
+        candidate_ids = _evidence_candidates(metadata, time_window, candidate_limit)
+    candidate_ids = [cid for cid in candidate_ids if cid]
     if allow_extract and (allow_ocr or allow_vlm):
         can_run = True
         if require_idle:
@@ -310,29 +339,44 @@ def run_query(system, query: str) -> dict[str, Any]:
             else:
                 assume_idle = bool(system.config.get("runtime", {}).get("activity", {}).get("assume_idle_when_missing", False))
                 can_run = assume_idle
-        if can_run:
+        if can_run and candidate_ids:
             extract_on_demand(
                 system,
                 time_window,
                 allow_ocr=allow_ocr,
                 allow_vlm=allow_vlm,
                 collected_ids=extracted_ids,
-                candidate_ids=[result.get("record_id") for result in results if result.get("record_id")],
+                candidate_ids=candidate_ids,
             )
+            extraction_ran = True
             results = retrieval.search(query_text, time_window=time_window)
 
     claims = []
-    metadata = system.get("storage.metadata")
     for result in results:
         derived_id = result.get("derived_id")
-        record = metadata.get(derived_id or result["record_id"], {})
+        evidence_id = result["record_id"]
+        record = metadata.get(derived_id or evidence_id, {})
+        evidence_record = metadata.get(evidence_id, {})
         text = record.get("text", "")
+        evidence_hash = evidence_record.get("content_hash")
+        if evidence_hash is None and evidence_record.get("text"):
+            evidence_hash = hash_text(normalize_text(evidence_record.get("text", "")))
+        derived_hash = None
+        if derived_id:
+            derived_record = metadata.get(derived_id, {})
+            derived_hash = derived_record.get("content_hash")
+            if derived_hash is None and derived_record.get("text"):
+                derived_hash = hash_text(normalize_text(derived_record.get("text", "")))
         claims.append(
             {
-                "text": text or f"Matched record {result['record_id']}",
+                "text": text or f"Matched record {evidence_id}",
                 "citations": [
                     {
-                        "span_id": result["record_id"],
+                        "span_id": evidence_id,
+                        "evidence_id": evidence_id,
+                        "evidence_hash": evidence_hash,
+                        "derived_id": derived_id,
+                        "derived_hash": derived_hash,
                         "source": "local",
                         "offset_start": 0,
                         "offset_end": len(text),
@@ -353,6 +397,10 @@ def run_query(system, query: str) -> dict[str, Any]:
             "result_count": int(len(results)),
             "result_ids": result_ids,
             "extracted_count": int(len(extracted_ids)),
+            "candidate_ids": candidate_ids,
+            "candidate_limit": int(candidate_limit),
+            "extraction_ran": bool(extraction_ran),
+            "extraction_allowed": bool(allow_extract),
             "promptops_applied": bool(promptops_result and promptops_result.applied),
         }
         event_builder.ledger_entry(

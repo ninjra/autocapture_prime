@@ -72,6 +72,10 @@
       "type": "array",
       "items": {"type": "string"}
     },
+    "required_capabilities": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
     "hash_lock": {
       "type": "object",
       "additionalProperties": false,

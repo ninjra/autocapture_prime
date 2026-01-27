@@ -47,6 +47,7 @@ class PluginManifest:
     conflicts_with: List[str]
     replaces: List[str]
     stages: List[str]
+    required_capabilities: List[str]
     hash_lock: PluginHashLock
     path: Path
 
@@ -89,6 +90,7 @@ class PluginManifest:
             conflicts_with=list(data.get("conflicts_with", []) or []),
             replaces=list(data.get("replaces", []) or []),
             stages=list(data.get("stages", []) or []),
+            required_capabilities=list(data.get("required_capabilities", []) or []),
             hash_lock=lock,
             path=path,
         )

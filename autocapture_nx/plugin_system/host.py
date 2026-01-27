@@ -101,7 +101,17 @@ class RemoteCapability:
 
 
 class PluginProcess:
-    def __init__(self, plugin_path: Path, callable_name: str, plugin_id: str, network_allowed: bool, config: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        plugin_path: Path,
+        callable_name: str,
+        plugin_id: str,
+        network_allowed: bool,
+        config: dict[str, Any],
+        *,
+        capabilities: Any,
+        allowed_capabilities: set[str] | None,
+    ) -> None:
         hosting = _hosting_cfg(config)
         self._rpc_timeout_s = float(hosting.get("rpc_timeout_s", 10))
         self._rpc_max_message_bytes = int(hosting.get("rpc_max_message_bytes", 2_000_000))
@@ -111,6 +121,9 @@ class PluginProcess:
         self._reader_stop = threading.Event()
         self._reader_thread: threading.Thread | None = None
         self._reader_error: str | None = None
+        self._capabilities = capabilities
+        self._allowed_capabilities = set(allowed_capabilities) if allowed_capabilities else None
+        self._plugin_id = plugin_id
 
         self._proc: subprocess.Popen[str] | None = subprocess.Popen(
             [
@@ -135,7 +148,11 @@ class PluginProcess:
         self._req_id = 0
         self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self._reader_thread.start()
-        self._send_payload(config)
+        init_payload: dict[str, Any] = {"config": config}
+        init_payload["allowed_capabilities"] = (
+            None if self._allowed_capabilities is None else sorted(self._allowed_capabilities)
+        )
+        self._send_payload(init_payload)
 
     def _send_payload(self, payload: dict[str, Any]) -> None:
         text = json.dumps(payload)
@@ -174,6 +191,14 @@ class PluginProcess:
             except Exception as exc:
                 self._set_reader_error(f"invalid plugin host response: {exc}")
                 return
+            if response.get("method") == "cap_call":
+                cap_response = self._handle_cap_call(response)
+                try:
+                    self._send_payload(cap_response)
+                except Exception as exc:
+                    self._set_reader_error(str(exc))
+                    return
+                continue
             req_id = response.get("id")
             if req_id is None:
                 continue
@@ -185,6 +210,64 @@ class PluginProcess:
                 resp_q.put_nowait(response)
             except Exception:
                 pass
+
+    def _cap_allowed(self, capability: str) -> bool:
+        allowed = self._allowed_capabilities
+        if allowed is None:
+            return True
+        return capability in allowed
+
+    def _handle_cap_call(self, request: dict[str, Any]) -> dict[str, Any]:
+        req_id = int(request.get("id", 0))
+        capability = str(request.get("capability", ""))
+        function = str(request.get("function", ""))
+        if not capability:
+            return {"id": req_id, "ok": False, "error": "missing capability", "response_to": "cap_call"}
+        if not self._cap_allowed(capability):
+            return {
+                "id": req_id,
+                "ok": False,
+                "error": f"capability not allowed: {capability}",
+                "response_to": "cap_call",
+            }
+        caps = self._capabilities
+        if caps is None:
+            return {
+                "id": req_id,
+                "ok": False,
+                "error": f"capability registry unavailable: {capability}",
+                "response_to": "cap_call",
+            }
+        try:
+            cap_obj = caps.get(capability)
+        except Exception as exc:
+            return {
+                "id": req_id,
+                "ok": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "response_to": "cap_call",
+            }
+        try:
+            args = _decode(request.get("args", []))
+            kwargs = _decode(request.get("kwargs", {}))
+            if function:
+                target = getattr(cap_obj, function)
+                if not callable(target):
+                    raise PluginError(f"capability method not callable: {capability}.{function}")
+                result = target(*args, **kwargs)
+            else:
+                if callable(cap_obj):
+                    result = cap_obj(*args, **kwargs)
+                else:
+                    result = cap_obj
+            return {"id": req_id, "ok": True, "result": _encode(result), "response_to": "cap_call"}
+        except Exception as exc:
+            return {
+                "id": req_id,
+                "ok": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "response_to": "cap_call",
+            }
 
     def close(self) -> None:
         proc = getattr(self, "_proc", None)
@@ -266,8 +349,26 @@ class PluginProcess:
 
 
 class SubprocessPlugin:
-    def __init__(self, plugin_path: Path, callable_name: str, plugin_id: str, network_allowed: bool, config: dict[str, Any]):
-        self._host: PluginProcess | None = PluginProcess(plugin_path, callable_name, plugin_id, network_allowed, config)
+    def __init__(
+        self,
+        plugin_path: Path,
+        callable_name: str,
+        plugin_id: str,
+        network_allowed: bool,
+        config: dict[str, Any],
+        *,
+        capabilities: Any,
+        allowed_capabilities: set[str] | None,
+    ):
+        self._host: PluginProcess | None = PluginProcess(
+            plugin_path,
+            callable_name,
+            plugin_id,
+            network_allowed,
+            config,
+            capabilities=capabilities,
+            allowed_capabilities=allowed_capabilities,
+        )
         atexit.register(self.close)
         self._caps: dict[str, RemoteCapability] = {}
         for name, methods in self._host.capabilities().items():

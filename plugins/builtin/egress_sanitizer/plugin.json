@@ -21,6 +21,9 @@
     "requires_schema_versions": [1]
   },
   "depends_on": [],
+  "required_capabilities": [
+    "storage.entity_map"
+  ],
   "hash_lock": {
     "manifest_sha256": "",
     "artifact_sha256": ""

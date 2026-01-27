@@ -18,9 +18,14 @@
   },
   "compat": {
     "requires_kernel": ">=0.1.0",
-    "requires_schema_versions": [1]
+    "requires_schema_versions": [
+      1
+    ]
   },
-  "depends_on": ["builtin.ledger.basic"],
+  "depends_on": [
+    "builtin.ledger.basic"
+  ],
+  "required_capabilities": [],
   "hash_lock": {
     "manifest_sha256": "",
     "artifact_sha256": ""

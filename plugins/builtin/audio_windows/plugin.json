@@ -21,6 +21,11 @@
     "requires_schema_versions": [1]
   },
   "depends_on": ["builtin.journal.basic"],
+  "required_capabilities": [
+    "storage.media",
+    "storage.metadata",
+    "event.builder"
+  ],
   "hash_lock": {
     "manifest_sha256": "",
     "artifact_sha256": ""

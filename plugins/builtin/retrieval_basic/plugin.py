@@ -38,7 +38,15 @@ class RetrievalStrategy(PluginBase):
         results = self._search_indexed(store, query_text, time_window)
         if not results:
             results = _scan_metadata(store, query_text.lower(), time_window)
-        results.sort(key=lambda r: (-float(r.get("score", 0.0)), -(_ts_key(r.get("ts_utc")) or 0.0), r["record_id"]))
+        results.sort(
+            key=lambda r: (
+                -float(r.get("score", 0.0)),
+                -(_ts_key(r.get("ts_utc")) or 0.0),
+                str(r.get("record_type", "")),
+                str(r.get("record_id", "")),
+                str(r.get("derived_id", "")),
+            )
+        )
         _attach_timelines(results, store, window_events, input_summaries)
         return results
 
@@ -193,7 +201,8 @@ def _map_candidates(
         if not _within_window(ts, time_window):
             continue
         score = float(item.get("score", 0.0))
-        result = {"record_id": source_id, "score": score, "ts_utc": ts}
+        record_type = str(source_record.get("record_type", ""))
+        result = {"record_id": source_id, "score": score, "ts_utc": ts, "record_type": record_type}
         if source_id != doc_id:
             result["derived_id"] = doc_id
         snippet = item.get("snippet")
