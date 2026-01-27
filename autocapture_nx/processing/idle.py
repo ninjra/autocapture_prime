@@ -19,6 +19,9 @@ class IdleProcessStats:
     processed: int = 0
     ocr_ok: int = 0
     vlm_ok: int = 0
+    sst_runs: int = 0
+    sst_heavy: int = 0
+    sst_tokens: int = 0
     skipped: int = 0
     errors: int = 0
 
@@ -94,6 +97,7 @@ class IdleProcessor:
         self._media = self._cap("storage.media")
         self._ocr = self._cap("ocr.engine")
         self._vlm = self._cap("vision.extractor")
+        self._pipeline = self._cap("processing.pipeline")
         self._events = self._cap("event.builder")
         self._logger = self._cap("observability.logger")
         self._lexical = None
@@ -148,6 +152,8 @@ class IdleProcessor:
         extractors = idle_cfg.get("extractors", {})
         allow_ocr = bool(extractors.get("ocr", True))
         allow_vlm = bool(extractors.get("vlm", True))
+        sst_cfg = self._config.get("processing", {}).get("sst", {})
+        pipeline_enabled = bool(sst_cfg.get("enabled", True)) and self._pipeline is not None
         deadline = time.time() + max(1, max_seconds)
 
         keys = list(getattr(self._metadata, "keys", lambda: [])())
@@ -200,6 +206,31 @@ class IdleProcessor:
             frame = _extract_frame(blob, record)
             if not frame:
                 stats.errors += 1
+                continue
+
+            pipeline = self._pipeline
+            if pipeline_enabled and pipeline is not None and hasattr(pipeline, "process_record"):
+                try:
+                    result = pipeline.process_record(
+                        record_id=record_id,
+                        record=record,
+                        frame_bytes=frame,
+                        allow_ocr=allow_ocr,
+                        allow_vlm=allow_vlm,
+                        should_abort=should_abort,
+                        deadline_ts=deadline,
+                    )
+                except Exception as exc:
+                    stats.errors += 1
+                    if self._logger is not None:
+                        self._logger.log("sst.pipeline_error", {"source_id": record_id, "error": str(exc)})
+                    continue
+                stats.sst_runs += 1
+                stats.sst_heavy += int(result.heavy_ran)
+                stats.sst_tokens += int(result.ocr_tokens)
+                stats.processed += int(result.derived_records)
+                if stats.processed >= max_items:
+                    break
                 continue
 
             for kind, provider_id, derived_id, extractor in derived_items:

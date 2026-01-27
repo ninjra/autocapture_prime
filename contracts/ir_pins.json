@@ -124,6 +124,10 @@
     },
     {
       "enabled": true,
+      "id": "builtin.processing.sst.pipeline"
+    },
+    {
+      "enabled": true,
       "id": "builtin.reranker.stub"
     },
     {

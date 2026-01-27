@@ -68,7 +68,9 @@ is_wsl() {
 }
 
 python_cmd() {
-  if have_cmd python3; then
+  if [ -x "$ROOT/.venv/bin/python" ]; then
+    echo "$ROOT/.venv/bin/python"
+  elif have_cmd python3; then
     echo python3
   elif have_cmd python; then
     echo python

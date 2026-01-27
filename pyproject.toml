@@ -70,6 +70,7 @@ packages = [
   "autocapture_nx.kernel",
   "autocapture_nx.plugin_system",
   "autocapture_nx.processing",
+  "autocapture_nx.processing.sst",
   "autocapture_nx.windows",
   "plugins",
 ]

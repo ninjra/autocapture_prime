@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-01-27T01:24:44.897709+00:00",
+  "generated_at": "2026-01-27T04:58:36.040897+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "15a258e23ffb0b8ee91e9f6955272db5d7992f024ef54ac98580010152b40012",
@@ -72,6 +72,10 @@
     "builtin.privacy.egress_sanitizer": {
       "artifact_sha256": "be1476ed1af6068ae29c0e39309f34e6b71f4bf3aa531440363426067e89215d",
       "manifest_sha256": "beab6c861e444131b49f7c94a81b103b6b818c1b9f8084e8589273bbf115d58c"
+    },
+    "builtin.processing.sst.pipeline": {
+      "artifact_sha256": "fc13ffd4497747b96a82d352ddf44a46cfeaa4f15e15a5e2a243c5cbd14cda1f",
+      "manifest_sha256": "af67adc0df1268174deebee5a85736096d3084f0a1ccaaf51ebee2b0cf757883"
     },
     "builtin.reranker.stub": {
       "artifact_sha256": "8fd9a17095c476def7d93da24a83652806d3f3fc3e0605b994aa10ae570a615c",

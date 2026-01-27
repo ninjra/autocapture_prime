@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import zipfile
+import time
 from datetime import datetime
 from typing import Any
 
@@ -67,6 +68,12 @@ def extract_on_demand(
     metadata = system.get("storage.metadata")
     ocr = system.get("ocr.engine") if allow_ocr else None
     vlm = system.get("vision.extractor") if allow_vlm else None
+    pipeline = None
+    if hasattr(system, "has") and system.has("processing.pipeline"):
+        try:
+            pipeline = system.get("processing.pipeline")
+        except Exception:
+            pipeline = None
     event_builder = None
     if hasattr(system, "get"):
         try:
@@ -87,6 +94,10 @@ def extract_on_demand(
         except Exception:
             lexical = None
             vector = None
+    sst_cfg = config.get("processing", {}).get("sst", {}) if isinstance(config, dict) else {}
+    pipeline_enabled = bool(sst_cfg.get("enabled", True)) and pipeline is not None
+    max_seconds = int(config.get("processing", {}).get("idle", {}).get("max_seconds_per_run", 30)) if isinstance(config, dict) else 30
+    deadline = time.time() + max(1, max_seconds)
 
     def _index_text(doc_id: str, text: str) -> None:
         if not text:
@@ -147,6 +158,25 @@ def extract_on_demand(
             continue
         frame = _extract_frame(blob, record)
         if not frame:
+            continue
+        if pipeline_enabled and pipeline is not None and hasattr(pipeline, "process_record"):
+            try:
+                result = pipeline.process_record(
+                    record_id=record_id,
+                    record=record,
+                    frame_bytes=frame,
+                    allow_ocr=allow_ocr,
+                    allow_vlm=allow_vlm,
+                    should_abort=None,
+                    deadline_ts=deadline,
+                )
+            except Exception:
+                continue
+            if collected_ids is not None:
+                collected_ids.extend(result.derived_ids)
+            processed += int(result.derived_records)
+            if processed >= limit or time.time() >= deadline:
+                break
             continue
         for derived_id, extractor, kind, provider_id in derived_ids:
             if metadata.get(derived_id):
