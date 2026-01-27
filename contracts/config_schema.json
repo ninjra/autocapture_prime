@@ -376,6 +376,30 @@
       ],
       "type": "object"
     },
+    "retrieval": {
+      "additionalProperties": false,
+      "properties": {
+        "fast_threshold": {
+          "type": "integer"
+        },
+        "fusion_threshold": {
+          "type": "integer"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "vector_limit": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "limit",
+        "vector_limit",
+        "fast_threshold",
+        "fusion_threshold"
+      ],
+      "type": "object"
+    },
     "paths": {
       "additionalProperties": false,
       "properties": {
@@ -400,6 +424,39 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "capabilities": {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "fanout": {
+                "type": "boolean"
+              },
+              "max_providers": {
+                "type": "integer"
+              },
+              "mode": {
+                "type": "string"
+              },
+              "preferred": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "provider_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "mode"
+            ],
+            "type": "object"
+          },
+          "type": "object"
         },
         "default_pack": {
           "items": {
@@ -498,6 +555,7 @@
       "required": [
         "safe_mode",
         "allowlist",
+        "capabilities",
         "default_pack",
         "enabled",
         "search_paths",
@@ -1140,6 +1198,7 @@
     "time",
     "backpressure",
     "performance",
+    "retrieval",
     "capture",
     "processing",
     "storage",

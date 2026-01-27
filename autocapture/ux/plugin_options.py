@@ -7,11 +7,44 @@ from pathlib import Path
 from typing import Any
 
 
+CAPABILITY_POLICY_FIELDS = {
+    "mode",
+    "preferred",
+    "provider_ids",
+    "fanout",
+    "max_providers",
+}
+
+
 def _label_from_path(path: str) -> str:
     return path.split(".")[-1].replace("_", " ").title()
 
 
+def _capability_policy_target(path: str) -> tuple[str, str] | None:
+    parts = path.split(".")
+    if len(parts) < 4:
+        return None
+    if parts[0] != "plugins" or parts[1] != "capabilities":
+        return None
+    for idx in range(2, len(parts)):
+        if parts[idx] in CAPABILITY_POLICY_FIELDS:
+            capability = ".".join(parts[2:idx])
+            field = parts[idx]
+            if capability:
+                return capability, field
+    return None
+
+
 def _get_by_path(data: dict[str, Any], path: str) -> Any:
+    cap_target = _capability_policy_target(path)
+    if cap_target is not None:
+        capability, field = cap_target
+        plugins_cfg = data.get("plugins", {}) if isinstance(data, dict) else {}
+        caps_cfg = plugins_cfg.get("capabilities", {}) if isinstance(plugins_cfg, dict) else {}
+        policy = caps_cfg.get(capability, {}) if isinstance(caps_cfg, dict) else {}
+        if isinstance(policy, dict):
+            return policy.get(field)
+        return None
     current: Any = data
     for part in path.split("."):
         if not isinstance(current, dict):
@@ -21,6 +54,15 @@ def _get_by_path(data: dict[str, Any], path: str) -> Any:
 
 
 def _schema_for_path(schema: dict[str, Any], path: str) -> dict[str, Any] | None:
+    cap_target = _capability_policy_target(path)
+    if cap_target is not None:
+        _capability, field = cap_target
+        plugins_schema = schema.get("properties", {}).get("plugins", {})
+        caps_schema = plugins_schema.get("properties", {}).get("capabilities", {})
+        policy_schema = caps_schema.get("additionalProperties", {})
+        if isinstance(policy_schema, dict):
+            return policy_schema.get("properties", {}).get(field)
+        return None
     node = schema.get("properties", {})
     for part in path.split("."):
         if not isinstance(node, dict) or part not in node:
@@ -92,10 +134,18 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "runtime.mode_enforcement.suspend_workers",
         "runtime.mode_enforcement.suspend_deadline_ms",
     ],
+    "builtin.time.advanced": [
+        "time.timezone",
+        "runtime.timezone",
+        "plugins.capabilities.time.intent_parser.preferred",
+    ],
     "builtin.vlm.stub": [
         "models.vlm_path",
         "processing.idle.extractors.vlm",
         "processing.on_query.extractors.vlm",
+        "plugins.capabilities.vision.extractor.mode",
+        "plugins.capabilities.vision.extractor.provider_ids",
+        "plugins.capabilities.vision.extractor.max_providers",
     ],
     "builtin.reranker.stub": [
         "models.reranker_path",
@@ -105,6 +155,8 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
     ],
     "mx.core.embed_local": [
         "indexing.embedder_model",
+        "plugins.capabilities.embedder.text.mode",
+        "plugins.capabilities.embedder.text.preferred",
     ],
     "builtin.storage.sqlcipher": [
         "storage.metadata_path",
@@ -119,6 +171,9 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "storage.disk_pressure.interval_s",
         "storage.forecast.enabled",
         "storage.forecast.warn_days",
+        "plugins.capabilities.storage.metadata.preferred",
+        "plugins.capabilities.storage.media.preferred",
+        "plugins.capabilities.storage.entity_map.preferred",
     ],
     "builtin.storage.encrypted": [
         "storage.media_dir",
@@ -139,10 +194,16 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "storage.vector_path",
         "storage.lexical_path",
         "storage.data_dir",
+        "plugins.capabilities.storage.metadata.preferred",
+        "plugins.capabilities.storage.media.preferred",
+        "plugins.capabilities.storage.entity_map.preferred",
     ],
     "builtin.ocr.stub": [
         "processing.idle.extractors.ocr",
         "processing.on_query.extractors.ocr",
+        "plugins.capabilities.ocr.engine.mode",
+        "plugins.capabilities.ocr.engine.provider_ids",
+        "plugins.capabilities.ocr.engine.max_providers",
     ],
     "mx.prompts.default": [
         "promptops.enabled",
@@ -159,6 +220,9 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
     "mx.core.ocr_local": [
         "processing.idle.extractors.ocr",
         "processing.on_query.extractors.ocr",
+        "plugins.capabilities.ocr.engine.mode",
+        "plugins.capabilities.ocr.engine.provider_ids",
+        "plugins.capabilities.ocr.engine.max_providers",
     ],
     "mx.core.llm_openai_compat": [
         "gateway.openai_base_url",
@@ -169,6 +233,16 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "indexing.vector_backend",
         "indexing.qdrant.url",
         "indexing.qdrant.collection",
+        "plugins.capabilities.retrieval.strategy.mode",
+        "plugins.capabilities.retrieval.strategy.preferred",
+    ],
+    "builtin.retrieval.basic": [
+        "retrieval.limit",
+        "retrieval.vector_limit",
+        "retrieval.fast_threshold",
+        "retrieval.fusion_threshold",
+        "plugins.capabilities.retrieval.strategy.mode",
+        "plugins.capabilities.retrieval.strategy.preferred",
     ],
     "mx.research.default": [
         "research.enabled",

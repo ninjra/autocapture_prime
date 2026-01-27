@@ -70,6 +70,22 @@ def _get_media_blob(store: Any, record_id: str) -> bytes | None:
     return None
 
 
+def _capability_providers(capability: Any | None, default_provider: str) -> list[tuple[str, Any]]:
+    if capability is None:
+        return []
+    target = capability
+    if hasattr(target, "target"):
+        target = getattr(target, "target")
+    if hasattr(target, "items"):
+        try:
+            items = target.items()
+            if items:
+                return list(items)
+        except Exception:
+            pass
+    return [(default_provider, capability)]
+
+
 class IdleProcessor:
     def __init__(self, system: Any) -> None:
         self._system = system
@@ -149,19 +165,31 @@ class IdleProcessor:
             run_id = _derive_run_id(self._config, record_id)
             ts_utc = record.get("ts_utc") or record.get("ts_start_utc")
             ts_utc = ts_utc or datetime.now(timezone.utc).isoformat()
-            derived_keys: dict[str, tuple[str, Any]] = {}
+            derived_items: list[tuple[str, str, str, Any]] = []
             encoded_source = encode_record_id_component(record_id)
             if allow_ocr and self._ocr is not None:
-                derived_keys["ocr"] = (
-                    f"{run_id}/derived.text.ocr/{encoded_source}",
-                    self._ocr,
-                )
+                for provider_id, extractor in _capability_providers(self._ocr, "ocr.engine"):
+                    provider_component = encode_record_id_component(provider_id)
+                    derived_items.append(
+                        (
+                            "ocr",
+                            provider_id,
+                            f"{run_id}/derived.text.ocr/{provider_component}/{encoded_source}",
+                            extractor,
+                        )
+                    )
             if allow_vlm and self._vlm is not None:
-                derived_keys["vlm"] = (
-                    f"{run_id}/derived.text.vlm/{encoded_source}",
-                    self._vlm,
-                )
-            if not derived_keys:
+                for provider_id, extractor in _capability_providers(self._vlm, "vision.extractor"):
+                    provider_component = encode_record_id_component(provider_id)
+                    derived_items.append(
+                        (
+                            "vlm",
+                            provider_id,
+                            f"{run_id}/derived.text.vlm/{provider_component}/{encoded_source}",
+                            extractor,
+                        )
+                    )
+            if not derived_items:
                 stats.skipped += 1
                 continue
 
@@ -174,7 +202,7 @@ class IdleProcessor:
                 stats.errors += 1
                 continue
 
-            for kind, (derived_id, extractor) in derived_keys.items():
+            for kind, provider_id, derived_id, extractor in derived_items:
                 if should_abort and should_abort():
                     break
                 if time.time() >= deadline:
@@ -196,6 +224,7 @@ class IdleProcessor:
                     "text": text,
                     "source_id": record_id,
                     "method": kind,
+                    "provider_id": provider_id,
                 }
                 model_name = self._config.get("models", {}).get("vlm_path") if kind == "vlm" else None
                 if model_name:

@@ -113,8 +113,10 @@ class IdleProcessorTests(unittest.TestCase):
             stats = processor.process()
             self.assertEqual(stats.processed, 2)
             encoded = encode_record_id_component(record_id)
-            self.assertIn(f"run1/derived.text.ocr/{encoded}", metadata.data)
-            self.assertIn(f"run1/derived.text.vlm/{encoded}", metadata.data)
+            ocr_provider = encode_record_id_component("ocr.engine")
+            vlm_provider = encode_record_id_component("vision.extractor")
+            self.assertIn(f"run1/derived.text.ocr/{ocr_provider}/{encoded}", metadata.data)
+            self.assertIn(f"run1/derived.text.vlm/{vlm_provider}/{encoded}", metadata.data)
 
 
 if __name__ == "__main__":

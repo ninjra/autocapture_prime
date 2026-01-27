@@ -37,6 +37,22 @@ def _within_window(ts: str | None, window: dict[str, Any] | None) -> bool:
     return True
 
 
+def _capability_providers(capability: Any | None, default_provider: str) -> list[tuple[str, Any]]:
+    if capability is None:
+        return []
+    target = capability
+    if hasattr(target, "target"):
+        target = getattr(target, "target")
+    if hasattr(target, "items"):
+        try:
+            items = target.items()
+            if items:
+                return list(items)
+        except Exception:
+            pass
+    return [(default_provider, capability)]
+
+
 def extract_on_demand(
     system,
     time_window: dict[str, Any] | None,
@@ -102,15 +118,27 @@ def extract_on_demand(
         if not run_id and hasattr(system, "config"):
             run_id = getattr(system, "config", {}).get("runtime", {}).get("run_id")
         run_id = run_id or "run"
-        derived_ids: list[tuple[str, Any, str]] = []
+        derived_ids: list[tuple[str, Any, str, str]] = []
         encoded_source = encode_record_id_component(record_id)
-        if ocr is not None:
+        for provider_id, extractor in _capability_providers(ocr, "ocr.engine"):
+            provider_component = encode_record_id_component(provider_id)
             derived_ids.append(
-                (f"{run_id}/derived.text.ocr/{encoded_source}", ocr, "ocr")
+                (
+                    f"{run_id}/derived.text.ocr/{provider_component}/{encoded_source}",
+                    extractor,
+                    "ocr",
+                    provider_id,
+                )
             )
-        if vlm is not None:
+        for provider_id, extractor in _capability_providers(vlm, "vision.extractor"):
+            provider_component = encode_record_id_component(provider_id)
             derived_ids.append(
-                (f"{run_id}/derived.text.vlm/{encoded_source}", vlm, "vlm")
+                (
+                    f"{run_id}/derived.text.vlm/{provider_component}/{encoded_source}",
+                    extractor,
+                    "vlm",
+                    provider_id,
+                )
             )
         if not derived_ids:
             continue
@@ -120,7 +148,7 @@ def extract_on_demand(
         frame = _extract_frame(blob, record)
         if not frame:
             continue
-        for derived_id, extractor, kind in derived_ids:
+        for derived_id, extractor, kind, provider_id in derived_ids:
             if metadata.get(derived_id):
                 continue
             try:
@@ -134,6 +162,7 @@ def extract_on_demand(
                     "text": text,
                     "source_id": record_id,
                     "method": kind,
+                    "provider_id": provider_id,
                 }
                 if hasattr(metadata, "put_new"):
                     try:

@@ -23,6 +23,15 @@ if TYPE_CHECKING:
     from autocapture_nx.kernel.system import System
 
 
+DEFAULT_CAPABILITY_POLICY: dict[str, Any] = {
+    "mode": "single",
+    "preferred": [],
+    "provider_ids": [],
+    "fanout": True,
+    "max_providers": 0,
+}
+
+
 def _parse_version(version: str) -> tuple[int, ...]:
     parts = []
     for part in version.strip().lstrip("v").split("."):
@@ -75,6 +84,14 @@ class CapabilityProxy:
         self._target = target
         self._network_allowed = network_allowed
 
+    @property
+    def network_allowed(self) -> bool:
+        return self._network_allowed
+
+    @property
+    def target(self) -> Any:
+        return self._target
+
     def __call__(self, *args, **kwargs):
         if not callable(self._target):
             raise TypeError("Capability is not callable")
@@ -92,6 +109,56 @@ class CapabilityProxy:
         return attr
 
 
+class MultiCapabilityProxy:
+    """Fan-out proxy that can expose multiple providers for a capability."""
+
+    def __init__(
+        self,
+        capability: str,
+        providers: list[tuple[str, CapabilityProxy]],
+        policy: dict[str, Any],
+    ) -> None:
+        self.capability = capability
+        self._policy = dict(policy)
+        self._providers: list[tuple[str, CapabilityProxy]] = []
+        for plugin_id, proxy in providers:
+            self.add_provider(plugin_id, proxy)
+
+    def add_provider(self, plugin_id: str, proxy: CapabilityProxy) -> None:
+        for existing_id, _ in self._providers:
+            if existing_id == plugin_id:
+                raise PluginError(f"Duplicate provider {plugin_id} for capability {self.capability}")
+        self._providers.append((plugin_id, proxy))
+        max_providers = int(self._policy.get("max_providers", 0) or 0)
+        if max_providers > 0:
+            self._providers = self._providers[:max_providers]
+
+    def items(self) -> list[tuple[str, CapabilityProxy]]:
+        return list(self._providers)
+
+    def provider_ids(self) -> list[str]:
+        return [plugin_id for plugin_id, _proxy in self._providers]
+
+    def call_all(self, method: str, *args, **kwargs) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        for plugin_id, proxy in self._providers:
+            attr = getattr(proxy, method, None)
+            if attr is None:
+                continue
+            if callable(attr):
+                result = attr(*args, **kwargs)
+            else:
+                result = attr
+            results.append({"plugin_id": plugin_id, "result": result})
+        return results
+
+    def __getattr__(self, name: str) -> Any:
+        def _fanout(*args, **kwargs):
+            return self.call_all(name, *args, **kwargs)
+
+        return _fanout
+
+
 class CapabilityRegistry:
     def __init__(self) -> None:
         self._capabilities: dict[str, Any] = {}
@@ -107,12 +174,17 @@ class CapabilityRegistry:
     def all(self) -> dict[str, Any]:
         return dict(self._capabilities)
 
+    def replace_all(self, mapping: dict[str, Any]) -> None:
+        self._capabilities = dict(mapping)
+
 
 class PluginRegistry:
     def __init__(self, config: dict[str, Any], safe_mode: bool) -> None:
         self.config = config
         self.safe_mode = safe_mode
         self._validator = SchemaLiteValidator()
+        plugins_cfg = config.get("plugins", {}) if isinstance(config, dict) else {}
+        self._capability_policies = plugins_cfg.get("capabilities", {}) if isinstance(plugins_cfg, dict) else {}
 
     def discover_manifest_paths(self) -> list[Path]:
         paths = [plugins_dir() / "builtin"]
@@ -212,6 +284,95 @@ class PluginRegistry:
                 raise PluginError(f"Plugin {manifest.plugin_id} manifest hash mismatch")
             if artifact_hash != expected.get("artifact_sha256"):
                 raise PluginError(f"Plugin {manifest.plugin_id} artifact hash mismatch")
+
+    def _capability_policy(self, capability: str) -> dict[str, Any]:
+        raw = self._capability_policies.get(capability, {}) if isinstance(self._capability_policies, dict) else {}
+        policy = dict(DEFAULT_CAPABILITY_POLICY)
+        if isinstance(raw, dict):
+            policy.update(raw)
+        mode = str(policy.get("mode", "single")).lower()
+        if mode not in {"single", "multi"}:
+            raise PluginError(f"Invalid capability mode for {capability}: {mode}")
+        policy["mode"] = mode
+        preferred = policy.get("preferred", [])
+        policy["preferred"] = [str(pid) for pid in preferred] if isinstance(preferred, list) else []
+        provider_ids = policy.get("provider_ids", [])
+        policy["provider_ids"] = [str(pid) for pid in provider_ids] if isinstance(provider_ids, list) else []
+        try:
+            policy["max_providers"] = int(policy.get("max_providers", 0))
+        except Exception:
+            policy["max_providers"] = 0
+        policy["fanout"] = bool(policy.get("fanout", True))
+        return policy
+
+    def _ordered_providers(
+        self,
+        providers: list[tuple[str, CapabilityProxy]],
+        preferred: list[str],
+    ) -> list[tuple[str, CapabilityProxy]]:
+        base = sorted(providers, key=lambda item: item[0])
+        if not preferred:
+            return base
+        preferred_set = set(preferred)
+        head: list[tuple[str, CapabilityProxy]] = []
+        for pid in preferred:
+            for candidate in base:
+                if candidate[0] == pid:
+                    head.append(candidate)
+        tail = [candidate for candidate in base if candidate[0] not in preferred_set]
+        return head + tail
+
+    def _filtered_providers(
+        self,
+        capability: str,
+        providers: list[tuple[str, CapabilityProxy]],
+        policy: dict[str, Any],
+    ) -> list[tuple[str, CapabilityProxy]]:
+        provider_ids = policy.get("provider_ids", [])
+        if not provider_ids:
+            return providers
+        allowed = set(provider_ids)
+        filtered = [item for item in providers if item[0] in allowed]
+        if not filtered:
+            raise PluginError(f"No allowed providers for {capability} after provider_ids filter")
+        return filtered
+
+    def _resolve_single(
+        self,
+        capability: str,
+        providers: list[tuple[str, CapabilityProxy]],
+        policy: dict[str, Any],
+    ) -> tuple[str, CapabilityProxy]:
+        if len(providers) == 1:
+            return providers[0]
+        preferred = policy.get("preferred", [])
+        for pid in preferred:
+            for candidate in providers:
+                if candidate[0] == pid:
+                    return candidate
+        ids = ", ".join(sorted(pid for pid, _proxy in providers))
+        raise PluginError(f"Multiple providers for {capability}: {ids}")
+
+    def _resolve_capabilities(
+        self,
+        providers_by_cap: dict[str, list[tuple[str, CapabilityProxy]]],
+    ) -> CapabilityRegistry:
+        capabilities = CapabilityRegistry()
+        for capability, providers in sorted(providers_by_cap.items(), key=lambda item: item[0]):
+            policy = self._capability_policy(capability)
+            providers = self._filtered_providers(capability, providers, policy)
+            providers = self._ordered_providers(providers, policy.get("preferred", []))
+            if policy.get("mode") == "multi":
+                max_providers = int(policy.get("max_providers", 0) or 0)
+                if max_providers > 0:
+                    providers = providers[:max_providers]
+                multi = MultiCapabilityProxy(capability, providers, policy)
+                capabilities.register(capability, multi, network_allowed=False)
+            else:
+                plugin_id, proxy = self._resolve_single(capability, providers, policy)
+                capabilities.register(capability, proxy, network_allowed=proxy.network_allowed)
+        return capabilities
+
     def load_enabled(self, manifests: list[PluginManifest], *, safe_mode: bool) -> list[LoadedPlugin]:
         registry = self if safe_mode == self.safe_mode else PluginRegistry(self.config, safe_mode=safe_mode)
         loaded, _caps = registry.load_plugins()
@@ -225,17 +386,36 @@ class PluginRegistry:
             raise PluginError("register_capabilities requires a System instance")
         for plugin in plugins:
             if isinstance(plugin, LoadedPlugin):
+                plugin_id = plugin.plugin_id
                 caps = plugin.capabilities
                 network_allowed = bool(plugin.manifest.get("permissions", {}).get("network", False))
             elif hasattr(plugin, "capabilities"):
+                plugin_id = str(getattr(plugin, "plugin_id", "unknown.plugin"))
                 caps = plugin.capabilities()
                 network_allowed = False
             else:
                 continue
             for cap_name, impl in caps.items():
+                policy = self._capability_policy(cap_name)
                 if system.has(cap_name):
-                    continue
-                system.register(cap_name, impl, network_allowed=network_allowed)
+                    if policy.get("mode") != "multi":
+                        raise PluginError(f"Duplicate capability for {cap_name}: {plugin_id}")
+                    existing = system.get(cap_name)
+                    if isinstance(existing, CapabilityProxy):
+                        existing = existing.target
+                    if isinstance(existing, MultiCapabilityProxy):
+                        existing.add_provider(plugin_id, CapabilityProxy(impl, network_allowed))
+                        continue
+                    raise PluginError(f"Existing capability for {cap_name} is not multi-capable")
+                if policy.get("mode") == "multi":
+                    multi = MultiCapabilityProxy(
+                        cap_name,
+                        [(plugin_id, CapabilityProxy(impl, network_allowed))],
+                        policy,
+                    )
+                    system.register(cap_name, multi, network_allowed=False)
+                else:
+                    system.register(cap_name, impl, network_allowed=network_allowed)
 
     def load_plugins(self) -> tuple[list[LoadedPlugin], CapabilityRegistry]:
         manifests = self.discover_manifest_paths()
@@ -258,6 +438,7 @@ class PluginRegistry:
 
         loaded: list[LoadedPlugin] = []
         capabilities = CapabilityRegistry()
+        providers_by_cap: dict[str, list[tuple[str, CapabilityProxy]]] = {}
 
         def is_enabled(pid: str, manifest: dict[str, Any]) -> bool:
             if self.config.get("plugins", {}).get("safe_mode", False):
@@ -322,7 +503,10 @@ class PluginRegistry:
                             raise PluginError(f"Plugin {plugin_id} missing capabilities()")
                         caps = instance.capabilities()
                 for cap_name, impl in caps.items():
-                    capabilities.register(cap_name, impl, network_allowed)
+                    proxy = CapabilityProxy(impl, network_allowed)
+                    providers_by_cap.setdefault(cap_name, []).append((plugin_id, proxy))
                 loaded.append(LoadedPlugin(plugin_id, manifest, instance, caps))
 
+        resolved = self._resolve_capabilities(providers_by_cap)
+        capabilities.replace_all(resolved.all())
         return loaded, capabilities

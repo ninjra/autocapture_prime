@@ -62,8 +62,9 @@ class ExtractOnDemandCandidateTests(unittest.TestCase):
         self.assertEqual(processed, 1)
         encoded_a = encode_record_id_component(record_a)
         encoded_b = encode_record_id_component(record_b)
-        ocr_a = f"run1/derived.text.ocr/{encoded_a}"
-        ocr_b = f"run1/derived.text.ocr/{encoded_b}"
+        provider = encode_record_id_component("ocr.engine")
+        ocr_a = f"run1/derived.text.ocr/{provider}/{encoded_a}"
+        ocr_b = f"run1/derived.text.ocr/{provider}/{encoded_b}"
         self.assertIn(ocr_a, metadata.data)
         self.assertNotIn(ocr_b, metadata.data)
 

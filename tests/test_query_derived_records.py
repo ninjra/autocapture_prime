@@ -60,8 +60,10 @@ class QueryDerivedRecordTests(unittest.TestCase):
         self.assertEqual(processed, 2)
         self.assertNotIn("text", metadata.get(record_id))
         encoded = encode_record_id_component(record_id)
-        vlm_id = f"run1/derived.text.vlm/{encoded}"
-        ocr_id = f"run1/derived.text.ocr/{encoded}"
+        vlm_provider = encode_record_id_component("vision.extractor")
+        ocr_provider = encode_record_id_component("ocr.engine")
+        vlm_id = f"run1/derived.text.vlm/{vlm_provider}/{encoded}"
+        ocr_id = f"run1/derived.text.ocr/{ocr_provider}/{encoded}"
         derived_vlm = metadata.get(vlm_id)
         derived_ocr = metadata.get(ocr_id)
         self.assertEqual(derived_vlm["record_type"], "derived.text.vlm")
@@ -76,13 +78,15 @@ class QueryDerivedRecordTests(unittest.TestCase):
         record_id = "run1/segment/1"
         metadata.put(record_id, {"record_type": "evidence.capture.segment", "ts_utc": "2024-01-02T00:00:00+00:00"})
         encoded = encode_record_id_component(record_id)
+        vlm_provider = encode_record_id_component("vision.extractor")
         metadata.put(
-            f"run1/derived.text.vlm/{encoded}",
+            f"run1/derived.text.vlm/{vlm_provider}/{encoded}",
             {
                 "record_type": "derived.text.vlm",
                 "ts_utc": "2024-01-02T00:00:00+00:00",
                 "text": "hello world",
                 "source_id": record_id,
+                "provider_id": "vision.extractor",
             },
         )
         ctx = PluginContext(config={}, get_capability=lambda _k: metadata, logger=lambda _m: None)
@@ -91,7 +95,7 @@ class QueryDerivedRecordTests(unittest.TestCase):
         results = retrieval.search("hello", time_window=None)
         self.assertTrue(results)
         self.assertEqual(results[0]["record_id"], record_id)
-        self.assertEqual(results[0]["derived_id"], f"run1/derived.text.vlm/{encoded}")
+        self.assertEqual(results[0]["derived_id"], f"run1/derived.text.vlm/{vlm_provider}/{encoded}")
 
 
 if __name__ == "__main__":

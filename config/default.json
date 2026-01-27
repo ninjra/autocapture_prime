@@ -114,6 +114,12 @@
     "query_latency_ms": 2000,
     "startup_ms": 500
   },
+  "retrieval": {
+    "limit": 25,
+    "vector_limit": 25,
+    "fast_threshold": 3,
+    "fusion_threshold": 5
+  },
   "plugins": {
     "allowlist": [
       "builtin.anchor.basic",
@@ -265,6 +271,251 @@
       "network_allowed_plugin_ids": [
         "builtin.egress.gateway"
       ]
+    },
+    "capabilities": {
+      "anchor.writer": {
+        "mode": "single",
+        "preferred": [
+          "builtin.anchor.basic"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "answer.builder": {
+        "mode": "single",
+        "preferred": [
+          "builtin.answer.basic"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "capture.audio": {
+        "mode": "single",
+        "preferred": [
+          "builtin.capture.audio.windows"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "capture.backpressure": {
+        "mode": "single",
+        "preferred": [
+          "builtin.backpressure.basic"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "capture.source": {
+        "mode": "single",
+        "preferred": [
+          "builtin.capture.windows",
+          "builtin.capture.stub"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "citation.validator": {
+        "mode": "single",
+        "preferred": [
+          "builtin.citation.basic"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "devtools.ast_ir": {
+        "mode": "single",
+        "preferred": [
+          "builtin.devtools.ast_ir"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "devtools.diffusion": {
+        "mode": "single",
+        "preferred": [
+          "builtin.devtools.diffusion"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "egress.gateway": {
+        "mode": "single",
+        "preferred": [
+          "builtin.egress.gateway"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "embedder.text": {
+        "mode": "single",
+        "preferred": [
+          "builtin.embedder.stub"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "journal.writer": {
+        "mode": "single",
+        "preferred": [
+          "builtin.journal.basic"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "ledger.writer": {
+        "mode": "single",
+        "preferred": [
+          "builtin.ledger.basic"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "observability.logger": {
+        "mode": "single",
+        "preferred": [
+          "builtin.observability.basic"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "ocr.engine": {
+        "mode": "multi",
+        "preferred": [
+          "mx.core.ocr_local",
+          "builtin.ocr.stub"
+        ],
+        "provider_ids": [],
+        "fanout": true,
+        "max_providers": 8
+      },
+      "privacy.egress_sanitizer": {
+        "mode": "single",
+        "preferred": [
+          "builtin.privacy.egress_sanitizer"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "reranker": {
+        "mode": "single",
+        "preferred": [
+          "builtin.reranker.stub"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "retrieval.strategy": {
+        "mode": "single",
+        "preferred": [
+          "builtin.retrieval.basic"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "runtime.governor": {
+        "mode": "single",
+        "preferred": [
+          "builtin.runtime.governor"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "storage.entity_map": {
+        "mode": "single",
+        "preferred": [
+          "builtin.storage.sqlcipher",
+          "builtin.storage.encrypted",
+          "builtin.storage.memory"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "storage.keyring": {
+        "mode": "single",
+        "preferred": [
+          "builtin.storage.sqlcipher",
+          "builtin.storage.encrypted"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "storage.media": {
+        "mode": "single",
+        "preferred": [
+          "builtin.storage.sqlcipher",
+          "builtin.storage.encrypted",
+          "builtin.storage.memory"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "storage.metadata": {
+        "mode": "single",
+        "preferred": [
+          "builtin.storage.sqlcipher",
+          "builtin.storage.encrypted",
+          "builtin.storage.memory"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "time.intent_parser": {
+        "mode": "single",
+        "preferred": [
+          "builtin.time.advanced"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "tracking.input": {
+        "mode": "single",
+        "preferred": [
+          "builtin.tracking.input.windows"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "vision.extractor": {
+        "mode": "multi",
+        "preferred": [
+          "builtin.vlm.stub"
+        ],
+        "provider_ids": [],
+        "fanout": true,
+        "max_providers": 8
+      },
+      "window.metadata": {
+        "mode": "single",
+        "preferred": [
+          "builtin.window.metadata.windows"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      }
     },
     "safe_mode": false,
     "search_paths": [
