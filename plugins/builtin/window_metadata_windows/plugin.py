@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+from autocapture_nx.kernel.hashing import sha256_text
 from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 from autocapture_nx.windows.win_window import active_window
@@ -69,16 +70,8 @@ class WindowMetadataWindows(PluginBase):
             if info and info.hwnd != last_hwnd:
                 ts = datetime.now(timezone.utc).isoformat()
                 payload = {
-                    "title": info.title,
-                    "process_path": info.process_path,
-                    "hwnd": info.hwnd,
-                    "rect": [int(value) for value in info.rect],
+                    **_build_window_payload(info),
                 }
-                if info.monitor is not None:
-                    payload["monitor"] = {
-                        "device": info.monitor.device,
-                        "rect": [int(value) for value in info.monitor.rect],
-                    }
                 record_id = prefixed_id(run_id, "window", seq)
                 event_builder.journal_event(
                     "window.meta",
@@ -106,3 +99,25 @@ class WindowMetadataWindows(PluginBase):
 
 def create_plugin(plugin_id: str, context: PluginContext) -> WindowMetadataWindows:
     return WindowMetadataWindows(plugin_id, context)
+
+
+def _build_window_payload(info: Any) -> dict[str, Any]:
+    process_path = str(getattr(info, "process_path", "") or "")
+    raw_path = str(getattr(info, "process_path_raw", "") or "")
+    payload = {
+        "title": str(getattr(info, "title", "") or ""),
+        "process_path": process_path,
+        "hwnd": int(getattr(info, "hwnd", 0)),
+        "rect": [int(value) for value in getattr(info, "rect", (0, 0, 0, 0))],
+    }
+    if raw_path:
+        payload["process_path_raw"] = raw_path
+    if process_path:
+        payload["process_path_hash"] = sha256_text(process_path)
+    monitor = getattr(info, "monitor", None)
+    if monitor is not None:
+        payload["monitor"] = {
+            "device": getattr(monitor, "device", ""),
+            "rect": [int(value) for value in getattr(monitor, "rect", (0, 0, 0, 0))],
+        }
+    return payload

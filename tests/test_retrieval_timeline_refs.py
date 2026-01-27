@@ -63,6 +63,22 @@ class RetrievalTimelineTests(unittest.TestCase):
                 "end_ts_utc": "2026-01-24T10:00:09+00:00",
             },
         )
+        store.put(
+            "run1/cursor/0",
+            {
+                "record_type": "derived.cursor.sample",
+                "ts_utc": "2026-01-24T10:00:01+00:00",
+                "cursor": {"x": 5, "y": 6},
+            },
+        )
+        store.put(
+            "run1/cursor/1",
+            {
+                "record_type": "derived.cursor.sample",
+                "ts_utc": "2026-01-24T10:00:08+00:00",
+                "cursor": {"x": 7, "y": 8},
+            },
+        )
         ctx = PluginContext(config={}, get_capability=lambda _k: store, logger=lambda _m: None)
         retrieval = RetrievalStrategy("retrieval", ctx)
         results = retrieval.search("needle", time_window=None)
@@ -71,6 +87,7 @@ class RetrievalTimelineTests(unittest.TestCase):
         self.assertEqual(result["window_ref"]["record_id"], "run1/window/0")
         self.assertEqual(result["window_timeline"], ["run1/window/1"])
         self.assertEqual(result["input_refs"], ["run1/input/0", "run1/input/1"])
+        self.assertEqual(result["cursor_refs"], ["run1/cursor/0", "run1/cursor/1"])
 
 
 if __name__ == "__main__":

@@ -34,7 +34,7 @@ class RetrievalStrategy(PluginBase):
         query_text = str(query or "").strip()
         if not query_text:
             return []
-        window_events, input_summaries = _collect_timelines(store)
+        window_events, input_summaries, cursor_samples = _collect_timelines(store)
         results = self._search_indexed(store, query_text, time_window)
         if not results:
             results = _scan_metadata(store, query_text.lower(), time_window)
@@ -47,7 +47,7 @@ class RetrievalStrategy(PluginBase):
                 str(r.get("derived_id", "")),
             )
         )
-        _attach_timelines(results, store, window_events, input_summaries)
+        _attach_timelines(results, store, window_events, input_summaries, cursor_samples)
         return results
 
     def _ensure_indexes(self) -> None:
@@ -130,9 +130,12 @@ def create_plugin(plugin_id: str, context: PluginContext) -> RetrievalStrategy:
     return RetrievalStrategy(plugin_id, context)
 
 
-def _collect_timelines(store: Any) -> tuple[list[tuple[float, str, dict[str, Any]]], list[tuple[float, float, str]]]:
+def _collect_timelines(
+    store: Any,
+) -> tuple[list[tuple[float, str, dict[str, Any]]], list[tuple[float, float, str]], list[tuple[float, str]]]:
     window_events: list[tuple[float, str, dict[str, Any]]] = []
     input_summaries: list[tuple[float, float, str]] = []
+    cursor_samples: list[tuple[float, str]] = []
     for record_id in getattr(store, "keys", lambda: [])():
         record = store.get(record_id, {})
         record_type = str(record.get("record_type", ""))
@@ -145,7 +148,11 @@ def _collect_timelines(store: Any) -> tuple[list[tuple[float, str, dict[str, Any
             end_ts = _ts_key(record.get("end_ts_utc") or record.get("ts_end_utc"))
             if start_ts is not None and end_ts is not None:
                 input_summaries.append((start_ts, end_ts, record_id))
-    return window_events, input_summaries
+        elif record_type == "derived.cursor.sample":
+            ts_val = _ts_key(record.get("ts_utc"))
+            if ts_val is not None:
+                cursor_samples.append((ts_val, record_id))
+    return window_events, input_summaries, cursor_samples
 
 
 def _within_window(ts: str | None, time_window: dict[str, Any] | None) -> bool:
@@ -236,6 +243,7 @@ def _attach_timelines(
     store: Any,
     window_events: list[tuple[float, str, dict[str, Any]]],
     input_summaries: list[tuple[float, float, str]],
+    cursor_samples: list[tuple[float, str]],
 ) -> None:
     if not results:
         return
@@ -243,7 +251,10 @@ def _attach_timelines(
         window_events.sort(key=lambda item: item[0])
     if input_summaries:
         input_summaries.sort(key=lambda item: item[0])
+    if cursor_samples:
+        cursor_samples.sort(key=lambda item: item[0])
     window_times = [ts for ts, _rid, _record in window_events]
+    cursor_times = [ts for ts, _rid in cursor_samples]
     for result in results:
         record_id = result.get("record_id")
         if not record_id:
@@ -277,3 +288,8 @@ def _attach_timelines(
                 input_refs.append(input_id)
             if input_refs:
                 result["input_refs"] = input_refs
+        if cursor_samples and end_ts is not None:
+            left = bisect_left(cursor_times, start_ts)
+            right = bisect_right(cursor_times, end_ts)
+            if right > left:
+                result["cursor_refs"] = [cursor_samples[i][1] for i in range(left, right)]

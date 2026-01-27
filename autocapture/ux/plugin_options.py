@@ -128,6 +128,7 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "capture.video.resolution",
         "capture.cursor.enabled",
         "capture.cursor.include_shape",
+        "capture.cursor.sample_hz",
     ],
     "mx.core.capture_win": [
         "capture.video.backend",
@@ -160,6 +161,11 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
     "builtin.window.metadata.windows": [
         "capture.window_metadata.enabled",
         "capture.window_metadata.sample_hz",
+    ],
+    "builtin.cursor.windows": [
+        "capture.cursor.enabled",
+        "capture.cursor.sample_hz",
+        "capture.cursor.include_shape",
     ],
     "builtin.backpressure.basic": [
         "backpressure.max_fps",

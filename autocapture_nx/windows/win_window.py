@@ -16,6 +16,7 @@ class WindowInfo:
     hwnd: int
     rect: tuple[int, int, int, int]
     monitor: "MonitorInfo | None" = None
+    process_path_raw: str = ""
 
 
 @dataclass
@@ -148,7 +149,15 @@ def active_window() -> Optional[WindowInfo]:
     if not hwnd:
         return None
     title = _get_window_text(hwnd)
-    path = normalize_device_path(_get_process_path(hwnd))
+    raw_path = _get_process_path(hwnd)
+    path = normalize_device_path(raw_path)
     rect = _get_window_rect(hwnd)
     monitor = _get_monitor_info(hwnd)
-    return WindowInfo(title=title, process_path=path, hwnd=hwnd, rect=rect, monitor=monitor)
+    return WindowInfo(
+        title=title,
+        process_path=path,
+        process_path_raw=raw_path,
+        hwnd=hwnd,
+        rect=rect,
+        monitor=monitor,
+    )

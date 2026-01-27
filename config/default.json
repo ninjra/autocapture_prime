@@ -27,7 +27,8 @@
     },
     "cursor": {
       "enabled": false,
-      "include_shape": true
+      "include_shape": true,
+      "sample_hz": 5
     },
     "input_tracking": {
       "flush_interval_ms": 250,
@@ -128,6 +129,7 @@
       "builtin.capture.audio.windows",
       "builtin.capture.stub",
       "builtin.capture.windows",
+      "builtin.cursor.windows",
       "builtin.citation.basic",
       "builtin.devtools.ast_ir",
       "builtin.devtools.diffusion",
@@ -215,6 +217,7 @@
       "builtin.capture.audio.windows": true,
       "builtin.capture.stub": false,
       "builtin.capture.windows": true,
+      "builtin.cursor.windows": false,
       "builtin.citation.basic": true,
       "builtin.devtools.ast_ir": true,
       "builtin.devtools.diffusion": true,
@@ -250,6 +253,7 @@
         "builtin.journal.basic",
         "builtin.anchor.basic",
         "builtin.capture.windows",
+        "builtin.cursor.windows",
         "builtin.capture.audio.windows",
         "builtin.tracking.input.windows",
         "builtin.window.metadata.windows",
@@ -523,6 +527,15 @@
         "mode": "single",
         "preferred": [
           "builtin.tracking.input.windows"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "tracking.cursor": {
+        "mode": "single",
+        "preferred": [
+          "builtin.cursor.windows"
         ],
         "provider_ids": [],
         "fanout": false,

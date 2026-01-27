@@ -172,10 +172,13 @@ def cmd_run(args: argparse.Namespace) -> int:
     audio = system.get("capture.audio")
     input_tracker = system.get("tracking.input")
     window_meta = system.get("window.metadata")
+    cursor_tracker = system.get("tracking.cursor") if system.has("tracking.cursor") else None
     capture.start()
     audio.start()
     input_tracker.start()
     window_meta.start()
+    if cursor_tracker is not None:
+        cursor_tracker.start()
     print("Capture running. Press Ctrl+C to stop.")
     try:
         import time
@@ -188,6 +191,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         audio.stop()
         input_tracker.stop()
         window_meta.stop()
+        if cursor_tracker is not None:
+            cursor_tracker.stop()
         kernel.shutdown()
     return 0
 

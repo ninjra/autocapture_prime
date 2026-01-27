@@ -116,11 +116,15 @@
             },
             "include_shape": {
               "type": "boolean"
+            },
+            "sample_hz": {
+              "type": "integer"
             }
           },
           "required": [
             "enabled",
-            "include_shape"
+            "include_shape",
+            "sample_hz"
           ],
           "type": "object"
         },

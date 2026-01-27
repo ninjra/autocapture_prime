@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-01-27T18:34:02.418059+00:00",
+  "generated_at": "2026-01-27T19:47:18.932878+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "b5e8b68554905a6fb046bc25ffd2fa15a0b918d0b574ddf3debf8463f797bb17",
@@ -28,6 +28,10 @@
     "builtin.citation.basic": {
       "artifact_sha256": "b1f5a60862f27434dc941a72511c714b52ce6535cca893000d7872f1b4970093",
       "manifest_sha256": "65ad757f63666189f3581cd1a2b2e218eafe813728cb4bf6e2baeb8b27735718"
+    },
+    "builtin.cursor.windows": {
+      "artifact_sha256": "342dde00165011b9b1435c71652631a144f200fadc8e5844bb21144f9df48e9e",
+      "manifest_sha256": "845582f7eba7bc2fa9bcc5677006c2aedbd1d2d974625ddd7b44335325f6af63"
     },
     "builtin.devtools.ast_ir": {
       "artifact_sha256": "f08856a5f838867848b1f72bbd55d0211056b2234ba79d13761f2eb6ace7e14a",
@@ -86,7 +90,7 @@
       "manifest_sha256": "6991ea487886c7ee84d6d263b4e9c1764aca406b76c82dd21e987898c81a895d"
     },
     "builtin.retrieval.basic": {
-      "artifact_sha256": "96ff9841fc2c778a5e440feb4088483f98d68d50663b013de45ccfac18d9b0b7",
+      "artifact_sha256": "7f47de6da3f9f2f6430beee942637eaeb9572f027d6a793ebcc433aa3c604423",
       "manifest_sha256": "0207b3fbedaa5c330bc49c1d3860b05b4b79eb7d80ff33c41e71cbc05164b20e"
     },
     "builtin.runtime.governor": {
@@ -122,7 +126,7 @@
       "manifest_sha256": "17bd6abdc752f44701c077fb18045644c154f5386c7b24f85797ca2464923cc1"
     },
     "builtin.window.metadata.windows": {
-      "artifact_sha256": "14189a158af5ca5300c593705e8218c4ab5f722e974806574aab2237ac82eece",
+      "artifact_sha256": "0e6462f850d5bf232de307a8b14039bb86ef5ea63ce6a53d0e50227db10201ad",
       "manifest_sha256": "baf7f5b942b27d832d7c3ba8b39d047e02e01bab26cb07076361ab83aa416ca8"
     }
   },
