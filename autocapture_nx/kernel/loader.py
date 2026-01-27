@@ -553,6 +553,33 @@ class Kernel:
                     detail="encrypted storage loaded" if ok else "encrypted storage missing",
                 )
             )
+        def _check_model_path(label: str, value: Any) -> None:
+            if not value:
+                checks.append(
+                    DoctorCheck(
+                        name=f"{label}_path",
+                        ok=True,
+                        detail="not configured",
+                    )
+                )
+                return
+            path = Path(str(value))
+            ok = path.exists()
+            checks.append(
+                DoctorCheck(
+                    name=f"{label}_path",
+                    ok=ok,
+                    detail="ok" if ok else "missing",
+                )
+            )
+
+        models_cfg = config.get("models", {})
+        if isinstance(models_cfg, dict):
+            _check_model_path("vlm_model", models_cfg.get("vlm_path"))
+            _check_model_path("reranker_model", models_cfg.get("reranker_path"))
+        indexing_cfg = config.get("indexing", {})
+        if isinstance(indexing_cfg, dict):
+            _check_model_path("embedder_model", indexing_cfg.get("embedder_model"))
         lock_path = resolve_repo_path("contracts/lock.json")
         if not lock_path.exists():
             checks.append(
