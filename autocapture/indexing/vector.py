@@ -99,6 +99,11 @@ class VectorIndex:
         self._conn.execute("REPLACE INTO vectors (doc_id, vector) VALUES (?, ?)", (doc_id, json.dumps(vec)))
         self._conn.commit()
 
+    def count(self) -> int:
+        cur = self._conn.execute("SELECT COUNT(*) FROM vectors")
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+
     def query(self, text: str, limit: int = 5) -> list[VectorHit]:
         query_vec = self._embedder.embed(text)
         cur = self._conn.execute("SELECT doc_id, vector FROM vectors")

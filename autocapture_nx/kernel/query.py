@@ -7,6 +7,7 @@ import zipfile
 from datetime import datetime
 from typing import Any
 
+from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.ids import encode_record_id_component
 
 
@@ -56,6 +57,34 @@ def extract_on_demand(
             event_builder = system.get("event.builder")
         except Exception:
             event_builder = None
+
+    config = None
+    if hasattr(system, "config"):
+        config = system.config
+    elif isinstance(system, dict):
+        config = system.get("config")
+    lexical = None
+    vector = None
+    if isinstance(config, dict) and config:
+        try:
+            lexical, vector = build_indexes(config)
+        except Exception:
+            lexical = None
+            vector = None
+
+    def _index_text(doc_id: str, text: str) -> None:
+        if not text:
+            return
+        if lexical is not None:
+            try:
+                lexical.index(doc_id, text)
+            except Exception:
+                pass
+        if vector is not None:
+            try:
+                vector.index(doc_id, text)
+            except Exception:
+                pass
 
     processed = 0
     if candidate_ids is not None:
@@ -113,6 +142,7 @@ def extract_on_demand(
                         continue
                 else:
                     metadata.put(derived_id, payload)
+                _index_text(derived_id, text)
                 if collected_ids is not None:
                     collected_ids.append(derived_id)
                 if event_builder is not None:

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.ids import encode_record_id_component
 
 
@@ -79,6 +80,9 @@ class IdleProcessor:
         self._vlm = self._cap("vision.extractor")
         self._events = self._cap("event.builder")
         self._logger = self._cap("observability.logger")
+        self._lexical = None
+        self._vector = None
+        self._indexes_ready = False
 
     def _cap(self, name: str) -> Any | None:
         if hasattr(self._system, "has") and self._system.has(name):
@@ -87,10 +91,41 @@ class IdleProcessor:
             return self._system.get(name)
         return None
 
+    def _ensure_indexes(self) -> None:
+        if self._indexes_ready:
+            return
+        self._indexes_ready = True
+        if not isinstance(self._config, dict) or not self._config:
+            return
+        try:
+            self._lexical, self._vector = build_indexes(self._config)
+        except Exception as exc:
+            self._lexical = None
+            self._vector = None
+            if self._logger is not None:
+                self._logger.log("index.init_failed", {"error": str(exc)})
+
+    def _index_text(self, doc_id: str, text: str) -> None:
+        if not text:
+            return
+        if self._lexical is not None:
+            try:
+                self._lexical.index(doc_id, text)
+            except Exception as exc:
+                if self._logger is not None:
+                    self._logger.log("index.lexical_error", {"doc_id": doc_id, "error": str(exc)})
+        if self._vector is not None:
+            try:
+                self._vector.index(doc_id, text)
+            except Exception as exc:
+                if self._logger is not None:
+                    self._logger.log("index.vector_error", {"doc_id": doc_id, "error": str(exc)})
+
     def process(self, *, should_abort: Callable[[], bool] | None = None) -> IdleProcessStats:
         stats = IdleProcessStats()
         if self._metadata is None or self._media is None:
             return stats
+        self._ensure_indexes()
         idle_cfg = self._config.get("processing", {}).get("idle", {})
         max_items = int(idle_cfg.get("max_items_per_run", 20))
         max_seconds = int(idle_cfg.get("max_seconds_per_run", 30))
@@ -172,6 +207,7 @@ class IdleProcessor:
                         continue
                 else:
                     self._metadata.put(derived_id, payload)
+                self._index_text(derived_id, text)
                 stats.processed += 1
                 if kind == "ocr":
                     stats.ocr_ok += 1
