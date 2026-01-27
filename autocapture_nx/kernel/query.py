@@ -43,6 +43,7 @@ def extract_on_demand(
     limit: int = 5,
     allow_ocr: bool = True,
     allow_vlm: bool = True,
+    collected_ids: list[str] | None = None,
 ) -> int:
     media = system.get("storage.media")
     metadata = system.get("storage.metadata")
@@ -107,6 +108,8 @@ def extract_on_demand(
                         continue
                 else:
                     metadata.put(derived_id, payload)
+                if collected_ids is not None:
+                    collected_ids.append(derived_id)
                 if event_builder is not None:
                     event_payload = dict(payload)
                     event_payload["derived_id"] = derived_id
@@ -156,6 +159,12 @@ def run_query(system, query: str) -> dict[str, Any]:
     parser = system.get("time.intent_parser")
     retrieval = system.get("retrieval.strategy")
     answer = system.get("answer.builder")
+    event_builder = None
+    if hasattr(system, "get"):
+        try:
+            event_builder = system.get("event.builder")
+        except Exception:
+            event_builder = None
 
     intent = parser.parse(query)
     time_window = intent.get("time_window")
@@ -165,6 +174,7 @@ def run_query(system, query: str) -> dict[str, Any]:
     require_idle = bool(on_query.get("require_idle", True))
     allow_ocr = bool(on_query.get("extractors", {}).get("ocr", True))
     allow_vlm = bool(on_query.get("extractors", {}).get("vlm", False))
+    extracted_ids: list[str] = []
     if allow_extract and (allow_ocr or allow_vlm):
         can_run = True
         if require_idle:
@@ -184,7 +194,13 @@ def run_query(system, query: str) -> dict[str, Any]:
                 assume_idle = bool(system.config.get("runtime", {}).get("activity", {}).get("assume_idle_when_missing", False))
                 can_run = assume_idle
         if can_run:
-            extract_on_demand(system, time_window, allow_ocr=allow_ocr, allow_vlm=allow_vlm)
+            extract_on_demand(
+                system,
+                time_window,
+                allow_ocr=allow_ocr,
+                allow_vlm=allow_vlm,
+                collected_ids=extracted_ids,
+            )
             results = retrieval.search(query, time_window=time_window)
 
     claims = []
@@ -207,4 +223,22 @@ def run_query(system, query: str) -> dict[str, Any]:
             }
         )
     answer_obj = answer.build(claims)
+    if event_builder is not None:
+        run_id = system.config.get("runtime", {}).get("run_id", "run")
+        result_ids = [result.get("record_id") for result in results if result.get("record_id")]
+        payload = {
+            "event": "query.execute",
+            "run_id": run_id,
+            "query": query,
+            "time_window": time_window,
+            "result_count": int(len(results)),
+            "result_ids": result_ids,
+            "extracted_count": int(len(extracted_ids)),
+        }
+        event_builder.ledger_entry(
+            "query.execute",
+            inputs=result_ids,
+            outputs=extracted_ids,
+            payload=payload,
+        )
     return {"intent": intent, "results": results, "answer": answer_obj}
