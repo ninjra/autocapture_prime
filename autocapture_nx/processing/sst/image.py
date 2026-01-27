@@ -83,6 +83,11 @@ def tile_image(
     tile_max_px: int,
     overlap_px: int,
     add_full_frame: bool,
+    focus_tokens: list[dict[str, Any]] | None = None,
+    focus_conf_bp: int = 0,
+    focus_padding_px: int = 24,
+    focus_max_patches: int = 0,
+    focus_cluster_gap_px: int = 48,
 ) -> list[dict[str, Any]]:
     width, height = image_rgb.size
     tiles: list[dict[str, Any]] = []
@@ -99,10 +104,85 @@ def tile_image(
             bbox = clamp_bbox((x1, y1, x2, y2), width=width, height=height)
             patch_id = f"tile-{bbox[1]}-{bbox[0]}-{bbox[3]}-{bbox[2]}"
             tiles.append(_make_patch(patch_id, bbox, image_rgb))
+    if focus_tokens and focus_max_patches != 0:
+        focus_boxes = _focus_bboxes(
+            focus_tokens,
+            width=width,
+            height=height,
+            conf_bp=focus_conf_bp,
+            cluster_gap_px=focus_cluster_gap_px,
+        )
+        if focus_max_patches > 0:
+            focus_boxes = focus_boxes[:focus_max_patches]
+        existing = {tuple(tile["bbox"]) for tile in tiles}
+        for idx, bbox in enumerate(focus_boxes):
+            expanded = _expand_bbox(bbox, focus_padding_px, width=width, height=height)
+            if expanded in existing:
+                continue
+            patch_id = f"focus-{idx}-{expanded[1]}-{expanded[0]}-{expanded[3]}-{expanded[2]}"
+            tiles.append(_make_patch(patch_id, expanded, image_rgb))
+            existing.add(expanded)
     tiles.sort(key=lambda t: (t["bbox"][1], t["bbox"][0], -(t["bbox"][2] - t["bbox"][0]) * (t["bbox"][3] - t["bbox"][1]), t["patch_id"]))
     _ensure_coverage(tiles, width=width, height=height, add_full_frame=add_full_frame)
     _ensure_unique_ids(tiles)
     return tiles
+
+
+def _focus_bboxes(
+    tokens: list[dict[str, Any]],
+    *,
+    width: int,
+    height: int,
+    conf_bp: int,
+    cluster_gap_px: int,
+) -> list[BBox]:
+    if not tokens:
+        return []
+    selected: list[BBox] = []
+    for token in tokens:
+        bbox = token.get("bbox")
+        if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+            continue
+        try:
+            conf = int(token.get("confidence_bp", 0))
+        except Exception:
+            conf = 0
+        if conf_bp and conf >= conf_bp:
+            continue
+        try:
+            bx = (int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3]))
+        except Exception:
+            continue
+        selected.append(clamp_bbox(bx, width=width, height=height))
+    if not selected:
+        return []
+    selected.sort(key=lambda b: (b[1], b[0], b[3], b[2]))
+    clusters: list[BBox] = []
+    for bbox in selected:
+        placed = False
+        for idx, cluster in enumerate(clusters):
+            if _bbox_close(cluster, bbox, gap=cluster_gap_px):
+                clusters[idx] = _bbox_union(cluster, bbox)
+                placed = True
+                break
+        if not placed:
+            clusters.append(bbox)
+    clusters.sort(key=lambda b: (b[1], b[0], b[3], b[2]))
+    return clusters
+
+
+def _bbox_close(a: BBox, b: BBox, *, gap: int) -> bool:
+    return not (a[2] + gap < b[0] or b[2] + gap < a[0] or a[3] + gap < b[1] or b[3] + gap < a[1])
+
+
+def _bbox_union(a: BBox, b: BBox) -> BBox:
+    return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+
+
+def _expand_bbox(bbox: BBox, padding_px: int, *, width: int, height: int) -> BBox:
+    x1, y1, x2, y2 = bbox
+    pad = max(0, int(padding_px))
+    return clamp_bbox((x1 - pad, y1 - pad, x2 + pad, y2 + pad), width=width, height=height)
 
 
 def _make_patch(patch_id: str, bbox: BBox, image_rgb: Image.Image) -> dict[str, Any]:

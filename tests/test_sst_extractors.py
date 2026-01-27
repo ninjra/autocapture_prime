@@ -1,5 +1,11 @@
 import unittest
 
+try:
+    from PIL import Image, ImageDraw
+except Exception:  # pragma: no cover - optional dependency guard
+    Image = None
+    ImageDraw = None
+
 from autocapture_nx.processing.sst.extract import extract_charts, extract_code_blocks, extract_spreadsheets, extract_tables
 from autocapture_nx.processing.sst.layout import assemble_layout
 
@@ -70,6 +76,33 @@ class SSTExtractorTests(unittest.TestCase):
         chart = charts[0]
         self.assertIn(chart["chart_type"], {"bar", "line", "unknown"})
         self.assertTrue(chart.get("series"))
+
+    @unittest.skipIf(Image is None, "Pillow is required for caret detection")
+    def test_code_caret_and_selection_detection(self) -> None:
+        assert Image is not None and ImageDraw is not None
+        img = Image.new("RGB", (200, 100), (180, 180, 180))
+        draw = ImageDraw.Draw(img)
+        draw.line((80, 10, 80, 70), fill=(0, 0, 0), width=1)
+        draw.rectangle((20, 20, 120, 40), fill=(50, 100, 200))
+
+        tokens = [
+            _token("t1", "SELECT", (20, 12, 70, 24)),
+            _token("t2", "FROM", (20, 32, 60, 44)),
+        ]
+        lines, _blocks = assemble_layout(tokens, line_y_threshold_px=12, block_gap_px=24, align_tolerance_px=20)
+        code_blocks = extract_code_blocks(
+            tokens=tokens,
+            text_lines=lines,
+            state_id="s1",
+            min_keywords=1,
+            image_rgb=img,
+            detect_caret=True,
+            detect_selection=True,
+        )
+        self.assertTrue(code_blocks)
+        code = code_blocks[0]
+        self.assertIsNotNone(code.get("caret"))
+        self.assertIsNotNone(code.get("selection"))
 
 
 if __name__ == "__main__":

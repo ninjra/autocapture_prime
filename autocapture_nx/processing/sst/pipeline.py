@@ -293,11 +293,21 @@ class SSTPipeline:
             frame_height=frame_height,
         )
 
+        focus_tokens: list[dict[str, Any]] | None = None
+        if self._sst_cfg.get("tile_refine_enabled") and prev_ctx and isinstance(prev_ctx.state, dict):
+            prev_tokens = prev_ctx.state.get("tokens")
+            if isinstance(prev_tokens, list):
+                focus_tokens = prev_tokens
         patches = tile_image(
             normalized.image_rgb,
             tile_max_px=int(self._sst_cfg["tile_max_px"]),
             overlap_px=int(self._sst_cfg["tile_overlap_px"]),
             add_full_frame=bool(self._sst_cfg["tile_add_full_frame"]),
+            focus_tokens=focus_tokens,
+            focus_conf_bp=int(self._sst_cfg.get("tile_refine_low_conf_bp", 0) or 0),
+            focus_padding_px=int(self._sst_cfg.get("tile_refine_padding_px", 24) or 0),
+            focus_max_patches=int(self._sst_cfg.get("tile_refine_max_patches", 0) or 0),
+            focus_cluster_gap_px=int(self._sst_cfg.get("tile_refine_cluster_gap_px", 48) or 0),
         )
         baseline_patches = patches
         stage_payload["patches"] = baseline_patches
@@ -488,6 +498,9 @@ class SSTPipeline:
             text_lines=text_lines,
             state_id="pending",
             min_keywords=int(self._sst_cfg["code_min_keywords"]),
+            image_rgb=normalized.image_rgb,
+            detect_caret=bool(self._sst_cfg.get("code_detect_caret", False)),
+            detect_selection=bool(self._sst_cfg.get("code_detect_selection", False)),
         )
         baseline_code_blocks = code_blocks
         stage_payload["code_blocks"] = baseline_code_blocks
@@ -1633,6 +1646,11 @@ def _sst_config(config: dict[str, Any]) -> dict[str, Any]:
         "tile_max_px": _int("tile_max_px", 1024),
         "tile_overlap_px": _int("tile_overlap_px", 64),
         "tile_add_full_frame": _bool("tile_add_full_frame", True),
+        "tile_refine_enabled": _bool("tile_refine_enabled", False),
+        "tile_refine_low_conf_bp": _int("tile_refine_low_conf_bp", 6500),
+        "tile_refine_padding_px": _int("tile_refine_padding_px", 24),
+        "tile_refine_max_patches": _int("tile_refine_max_patches", 12),
+        "tile_refine_cluster_gap_px": _int("tile_refine_cluster_gap_px", 48),
         "ocr_min_conf_bp": _int("ocr_min_conf_bp", 3500),
         "ocr_nms_iou_bp": _int("ocr_nms_iou_bp", 7000),
         "ocr_max_tokens": _int("ocr_max_tokens", 4000),
@@ -1647,6 +1665,8 @@ def _sst_config(config: dict[str, Any]) -> dict[str, Any]:
         "table_col_gap_px": _int("table_col_gap_px", 36),
         "sheet_header_scan_rows": _int("sheet_header_scan_rows", 2),
         "code_min_keywords": _int("code_min_keywords", 1),
+        "code_detect_caret": _bool("code_detect_caret", False),
+        "code_detect_selection": _bool("code_detect_selection", False),
         "chart_min_ticks": _int("chart_min_ticks", 2),
         "delta_bbox_shift_px": _int("delta_bbox_shift_px", 24),
         "delta_table_match_iou_bp": _int("delta_table_match_iou_bp", 3000),

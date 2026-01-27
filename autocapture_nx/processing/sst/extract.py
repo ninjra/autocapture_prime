@@ -333,6 +333,9 @@ def extract_code_blocks(
     text_lines: list[dict[str, Any]],
     state_id: str,
     min_keywords: int,
+    image_rgb: Any | None = None,
+    detect_caret: bool = False,
+    detect_selection: bool = False,
 ) -> list[dict[str, Any]]:
     if not tokens:
         return []
@@ -373,6 +376,19 @@ def extract_code_blocks(
     if language == "sql" and not _sql_balance_ok(code_text):
         diagnostics.append("sql_unbalanced")
         confidence = 4500
+    caret_payload: dict[str, Any] | None = None
+    selection_payload: dict[str, Any] | None = None
+    if image_rgb is not None and (detect_caret or detect_selection):
+        caret_bbox, selection_bbox = _detect_code_highlights(
+            image_rgb,
+            bbox,
+            detect_caret=detect_caret,
+            detect_selection=detect_selection,
+        )
+        if caret_bbox is not None:
+            caret_payload = {"bbox": caret_bbox, "confidence_bp": 6000}
+        if selection_bbox is not None:
+            selection_payload = {"bbox": selection_bbox, "confidence_bp": 5500}
     return [
         {
             "code_id": code_id,
@@ -382,12 +398,118 @@ def extract_code_blocks(
             "text": code_text,
             "lines": tuple(rendered_lines),
             "line_numbers": tuple(line_numbers),
-            "caret": None,
-            "selection": None,
+            "caret": caret_payload,
+            "selection": selection_payload,
             "confidence_bp": confidence,
             "diagnostics": tuple(diagnostics),
         }
     ]
+
+
+def _detect_code_highlights(
+    image_rgb: Any,
+    bbox: BBox,
+    *,
+    detect_caret: bool,
+    detect_selection: bool,
+) -> tuple[BBox | None, BBox | None]:
+    try:
+        from PIL import Image
+    except Exception:
+        return None, None
+    if not hasattr(image_rgb, "crop"):
+        return None, None
+    crop = image_rgb.crop(bbox)
+    if not isinstance(crop, Image.Image):
+        return None, None
+    width, height = crop.size
+    if width <= 2 or height <= 2:
+        return None, None
+    max_dim = 320
+    scale = min(1.0, max_dim / max(width, height))
+    if scale < 1.0:
+        resized = crop.resize((max(2, int(width * scale)), max(2, int(height * scale))), Image.BILINEAR)
+    else:
+        resized = crop
+    caret_box = _detect_caret_bbox(resized) if detect_caret else None
+    selection_box = _detect_selection_bbox(resized) if detect_selection else None
+    if scale < 1.0:
+        if caret_box is not None:
+            caret_box = _scale_bbox(caret_box, 1 / scale, 1 / scale)
+        if selection_box is not None:
+            selection_box = _scale_bbox(selection_box, 1 / scale, 1 / scale)
+    caret_box = _offset_bbox(caret_box, bbox) if caret_box is not None else None
+    selection_box = _offset_bbox(selection_box, bbox) if selection_box is not None else None
+    return caret_box, selection_box
+
+
+def _detect_caret_bbox(image: Any) -> BBox | None:
+    gray = image.convert("L")
+    width, height = gray.size
+    pixels = list(gray.getdata())
+    if width <= 2 or height <= 2:
+        return None
+    means: list[float] = []
+    mins: list[int] = []
+    maxs: list[int] = []
+    for x in range(width):
+        col = pixels[x::width]
+        if not col:
+            means.append(0.0)
+            mins.append(0)
+            maxs.append(0)
+            continue
+        mins.append(min(col))
+        maxs.append(max(col))
+        means.append(sum(col) / len(col))
+    best_x = None
+    best_score = 0.0
+    for x in range(1, width - 1):
+        mean = means[x]
+        if mean > 235 or mean < 20:
+            contrast = max(abs(mean - means[x - 1]), abs(mean - means[x + 1]))
+            local_range = maxs[x] - mins[x]
+            score = contrast + max(0.0, 20.0 - local_range)
+            if contrast >= 25 and score > best_score:
+                best_score = score
+                best_x = x
+    if best_x is None:
+        return None
+    return (best_x, 0, min(width, best_x + 1), height)
+
+
+def _detect_selection_bbox(image: Any) -> BBox | None:
+    rgb = image.convert("RGB")
+    width, height = rgb.size
+    pixels = list(rgb.getdata())
+    if width <= 2 or height <= 2:
+        return None
+    xs: list[int] = []
+    ys: list[int] = []
+    for idx, (r, g, b) in enumerate(pixels):
+        if b > 140 and (b - r) > 35 and (b - g) > 20:
+            y, x = divmod(idx, width)
+            xs.append(x)
+            ys.append(y)
+    if not xs:
+        return None
+    area = len(xs)
+    if area < max(12, (width * height) // 300):
+        return None
+    x1, x2 = min(xs), max(xs) + 1
+    y1, y2 = min(ys), max(ys) + 1
+    return (x1, y1, x2, y2)
+
+
+def _scale_bbox(bbox: BBox, sx: float, sy: float) -> BBox:
+    x1, y1, x2, y2 = bbox
+    return (int(x1 * sx), int(y1 * sy), int(x2 * sx), int(y2 * sy))
+
+
+def _offset_bbox(bbox: BBox, offset: BBox) -> BBox:
+    ox1, oy1, _ox2, _oy2 = offset
+    x1, y1, x2, y2 = bbox
+    return (x1 + ox1, y1 + oy1, x2 + ox1, y2 + oy1)
 
 
 def extract_charts(

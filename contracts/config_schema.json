@@ -1006,6 +1006,12 @@
             "code_min_keywords": {
               "type": "integer"
             },
+            "code_detect_caret": {
+              "type": "boolean"
+            },
+            "code_detect_selection": {
+              "type": "boolean"
+            },
             "d_boundary": {
               "type": "integer"
             },
@@ -1126,6 +1132,21 @@
             "tile_add_full_frame": {
               "type": "boolean"
             },
+            "tile_refine_cluster_gap_px": {
+              "type": "integer"
+            },
+            "tile_refine_enabled": {
+              "type": "boolean"
+            },
+            "tile_refine_low_conf_bp": {
+              "type": "integer"
+            },
+            "tile_refine_max_patches": {
+              "type": "integer"
+            },
+            "tile_refine_padding_px": {
+              "type": "integer"
+            },
             "tile_max_px": {
               "type": "integer"
             },
@@ -1147,6 +1168,11 @@
             "tile_max_px",
             "tile_overlap_px",
             "tile_add_full_frame",
+            "tile_refine_enabled",
+            "tile_refine_low_conf_bp",
+            "tile_refine_padding_px",
+            "tile_refine_max_patches",
+            "tile_refine_cluster_gap_px",
             "ocr_min_conf_bp",
             "ocr_nms_iou_bp",
             "ocr_max_tokens",
@@ -1161,6 +1187,8 @@
             "table_col_gap_px",
             "sheet_header_scan_rows",
             "code_min_keywords",
+            "code_detect_caret",
+            "code_detect_selection",
             "chart_min_ticks",
             "ui_vlm",
             "delta_bbox_shift_px",
