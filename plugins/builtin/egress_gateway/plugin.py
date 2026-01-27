@@ -5,10 +5,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+import urllib.request
+
+try:
+    import httpx
+except Exception:  # pragma: no cover - optional dependency
+    httpx = None  # type: ignore[assignment]
 
 from autocapture_nx.kernel.config import SchemaLiteValidator
 from autocapture_nx.kernel.errors import ConfigError
 
+from autocapture.plugins.policy_gate import PolicyGate
 from autocapture_nx.kernel.errors import NetworkDisabledError, PermissionError
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 
@@ -44,24 +51,53 @@ class EgressGateway(PluginBase):
             "citations_stub": payload.get("citations_stub", []),
         }
 
+    def _endpoint(self) -> tuple[str, dict[str, str], float]:
+        gateway_cfg = self.context.config.get("gateway", {}) if isinstance(self.context.config, dict) else {}
+        base_url = str(gateway_cfg.get("openai_base_url", "")).strip()
+        if not base_url:
+            raise ConfigError("gateway_base_url_missing")
+        path = str(gateway_cfg.get("egress_path", "/v1/egress")).strip() or "/v1/egress"
+        if not path.startswith("/"):
+            path = f"/{path}"
+        url = base_url.rstrip("/") + path
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        api_key = str(gateway_cfg.get("openai_api_key", "")).strip()
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        timeout_s = float(gateway_cfg.get("timeout_s", 30.0))
+        return url, headers, timeout_s
+
+    def _post_json(self, url: str, payload: dict[str, Any], headers: dict[str, str], timeout_s: float) -> tuple[int, Any]:
+        if httpx is not None:
+            resp = httpx.post(url, json=payload, headers=headers, timeout=timeout_s)  # type: ignore[union-attr]
+            try:
+                return resp.status_code, resp.json()
+            except Exception:
+                return resp.status_code, {"text": resp.text}
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            body = resp.read().decode("utf-8")
+            try:
+                return resp.getcode(), json.loads(body) if body else {}
+            except Exception:
+                return resp.getcode(), {"text": body}
+
     def send(self, payload: dict[str, Any], provider: str = "default") -> dict[str, Any]:
-        privacy = self.context.config.get("privacy", {})
+        _ = provider
+        privacy = self.context.config.get("privacy", {}) if isinstance(self.context.config, dict) else {}
         egress_cfg = privacy.get("egress", {})
-        cloud_cfg = privacy.get("cloud", {})
 
         if not egress_cfg.get("enabled", True):
             raise NetworkDisabledError("Egress is disabled by config")
-        if not cloud_cfg.get("enabled", False):
-            raise NetworkDisabledError("Cloud usage is disabled by config")
 
         sanitizer = self.context.get_capability("privacy.egress_sanitizer")
-        sanitized = payload
-        if egress_cfg.get("default_sanitize", True):
-            sanitized = sanitizer.sanitize_payload(payload, scope=provider)
-            if not sanitizer.leak_check(sanitized):
-                raise PermissionError("Egress sanitizer leak check failed")
-        elif not egress_cfg.get("allow_raw_egress", False):
-            raise PermissionError("Raw egress not allowed by policy")
+        gate = PolicyGate(self.context.config, sanitizer)
+        allow_images = bool(payload.get("allow_images", False) or payload.get("images"))
+        decision = gate.enforce(self.plugin_id, payload, allow_raw_egress=False, allow_images=allow_images)
+        if not decision.ok:
+            raise PermissionError(decision.reason)
+        sanitized = decision.sanitized_payload or payload
 
         reasoning_only = egress_cfg.get("reasoning_packet_only", True)
         if reasoning_only:
@@ -71,9 +107,14 @@ class EgressGateway(PluginBase):
             except ConfigError as exc:
                 raise PermissionError(f"Reasoning packet schema violation: {exc}") from exc
 
-        # No real network I/O in baseline; return a stub response.
-        response = {"status": "blocked_local", "payload": sanitized}
-        return response
+        url, headers, timeout_s = self._endpoint()
+        status_code, response_payload = self._post_json(url, sanitized, headers, timeout_s)
+        return {
+            "status": "ok" if 200 <= status_code < 300 else "error",
+            "status_code": status_code,
+            "payload": sanitized,
+            "response": response_payload,
+        }
 
     def detokenize(self, payload: dict[str, Any]) -> dict[str, Any]:
         sanitizer = self.context.get_capability("privacy.egress_sanitizer")

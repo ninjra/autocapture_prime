@@ -23,6 +23,9 @@
     ]
   },
   "depends_on": [],
+  "optional_deps": [
+    "pytesseract"
+  ],
   "required_capabilities": [],
   "hash_lock": {
     "manifest_sha256": "",

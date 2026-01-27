@@ -177,15 +177,15 @@ Each entry references its source file.
 - Spec placeholder file with `[MISSING_VALUE]` entries. `docs/spec/README.md:5` + `docs/spec/autocapture_nx_blueprint_2026-01-24.md`.
 
 ### B3) Stub or placeholder plugin implementations
-- Capture stub raises `NotImplementedError`. `plugins/builtin/capture_stub/plugin.py:17-18`
+- Capture stub now runs a synthetic/file-backed pipeline for testing. `plugins/builtin/capture_stub/plugin.py`
 - VLM stub labeled placeholder; requires local model files. `plugins/builtin/vlm_stub/plugin.py:1`
-- Embedder/OCR/Reranker stubs are minimal local implementations with optional deps and fixed model paths.
+- Embedder/OCR/Reranker stubs are minimal local implementations with optional deps and config-driven model paths.
   - `plugins/builtin/embedder_stub/plugin.py`
   - `plugins/builtin/ocr_stub/plugin.py`
   - `plugins/builtin/reranker_stub/plugin.py`
 
 ### B4) Stubbed behavior in non-plugin logic
-- Egress gateway returns a stub response (no real network I/O). `plugins/builtin/egress_gateway/plugin.py:74-76`
+- Egress gateway uses policy-checked HTTP requests (no stub response). `plugins/builtin/egress_gateway/plugin.py`
 - MX implementation plan explicitly permits placeholder citation overlay images. `docs/autocapture_mx_implementation_plan.md:192`
 
 ### B5) Configured stub plugin IDs
@@ -200,4 +200,3 @@ Each entry references its source file.
 - This checklist is deliberately additive and does not change any code paths.
 - For any future implementation steps, follow the "fail closed" rule (add TODOs rather than guessing commands).
 - Align all remediation work with the four pillars and update this checklist as tasks are completed.
-

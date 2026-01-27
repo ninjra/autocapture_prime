@@ -1,6 +1,8 @@
 import json
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 from autocapture_nx.kernel.config import ConfigPaths, SchemaLiteValidator, load_config
@@ -11,49 +13,86 @@ from plugins.builtin.egress_sanitizer.plugin import EgressSanitizer
 
 class EgressGatewayTests(unittest.TestCase):
     def test_reasoning_packet_schema(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = ConfigPaths(
-                default_path=Path("config") / "default.json",
-                user_path=Path(tmp) / "user.json",
-                schema_path=Path("contracts") / "config_schema.json",
-                backup_dir=Path(tmp) / "backup",
-            )
-            safe_tmp = tmp.replace("\\", "/")
-            user_override = {
-                "storage": {
-                    "data_dir": safe_tmp,
-                    "crypto": {
-                        "keyring_path": f"{safe_tmp}/keyring.json",
-                        "root_key_path": f"{safe_tmp}/root.key",
+        payloads: list[dict] = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):  # noqa: N802 - http.server uses do_* naming
+                length = int(self.headers.get("Content-Length", "0") or "0")
+                raw = self.rfile.read(length).decode("utf-8")
+                payloads.append(json.loads(raw) if raw else {})
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": True}).encode("utf-8"))
+
+            def log_message(self, _format, *_args):  # pragma: no cover - silence server logs
+                return
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                paths = ConfigPaths(
+                    default_path=Path("config") / "default.json",
+                    user_path=Path(tmp) / "user.json",
+                    schema_path=Path("contracts") / "config_schema.json",
+                    backup_dir=Path(tmp) / "backup",
+                )
+                base_url = f"http://127.0.0.1:{server.server_port}"
+                safe_tmp = tmp.replace("\\", "/")
+                user_override = {
+                    "storage": {
+                        "data_dir": safe_tmp,
+                        "crypto": {
+                            "keyring_path": f"{safe_tmp}/keyring.json",
+                            "root_key_path": f"{safe_tmp}/root.key",
+                        },
                     },
-                },
-                "privacy": {
-                    "cloud": {"enabled": True}
-                },
-            }
-            with open(paths.user_path, "w", encoding="utf-8") as handle:
-                json.dump(user_override, handle)
-            config = load_config(paths, safe_mode=False)
-            sanitizer = EgressSanitizer("sanitizer", PluginContext(config=config, get_capability=lambda _k: (_ for _ in ()).throw(Exception()), logger=lambda _m: None))
+                    "gateway": {
+                        "openai_base_url": base_url,
+                        "egress_path": "/v1/egress",
+                    },
+                    "plugins": {
+                        "permissions": {"network_allowed_plugin_ids": ["builtin.egress.gateway"]},
+                    },
+                    "privacy": {
+                        "cloud": {"enabled": True},
+                        "egress": {"default_sanitize": True},
+                    },
+                }
+                with open(paths.user_path, "w", encoding="utf-8") as handle:
+                    json.dump(user_override, handle)
+                config = load_config(paths, safe_mode=False)
+                sanitizer = EgressSanitizer("sanitizer", PluginContext(config=config, get_capability=lambda _k: (_ for _ in ()).throw(Exception()), logger=lambda _m: None))
 
-            def get_capability(name: str):
-                if name == "privacy.egress_sanitizer":
-                    return sanitizer
-                raise KeyError(name)
+                def get_capability(name: str):
+                    if name == "privacy.egress_sanitizer":
+                        return sanitizer
+                    raise KeyError(name)
 
-            gateway = EgressGateway("gateway", PluginContext(config=config, get_capability=get_capability, logger=lambda _m: None))
-            payload = {
-                "query": "Email john@example.com about the report",
-                "facts": [{"type": "event", "ts_utc": "2025-01-01T00:00:00Z", "fields": {"owner": "John Doe"}}],
-                "time_window": {"start": "2025-01-01T00:00:00Z", "end": "2025-01-02T00:00:00Z"},
-            }
-            response = gateway.send(payload)
-            packet = response["payload"]
-            schema_path = Path("contracts") / "reasoning_packet.schema.json"
-            with open(schema_path, "r", encoding="utf-8") as handle:
-                schema = json.load(handle)
-            SchemaLiteValidator().validate(schema, packet)
-            self.assertNotIn("john@example.com", packet["query_sanitized"])
+                gateway = EgressGateway(
+                    "builtin.egress.gateway",
+                    PluginContext(config=config, get_capability=get_capability, logger=lambda _m: None),
+                )
+                payload = {
+                    "query": "Email john@example.com about the report",
+                    "facts": [{"type": "event", "ts_utc": "2025-01-01T00:00:00Z", "fields": {"owner": "John Doe"}}],
+                    "time_window": {"start": "2025-01-01T00:00:00Z", "end": "2025-01-02T00:00:00Z"},
+                }
+                response = gateway.send(payload)
+                packet = response["payload"]
+                schema_path = Path("contracts") / "reasoning_packet.schema.json"
+                with open(schema_path, "r", encoding="utf-8") as handle:
+                    schema = json.load(handle)
+                SchemaLiteValidator().validate(schema, packet)
+                self.assertNotIn("john@example.com", packet["query_sanitized"])
+                self.assertEqual(response.get("status"), "ok")
+                self.assertTrue(payloads)
+                self.assertIn("query_sanitized", payloads[0])
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
 
 
 if __name__ == "__main__":

@@ -10,10 +10,19 @@ from autocapture_nx.windows.win_capture import Frame
 class _EventBuilder:
     def __init__(self) -> None:
         self.events: list[str] = []
+        self.ledger_events: list[str] = []
 
     def journal_event(self, event_type: str, _payload: dict, **_kwargs) -> str:
         self.events.append(event_type)
         return "event"
+
+    def ledger_entry(self, stage: str, inputs: list[str], outputs: list[str], *, payload: dict | None = None, **_kwargs) -> str:
+        _ = (inputs, outputs)
+        if isinstance(payload, dict):
+            self.ledger_events.append(payload.get("event", stage))
+        else:
+            self.ledger_events.append(stage)
+        return "hash"
 
 
 class _Backpressure:
@@ -63,6 +72,7 @@ class CaptureDiskPressureTests(unittest.TestCase):
                     pipeline._grab_loop()
 
         self.assertIn("capture.degrade", builder.events)
+        self.assertIn("capture.degrade", builder.ledger_events)
 
 
 if __name__ == "__main__":

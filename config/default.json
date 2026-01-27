@@ -46,6 +46,14 @@
       "resolution": "native",
       "segment_seconds": 60
     },
+    "stub": {
+      "frames_dir": "",
+      "loop": false,
+      "max_frames": 0,
+      "frame_width": 1280,
+      "frame_height": 720,
+      "jpeg_quality": 90
+    },
     "window_metadata": {
       "enabled": true,
       "sample_hz": 5
@@ -61,7 +69,10 @@
     }
   },
   "gateway": {
-    "openai_base_url": ""
+    "openai_base_url": "",
+    "openai_api_key": "",
+    "egress_path": "/v1/egress",
+    "timeout_s": 30
   },
   "indexing": {
     "embedder_model": null,
@@ -113,7 +124,8 @@
   "performance": {
     "ingestion_mb_s": 50,
     "query_latency_ms": 2000,
-    "startup_ms": 500
+    "startup_ms": 500,
+    "memory_ceiling_mb": 512
   },
   "retrieval": {
     "limit": 25,

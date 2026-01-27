@@ -347,9 +347,13 @@ class CapturePipeline:
         )
         self._backend_used = backend_used
         if backend_used != backend:
-            self._event_builder.journal_event(
+            backend_payload: dict[str, Any] = {"requested": backend, "used": backend_used}
+            self._event_builder.journal_event("capture.backend_fallback", backend_payload)
+            self._event_builder.ledger_entry(
                 "capture.backend_fallback",
-                {"requested": backend, "used": backend_used},
+                inputs=[],
+                outputs=[],
+                payload={"event": "capture.backend_fallback", **backend_payload},
             )
 
         for frame in frame_iter:
@@ -365,12 +369,18 @@ class CapturePipeline:
                 with self._drops_lock:
                     self._drops_total += dropped
                     self._drops_segment += dropped
-                payload = {
+                drop_payload: dict[str, Any] = {
                     "dropped_frames": int(dropped),
                     "queue_depth": int(frame_queue.qsize()),
                     "policy": "drop_oldest",
                 }
-                self._event_builder.journal_event("capture.drop", payload)
+                self._event_builder.journal_event("capture.drop", drop_payload)
+                self._event_builder.ledger_entry(
+                    "capture.drop",
+                    inputs=[],
+                    outputs=[],
+                    payload={"event": "capture.drop", **drop_payload},
+                )
 
             with self._drops_lock:
                 self._queue_depth_max = max(self._queue_depth_max, frame_queue.qsize())
@@ -380,14 +390,20 @@ class CapturePipeline:
                 free_gb = _free_gb(self._config.get("storage", {}).get("data_dir", "."))
                 level, changed = disk_pressure.evaluate(free_gb)
                 if changed:
-                    payload = {
+                    pressure_payload: dict[str, Any] = {
                         "level": level,
                         "free_gb": int(free_gb),
                         "warn_gb": int(warn_free),
                         "soft_gb": int(soft_free),
                         "critical_gb": int(critical_free),
                     }
-                    self._event_builder.journal_event("disk.pressure", payload)
+                    self._event_builder.journal_event("disk.pressure", pressure_payload)
+                    self._event_builder.ledger_entry(
+                        "disk.pressure",
+                        inputs=[],
+                        outputs=[],
+                        payload={"event": "disk.pressure", **pressure_payload},
+                    )
                 if level == "soft":
                     degraded = True
                     fps_target = max(int(backpressure_cfg.get("min_fps", 5)), fps_target // 2)
@@ -395,18 +411,29 @@ class CapturePipeline:
                     with self._rate_lock:
                         self._fps_target = fps_target
                         self._bitrate_kbps = bitrate_kbps
-                    self._event_builder.journal_event(
+                    degrade_payload: dict[str, Any] = {
+                        "fps_target": int(fps_target),
+                        "bitrate_kbps": int(bitrate_kbps),
+                        "level": level,
+                    }
+                    self._event_builder.journal_event("capture.degrade", degrade_payload)
+                    self._event_builder.ledger_entry(
                         "capture.degrade",
-                        {
-                            "fps_target": int(fps_target),
-                            "bitrate_kbps": int(bitrate_kbps),
-                            "level": level,
-                        },
+                        inputs=[],
+                        outputs=[],
+                        payload={"event": "capture.degrade", **degrade_payload},
                     )
                 elif level == "critical":
-                    self._event_builder.journal_event(
+                    critical_payload: dict[str, Any] = {
+                        "free_gb": int(free_gb),
+                        "threshold_gb": int(critical_free),
+                    }
+                    self._event_builder.journal_event("disk.critical", critical_payload)
+                    self._event_builder.ledger_entry(
                         "disk.critical",
-                        {"free_gb": int(free_gb), "threshold_gb": int(critical_free)},
+                        inputs=[],
+                        outputs=[],
+                        payload={"event": "disk.critical", **critical_payload},
                     )
                     self._stop.set()
                     break
@@ -417,6 +444,18 @@ class CapturePipeline:
                     with self._rate_lock:
                         self._fps_target = fps_target
                         self._bitrate_kbps = bitrate_kbps
+                    restore_payload: dict[str, Any] = {
+                        "fps_target": int(fps_target),
+                        "bitrate_kbps": int(bitrate_kbps),
+                        "level": level,
+                    }
+                    self._event_builder.journal_event("capture.restore", restore_payload)
+                    self._event_builder.ledger_entry(
+                        "capture.restore",
+                        inputs=[],
+                        outputs=[],
+                        payload={"event": "capture.restore", **restore_payload},
+                    )
                 last_disk_check = now
 
             queue_depth = frame_queue.qsize()
@@ -454,9 +493,13 @@ class CapturePipeline:
         ffmpeg_path_cfg = str(capture_cfg.get("ffmpeg_path", "")).strip()
         resolved_container, ffmpeg_path = _resolve_container(container_type, ffmpeg_path_cfg)
         if resolved_container != container_type:
-            self._event_builder.journal_event(
+            container_payload: dict[str, Any] = {"requested": container_type, "used": resolved_container}
+            self._event_builder.journal_event("capture.container_fallback", container_payload)
+            self._event_builder.ledger_entry(
                 "capture.container_fallback",
-                {"requested": container_type, "used": resolved_container},
+                inputs=[],
+                outputs=[],
+                payload={"event": "capture.container_fallback", **container_payload},
             )
         container_type = resolved_container
         with self._rate_lock:

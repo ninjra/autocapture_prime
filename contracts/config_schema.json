@@ -195,6 +195,38 @@
           ],
           "type": "object"
         },
+        "stub": {
+          "additionalProperties": false,
+          "properties": {
+            "frames_dir": {
+              "type": "string"
+            },
+            "loop": {
+              "type": "boolean"
+            },
+            "max_frames": {
+              "type": "integer"
+            },
+            "frame_width": {
+              "type": "integer"
+            },
+            "frame_height": {
+              "type": "integer"
+            },
+            "jpeg_quality": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frames_dir",
+            "loop",
+            "max_frames",
+            "frame_width",
+            "frame_height",
+            "jpeg_quality"
+          ],
+          "type": "object"
+        },
         "window_metadata": {
           "additionalProperties": false,
           "properties": {
@@ -215,6 +247,7 @@
       "required": [
         "video",
         "audio",
+        "stub",
         "window_metadata",
         "input_tracking",
         "cursor"
@@ -264,6 +297,15 @@
       "properties": {
         "openai_base_url": {
           "type": "string"
+        },
+        "openai_api_key": {
+          "type": "string"
+        },
+        "egress_path": {
+          "type": "string"
+        },
+        "timeout_s": {
+          "type": "number"
         }
       },
       "type": "object"
@@ -371,12 +413,16 @@
         },
         "startup_ms": {
           "type": "integer"
+        },
+        "memory_ceiling_mb": {
+          "type": "integer"
         }
       },
       "required": [
         "startup_ms",
         "query_latency_ms",
-        "ingestion_mb_s"
+        "ingestion_mb_s",
+        "memory_ceiling_mb"
       ],
       "type": "object"
     },

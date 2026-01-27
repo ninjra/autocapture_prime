@@ -12,8 +12,8 @@
   ],
   "permissions": {
     "filesystem": "readwrite",
-    "gpu": true,
-    "raw_input": true,
+    "gpu": false,
+    "raw_input": false,
     "network": false
   },
   "compat": {
@@ -22,8 +22,21 @@
       1
     ]
   },
-  "depends_on": [],
-  "required_capabilities": [],
+  "depends_on": [
+    "builtin.journal.basic",
+    "builtin.ledger.basic",
+    "builtin.anchor.basic",
+    "builtin.backpressure.basic"
+  ],
+  "required_capabilities": [
+    "storage.media",
+    "storage.metadata",
+    "event.builder",
+    "capture.backpressure",
+    "observability.logger",
+    "window.metadata",
+    "tracking.input"
+  ],
   "hash_lock": {
     "manifest_sha256": "",
     "artifact_sha256": ""

@@ -20,10 +20,7 @@ dependencies = [
   "pynput>=1.7.6",
   "sounddevice>=0.4.6",
   "PyYAML>=6.0.1",
-  "PyPDF2>=3.0.0",
-  "pytesseract>=0.3.10",
-  "ruff>=0.6.0",
-  "mypy>=1.8.0"
+  "PyPDF2>=3.0.0"
 ]
 
 [project.scripts]
@@ -31,6 +28,7 @@ autocapture = "autocapture_nx.cli:main"
 
 [project.optional-dependencies]
 sqlcipher = ["pysqlcipher3-binary>=1.0.4"]
+ocr = ["pytesseract>=0.3.10"]
 embeddings = [
   "sentence-transformers>=2.2.2",
   "torch>=2.1.0"
@@ -38,6 +36,11 @@ embeddings = [
 vision = [
   "transformers>=4.38.0",
   "torch>=2.1.0"
+]
+dev = [
+  "ruff>=0.6.0",
+  "mypy>=1.8.0",
+  "pip-audit>=2.7.0"
 ]
 
 [tool.setuptools]
@@ -73,6 +76,7 @@ packages = [
   "autocapture_nx.processing.sst",
   "autocapture_nx.windows",
   "plugins",
+  "plugins.builtin",
 ]
 
 [tool.setuptools.package-data]

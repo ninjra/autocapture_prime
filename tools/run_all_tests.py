@@ -27,6 +27,7 @@ def _commands(py: str) -> Iterable[list[str]]:
         [py, "tools/gate_perf.py"],
         [py, "tools/gate_security.py"],
         [py, "tools/gate_static.py"],
+        [py, "tools/gate_vuln.py"],
         [py, "tools/gate_doctor.py"],
         [py, "-m", "autocapture_nx", "doctor"],
         [py, "-m", "autocapture_nx", "--safe-mode", "doctor"],
@@ -97,7 +98,7 @@ def _module_exists(python_exe: str, module: str) -> bool:
 
 def _ensure_tooling(repo_root: Path, log_path: Path) -> str | None:
     system_py = sys.executable
-    if _module_exists(system_py, "ruff") and _module_exists(system_py, "mypy"):
+    if _module_exists(system_py, "ruff") and _module_exists(system_py, "mypy") and _module_exists(system_py, "pip_audit"):
         return None
     tools_venv = repo_root / ".dev" / "tools_venv"
     tool_python = tools_venv / "bin" / "python"
@@ -112,7 +113,7 @@ def _ensure_tooling(repo_root: Path, log_path: Path) -> str | None:
         if candidate.exists():
             wheelhouse = str(candidate)
     allow_network = os.environ.get("AUTO_CAPTURE_ALLOW_NETWORK", "1")
-    cmd = [str(tool_python), "-m", "pip", "install", "ruff", "mypy"]
+    cmd = [str(tool_python), "-m", "pip", "install", "ruff", "mypy", "pip-audit"]
     if wheelhouse:
         cmd.extend(["--no-index", "--find-links", wheelhouse])
     elif allow_network != "1":

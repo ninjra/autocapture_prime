@@ -318,6 +318,18 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "runtime.timezone",
         "plugins.capabilities.time.intent_parser.preferred",
     ],
+    "builtin.capture.stub": [
+        "capture.stub.frames_dir",
+        "capture.stub.loop",
+        "capture.stub.max_frames",
+        "capture.stub.frame_width",
+        "capture.stub.frame_height",
+        "capture.stub.jpeg_quality",
+        "capture.video.fps_target",
+        "capture.video.container",
+        "capture.video.encoder",
+        "capture.video.segment_seconds",
+    ],
     "builtin.vlm.stub": [
         "models.vlm_path",
         "processing.idle.extractors.vlm",

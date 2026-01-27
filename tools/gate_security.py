@@ -13,7 +13,9 @@ def main() -> int:
         "unittest",
         "tests/test_network_guard.py",
         "tests/test_plugin_network_block.py",
+        "tests/test_encrypted_store_fail_loud.py",
         "tests/test_sanitizer_no_raw_pii.py",
+        "tests/test_policy_gate.py",
         "tests/test_egress_gateway.py",
         "-q",
     ]

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-01-27T21:02:42.906331+00:00",
+  "generated_at": "2026-01-27T22:13:36.378107+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "5cc1c94085943e29dbfd9732be2e9bd938b716239ae0fb6be03532b5bdde9a6a",
@@ -18,8 +18,8 @@
       "manifest_sha256": "60ecb2135011c82cbc1f17b70e804d3a9be67d17dcc52d624492c1bef8401e2e"
     },
     "builtin.capture.stub": {
-      "artifact_sha256": "44590724a49c79929ee4573c54ea957eae83eb7d20c56948429107da5ef5f212",
-      "manifest_sha256": "2aeb3deca5cc39d2a3b70b3be0baac121f32b2dde31eabf8d93e5c26ab286007"
+      "artifact_sha256": "c23fb2fa65b904c0d20e4f6d724c3b9b05a11f626c775af39e21825f16d1ea2d",
+      "manifest_sha256": "d8332405a92e1397a8999d2219ad20c9acc4c4dfe2c1bdce4b0db1104e0c1cbc"
     },
     "builtin.capture.windows": {
       "artifact_sha256": "e5adbf73f7bfed42bfe7d98f9b82673013a88a89615a92f98c09e5fdb23d26f6",
@@ -42,7 +42,7 @@
       "manifest_sha256": "4b2ccfdfcc943a292a7315e8b3b65c979258687de0c7af4133ca8ca94de0c467"
     },
     "builtin.egress.gateway": {
-      "artifact_sha256": "3034a7c2ebe36946caaecf474d79589fe09a5794b9d5017793300b3cedac5cd7",
+      "artifact_sha256": "26ee4bf8f699b9c97d50272f90793114c656aa118d7f1ccbe6ea70bbe8e40dd0",
       "manifest_sha256": "bbe4a544adc24a619919f77879969ed82cc081ac4b8de9b9c4582f2d9ccddea2"
     },
     "builtin.embedder.stub": {
@@ -70,8 +70,8 @@
       "manifest_sha256": "e834b91caf0fe7a6086c002bc5ae31d8e71aa2816d9c8f279d8a74956682c705"
     },
     "builtin.ocr.stub": {
-      "artifact_sha256": "beb956ab3ab2fa7de65ee6681ba739b1dffa326c93dd99b1b2cf0b8ccf5dcefe",
-      "manifest_sha256": "498ddedde9d0516fabde6384feda515b6e6f64dabebe766e85516c54d33647ed"
+      "artifact_sha256": "5b52a56f77591252168aba8a611474f4924f763acd3f52f38d7e33e5c75986df",
+      "manifest_sha256": "7e4fe3309afbd42b1ce179569fd7ff85831d12fec07dd6998b3d4b4c264c5e20"
     },
     "builtin.privacy.egress_sanitizer": {
       "artifact_sha256": "23aefe4626f42d5087291e474c034de845a04bcc53fb8cb805d828ea07190d36",
