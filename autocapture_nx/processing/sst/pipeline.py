@@ -59,6 +59,7 @@ class _PrevContext:
 
 _STAGE_NAMES: tuple[str, ...] = (
     "ingest.frame",
+    "temporal.segment",
     "preprocess.normalize",
     "preprocess.tile",
     "ocr.onnx",
@@ -156,6 +157,56 @@ class SSTPipeline:
             diff_threshold_bp=int(self._sst_cfg["diff_threshold_bp"]),
             downscale_px=int(self._sst_cfg["segment_downscale_px"]),
         )
+
+        seg_payload = {
+            "run_id": run_id,
+            "record_id": record_id,
+            "ts_ms": ts_ms,
+            "phash": normalized.phash,
+            "prev_phash": prev_phash,
+            "prev_downscaled": prev_downscaled,
+            "image_rgb": normalized.image_rgb,
+            "d_stable": int(self._sst_cfg["d_stable"]),
+            "d_boundary": int(self._sst_cfg["d_boundary"]),
+            "diff_threshold_bp": int(self._sst_cfg["diff_threshold_bp"]),
+            "segment_downscale_px": int(self._sst_cfg["segment_downscale_px"]),
+            "boundary": decision.boundary,
+            "boundary_reason": decision.reason,
+            "phash_distance": decision.phash_distance,
+            "diff_score_bp": decision.diff_score_bp,
+        }
+        frame_width = int(normalized.width)
+        frame_height = int(normalized.height)
+        frame_bbox = (0, 0, frame_width, frame_height)
+        self._run_stage_hooks(
+            stage="temporal.segment",
+            payload=seg_payload,
+            diagnostics=diagnostics,
+            run_id=run_id,
+            record_id=record_id,
+            frame_bbox=frame_bbox,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        override = seg_payload.get("boundary_override")
+        if override is not False and isinstance(seg_payload.get("boundary"), bool):
+            phash_distance = decision.phash_distance
+            diff_score_bp = decision.diff_score_bp
+            raw_phash = seg_payload.get("phash_distance")
+            raw_diff = seg_payload.get("diff_score_bp")
+            if isinstance(raw_phash, int):
+                phash_distance = raw_phash
+            if isinstance(raw_diff, int):
+                diff_score_bp = raw_diff
+            decision = SegmentDecision(
+                bool(seg_payload.get("boundary")),
+                str(seg_payload.get("boundary_reason") or decision.reason),
+                phash_distance,
+                diff_score_bp,
+            )
+        downscaled_value = seg_payload.get("downscaled")
+        if isinstance(downscaled_value, tuple):
+            downscaled = downscaled_value
 
         derived_records = 0
         indexed_docs = 0
@@ -270,7 +321,15 @@ class SSTPipeline:
             "record": record,
             "window_title": window_title,
             "frame_bytes": frame_bytes,
+            "allow_ocr": bool(allow_ocr),
+            "allow_vlm": bool(allow_vlm),
         }
+        if prev_ctx:
+            stage_payload["prev_record_id"] = prev_ctx.record_id
+        if prev_ctx and isinstance(prev_ctx.state, dict):
+            stage_payload["prev_state"] = prev_ctx.state
+        if prev_ctx and isinstance(prev_ctx.cursor, dict):
+            stage_payload["cursor_prev"] = prev_ctx.cursor
 
         self._run_stage_hooks(
             stage="ingest.frame",
@@ -326,7 +385,7 @@ class SSTPipeline:
             diagnostics.append({"kind": "sst.stage_hook_invalid_patches", "stage": "preprocess.tile"})
             patches = baseline_patches
 
-        tokens, ocr_diag = run_ocr_tokens(
+        tokens, ocr_diag, raw_tokens = run_ocr_tokens(
             patches=patches,
             ocr_capability=self._ocr,
             frame_width=frame_width,
@@ -348,7 +407,17 @@ class SSTPipeline:
             stage="ocr.onnx",
             provider_id_hint="ocr.engine",
         )
+        raw_tokens = _sanitize_tokens(
+            raw_tokens,
+            frame_width=frame_width,
+            frame_height=frame_height,
+            diagnostics=diagnostics,
+            stage="ocr.onnx.raw",
+            provider_id_hint="ocr.engine",
+        )
+        tokens_raw = _merge_token_lists(raw_tokens, tokens)
         stage_payload["tokens"] = tokens
+        stage_payload["tokens_raw"] = tokens_raw
         self._run_stage_hooks(
             stage="ocr.onnx",
             payload=stage_payload,
@@ -368,17 +437,29 @@ class SSTPipeline:
             stage="ocr.onnx",
             provider_id_hint="stage_hook",
         )
-        tokens.extend(
-            _sanitize_tokens(
-                self._vlm_tokens(frame_width, frame_height, frame_bytes, allow_vlm, should_abort, deadline_ts),
+        raw_payload = stage_payload.get("tokens_raw", tokens_raw)
+        if isinstance(raw_payload, list):
+            tokens_raw = _sanitize_tokens(
+                raw_payload,
                 frame_width=frame_width,
                 frame_height=frame_height,
                 diagnostics=diagnostics,
-                stage="vision.vlm",
-                provider_id_hint="vision.extractor",
+                stage="ocr.onnx.raw",
+                provider_id_hint="stage_hook",
             )
+            stage_payload["tokens_raw"] = tokens_raw
+        vlm_tokens = _sanitize_tokens(
+            self._vlm_tokens(frame_width, frame_height, frame_bytes, allow_vlm, should_abort, deadline_ts),
+            frame_width=frame_width,
+            frame_height=frame_height,
+            diagnostics=diagnostics,
+            stage="vision.vlm",
+            provider_id_hint="vision.extractor",
         )
+        tokens.extend(vlm_tokens)
+        tokens_raw = _merge_token_lists(tokens_raw, vlm_tokens)
         stage_payload["tokens"] = tokens
+        stage_payload["tokens_raw"] = tokens_raw
         self._run_stage_hooks(
             stage="vision.vlm",
             payload=stage_payload,
@@ -400,14 +481,18 @@ class SSTPipeline:
         )
         tokens = _stable_tokens(tokens)
         stage_payload["tokens"] = tokens
+        tokens_raw = _merge_token_lists(tokens_raw, tokens)
+        stage_payload["tokens_raw"] = tokens_raw
         ocr_tokens = len(tokens)
 
+        layout_tokens = _layout_tokens(tokens)
         text_lines, text_blocks = assemble_layout(
-            tokens,
+            layout_tokens,
             line_y_threshold_px=int(self._sst_cfg["layout_line_y_px"]),
             block_gap_px=int(self._sst_cfg["layout_block_gap_px"]),
             align_tolerance_px=int(self._sst_cfg["layout_align_tol_px"]),
         )
+        stage_payload["tokens"] = layout_tokens
         stage_payload["text_lines"] = text_lines
         stage_payload["text_blocks"] = text_blocks
         self._run_stage_hooks(
@@ -422,7 +507,7 @@ class SSTPipeline:
         )
         tokens = _tokens_from_payload(
             stage_payload,
-            fallback=tokens,
+            fallback=layout_tokens,
             frame_width=frame_width,
             frame_height=frame_height,
             diagnostics=diagnostics,
@@ -430,17 +515,21 @@ class SSTPipeline:
             provider_id_hint="stage_hook",
         )
         tokens = _stable_tokens(tokens)
+        layout_tokens = _layout_tokens(tokens)
         # Re-run layout after hooks so token line/block ids stay coherent.
         text_lines, text_blocks = assemble_layout(
-            tokens,
+            layout_tokens,
             line_y_threshold_px=int(self._sst_cfg["layout_line_y_px"]),
             block_gap_px=int(self._sst_cfg["layout_block_gap_px"]),
             align_tolerance_px=int(self._sst_cfg["layout_align_tol_px"]),
         )
-        stage_payload["tokens"] = tokens
+        stage_payload["tokens"] = layout_tokens
         stage_payload["text_lines"] = text_lines
         stage_payload["text_blocks"] = text_blocks
-        ocr_tokens = len(tokens)
+        ocr_tokens = len(layout_tokens)
+        tokens = layout_tokens
+        tokens_raw = _merge_token_lists(tokens_raw, tokens)
+        stage_payload["tokens_raw"] = tokens_raw
 
         tables = extract_tables(
             tokens=tokens,
@@ -598,6 +687,7 @@ class SSTPipeline:
             width=frame_width,
             height=frame_height,
             tokens=tokens,
+            tokens_raw=tokens_raw,
             element_graph=element_graph,
             text_lines=text_lines,
             text_blocks=text_blocks,
@@ -779,10 +869,35 @@ class SSTPipeline:
             frame_width=frame_width,
             frame_height=frame_height,
         )
+        persisted = stage_payload.get("persisted") if isinstance(stage_payload.get("persisted"), dict) else None
         extra_docs = _collect_extra_docs(stage_payload, diagnostics=diagnostics, stage="persist.bundle", fallback=extra_docs)
         extra_docs, extra_redactions = _redact_extra_docs(extra_docs, enabled=bool(self._sst_cfg["redact_enabled"]))
         if extra_redactions:
             diagnostics.append({"kind": "sst.extra_doc_redactions", "redactions": extra_redactions})
+
+        if persisted and persisted.get("handled"):
+            derived_records = int(persisted.get("derived_records", 0))
+            indexed_docs = int(persisted.get("indexed_docs", 0))
+            derived_ids = tuple(persisted.get("derived_ids", ()) or ())
+            diagnostics.append(
+                {
+                    "kind": "sst.persist",
+                    "derived_records": derived_records,
+                    "indexed_docs": indexed_docs,
+                    "boundary": decision.boundary,
+                    "extra_docs": len(extra_docs),
+                    "plugin": "persist.bundle",
+                }
+            )
+            return _HeavyResult(
+                derived_records,
+                indexed_docs,
+                ocr_tokens,
+                tuple(diagnostics),
+                state,
+                cursor,
+                derived_ids,
+            )
 
         persist = self._ensure_persistence()
         stats = persist.persist_state_bundle(
@@ -817,9 +932,9 @@ class SSTPipeline:
 
     def _unwrap_target(self, cap: Any) -> Any:
         target = cap
-        if hasattr(target, "target"):
+        if getattr(type(target), "target", None) is not None:
             try:
-                target = getattr(target, "target")
+                target = target.target
             except Exception:
                 return cap
         return target
@@ -925,6 +1040,28 @@ class SSTPipeline:
                     }
                 )
                 continue
+            metrics = result.pop("metrics", None)
+            if isinstance(metrics, dict) and metrics:
+                diagnostics.append(
+                    {
+                        "kind": "sst.stage_hook_metrics",
+                        "stage": stage,
+                        "provider_id": provider_id,
+                        "metrics": metrics,
+                    }
+                )
+            diag_items = result.pop("diagnostics", None)
+            if isinstance(diag_items, list):
+                for item in diag_items:
+                    if isinstance(item, dict):
+                        diagnostics.append(
+                            {
+                                "kind": "sst.stage_hook_diag",
+                                "stage": stage,
+                                "provider_id": provider_id,
+                                "detail": item,
+                            }
+                        )
             prepared = _prepare_stage_result(
                 stage=stage,
                 result=result,
@@ -1185,7 +1322,7 @@ def _prepare_stage_result(
     if "tokens" in out:
         tokens_raw = out.get("tokens")
         if isinstance(tokens_raw, list):
-            out["tokens"] = _sanitize_tokens(
+            sanitized_tokens = _sanitize_tokens(
                 tokens_raw,
                 frame_width=frame_width,
                 frame_height=frame_height,
@@ -1193,6 +1330,9 @@ def _prepare_stage_result(
                 stage=stage,
                 provider_id_hint=provider_id,
             )
+            out["tokens"] = sanitized_tokens
+            if "tokens_raw" not in out:
+                out["tokens_raw"] = list(sanitized_tokens)
         else:
             diagnostics.append(
                 {
@@ -1237,9 +1377,16 @@ def _filter_canonical_keys(
     provider_id: str,
     diagnostics: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    raw_allow = {
+        "preprocess.normalize": {"image_rgb"},
+        "preprocess.tile": {"patches"},
+    }.get(stage, set())
     out: dict[str, Any] = {}
     for key, value in result.items():
         key_str = str(key)
+        if key_str in raw_allow:
+            out[key_str] = value
+            continue
         try:
             canonical_value, dropped = _canonicalize_value(value)
         except CanonicalJSONError as exc:
@@ -1322,6 +1469,8 @@ def _sanitize_tokens(
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     dropped = 0
+    invalid_text = 0
+    invalid_bbox = 0
     provider_default = provider_id_hint or "stage_hook"
     for idx, token in enumerate(tokens):
         if not isinstance(token, dict):
@@ -1329,14 +1478,17 @@ def _sanitize_tokens(
             continue
         text_raw = str(token.get("text", ""))
         norm = norm_text(str(token.get("norm_text", text_raw)))
-        if not norm:
-            dropped += 1
-            continue
         bbox_raw = token.get("bbox")
         bbox = _coerce_bbox(bbox_raw, frame_width=frame_width, frame_height=frame_height)
+        flags_raw = token.get("flags", {})
+        flags: dict[str, Any] = dict(flags_raw) if isinstance(flags_raw, dict) else {}
+        if not norm:
+            invalid_text += 1
+            flags["invalid_text"] = True
         if bbox is None:
-            dropped += 1
-            continue
+            invalid_bbox += 1
+            flags["bbox_invalid"] = True
+            bbox = (0, 0, 0, 0)
         provider_id = str(token.get("provider_id") or provider_default)
         patch_id = str(token.get("patch_id") or "full_frame")
         confidence_bp = _coerce_bp(token.get("confidence_bp", token.get("confidence", 0)))
@@ -1353,12 +1505,8 @@ def _sanitize_tokens(
             except Exception:
                 digest = hash_canonical({"text": norm, "provider_id": provider_id})[:12]
             token_id = encode_record_id_component(f"hook-{provider_id}-{digest}")
-        flags_raw = token.get("flags", {})
-        monospace_likely = False
-        is_number = False
-        if isinstance(flags_raw, dict):
-            monospace_likely = bool(flags_raw.get("monospace_likely", False))
-            is_number = bool(flags_raw.get("is_number", False))
+        monospace_likely = bool(flags.get("monospace_likely", False))
+        is_number = bool(flags.get("is_number", False))
         source = str(token.get("source") or "stage_hook")
         next_token: dict[str, Any] = {
             "token_id": token_id,
@@ -1370,6 +1518,9 @@ def _sanitize_tokens(
             "flags": {
                 "monospace_likely": monospace_likely,
                 "is_number": is_number,
+                "invalid_text": bool(flags.get("invalid_text", False)),
+                "bbox_invalid": bool(flags.get("bbox_invalid", False)),
+                "low_confidence": bool(flags.get("low_confidence", False)),
             },
             "provider_id": provider_id,
             "patch_id": patch_id,
@@ -1389,6 +1540,16 @@ def _sanitize_tokens(
                 "provider_id": provider_id_hint,
                 "dropped": dropped,
                 "kept": len(out),
+            }
+        )
+    if invalid_text or invalid_bbox:
+        diagnostics.append(
+            {
+                "kind": "sst.stage_hook_tokens_invalid",
+                "stage": stage,
+                "provider_id": provider_id_hint,
+                "invalid_text": invalid_text,
+                "invalid_bbox": invalid_bbox,
             }
         )
     return out
@@ -1632,6 +1793,42 @@ def _sst_config(config: dict[str, Any]) -> dict[str, Any]:
     stages = set(_STAGE_NAMES) | {str(stage) for stage in stage_cfg.keys()}
     stage_policies = {stage: _stage_policy(stage) for stage in sorted(stages)}
 
+    ui_parse_cfg = sst.get("ui_parse", {}) if isinstance(sst.get("ui_parse", {}), dict) else {}
+    ui_parse = {
+        "enabled": bool(ui_parse_cfg.get("enabled", True)),
+        "mode": str(ui_parse_cfg.get("mode", "detector")),
+        "max_providers": int(ui_parse_cfg.get("max_providers", 1) or 0),
+        "fallback_detector": bool(ui_parse_cfg.get("fallback_detector", True)),
+    }
+
+    cursor_cfg = sst.get("cursor_detect", {}) if isinstance(sst.get("cursor_detect", {}), dict) else {}
+    scales = cursor_cfg.get("scales", [0.75, 1.0, 1.25])
+    if not isinstance(scales, (list, tuple)):
+        scales = [1.0]
+
+    def _float_bp(value: Any, default: float) -> int:
+        try:
+            val = float(value)
+        except Exception:
+            val = float(default)
+        if val > 1.5:
+            return int(round(val))
+        return int(round(val * 10000))
+
+    cursor_detect = {
+        "enabled": bool(cursor_cfg.get("enabled", False)),
+        "threshold_bp": _float_bp(cursor_cfg.get("threshold", 0.65), 0.65),
+        "stride_px": int(cursor_cfg.get("stride_px", 4) or 0),
+        "downscale_bp": _float_bp(cursor_cfg.get("downscale", 0.5), 0.5),
+        "scales_bp": tuple(_float_bp(scale, 1.0) for scale in scales),
+    }
+
+    temporal_cfg = sst.get("temporal_segment", {}) if isinstance(sst.get("temporal_segment", {}), dict) else {}
+    temporal_segment = {"mode": str(temporal_cfg.get("mode", "shadow"))}
+
+    persist_cfg = sst.get("persist", {}) if isinstance(sst.get("persist", {}), dict) else {}
+    persist = {"mode": str(persist_cfg.get("mode", "shadow"))}
+
     return {
         "enabled": _bool("enabled", True),
         "strip_alpha": _bool("strip_alpha", True),
@@ -1673,6 +1870,10 @@ def _sst_config(config: dict[str, Any]) -> dict[str, Any]:
         "redact_enabled": _bool("redact_enabled", True),
         "redact_denylist": tuple(str(x) for x in denylist if x),
         "stage_providers": stage_policies,
+        "ui_parse": ui_parse,
+        "cursor_detect": cursor_detect,
+        "temporal_segment": temporal_segment,
+        "persist": persist,
         "schema_version": _int("schema_version", 1),
     }
 
@@ -1712,7 +1913,6 @@ def _window_title(record: dict[str, Any]) -> str | None:
 
 
 def _stable_tokens(tokens: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    tokens = [t for t in tokens if t.get("norm_text")]
     tokens.sort(key=lambda t: (t["bbox"][1], t["bbox"][0], t["bbox"][2], t["token_id"]))
     # Deduplicate by id while preserving order.
     out = []
@@ -1722,5 +1922,30 @@ def _stable_tokens(tokens: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if tid in seen:
             continue
         seen.add(tid)
+        out.append(token)
+    return out
+
+
+def _layout_tokens(tokens: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for token in tokens:
+        if not token.get("norm_text"):
+            continue
+        flags = token.get("flags") if isinstance(token.get("flags"), dict) else {}
+        if isinstance(flags, dict) and flags.get("bbox_invalid", False):
+            continue
+        out.append(token)
+    return out
+
+
+def _merge_token_lists(base: list[dict[str, Any]], extra: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen = {t.get("token_id") for t in base if t.get("token_id")}
+    out = list(base)
+    for token in extra:
+        tid = token.get("token_id")
+        if tid and tid in seen:
+            continue
+        if tid:
+            seen.add(tid)
         out.append(token)
     return out

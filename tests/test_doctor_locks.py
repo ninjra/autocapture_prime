@@ -13,7 +13,7 @@ class DoctorLocksTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.environ["AUTOCAPTURE_CONFIG_DIR"] = tmp
             os.environ["AUTOCAPTURE_DATA_DIR"] = tmp
-            kernel = Kernel(default_config_paths(), safe_mode=True)
+            kernel = Kernel(default_config_paths(), safe_mode=False)
             kernel.boot(start_conductor=False)
             try:
                 original_lock = Path("contracts") / "lock.json"
@@ -63,7 +63,7 @@ class DoctorLocksTests(unittest.TestCase):
             }
             (config_dir / "user.json").write_text(json.dumps(user_cfg, indent=2), encoding="utf-8")
 
-            kernel = Kernel(default_config_paths(), safe_mode=True)
+            kernel = Kernel(default_config_paths(), safe_mode=False)
             kernel.boot(start_conductor=False)
             try:
                 data = json.loads(lock_copy.read_text(encoding="utf-8"))

@@ -183,7 +183,25 @@
       "mx.core.web_ui",
       "mx.prompts.default",
       "mx.research.default",
-      "mx.training.default"
+      "mx.training.default",
+      "builtin.sst.preprocess.normalize",
+      "builtin.sst.preprocess.tile",
+      "builtin.sst.ocr.onnx",
+      "builtin.sst.ui.parse",
+      "builtin.sst.layout.assemble",
+      "builtin.sst.extract.table",
+      "builtin.sst.extract.spreadsheet",
+      "builtin.sst.extract.code",
+      "builtin.sst.extract.chart",
+      "builtin.sst.track.cursor",
+      "builtin.sst.build.state",
+      "builtin.sst.match.ids",
+      "builtin.sst.temporal.segment",
+      "builtin.sst.build.delta",
+      "builtin.sst.infer.action",
+      "builtin.sst.compliance.redact",
+      "builtin.sst.persist",
+      "builtin.sst.index"
     ],
     "default_pack": [
       "builtin.anchor.basic",
@@ -256,7 +274,25 @@
       "builtin.time.advanced": true,
       "builtin.tracking.input.windows": true,
       "builtin.vlm.stub": true,
-      "builtin.window.metadata.windows": true
+      "builtin.window.metadata.windows": true,
+      "builtin.sst.preprocess.normalize": false,
+      "builtin.sst.preprocess.tile": false,
+      "builtin.sst.ocr.onnx": false,
+      "builtin.sst.ui.parse": false,
+      "builtin.sst.layout.assemble": false,
+      "builtin.sst.extract.table": false,
+      "builtin.sst.extract.spreadsheet": false,
+      "builtin.sst.extract.code": false,
+      "builtin.sst.extract.chart": false,
+      "builtin.sst.track.cursor": false,
+      "builtin.sst.build.state": false,
+      "builtin.sst.match.ids": false,
+      "builtin.sst.temporal.segment": false,
+      "builtin.sst.build.delta": false,
+      "builtin.sst.infer.action": false,
+      "builtin.sst.compliance.redact": false,
+      "builtin.sst.persist": false,
+      "builtin.sst.index": false
     },
     "hosting": {
       "cache_dir": "data/cache/plugins",
@@ -282,7 +318,25 @@
         "builtin.answer.basic",
         "builtin.citation.basic",
         "builtin.devtools.diffusion",
-        "builtin.devtools.ast_ir"
+        "builtin.devtools.ast_ir",
+        "builtin.sst.preprocess.normalize",
+        "builtin.sst.preprocess.tile",
+        "builtin.sst.ocr.onnx",
+        "builtin.sst.ui.parse",
+        "builtin.sst.layout.assemble",
+        "builtin.sst.extract.table",
+        "builtin.sst.extract.spreadsheet",
+        "builtin.sst.extract.code",
+        "builtin.sst.extract.chart",
+        "builtin.sst.track.cursor",
+        "builtin.sst.build.state",
+        "builtin.sst.match.ids",
+        "builtin.sst.temporal.segment",
+        "builtin.sst.build.delta",
+        "builtin.sst.infer.action",
+        "builtin.sst.compliance.redact",
+        "builtin.sst.persist",
+        "builtin.sst.index"
       ],
       "mode": "subprocess",
       "rpc_max_message_bytes": 2000000,
@@ -820,9 +874,38 @@
           "provider_ids": [],
           "fanout": true,
           "max_providers": 0
+        },
+        "temporal.segment": {
+          "enabled": true,
+          "provider_ids": [],
+          "fanout": true,
+          "max_providers": 0
         }
       },
-      "schema_version": 1
+      "schema_version": 1,
+      "ui_parse": {
+        "enabled": true,
+        "mode": "detector",
+        "max_providers": 1,
+        "fallback_detector": true
+      },
+      "cursor_detect": {
+        "enabled": false,
+        "threshold": 6500,
+        "stride_px": 4,
+        "scales": [
+          7500,
+          10000,
+          12500
+        ],
+        "downscale": 5000
+      },
+      "temporal_segment": {
+        "mode": "shadow"
+      },
+      "persist": {
+        "mode": "shadow"
+      }
     }
   },
   "profile": "justin_full_fidelity",

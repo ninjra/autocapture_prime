@@ -18,6 +18,7 @@ def build_state(
     width: int,
     height: int,
     tokens: list[dict[str, Any]],
+    tokens_raw: list[dict[str, Any]] | None = None,
     element_graph: dict[str, Any],
     text_lines: list[dict[str, Any]],
     text_blocks: list[dict[str, Any]],
@@ -50,7 +51,7 @@ def build_state(
     code_blocks = [_with_state_id(c, state_id) for c in code_blocks]
     charts = [_with_state_id(c, state_id) for c in charts]
 
-    return {
+    payload = {
         "state_id": state_id,
         "frame_id": frame_id,
         "ts_ms": int(ts_ms),
@@ -71,6 +72,10 @@ def build_state(
         "state_confidence_bp": int(state_conf),
         "diagnostics": tuple(),
     }
+    if tokens_raw is not None:
+        payload["tokens_raw"] = tuple(tokens_raw)
+        payload["tokens_raw_count"] = int(len(tokens_raw))
+    return payload
 
 
 def _with_state_id(payload: dict[str, Any], state_id: str) -> dict[str, Any]:
@@ -145,4 +150,3 @@ def _state_confidence(
     if charts:
         boost += 200
     return bp(min(1.0, (base + boost) / 10000.0))
-

@@ -375,10 +375,16 @@
       "additionalProperties": false,
       "properties": {
         "reranker_path": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "vlm_path": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -1218,6 +1224,85 @@
             },
             "tile_overlap_px": {
               "type": "integer"
+            },
+            "ui_parse": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "max_providers": {
+                  "type": "integer"
+                },
+                "fallback_detector": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "enabled",
+                "mode",
+                "max_providers",
+                "fallback_detector"
+              ]
+            },
+            "cursor_detect": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "threshold": {
+                  "type": "integer"
+                },
+                "stride_px": {
+                  "type": "integer"
+                },
+                "scales": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
+                },
+                "downscale": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "enabled",
+                "threshold",
+                "stride_px",
+                "scales",
+                "downscale"
+              ]
+            },
+            "temporal_segment": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mode": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "persist": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mode": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "mode"
+              ]
             }
           },
           "required": [

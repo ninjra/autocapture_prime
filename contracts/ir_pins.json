@@ -148,6 +148,78 @@
     },
     {
       "enabled": false,
+      "id": "builtin.sst.build.delta"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.sst.build.state"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.sst.compliance.redact"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.sst.extract.chart"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.sst.extract.code"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.sst.extract.spreadsheet"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.sst.extract.table"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.sst.index"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.sst.infer.action"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.sst.layout.assemble"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.sst.match.ids"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.sst.ocr.onnx"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.sst.persist"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.sst.preprocess.normalize"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.sst.preprocess.tile"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.sst.temporal.segment"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.sst.track.cursor"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.sst.ui.parse"
+    },
+    {
+      "enabled": false,
       "id": "builtin.storage.encrypted"
     },
     {

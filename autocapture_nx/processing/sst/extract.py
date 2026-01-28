@@ -57,16 +57,16 @@ def run_ocr_tokens(
     allow_ocr: bool,
     should_abort: Callable[[], bool] | None,
     deadline_ts: float | None,
-) -> tuple[list[dict[str, Any]], ExtractDiagnostics]:
+) -> tuple[list[dict[str, Any]], ExtractDiagnostics, list[dict[str, Any]]]:
     diagnostics: list[dict[str, Any]] = []
     if not allow_ocr or ocr_capability is None:
         diagnostics.append({"kind": "ocr.skipped", "detail": "ocr disabled or missing"})
-        return [], ExtractDiagnostics(tuple(diagnostics))
+        return [], ExtractDiagnostics(tuple(diagnostics)), []
 
     providers = providers_from_capability(ocr_capability, "ocr.engine")
     if not providers:
         diagnostics.append({"kind": "ocr.missing", "detail": "no providers"})
-        return [], ExtractDiagnostics(tuple(diagnostics))
+        return [], ExtractDiagnostics(tuple(diagnostics)), []
 
     selected_patches = patches[: max(1, max_patches)]
     tokens: list[dict[str, Any]] = []
@@ -74,20 +74,32 @@ def run_ocr_tokens(
         for patch in selected_patches:
             if should_abort and should_abort():
                 diagnostics.append({"kind": "ocr.aborted", "detail": provider_id})
-                return _postprocess_tokens(tokens, min_conf_bp, nms_iou_bp, max_tokens), ExtractDiagnostics(tuple(diagnostics))
+                return (
+                    _postprocess_tokens(tokens, min_conf_bp, nms_iou_bp, max_tokens),
+                    ExtractDiagnostics(tuple(diagnostics)),
+                    _flag_low_confidence(tokens, min_conf_bp),
+                )
             if deadline_ts is not None:
                 import time
 
                 if time.time() >= deadline_ts:
                     diagnostics.append({"kind": "ocr.deadline", "detail": provider_id})
-                    return _postprocess_tokens(tokens, min_conf_bp, nms_iou_bp, max_tokens), ExtractDiagnostics(tuple(diagnostics))
+                    return (
+                        _postprocess_tokens(tokens, min_conf_bp, nms_iou_bp, max_tokens),
+                        ExtractDiagnostics(tuple(diagnostics)),
+                        _flag_low_confidence(tokens, min_conf_bp),
+                    )
             try:
                 provider_tokens = _extract_tokens_from_provider(provider, provider_id, patch, frame_width, frame_height)
             except Exception as exc:
                 diagnostics.append({"kind": "ocr.error", "provider_id": provider_id, "error": str(exc)})
                 continue
             tokens.extend(provider_tokens)
-    return _postprocess_tokens(tokens, min_conf_bp, nms_iou_bp, max_tokens), ExtractDiagnostics(tuple(diagnostics))
+    return (
+        _postprocess_tokens(tokens, min_conf_bp, nms_iou_bp, max_tokens),
+        ExtractDiagnostics(tuple(diagnostics)),
+        _flag_low_confidence(tokens, min_conf_bp),
+    )
 
 
 def _extract_tokens_from_provider(
@@ -139,6 +151,8 @@ def _token_dict(provider_id: str, patch_id: str, idx: int, text: str, bbox: BBox
         "monospace_likely": _monospace_hint(text),
         "is_number": bool(RE_NUMBER.match(norm)),
     }
+    if not norm:
+        flags["invalid_text"] = True
     return {
         "token_id": token_id,
         "text": text,
@@ -150,6 +164,25 @@ def _token_dict(provider_id: str, patch_id: str, idx: int, text: str, bbox: BBox
         "provider_id": provider_id,
         "patch_id": patch_id,
     }
+
+
+def _flag_low_confidence(tokens: list[dict[str, Any]], min_conf_bp: int) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for token in tokens:
+        clone = dict(token)
+        flags = clone.get("flags", {})
+        if not isinstance(flags, dict):
+            flags = {}
+        try:
+            conf = int(clone.get("confidence_bp", 0))
+        except Exception:
+            conf = 0
+        if conf < min_conf_bp:
+            flags = dict(flags)
+            flags["low_confidence"] = True
+        clone["flags"] = flags
+        out.append(clone)
+    return out
 
 
 def _patch_to_frame_bbox(token_bbox: Any, patch_bbox: BBox, frame_width: int, frame_height: int) -> BBox:

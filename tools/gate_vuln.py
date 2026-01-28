@@ -36,7 +36,9 @@ def main() -> int:
     if runner is None:
         print("FAIL: pip-audit not available (install via dev extra or tooling venv)")
         return 1
-    cmd = [*runner, "--local", "--progress-spinner", "off"]
+    cache_dir = Path(".dev") / "cache" / "pip_audit"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cmd = [*runner, "--local", "--progress-spinner", "off", "--cache-dir", str(cache_dir)]
     result = subprocess.run(cmd)
     if result.returncode != 0:
         print("FAIL: vulnerability scan")
