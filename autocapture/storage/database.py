@@ -58,6 +58,20 @@ class EncryptedMetadataStore:
                 return
             raise
 
+    def put_new(self, record_id: str, payload: dict[str, Any]) -> None:
+        return self.put(record_id, payload)
+
+    def put_replace(self, record_id: str, payload: dict[str, Any]) -> None:
+        key_id, root = self.keyring.active_key()
+        key = derive_key(root, "metadata_store")
+        data = json.dumps(payload, sort_keys=True).encode("utf-8")
+        blob = encrypt_bytes(key, data, key_id=key_id)
+        self._conn.execute(
+            "INSERT OR REPLACE INTO records (record_id, nonce_b64, ciphertext_b64, key_id) VALUES (?, ?, ?, ?)",
+            (record_id, blob.nonce_b64, blob.ciphertext_b64, key_id),
+        )
+        self._conn.commit()
+
     def get(self, record_id: str, default: Any | None = None) -> Any:
         cur = self._conn.execute(
             "SELECT nonce_b64, ciphertext_b64, key_id FROM records WHERE record_id = ?",
@@ -74,3 +88,14 @@ class EncryptedMetadataStore:
     def keys(self) -> list[str]:
         cur = self._conn.execute("SELECT record_id FROM records")
         return [row[0] for row in cur.fetchall()]
+
+    def count(self) -> int:
+        cur = self._conn.execute("SELECT COUNT(*) FROM records")
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+
+    def delete(self, record_id: str) -> bool:
+        before = self._conn.total_changes
+        self._conn.execute("DELETE FROM records WHERE record_id = ?", (record_id,))
+        self._conn.commit()
+        return self._conn.total_changes > before

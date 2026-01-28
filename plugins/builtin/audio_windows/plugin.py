@@ -50,6 +50,19 @@ class AudioCaptureWindows(PluginBase):
         storage_media = self.context.get_capability("storage.media")
         storage_meta = self.context.get_capability("storage.metadata")
         event_builder = self.context.get_capability("event.builder")
+        if storage_media is None or storage_meta is None:
+            if event_builder is not None:
+                event_builder.failure_event(
+                    "audio.storage_missing",
+                    stage="init",
+                    error=RuntimeError("storage capabilities missing"),
+                    inputs=[],
+                    outputs=[],
+                    payload={"source": "audio"},
+                    ts_utc=_iso_utc(),
+                    retryable=False,
+                )
+            return
 
         audio_cfg = self.context.config.get("capture", {}).get("audio", {})
         mode = _resolve_audio_mode(audio_cfg)
@@ -91,25 +104,11 @@ class AudioCaptureWindows(PluginBase):
         if device is not None:
             stream_kwargs["device"] = device
 
-        with sd.InputStream(**stream_kwargs):
-            while not self._stop.is_set():
-                try:
-                    data, frames, time_info = audio_buffer.queue.get(timeout=0.2)
-                except queue.Empty:
-                    continue
-                dropped = audio_buffer.consume_drops()
-                if dropped > 0:
-                    _record_audio_drop(
-                        event_builder,
-                        {
-                            "dropped": int(dropped),
-                            "queue_max": int(audio_buffer.max_queue),
-                            "policy": "drop_newest",
-                            "source": mode,
-                        },
-                    )
-                record_id = prefixed_id(run_id, "audio", seq)
-                ts_utc = _iso_utc()
+        def _process_chunk(data, frames, dropped) -> None:
+            nonlocal seq
+            record_id = prefixed_id(run_id, "audio", seq)
+            ts_utc = _iso_utc()
+            try:
                 encoded_bytes, encoding_used = _encode_audio_bytes(
                     data,
                     samplerate=samplerate,
@@ -117,6 +116,21 @@ class AudioCaptureWindows(PluginBase):
                     encoding=encoding,
                     ffmpeg_path=ffmpeg_path,
                 )
+            except Exception as exc:
+                if event_builder is not None:
+                    event_builder.failure_event(
+                        "audio.encode_failed",
+                        stage="encode",
+                        error=exc,
+                        inputs=[],
+                        outputs=[record_id],
+                        payload={"record_id": record_id, "source": mode},
+                        ts_utc=ts_utc,
+                        retryable=False,
+                    )
+                seq += 1
+                return
+            try:
                 if hasattr(storage_media, "put_new"):
                     storage_media.put_new(record_id, encoded_bytes, ts_utc=ts_utc)
                 else:
@@ -140,19 +154,51 @@ class AudioCaptureWindows(PluginBase):
                     storage_meta.put_new(record_id, payload)
                 else:
                     storage_meta.put(record_id, payload)
-                event_builder.journal_event("capture.audio", payload, event_id=record_id, ts_utc=ts_utc)
-                event_builder.ledger_entry(
-                    "audio.capture",
-                    inputs=[],
-                    outputs=[record_id],
-                    payload=payload,
-                    entry_id=record_id,
-                    ts_utc=ts_utc,
-                )
-                seq += 1
+                if event_builder is not None:
+                    event_builder.journal_event("capture.audio", payload, event_id=record_id, ts_utc=ts_utc)
+                    event_builder.ledger_entry(
+                        "audio.capture",
+                        inputs=[],
+                        outputs=[record_id],
+                        payload=payload,
+                        entry_id=record_id,
+                        ts_utc=ts_utc,
+                    )
+            except Exception as exc:
+                if event_builder is not None:
+                    event_builder.failure_event(
+                        "audio.write_failed",
+                        stage="storage.write",
+                        error=exc,
+                        inputs=[],
+                        outputs=[record_id],
+                        payload={"record_id": record_id, "source": mode},
+                        ts_utc=ts_utc,
+                        retryable=False,
+                    )
+            seq += 1
+
+        with sd.InputStream(**stream_kwargs):
+            while not self._stop.is_set():
+                try:
+                    data, frames, _time_info = audio_buffer.queue.get(timeout=0.2)
+                except queue.Empty:
+                    continue
+                dropped = audio_buffer.consume_drops()
+                if dropped > 0:
+                    _record_audio_drop(
+                        event_builder,
+                        {
+                            "dropped": int(dropped),
+                            "queue_max": int(audio_buffer.max_queue),
+                            "policy": "drop_newest",
+                            "source": mode,
+                        },
+                    )
+                _process_chunk(data, frames, dropped)
         while not audio_buffer.queue.empty():
             try:
-                data, frames, time_info = audio_buffer.queue.get_nowait()
+                data, frames, _time_info = audio_buffer.queue.get_nowait()
             except queue.Empty:
                 break
             dropped = audio_buffer.consume_drops()
@@ -166,48 +212,7 @@ class AudioCaptureWindows(PluginBase):
                         "source": mode,
                     },
                 )
-            record_id = prefixed_id(run_id, "audio", seq)
-            ts_utc = _iso_utc()
-            encoded_bytes, encoding_used = _encode_audio_bytes(
-                data,
-                samplerate=samplerate,
-                channels=channels,
-                encoding=encoding,
-                ffmpeg_path=ffmpeg_path,
-            )
-            if hasattr(storage_media, "put_new"):
-                storage_media.put_new(record_id, encoded_bytes, ts_utc=ts_utc)
-            else:
-                storage_media.put(record_id, encoded_bytes, ts_utc=ts_utc)
-            payload = {
-                "record_type": "derived.audio.segment",
-                "ts_utc": ts_utc,
-                "run_id": run_id,
-                "frames": int(frames),
-                "channels": int(channels),
-                "sample_rate": int(samplerate),
-                "encoding": encoding_used,
-                "source": mode,
-                "device": device,
-                "device_name": device_name,
-                "drops": {"count": int(dropped), "queue_max": int(audio_buffer.max_queue), "policy": "drop_newest"},
-                "content_hash": hashlib.sha256(encoded_bytes).hexdigest(),
-            }
-            payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
-            if hasattr(storage_meta, "put_new"):
-                storage_meta.put_new(record_id, payload)
-            else:
-                storage_meta.put(record_id, payload)
-            event_builder.journal_event("capture.audio", payload, event_id=record_id, ts_utc=ts_utc)
-            event_builder.ledger_entry(
-                "audio.capture",
-                inputs=[],
-                outputs=[record_id],
-                payload=payload,
-                entry_id=record_id,
-                ts_utc=ts_utc,
-            )
-            seq += 1
+            _process_chunk(data, frames, dropped)
 
     def _build_callback(self, audio_buffer: "_AudioBuffer", stop_exc) -> Any:
         def callback(indata, frames, time_info, status):

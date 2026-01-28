@@ -202,15 +202,32 @@ class InputTrackerWindows(PluginBase):
         seq = self._batch_seq
         self._batch_seq += 1
         log_id = None
+        log_id_failed = None
         content_hash = None
+        log_error = None
         if events:
             log_id = prefixed_id(run_id, "derived.input.log", seq)
-            encoded = _encode_input_log(events)
-            if hasattr(storage_media, "put_new"):
-                storage_media.put_new(log_id, encoded, ts_utc=end_ts)
-            else:
-                storage_media.put(log_id, encoded, ts_utc=end_ts)
-            content_hash = hashlib.sha256(encoded).hexdigest()
+            try:
+                encoded = _encode_input_log(events)
+                if hasattr(storage_media, "put_new"):
+                    storage_media.put_new(log_id, encoded, ts_utc=end_ts)
+                else:
+                    storage_media.put(log_id, encoded, ts_utc=end_ts)
+                content_hash = hashlib.sha256(encoded).hexdigest()
+            except Exception as exc:
+                log_error = str(exc)
+                log_id_failed = log_id
+                log_id = None
+                event_builder.failure_event(
+                    "input.derived_failed",
+                    stage="storage.media",
+                    error=exc,
+                    inputs=[event_id],
+                    outputs=[log_id_failed] if log_id_failed else [],
+                    payload={"record_id": log_id_failed, "mode": self._mode},
+                    ts_utc=end_ts,
+                    retryable=False,
+                )
         summary_id = prefixed_id(run_id, "derived.input.summary", seq)
         summary = {
             "record_type": "derived.input.summary",
@@ -227,19 +244,35 @@ class InputTrackerWindows(PluginBase):
             summary["log_id"] = log_id
         if content_hash:
             summary["content_hash"] = content_hash
+        if log_id_failed:
+            summary["log_id_failed"] = log_id_failed
+        if log_error:
+            summary["log_error"] = log_error
         summary["payload_hash"] = sha256_canonical({k: v for k, v in summary.items() if k != "payload_hash"})
-        if hasattr(storage_meta, "put_new"):
-            storage_meta.put_new(summary_id, summary)
-        else:
-            storage_meta.put(summary_id, summary)
-        event_builder.ledger_entry(
-            "input.batch",
-            inputs=[event_id],
-            outputs=[summary_id] + ([log_id] if log_id else []),
-            payload=summary,
-            entry_id=summary_id,
-            ts_utc=end_ts,
-        )
+        try:
+            if hasattr(storage_meta, "put_new"):
+                storage_meta.put_new(summary_id, summary)
+            else:
+                storage_meta.put(summary_id, summary)
+            event_builder.ledger_entry(
+                "input.batch",
+                inputs=[event_id],
+                outputs=[summary_id] + ([log_id] if log_id else []),
+                payload=summary,
+                entry_id=summary_id,
+                ts_utc=end_ts,
+            )
+        except Exception as exc:
+            event_builder.failure_event(
+                "input.derived_failed",
+                stage="storage.metadata",
+                error=exc,
+                inputs=[event_id],
+                outputs=[summary_id],
+                payload={"record_id": summary_id, "mode": self._mode},
+                ts_utc=end_ts,
+                retryable=False,
+            )
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> InputTrackerWindows:
@@ -284,3 +317,22 @@ def _encode_input_log(events: list[dict[str, Any]]) -> bytes:
         payload.extend(struct.pack(">I", len(data)))
         payload.extend(data)
     return bytes(payload)
+
+
+def _decode_input_log(payload: bytes) -> list[dict[str, Any]]:
+    if not payload.startswith(b"INPT1"):
+        raise ValueError("Invalid input log header")
+    offset = 5
+    events: list[dict[str, Any]] = []
+    length = len(payload)
+    while offset < length:
+        if offset + 4 > length:
+            raise ValueError("Truncated input log")
+        size = struct.unpack(">I", payload[offset : offset + 4])[0]
+        offset += 4
+        if offset + size > length:
+            raise ValueError("Truncated input log")
+        chunk = payload[offset : offset + size]
+        offset += size
+        events.append(json.loads(chunk.decode("utf-8")))
+    return events

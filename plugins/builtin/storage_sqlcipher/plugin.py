@@ -6,6 +6,8 @@ import os
 import sqlite3
 from typing import Any
 
+from dataclasses import dataclass
+
 from autocapture_nx.kernel.keyring import KeyRing
 from autocapture_nx.kernel.metadata_store import ImmutableMetadataStore
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
@@ -24,6 +26,80 @@ def _sqlcipher_available() -> tuple[bool, str | None]:
     except Exception as exc:
         return False, str(exc)
     return True, None
+
+
+def sqlcipher_available() -> bool:
+    ok, _reason = _sqlcipher_available()
+    return ok
+
+
+@dataclass(frozen=True)
+class MetadataMigrationResult:
+    src_dir: str
+    dst_path: str
+    records_total: int
+    records_copied: int
+    records_skipped: int
+    dry_run: bool
+
+
+def migrate_metadata_json_to_sqlcipher(
+    config: dict[str, Any],
+    *,
+    src_dir: str | None = None,
+    dst_path: str | None = None,
+    dry_run: bool = False,
+) -> MetadataMigrationResult:
+    storage_cfg = config.get("storage", {})
+    data_dir = storage_cfg.get("data_dir", "data")
+    src_dir = src_dir or storage_cfg.get("metadata_dir") or os.path.join(data_dir, "metadata")
+    dst_path = dst_path or storage_cfg.get("metadata_path") or os.path.join(
+        data_dir, "metadata", "metadata.db"
+    )
+    ok, reason = _sqlcipher_available()
+    if not ok:
+        raise RuntimeError(f"SQLCipher unavailable ({reason})")
+    crypto_cfg = storage_cfg.get("crypto", {})
+    keyring_path = crypto_cfg.get("keyring_path", "data/vault/keyring.json")
+    root_key_path = crypto_cfg.get("root_key_path", "data/vault/root.key")
+    encryption_required = bool(storage_cfg.get("encryption_required", False))
+    require_protection = bool(encryption_required and os.name == "nt")
+    keyring = KeyRing.load(keyring_path, legacy_root_path=root_key_path, require_protection=require_protection)
+    run_id = str(config.get("runtime", {}).get("run_id", "run"))
+    fsync_policy = _FsyncPolicy.normalize(storage_cfg.get("fsync_policy"))
+    meta_provider = DerivedKeyProvider(keyring, "metadata")
+    _meta_id, meta_key = meta_provider.active()
+    json_store = EncryptedJSONStore(
+        src_dir,
+        meta_provider,
+        run_id,
+        require_decrypt=encryption_required,
+        fsync_policy=fsync_policy,
+    )
+    sql_store = SQLCipherStore(dst_path, meta_key, run_id, fsync_policy)
+    total = 0
+    copied = 0
+    skipped = 0
+    for record_id in json_store.keys():
+        payload = json_store.get(record_id, None)
+        if payload is None:
+            continue
+        total += 1
+        if dry_run:
+            continue
+        try:
+            sql_store.put_new(record_id, payload)
+            copied += 1
+        except FileExistsError:
+            skipped += 1
+    return MetadataMigrationResult(
+        src_dir=str(src_dir),
+        dst_path=str(dst_path),
+        records_total=total,
+        records_copied=copied,
+        records_skipped=skipped,
+        dry_run=dry_run,
+    )
 
 
 class SQLCipherStore:
@@ -146,6 +222,12 @@ class SQLCipherStore:
         cur = self._conn.execute("SELECT id FROM metadata ORDER BY id")
         return [row[0] for row in cur.fetchall()]
 
+    def count(self) -> int:
+        self._ensure()
+        cur = self._conn.execute("SELECT COUNT(*) FROM metadata")
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+
     def query_time_window(
         self,
         start_ts: str | None,
@@ -244,17 +326,25 @@ class SQLCipherStoragePlugin(PluginBase):
         run_id = str(context.config.get("runtime", {}).get("run_id", "run"))
         fsync_policy = _FsyncPolicy.normalize(storage_cfg.get("fsync_policy"))
         require_decrypt = bool(encryption_required)
+        legacy_meta_path = os.path.join(data_dir, "metadata", "metadata.db")
+        metadata_path = storage_cfg.get("metadata_path")
+        if metadata_path:
+            if not os.path.exists(metadata_path) and os.path.exists(legacy_meta_path):
+                metadata_path = legacy_meta_path
+        else:
+            metadata_path = legacy_meta_path
+        metadata_dir = storage_cfg.get("metadata_dir") or os.path.join(data_dir, "metadata")
         available, reason = _sqlcipher_available()
         if available:
             _meta_id, meta_key = meta_provider.active()
-            store = SQLCipherStore(os.path.join(data_dir, "metadata", "metadata.db"), meta_key, run_id, fsync_policy)
+            store = SQLCipherStore(metadata_path, meta_key, run_id, fsync_policy)
             self._metadata = ImmutableMetadataStore(store)
             self._entity_map = EntityMapAdapter(store)
         else:
             context.logger(f"SQLCipher unavailable ({reason}); falling back to encrypted JSON store")
             self._metadata = ImmutableMetadataStore(
                 EncryptedJSONStore(
-                    os.path.join(data_dir, "metadata"),
+                    metadata_dir,
                     meta_provider,
                     run_id,
                     require_decrypt=require_decrypt,

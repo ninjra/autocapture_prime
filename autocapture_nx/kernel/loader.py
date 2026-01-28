@@ -92,7 +92,7 @@ class Kernel:
         capabilities.register("event.builder", builder, network_allowed=False)
         self._record_storage_manifest(builder, capabilities, plugins)
         self._record_run_start(builder)
-        self._run_recovery(builder)
+        self._run_recovery(builder, capabilities)
         self.system = System(config=self.config, plugins=plugins, capabilities=capabilities)
         if start_conductor:
             try:
@@ -140,6 +140,20 @@ class Kernel:
             versions = {}
         self._package_versions_cache = dict(sorted(versions.items()))
         return dict(self._package_versions_cache)
+
+    def _store_counts(self, metadata: Any, media: Any) -> dict[str, int | None]:
+        counts: dict[str, int | None] = {"metadata": None, "media": None}
+        if metadata is not None and hasattr(metadata, "count"):
+            try:
+                counts["metadata"] = int(metadata.count())
+            except Exception:
+                counts["metadata"] = None
+        if media is not None and hasattr(media, "count"):
+            try:
+                counts["media"] = int(media.count())
+            except Exception:
+                counts["media"] = None
+        return counts
 
     def _verify_contract_lock(self) -> None:
         lock_path = resolve_repo_path("contracts/lock.json")
@@ -326,6 +340,7 @@ class Kernel:
         media_backend = type(media).__name__
         storage_cfg = self.config.get("storage", {})
         packages = self._package_versions()
+        counts = self._store_counts(metadata, media)
         manifest = {
             "record_type": "system.run_manifest",
             "run_id": run_id,
@@ -350,6 +365,7 @@ class Kernel:
                 "encryption_required": bool(storage_cfg.get("encryption_required", False)),
                 "metadata_backend": metadata_backend,
                 "media_backend": media_backend,
+                "counts": counts,
             },
             "platform": {
                 "system": platform.system(),
@@ -387,6 +403,10 @@ class Kernel:
             metadata = self.system.get("storage.metadata")
         except Exception:
             return
+        try:
+            media = self.system.get("storage.media")
+        except Exception:
+            media = None
         plugin_ids: list[str] = []
         plugin_versions: dict[str, str] = {}
         for plugin in self.system.plugins:
@@ -401,6 +421,9 @@ class Kernel:
                 plugin_versions[pid] = str(version)
         storage_cfg = self.config.get("storage", {})
         packages = self._package_versions()
+        metadata_backend = type(getattr(metadata, "_store", metadata)).__name__
+        media_backend = type(media).__name__ if media is not None else None
+        counts = self._store_counts(metadata, media)
         manifest = {
             "record_type": "system.run_manifest.final",
             "run_id": builder.run_id,
@@ -422,6 +445,9 @@ class Kernel:
                 "blob_dir": storage_cfg.get("blob_dir", "data/blobs"),
                 "fsync_policy": storage_cfg.get("fsync_policy", "none"),
                 "encryption_required": bool(storage_cfg.get("encryption_required", False)),
+                "metadata_backend": metadata_backend,
+                "media_backend": media_backend,
+                "counts": counts,
             },
         }
         record_id = prefixed_id(builder.run_id, "system.run_manifest.final", 0)
@@ -440,7 +466,7 @@ class Kernel:
             ts_utc=ts_utc,
         )
 
-    def _run_recovery(self, builder: EventBuilder) -> None:
+    def _run_recovery(self, builder: EventBuilder, capabilities: Any | None = None) -> None:
         data_dir = self.config.get("storage", {}).get("data_dir", "data")
         spool_dir = self.config.get("storage", {}).get("spool_dir", "data/spool")
         media_dir = self.config.get("storage", {}).get("media_dir", "data/media")
@@ -458,13 +484,86 @@ class Kernel:
                     removed.append(str(file_path))
                 except Exception:
                     continue
-        if removed:
-            sample = [path for path in removed[:5]]
-            payload = {
-                "event": "storage.recovery",
-                "removed_count": int(len(removed)),
-                "removed_samples": sample,
-            }
+        sealed_now: list[str] = []
+        missing_media: list[str] = []
+        if capabilities is not None:
+            try:
+                metadata = capabilities.get("storage.metadata")
+            except Exception:
+                metadata = None
+            try:
+                media = capabilities.get("storage.media")
+            except Exception:
+                media = None
+            segment_records: dict[str, dict[str, Any]] = {}
+            if metadata is not None and hasattr(metadata, "keys"):
+                for record_id in metadata.keys():
+                    record = metadata.get(record_id, {})
+                    if not isinstance(record, dict):
+                        continue
+                    if record.get("record_type") == "evidence.capture.segment":
+                        segment_records[record_id] = record
+            media_ids: set[str] = set()
+            if media is not None and hasattr(media, "keys"):
+                try:
+                    media_ids = set(media.keys())
+                except Exception:
+                    media_ids = set()
+
+            sealed_ids: set[str] = set()
+            ledger_path = Path(data_dir) / "ledger.ndjson"
+            if ledger_path.exists():
+                try:
+                    for line in ledger_path.read_text(encoding="utf-8").splitlines():
+                        if not line.strip():
+                            continue
+                        try:
+                            entry = json.loads(line)
+                        except Exception:
+                            continue
+                        payload = entry.get("payload", {})
+                        if not isinstance(payload, dict):
+                            continue
+                        if payload.get("event") == "segment.sealed" and payload.get("segment_id"):
+                            sealed_ids.add(str(payload.get("segment_id")))
+                except Exception:
+                    sealed_ids = set()
+
+            for record_id, record in segment_records.items():
+                if record_id in sealed_ids:
+                    continue
+                if record_id not in media_ids:
+                    missing_media.append(record_id)
+                    continue
+                ts_utc = record.get("ts_end_utc") or record.get("ts_utc") or datetime.now(timezone.utc).isoformat()
+                seal_payload = {
+                    "event": "segment.sealed",
+                    "segment_id": record_id,
+                    "content_hash": record.get("content_hash"),
+                    "payload_hash": record.get("payload_hash"),
+                    "recovered": True,
+                }
+                builder.journal_event("segment.sealed", seal_payload, ts_utc=ts_utc)
+                builder.ledger_entry(
+                    "segment.seal",
+                    inputs=[record_id],
+                    outputs=[],
+                    payload=seal_payload,
+                    ts_utc=ts_utc,
+                )
+                sealed_now.append(record_id)
+
+        if removed or sealed_now or missing_media:
+            payload = {"event": "storage.recovery"}
+            if removed:
+                payload["removed_count"] = int(len(removed))
+                payload["removed_samples"] = removed[:5]
+            if sealed_now:
+                payload["sealed_count"] = int(len(sealed_now))
+                payload["sealed_samples"] = sealed_now[:5]
+            if missing_media:
+                payload["missing_media_count"] = int(len(missing_media))
+                payload["missing_media_samples"] = missing_media[:5]
             ts_utc = datetime.now(timezone.utc).isoformat()
             builder.journal_event("storage.recovery", payload, ts_utc=ts_utc)
             builder.ledger_entry(

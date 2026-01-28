@@ -966,7 +966,11 @@ class CapturePipeline:
                 "event": "segment.sealed",
                 "segment_id": artifact.segment_id,
                 "content_hash": content_hash,
+                "payload_hash": metadata.get("payload_hash"),
             }
+            container = metadata.get("container")
+            if isinstance(container, dict) and container.get("index") is not None:
+                seal_payload["container_index_hash"] = sha256_canonical(container.get("index"))
             self._event_builder.ledger_entry(
                 "segment.seal",
                 inputs=[artifact.segment_id],
@@ -975,23 +979,35 @@ class CapturePipeline:
                 ts_utc=artifact.ts_end_utc,
             )
         except Exception as exc:
-            failure = {
-                "event": "capture.partial_failure",
+            failure_payload = {
                 "segment_id": artifact.segment_id,
-                "error": str(exc),
+                "backend": backend,
             }
-            self._event_builder.journal_event(
-                "capture.partial_failure",
-                failure,
-                ts_utc=artifact.ts_start_utc,
-            )
-            self._event_builder.ledger_entry(
-                "capture.partial_failure",
-                inputs=[artifact.segment_id],
-                outputs=[],
-                payload=failure,
-                ts_utc=artifact.ts_start_utc,
-            )
+            if hasattr(self._event_builder, "failure_event"):
+                self._event_builder.failure_event(
+                    "capture.partial_failure",
+                    stage="storage.write",
+                    error=exc,
+                    inputs=[artifact.segment_id],
+                    outputs=[],
+                    payload=failure_payload,
+                    ts_utc=artifact.ts_start_utc,
+                    retryable=False,
+                )
+            else:
+                failure_payload.update({"event": "capture.partial_failure", "error": str(exc)})
+                self._event_builder.journal_event(
+                    "capture.partial_failure",
+                    failure_payload,
+                    ts_utc=artifact.ts_start_utc,
+                )
+                self._event_builder.ledger_entry(
+                    "capture.partial_failure",
+                    inputs=[artifact.segment_id],
+                    outputs=[],
+                    payload=failure_payload,
+                    ts_utc=artifact.ts_start_utc,
+                )
             return
         try:
             os.remove(artifact.path)

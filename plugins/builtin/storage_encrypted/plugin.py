@@ -279,6 +279,7 @@ class EncryptedJSONStore:
         self._run_id = run_id or "run"
         self._fsync_policy = fsync_policy
         self._index: dict[str, str] = {}
+        self._count_cache: int | None = None
         os.makedirs(self._root, exist_ok=True)
 
     def _path_for_write(self, record_id: str, ts_utc: str | None, record_type: str | None = None) -> str:
@@ -340,14 +341,19 @@ class EncryptedJSONStore:
         self.put_replace(record_id, value)
 
     def put_replace(self, record_id: str, value: Any) -> None:
+        existed = any(os.path.exists(path) for path in self._path_candidates(record_id))
         self._remove_existing(record_id)
         self._write(record_id, value)
+        if self._count_cache is not None and not existed:
+            self._count_cache += 1
 
     def put_new(self, record_id: str, value: Any) -> None:
         for path in self._path_candidates(record_id):
             if os.path.exists(path):
                 raise FileExistsError(f"Metadata record already exists: {record_id}")
         self._write(record_id, value)
+        if self._count_cache is not None:
+            self._count_cache += 1
 
     def get(self, record_id: str, default: Any = None) -> Any:
         for path in self._path_candidates(record_id):
@@ -379,6 +385,11 @@ class EncryptedJSONStore:
             token = filename[:-5]
             ids.add(_decode_record_id(token))
         return sorted(ids)
+
+    def count(self) -> int:
+        if self._count_cache is None:
+            self._count_cache = len(list(_iter_files(self._root, [".json"])))
+        return self._count_cache
 
     def query_time_window(
         self,
@@ -421,6 +432,8 @@ class EncryptedJSONStore:
                     continue
         if removed:
             self._index.pop(record_id, None)
+            if self._count_cache is not None and self._count_cache > 0:
+                self._count_cache -= 1
         return removed
 
     def rotate(self, _new_key: bytes | None = None) -> int:
@@ -453,6 +466,7 @@ class EncryptedBlobStore:
         self._run_id = run_id or "run"
         self._fsync_policy = fsync_policy
         self._index: dict[str, str] = {}
+        self._count_cache: int | None = None
         os.makedirs(self._root, exist_ok=True)
 
     def _path_for_write(self, record_id: str, ts_utc: str | None, *, stream: bool) -> str:
@@ -513,9 +527,12 @@ class EncryptedBlobStore:
         key_id, key = self._key_provider.active()
         blob = encrypt_bytes_raw(key, data, key_id=key_id)
         path = self._path_for_write(record_id, ts_utc, stream=False)
+        existed = any(os.path.exists(path) for path in self._path_candidates(record_id))
         self._remove_existing(record_id)
         _atomic_write_bytes(path, _pack_blob(blob), fsync_policy=self._fsync_policy)
         self._index[record_id] = path
+        if self._count_cache is not None and not existed:
+            self._count_cache += 1
 
     def put_new(self, record_id: str, data: bytes, *, ts_utc: str | None = None) -> None:
         for path in self._path_candidates(record_id):
@@ -539,6 +556,7 @@ class EncryptedBlobStore:
     ) -> None:
         key_id, key = self._key_provider.active()
         path = self._path_for_write(record_id, ts_utc, stream=True)
+        existed = any(os.path.exists(path) for path in self._path_candidates(record_id))
         self._remove_existing(record_id)
         tmp_path = f"{path}.tmp"
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -561,6 +579,8 @@ class EncryptedBlobStore:
         os.replace(tmp_path, path)
         _fsync_dir(path, self._fsync_policy)
         self._index[record_id] = path
+        if self._count_cache is not None and not existed:
+            self._count_cache += 1
 
     def get(self, record_id: str, default: bytes | None = None) -> bytes | None:
         for path in self._path_candidates(record_id):
@@ -663,6 +683,8 @@ class EncryptedBlobStore:
                     continue
         if removed:
             self._index.pop(record_id, None)
+            if self._count_cache is not None and self._count_cache > 0:
+                self._count_cache -= 1
         return removed
 
     def rotate(self, _new_key: bytes | None = None) -> int:
@@ -674,6 +696,11 @@ class EncryptedBlobStore:
             self.put(record_id, value)
             count += 1
         return count
+
+    def count(self) -> int:
+        if self._count_cache is None:
+            self._count_cache = len(self.keys())
+        return self._count_cache
 
 
 class EntityMapStore:

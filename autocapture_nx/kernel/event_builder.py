@@ -114,3 +114,36 @@ class EventBuilder:
                 self._last_anchor_ts = now
                 self._anchor_entry_count = 0
         return ledger_hash
+
+    def failure_event(
+        self,
+        event_type: str,
+        *,
+        stage: str,
+        error: Exception,
+        inputs: list[str],
+        outputs: list[str],
+        payload: dict[str, Any] | None = None,
+        ts_utc: str | None = None,
+        retryable: bool | None = None,
+    ) -> str:
+        if not ts_utc:
+            ts_utc = datetime.now(timezone.utc).isoformat()
+        failure_payload = {
+            "event": event_type,
+            "stage": stage,
+            "error": str(error),
+            "error_class": error.__class__.__name__,
+            "retryable": bool(retryable) if retryable is not None else False,
+        }
+        if payload:
+            failure_payload.update(payload)
+        event_id = self.journal_event(event_type, failure_payload, ts_utc=ts_utc)
+        self.ledger_entry(
+            event_type,
+            inputs=inputs,
+            outputs=outputs,
+            payload=failure_payload,
+            ts_utc=ts_utc,
+        )
+        return event_id

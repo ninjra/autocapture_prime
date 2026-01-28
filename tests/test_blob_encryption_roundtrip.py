@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from autocapture.storage.blob_store import BlobStore
+from autocapture.storage.blob_store import BLOB_MAGIC, BlobStore
 from autocapture.storage.keys import load_keyring
 from autocapture.config.load import load_config
 from autocapture.config.models import ConfigPaths
@@ -36,6 +36,7 @@ class BlobEncryptionRoundtripTests(unittest.TestCase):
             loaded = store.get(blob_id)
             self.assertEqual(data, loaded)
             blob_path = Path(override["storage"]["blob_dir"]) / f"{blob_id}.blob"
+            self.assertTrue(blob_path.read_bytes().startswith(BLOB_MAGIC))
             self.assertNotIn(data, blob_path.read_bytes())
 
 

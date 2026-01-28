@@ -420,6 +420,23 @@ def cmd_storage_migrate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_storage_migrate_metadata(args: argparse.Namespace) -> int:
+    from plugins.builtin.storage_sqlcipher.plugin import migrate_metadata_json_to_sqlcipher
+
+    paths = default_config_paths()
+    config = load_config(paths, safe_mode=args.safe_mode)
+    src = args.src or None
+    dst = args.dst or None
+    result = migrate_metadata_json_to_sqlcipher(
+        config,
+        src_dir=src,
+        dst_path=dst,
+        dry_run=args.dry_run,
+    )
+    _print_json(asdict(result))
+    return 0
+
+
 def cmd_storage_forecast(args: argparse.Namespace) -> int:
     from autocapture.storage.forecast import forecast_from_journal
 
@@ -556,6 +573,11 @@ def build_parser() -> argparse.ArgumentParser:
     storage_migrate.add_argument("--no-verify", action="store_true")
     storage_migrate.add_argument("--update-config", action="store_true")
     storage_migrate.set_defaults(func=cmd_storage_migrate)
+    storage_migrate_meta = storage_sub.add_parser("migrate-metadata")
+    storage_migrate_meta.add_argument("--src", default="")
+    storage_migrate_meta.add_argument("--dst", default="")
+    storage_migrate_meta.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=False)
+    storage_migrate_meta.set_defaults(func=cmd_storage_migrate_metadata)
     storage_forecast = storage_sub.add_parser("forecast")
     storage_forecast.add_argument("--data-dir", default="")
     storage_forecast.set_defaults(func=cmd_storage_forecast)
