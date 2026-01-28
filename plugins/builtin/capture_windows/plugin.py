@@ -43,6 +43,7 @@ class CaptureWindows(PluginBase):
         logger = self.context.get_capability("observability.logger")
         window_tracker = _optional_capability(self.context, "window.metadata")
         input_tracker = _optional_capability(self.context, "tracking.input")
+        governor = _optional_capability(self.context, "runtime.governor")
 
         pipeline = CapturePipeline(
             self.context.config,
@@ -53,6 +54,7 @@ class CaptureWindows(PluginBase):
             logger=logger,
             window_tracker=window_tracker,
             input_tracker=input_tracker,
+            governor=governor,
             stop_event=self._stop,
         )
         self._pipeline = pipeline

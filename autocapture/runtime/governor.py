@@ -93,16 +93,19 @@ class RuntimeGovernor:
         self._window_spent_ms = 0
         self._window_jobs_run = 0
         self._inflight_heavy = 0
+        self._suspend_deadline_ms = 0
 
     def update_config(self, config: Mapping[str, Any]) -> None:
         budgets = resolve_idle_budgets(config)
         runtime_cfg = config.get("runtime", {}) if isinstance(config, Mapping) else {}
         idle_window_s = int(runtime_cfg.get("idle_window_s", budgets.min_idle_seconds))
         suspend_workers = bool(runtime_cfg.get("mode_enforcement", {}).get("suspend_workers", self.suspend_workers))
+        suspend_deadline_ms = int(runtime_cfg.get("mode_enforcement", {}).get("suspend_deadline_ms", 0) or 0)
         with self._lock:
             self.idle_window_s = idle_window_s
             self.suspend_workers = suspend_workers
             self._budgets = budgets
+            self._suspend_deadline_ms = max(0, suspend_deadline_ms)
             self._reset_window_locked()
 
     def _reset_window_locked(self) -> None:
@@ -147,7 +150,8 @@ class RuntimeGovernor:
     def _compute_mode_locked(self, signals: Mapping[str, Any]) -> tuple[str, str, float, float]:
         idle_seconds = float(signals.get("idle_seconds", 0.0))
         activity_score = float(signals.get("activity_score", 0.0) or 0.0)
-        user_active = bool(signals.get("user_active", False)) or activity_score >= 0.5
+        activity_recent = bool(signals.get("activity_recent", False))
+        user_active = bool(signals.get("user_active", False)) or activity_score >= 0.5 or activity_recent
         query_intent = bool(signals.get("query_intent", False))
         suspend_workers = bool(signals.get("suspend_workers", self.suspend_workers))
         allow_active = bool(self._budgets.allow_heavy_during_active)
@@ -167,7 +171,7 @@ class RuntimeGovernor:
         now = time.monotonic()
         mode, base_reason, idle_seconds, activity_score = self._compute_mode_locked(signals)
         mode_changed = mode != self._last_mode
-        if mode_changed:
+        if mode_changed or now < self._mode_changed_at:
             self._last_mode = mode
             self._mode_changed_at = now
         self._last_signals = dict(signals)
@@ -220,6 +224,9 @@ class RuntimeGovernor:
         with self._lock:
             decision = self._decide_locked(signals or self._last_signals)
             grace_ms = max(0, int(self._budgets.preempt_grace_ms))
+            suspend_deadline = max(0, int(self._suspend_deadline_ms))
+            if decision.mode != "IDLE_DRAIN" and suspend_deadline:
+                grace_ms = suspend_deadline if grace_ms <= 0 else min(grace_ms, suspend_deadline)
             elapsed_ms = int(max(0.0, (time.monotonic() - self._mode_changed_at) * 1000.0))
             if decision.mode != "IDLE_DRAIN" and elapsed_ms >= grace_ms:
                 return True

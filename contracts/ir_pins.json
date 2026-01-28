@@ -14,6 +14,7 @@
     "privacy.egress_sanitizer",
     "retrieval.strategy",
     "runtime.governor",
+    "runtime.scheduler",
     "storage.entity_map",
     "storage.media",
     "storage.metadata",
@@ -145,6 +146,10 @@
     {
       "enabled": true,
       "id": "builtin.runtime.governor"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.runtime.scheduler"
     },
     {
       "enabled": false,

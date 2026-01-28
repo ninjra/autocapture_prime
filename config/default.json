@@ -121,6 +121,7 @@
       "answer.builder",
       "citation.validator",
       "runtime.governor",
+      "runtime.scheduler",
       "capture.backpressure",
       "observability.logger",
       "devtools.diffusion",
@@ -185,6 +186,7 @@
       "builtin.reranker.basic",
       "builtin.retrieval.basic",
       "builtin.runtime.governor",
+      "builtin.runtime.scheduler",
       "builtin.storage.encrypted",
       "builtin.storage.sqlcipher",
       "builtin.time.advanced",
@@ -245,6 +247,7 @@
       "builtin.reranker.basic",
       "builtin.retrieval.basic",
       "builtin.runtime.governor",
+      "builtin.runtime.scheduler",
       "builtin.storage.sqlcipher",
       "builtin.time.advanced",
       "builtin.tracking.input.windows",
@@ -291,6 +294,7 @@
       "builtin.reranker.basic": true,
       "builtin.retrieval.basic": true,
       "builtin.runtime.governor": true,
+      "builtin.runtime.scheduler": true,
       "builtin.storage.encrypted": false,
       "builtin.storage.sqlcipher": true,
       "builtin.time.advanced": true,
@@ -333,6 +337,7 @@
         "builtin.window.metadata.windows",
         "builtin.backpressure.basic",
         "builtin.runtime.governor",
+        "builtin.runtime.scheduler",
         "builtin.observability.basic",
         "builtin.retrieval.basic",
         "builtin.processing.sst.pipeline",
@@ -558,6 +563,15 @@
         "mode": "single",
         "preferred": [
           "builtin.runtime.governor"
+        ],
+        "provider_ids": [],
+        "fanout": false,
+        "max_providers": 1
+      },
+      "runtime.scheduler": {
+        "mode": "single",
+        "preferred": [
+          "builtin.runtime.scheduler"
         ],
         "provider_ids": [],
         "fanout": false,

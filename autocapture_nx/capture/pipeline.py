@@ -17,6 +17,7 @@ from autocapture_nx.capture.avi import AviMjpegWriter
 from autocapture_nx.capture.queues import BoundedQueue
 from autocapture_nx.kernel.hashing import sha256_canonical
 from autocapture_nx.kernel.ids import encode_record_id_component, prefixed_id
+from autocapture_nx.kernel.telemetry import record_telemetry
 from autocapture_nx.windows.win_capture import Frame, iter_screenshots, list_monitors
 
 STOP_SENTINEL = object()
@@ -344,6 +345,7 @@ class CapturePipeline:
         logger: Any,
         window_tracker: Any | None,
         input_tracker: Any | None,
+        governor: Any | None = None,
         stop_event: threading.Event | None = None,
         frame_source: Any | None = None,
     ) -> None:
@@ -355,6 +357,7 @@ class CapturePipeline:
         self._logger = logger
         self._window_tracker = window_tracker
         self._input_tracker = input_tracker
+        self._governor = governor
         self._stop = stop_event or threading.Event()
         self._frame_source = frame_source
         self._threads: list[threading.Thread] = []
@@ -372,6 +375,16 @@ class CapturePipeline:
         self._fps_target = int(capture_cfg.get("fps_target", backpressure_cfg.get("max_fps", 30)))
         self._bitrate_kbps = int(backpressure_cfg.get("max_bitrate_kbps", 8000))
         self._jpeg_quality = int(capture_cfg.get("jpeg_quality", 90))
+        telemetry_cfg = config.get("runtime", {}).get("telemetry", {})
+        self._telemetry_enabled = bool(telemetry_cfg.get("enabled", True))
+        self._telemetry_interval_s = float(telemetry_cfg.get("emit_interval_s", 5))
+        self._telemetry_last = 0.0
+        self._telemetry_last_cpu = time.process_time()
+        self._telemetry_last_wall = time.monotonic()
+        self._telemetry_last_drops = 0
+        self._last_frame_ts: float | None = None
+        self._last_frame_interval_ms = 0.0
+        self._last_lag_ms = 0.0
 
     def start(self) -> None:
         backpressure_cfg = self._config.get("backpressure", {})
@@ -417,6 +430,8 @@ class CapturePipeline:
         idle_bitrate = int(activity_cfg.get("idle_bitrate_kbps", bitrate_kbps))
         active_quality = int(activity_cfg.get("active_jpeg_quality", jpeg_quality))
         idle_quality = int(activity_cfg.get("idle_jpeg_quality", jpeg_quality))
+        runtime_cfg = self._config.get("runtime", {})
+        suspend_workers = bool(runtime_cfg.get("mode_enforcement", {}).get("suspend_workers", True))
         base_fps = int(fps_target)
         base_bitrate = int(bitrate_kbps)
         base_quality = int(jpeg_quality)
@@ -427,6 +442,9 @@ class CapturePipeline:
             idle_quality = int(base_quality)
         activity_mode: str | None = None
         last_activity_check = 0.0
+        last_idle_seconds = 0.0
+        last_activity_score = 0.0
+        last_activity_reason: str | None = None
         backend = str(capture_cfg.get("backend", "mss"))
         disk_cfg = self._config.get("storage", {}).get("disk_pressure", {})
         warn_free = int(disk_cfg.get("warn_free_gb", 200))
@@ -466,9 +484,11 @@ class CapturePipeline:
                 degraded_quality = max(10, int(int(base_quality_val) * 0.7))
             return degraded_fps, degraded_bitrate, degraded_quality
 
-        def _activity_snapshot() -> tuple[str, float, float]:
+        def _activity_snapshot() -> tuple[str, float, float, str | None]:
             idle_seconds = 0.0
             activity_score = 0.0
+            activity_recent = False
+            user_active = False
             if self._input_tracker is not None and hasattr(self._input_tracker, "activity_signal"):
                 try:
                     signal = self._input_tracker.activity_signal()
@@ -477,17 +497,82 @@ class CapturePipeline:
                 if isinstance(signal, dict):
                     idle_seconds = float(signal.get("idle_seconds", 0.0))
                     activity_score = float(signal.get("activity_score", 0.0) or 0.0)
+                    activity_recent = bool(signal.get("recent_activity", False))
                     user_active = bool(signal.get("user_active", idle_seconds < activity_window_s)) or activity_score >= 0.5
-                    return ("active" if user_active else "idle", idle_seconds, activity_score)
+                    mode = "active" if user_active else "idle"
+                    reason = None
+                    if self._governor is not None:
+                        try:
+                            decision = self._governor.decide(
+                                {
+                                    "idle_seconds": idle_seconds,
+                                    "user_active": user_active,
+                                    "activity_score": activity_score,
+                                    "activity_recent": activity_recent,
+                                    "query_intent": False,
+                                    "suspend_workers": suspend_workers,
+                                }
+                            )
+                        except Exception:
+                            decision = None
+                        if decision is not None:
+                            idle_seconds = float(decision.idle_seconds)
+                            activity_score = float(decision.activity_score)
+                            mode = "idle" if decision.mode == "IDLE_DRAIN" else "active"
+                            reason = str(decision.reason)
+                    return (mode, idle_seconds, activity_score, reason)
             if self._input_tracker is not None and hasattr(self._input_tracker, "idle_seconds"):
                 try:
                     idle_seconds = float(self._input_tracker.idle_seconds())
                 except Exception:
                     idle_seconds = 0.0
                 user_active = idle_seconds < activity_window_s
-                return ("active" if user_active else "idle", idle_seconds, activity_score)
+                mode = "active" if user_active else "idle"
+                reason = None
+                if self._governor is not None:
+                    try:
+                        decision = self._governor.decide(
+                            {
+                                "idle_seconds": idle_seconds,
+                                "user_active": user_active,
+                                "activity_score": activity_score,
+                                "activity_recent": activity_recent,
+                                "query_intent": False,
+                                "suspend_workers": suspend_workers,
+                            }
+                        )
+                    except Exception:
+                        decision = None
+                    if decision is not None:
+                        idle_seconds = float(decision.idle_seconds)
+                        activity_score = float(decision.activity_score)
+                        mode = "idle" if decision.mode == "IDLE_DRAIN" else "active"
+                        reason = str(decision.reason)
+                return (mode, idle_seconds, activity_score, reason)
             idle_seconds = float("inf") if assume_idle else 0.0
-            return ("idle" if idle_seconds >= activity_window_s else "active", idle_seconds, activity_score)
+            user_active = idle_seconds < activity_window_s
+            mode = "idle" if idle_seconds >= activity_window_s else "active"
+            reason = None
+            if self._governor is not None:
+                try:
+                    decision = self._governor.decide(
+                        {
+                            "idle_seconds": idle_seconds,
+                            "user_active": user_active,
+                            "activity_score": activity_score,
+                            "activity_recent": activity_recent,
+                            "query_intent": False,
+                            "suspend_workers": suspend_workers,
+                        }
+                    )
+                except Exception:
+                    decision = None
+                if decision is not None:
+                    idle_seconds = float(decision.idle_seconds)
+                    activity_score = float(decision.activity_score)
+                    mode = "idle" if decision.mode == "IDLE_DRAIN" else "active"
+                    reason = str(decision.reason)
+            return (mode, idle_seconds, activity_score, reason)
         backend_used, frame_iter = _frame_iter(
             backend,
             fps_provider,
@@ -511,8 +596,18 @@ class CapturePipeline:
             if self._stop.is_set():
                 break
             now = time.monotonic()
+            if self._last_frame_ts is not None:
+                interval = max(0.0, now - self._last_frame_ts)
+                expected = 1.0 / max(1, int(fps_target))
+                lag = max(0.0, interval - expected)
+                self._last_frame_interval_ms = interval * 1000.0
+                self._last_lag_ms = lag * 1000.0
+            self._last_frame_ts = now
             if activity_enabled and (now - last_activity_check) >= max(0.2, activity_check_s):
-                mode, idle_seconds, activity_score = _activity_snapshot()
+                mode, idle_seconds, activity_score, activity_reason = _activity_snapshot()
+                last_idle_seconds = float(idle_seconds)
+                last_activity_score = float(activity_score)
+                last_activity_reason = str(activity_reason) if activity_reason else None
                 if mode != activity_mode:
                     activity_mode = mode
                     if mode == "active":
@@ -537,6 +632,7 @@ class CapturePipeline:
                         "mode": mode,
                         "idle_seconds": float(idle_seconds),
                         "activity_score": float(activity_score),
+                        "reason": str(activity_reason or ""),
                         "fps_target": int(fps_target),
                         "bitrate_kbps": int(bitrate_kbps),
                         "jpeg_quality": int(quality),
@@ -656,7 +752,13 @@ class CapturePipeline:
 
             queue_depth = frame_queue.qsize()
             update = self._backpressure.adjust(
-                {"queue_depth": int(queue_depth), "now": now},
+                {
+                    "queue_depth": int(queue_depth),
+                    "now": now,
+                    "mode": str(activity_mode or ""),
+                    "idle_seconds": float(last_idle_seconds),
+                    "activity_score": float(last_activity_score),
+                },
                 {"fps_target": fps_target, "bitrate_kbps": bitrate_kbps},
             )
             updated_fps = int(update.get("fps_target", fps_target))
@@ -686,6 +788,15 @@ class CapturePipeline:
                 with self._rate_lock:
                     self._fps_target = fps_target
                     self._bitrate_kbps = bitrate_kbps
+
+            self._emit_capture_telemetry(
+                now_mono=now,
+                mode=str(activity_mode or "unknown"),
+                idle_seconds=float(last_idle_seconds),
+                activity_score=float(last_activity_score),
+                reason=last_activity_reason,
+                queue_depth=int(queue_depth),
+            )
 
         # Signal end of stream
         frame_queue.put(STOP_SENTINEL)
@@ -1013,6 +1124,67 @@ class CapturePipeline:
             os.remove(artifact.path)
         except FileNotFoundError:
             pass
+
+    def _emit_capture_telemetry(
+        self,
+        *,
+        now_mono: float,
+        mode: str,
+        idle_seconds: float,
+        activity_score: float,
+        reason: str | None,
+        queue_depth: int,
+    ) -> None:
+        if not self._telemetry_enabled:
+            return
+        interval = max(0.5, float(self._telemetry_interval_s))
+        if mode == "active":
+            interval = max(interval, float(self._telemetry_interval_s) * 3.0)
+        if now_mono - self._telemetry_last < interval:
+            return
+        cpu_now = time.process_time()
+        wall_now = time.monotonic()
+        cpu_delta = max(0.0, cpu_now - self._telemetry_last_cpu)
+        wall_delta = max(0.001, wall_now - self._telemetry_last_wall)
+        cpu_pct = min(100.0, (cpu_delta / wall_delta) * 100.0)
+        with self._drops_lock:
+            drops_total = int(self._drops_total)
+            queue_depth_max = int(self._queue_depth_max)
+        drops_delta = drops_total - int(self._telemetry_last_drops)
+        if drops_delta < 0:
+            drops_delta = drops_total
+        payload = {
+            "mode": mode,
+            "reason": reason or "",
+            "idle_seconds": float(idle_seconds),
+            "activity_score": float(activity_score),
+            "queue_depth": int(queue_depth),
+            "queue_depth_max": int(queue_depth_max),
+            "drops_total": int(drops_total),
+            "drops_delta": int(drops_delta),
+            "lag_ms": float(self._last_lag_ms),
+            "frame_interval_ms": float(self._last_frame_interval_ms),
+            "cpu_pct": float(round(cpu_pct, 3)),
+            "fps_target": int(self._fps_target),
+            "bitrate_kbps": int(self._bitrate_kbps),
+            "jpeg_quality": int(self._jpeg_quality),
+            "backend": str(self._backend_used),
+        }
+        self._telemetry_last = now_mono
+        self._telemetry_last_cpu = cpu_now
+        self._telemetry_last_wall = wall_now
+        self._telemetry_last_drops = int(drops_total)
+        record_telemetry("capture", payload)
+        if self._event_builder is not None:
+            try:
+                self._event_builder.journal_event("telemetry.capture", payload)
+            except Exception:
+                pass
+        if self._logger is not None:
+            try:
+                self._logger.log("telemetry.capture", payload)
+            except Exception:
+                pass
 
     def _pop_drop_stats(self) -> tuple[int, int]:
         with self._drops_lock:

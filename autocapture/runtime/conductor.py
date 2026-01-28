@@ -10,7 +10,8 @@ from typing import Any
 from autocapture.research.runner import ResearchRunner
 from autocapture.storage.pressure import StoragePressureMonitor
 from autocapture.runtime.governor import RuntimeGovernor
-from autocapture.runtime.scheduler import Job, Scheduler
+from autocapture.runtime.scheduler import Job, JobStepResult, Scheduler
+from autocapture_nx.kernel.telemetry import record_telemetry
 
 
 @dataclass
@@ -28,7 +29,7 @@ class RuntimeConductor:
         self._system = system
         self._config = getattr(system, "config", {}) if system is not None else {}
         self._governor = self._resolve_governor(system)
-        self._scheduler = Scheduler(self._governor)
+        self._scheduler = self._resolve_scheduler(system, self._governor)
         self._input_tracker = self._resolve_input_tracker(system)
         self._idle_processor = None
         self._storage_monitor = StoragePressureMonitor(system)
@@ -54,6 +55,20 @@ class RuntimeConductor:
             except Exception:
                 pass
         return governor
+
+    def _resolve_scheduler(self, system: Any, governor: RuntimeGovernor) -> Scheduler:
+        if hasattr(system, "has") and system.has("runtime.scheduler"):
+            scheduler = system.get("runtime.scheduler")
+        elif isinstance(system, dict) and "runtime.scheduler" in system:
+            scheduler = system.get("runtime.scheduler")
+        else:
+            scheduler = Scheduler(governor)
+        if hasattr(scheduler, "set_governor"):
+            try:
+                scheduler.set_governor(governor)
+            except Exception:
+                pass
+        return scheduler
 
     def _resolve_input_tracker(self, system: Any):
         if hasattr(system, "has") and system.has("tracking.input"):
@@ -88,7 +103,7 @@ class RuntimeConductor:
         self._idle_processor = IdleProcessor(self._system)
         return self._idle_processor
 
-    def _signals(self) -> dict[str, Any]:
+    def _signals(self, *, query_intent: bool | None = None) -> dict[str, Any]:
         runtime_cfg = self._config.get("runtime", {}) if isinstance(self._config, dict) else {}
         active_window_s = float(runtime_cfg.get("active_window_s", 3))
         assume_idle = bool(runtime_cfg.get("activity", {}).get("assume_idle_when_missing", False))
@@ -115,7 +130,7 @@ class RuntimeConductor:
                 user_active = bool(signal.get("user_active", user_active))
                 activity_score = float(signal.get("activity_score", 0.0) or 0.0)
                 activity_recent = bool(signal.get("recent_activity", False))
-        return {
+        signals = {
             "idle_seconds": idle_seconds,
             "user_active": user_active,
             "query_intent": False,
@@ -124,6 +139,9 @@ class RuntimeConductor:
             "activity_score": activity_score,
             "activity_recent": activity_recent,
         }
+        if query_intent is not None:
+            signals["query_intent"] = bool(query_intent)
+        return signals
 
     def _schedule_idle(self) -> None:
         idle_cfg = self._config.get("processing", {}).get("idle", {})
@@ -135,12 +153,31 @@ class RuntimeConductor:
         if "idle.extract" in self._queued:
             return
 
-        def job_fn():
+        def step_fn(should_abort, budget_ms: int) -> JobStepResult:
             self._stats.last_idle_run = time.time()
-            processor.process(should_abort=self._should_abort)
+            started = time.monotonic()
+            if hasattr(processor, "process_step"):
+                result = processor.process_step(
+                    should_abort=should_abort,
+                    budget_ms=budget_ms,
+                    persist_checkpoint=True,
+                )
+                if isinstance(result, tuple):
+                    done = bool(result[0])
+                else:
+                    done = bool(result)
+            else:
+                if hasattr(processor, "process"):
+                    try:
+                        processor.process(should_abort=should_abort)
+                    except TypeError:
+                        processor.process()
+                done = True
+            consumed_ms = int(max(0.0, (time.monotonic() - started) * 1000.0))
+            return JobStepResult(done=done, consumed_ms=consumed_ms)
 
         estimate_ms = int(idle_cfg.get("estimate_ms", 2000))
-        self._scheduler.enqueue(Job(name="idle.extract", fn=job_fn, heavy=True, estimated_ms=estimate_ms))
+        self._scheduler.enqueue(Job(name="idle.extract", step_fn=step_fn, heavy=True, estimated_ms=estimate_ms))
         self._queued.add("idle.extract")
 
     def _schedule_research(self) -> None:
@@ -157,12 +194,19 @@ class RuntimeConductor:
         if "idle.research" in self._queued:
             return
 
-        def job_fn():
+        def step_fn(should_abort, budget_ms: int) -> JobStepResult:
             self._stats.last_research_run = time.time()
-            self._research_runner.run_once()
+            started = time.monotonic()
+            if hasattr(self._research_runner, "run_step"):
+                done = bool(self._research_runner.run_step(should_abort=should_abort, budget_ms=budget_ms))
+            else:
+                self._research_runner.run_once()
+                done = True
+            consumed_ms = int(max(0.0, (time.monotonic() - started) * 1000.0))
+            return JobStepResult(done=done, consumed_ms=consumed_ms)
 
         estimate_ms = int(cfg.get("estimate_ms", 1500))
-        self._scheduler.enqueue(Job(name="idle.research", fn=job_fn, heavy=True, estimated_ms=estimate_ms))
+        self._scheduler.enqueue(Job(name="idle.research", step_fn=step_fn, heavy=True, estimated_ms=estimate_ms))
         self._queued.add("idle.research")
 
     def _schedule_storage_pressure(self) -> None:
@@ -226,6 +270,7 @@ class RuntimeConductor:
         self._stats.last_telemetry_emit = now
         self._stats.last_mode = stats.mode
         self._stats.last_reason = stats.reason
+        record_telemetry("runtime", payload)
         if self._events is not None:
             try:
                 self._events.journal_event("runtime.telemetry", payload)
@@ -237,16 +282,38 @@ class RuntimeConductor:
             except Exception:
                 pass
 
-    def _run_once(self) -> list[str]:
+    def _run_once(self, *, force: bool = False) -> list[str]:
         self._schedule_idle()
         self._schedule_research()
         self._schedule_storage_pressure()
-        signals = self._signals()
+        signals = self._signals(query_intent=True if force else None)
         executed = self._scheduler.run_pending(signals)
         self._emit_telemetry(signals, executed)
         for name in executed:
             self._queued.discard(name)
         return executed
+
+    def run_once(self, *, force: bool = False) -> dict[str, Any]:
+        executed = self._run_once(force=force)
+        stats = self._scheduler.last_stats()
+        return {
+            "executed": executed,
+            "stats": {
+                "mode": stats.mode,
+                "reason": stats.reason,
+                "heavy_allowed": bool(stats.heavy_allowed),
+                "budget_remaining_ms": int(stats.budget_remaining_ms),
+                "budget_spent_ms": int(stats.budget_spent_ms),
+                "budget_window_ms": int(stats.budget_window_ms),
+                "inflight_heavy": int(stats.inflight_heavy),
+                "admitted_heavy": int(stats.admitted_heavy),
+                "completed_jobs": int(stats.completed_jobs),
+                "deferred_jobs": int(stats.deferred_jobs),
+                "preempted_jobs": int(stats.preempted_jobs),
+                "ran_light": int(stats.ran_light),
+                "ts_monotonic": float(stats.ts_monotonic),
+            },
+        }
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
