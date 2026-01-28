@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import warnings
 
 from autocapture.ingest.table_extractor import TableExtractor
 
@@ -12,13 +13,19 @@ class TableExtractorStrategiesTests(unittest.TestCase):
 
     def test_pdf_strategy(self) -> None:
         extractor = TableExtractor()
+        writer_cls = None
         try:
-            from PyPDF2 import PdfWriter
+            from pypdf import PdfWriter as writer_cls
         except Exception:
-            self.skipTest("PyPDF2 not available")
+            try:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", category=DeprecationWarning, module="PyPDF2")
+                    from PyPDF2 import PdfWriter as writer_cls
+            except Exception:
+                self.skipTest("PDF writer not available")
         with tempfile.TemporaryDirectory() as tmp:
             path = f"{tmp}/test.pdf"
-            writer = PdfWriter()
+            writer = writer_cls()
             writer.add_blank_page(width=72, height=72)
             with open(path, "wb") as handle:
                 writer.write(handle)
