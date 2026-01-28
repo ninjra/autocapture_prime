@@ -1,41 +1,32 @@
-"""Local embedding plugin using optional sentence-transformers or ONNX."""
+"""Local embedding plugin with hash fallback."""
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
+from autocapture.indexing.vector import LocalEmbedder
 
 
 class EmbedderLocal(PluginBase):
     def __init__(self, plugin_id: str, context: PluginContext) -> None:
         super().__init__(plugin_id, context)
-        self._model = None
+        model_name = None
+        cfg = context.config if isinstance(context.config, dict) else {}
+        indexing_cfg = cfg.get("indexing", {}) if isinstance(cfg.get("indexing", {}), dict) else {}
+        model_name = indexing_cfg.get("embedder_model")
+        self._embedder = LocalEmbedder(model_name)
 
     def capabilities(self) -> dict[str, Any]:
         return {"embedder.text": self}
 
-    def _load(self):
-        if self._model is not None:
-            return self._model
-        try:
-            from sentence_transformers import SentenceTransformer
-        except Exception as exc:
-            raise RuntimeError(f"Missing embedder dependency: {exc}")
-        model_path = self.context.config.get("indexing", {}).get("embedder_model")
-        if not model_path or not os.path.isdir(model_path):
-            raise RuntimeError("Missing embedder model files; set indexing.embedder_model to a local path")
-        try:
-            self._model = SentenceTransformer(model_path)
-        except Exception as exc:
-            raise RuntimeError(f"Failed to load embedder model at {model_path}: {exc}")
-        return self._model
-
     def embed(self, text: str) -> dict[str, Any]:
-        model = self._load()
-        vec = model.encode([text])[0]
-        return {"vector": vec.tolist(), "model_id": "local_sentence_transformers"}
+        vector = self._embedder.embed(text or "")
+        identity = self._embedder.identity()
+        model_id = str(identity.get("backend", "hash"))
+        if identity.get("model_name"):
+            model_id = f"{model_id}:{identity.get('model_name')}"
+        return {"vector": vector, "model_id": model_id, "identity": identity}
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> EmbedderLocal:

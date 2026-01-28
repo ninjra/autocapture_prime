@@ -88,7 +88,7 @@ def _write_consumer_plugin(root: Path, *, required_capabilities: list[str]) -> s
 
 class InprocCapabilityGuardTests(unittest.TestCase):
     def test_inproc_plugin_blocks_unallowed_capability(self) -> None:
-        with tempfile.TemporaryDirectory(dir=".") as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             storage_id = _write_storage_plugin(root)
             consumer_id = _write_consumer_plugin(root, required_capabilities=[])
@@ -111,7 +111,7 @@ class InprocCapabilityGuardTests(unittest.TestCase):
                 consumer.value()
 
     def test_inproc_plugin_allows_declared_capability(self) -> None:
-        with tempfile.TemporaryDirectory(dir=".") as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             storage_id = _write_storage_plugin(root)
             consumer_id = _write_consumer_plugin(root, required_capabilities=["storage.metadata"])

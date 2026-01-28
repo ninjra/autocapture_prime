@@ -1,10 +1,11 @@
-"""Local OCR plugin using optional pytesseract."""
+"""Local OCR plugin with deterministic fallback."""
 
 from __future__ import annotations
 
 from typing import Any
 
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
+from autocapture.ingest.ocr_basic import ocr_text_from_bytes, ocr_tokens_from_bytes
 
 
 class OCRLocal(PluginBase):
@@ -14,22 +15,27 @@ class OCRLocal(PluginBase):
     def capabilities(self) -> dict[str, Any]:
         return {"ocr.engine": self}
 
-    def extract(self, image_bytes: bytes) -> dict[str, Any]:
-        try:
-            import pytesseract
-            from PIL import Image
-        except Exception as exc:
-            raise RuntimeError(f"Missing OCR dependency: {exc}")
-        from io import BytesIO
-
+    def extract_tokens(self, image_bytes: bytes) -> dict[str, Any]:
         if not image_bytes:
-            raise RuntimeError("Missing OCR input bytes")
-        try:
-            img = Image.open(BytesIO(image_bytes))
-        except Exception as exc:
-            raise RuntimeError(f"Invalid OCR image bytes: {exc}")
-        text = pytesseract.image_to_string(img)
-        return {"text": text}
+            return {"tokens": []}
+        tokens = ocr_tokens_from_bytes(image_bytes)
+        output = []
+        for token in tokens:
+            output.append(
+                {
+                    "text": token.text,
+                    "bbox": token.bbox,
+                    "confidence": float(token.confidence),
+                }
+            )
+        return {"tokens": output}
+
+    def extract(self, image_bytes: bytes) -> dict[str, Any]:
+        if not image_bytes:
+            return {"text": "", "tokens": []}
+        tokens = self.extract_tokens(image_bytes).get("tokens", [])
+        text = ocr_text_from_bytes(image_bytes)
+        return {"text": text, "tokens": tokens}
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> OCRLocal:

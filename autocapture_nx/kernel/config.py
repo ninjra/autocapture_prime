@@ -56,6 +56,11 @@ class SchemaLiteValidator:
             self._validate_array(schema, data, path)
         elif expected_type in ("integer", "number"):
             self._validate_number(schema, data, path)
+        else:
+            if isinstance(data, dict) and any(k in schema for k in ("required", "properties", "additionalProperties")):
+                self._validate_object(schema, data, path)
+            elif isinstance(data, list) and "items" in schema:
+                self._validate_array(schema, data, path)
 
         if "allOf" in schema:
             for subschema in schema["allOf"]:

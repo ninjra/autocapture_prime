@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-01-28T15:31:50.540804+00:00",
+  "generated_at": "2026-01-28T16:25:24.980314+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "5cc1c94085943e29dbfd9732be2e9bd938b716239ae0fb6be03532b5bdde9a6a",
@@ -46,7 +46,7 @@
       "manifest_sha256": "bbe4a544adc24a619919f77879969ed82cc081ac4b8de9b9c4582f2d9ccddea2"
     },
     "builtin.embedder.stub": {
-      "artifact_sha256": "e3006a6b308568fec9bbf5445d6d07fdc9bb8492353df8b91a31ff0c17740cde",
+      "artifact_sha256": "1588b7740a51159851e86642865ae1dec33c88df4038fc63a0c1b1637de08a91",
       "manifest_sha256": "2ceb68a5d14a4afeb756799e49fe863036c7f490650f8ac1a67b1447dfe32b74"
     },
     "builtin.journal.basic": {
@@ -70,7 +70,7 @@
       "manifest_sha256": "e834b91caf0fe7a6086c002bc5ae31d8e71aa2816d9c8f279d8a74956682c705"
     },
     "builtin.ocr.stub": {
-      "artifact_sha256": "5b52a56f77591252168aba8a611474f4924f763acd3f52f38d7e33e5c75986df",
+      "artifact_sha256": "c9d6f497c465a8af92c64d4d143311fc6e54fc9c3d7a81f0ca954930793818ff",
       "manifest_sha256": "7e4fe3309afbd42b1ce179569fd7ff85831d12fec07dd6998b3d4b4c264c5e20"
     },
     "builtin.privacy.egress_sanitizer": {
@@ -86,7 +86,7 @@
       "manifest_sha256": "9fb7965305d6c9596fcb17a545777a94a9d89b170cb80757b80bde4f49d305b2"
     },
     "builtin.reranker.stub": {
-      "artifact_sha256": "ca4ddc8f4a2042155bfbe4f64648b6e2589bcdb4191f5406e345f51a40ef567f",
+      "artifact_sha256": "72249696e343dc39491144f5664b3922ca48bfd327d9a32d7640655dbd2144a4",
       "manifest_sha256": "6991ea487886c7ee84d6d263b4e9c1764aca406b76c82dd21e987898c81a895d"
     },
     "builtin.retrieval.basic": {
@@ -194,7 +194,7 @@
       "manifest_sha256": "dbf2e2c5baf03df420205d457e479f1c7841ce28eae5a71e3b3696f2dc344bdc"
     },
     "builtin.vlm.stub": {
-      "artifact_sha256": "278d2f22e6e34d7993573064f9019c11e1a3bd7485cc2960ad481d546ce4817d",
+      "artifact_sha256": "588ed49f617042a596673ef06d6652e86b29c7af8a9410cba6c1306de617e833",
       "manifest_sha256": "17bd6abdc752f44701c077fb18045644c154f5386c7b24f85797ca2464923cc1"
     },
     "builtin.window.metadata.windows": {

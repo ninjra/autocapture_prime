@@ -91,7 +91,7 @@ def _write_consumer_plugin(root: Path, *, required_capabilities: list[str]) -> s
 
 class SubprocessCapabilityBridgingTests(unittest.TestCase):
     def test_subprocess_plugin_can_call_allowed_capability(self) -> None:
-        with tempfile.TemporaryDirectory(dir=".") as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             storage_id = _write_storage_plugin(root)
             consumer_id = _write_consumer_plugin(root, required_capabilities=["storage.metadata"])
@@ -119,7 +119,7 @@ class SubprocessCapabilityBridgingTests(unittest.TestCase):
             self.assertEqual(result, {"value": 1})
 
     def test_subprocess_plugin_blocks_unallowed_capability(self) -> None:
-        with tempfile.TemporaryDirectory(dir=".") as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             storage_id = _write_storage_plugin(root)
             consumer_id = _write_consumer_plugin(root, required_capabilities=["storage.metadata"])
@@ -149,4 +149,3 @@ class SubprocessCapabilityBridgingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

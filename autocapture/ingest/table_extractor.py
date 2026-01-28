@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import csv
 
+from autocapture.ingest.ocr_basic import ocr_text_from_image
+
 
 class TableExtractor:
     def _parse_text(self, text: str) -> list[list[str]]:
@@ -20,13 +22,9 @@ class TableExtractor:
 
     def extract_from_image(self, image) -> list[list[str]]:
         try:
-            import pytesseract
-        except Exception as exc:
-            raise RuntimeError(f"OCR unavailable: {exc}")
-        try:
-            text = pytesseract.image_to_string(image)
-        except Exception as exc:
-            raise RuntimeError(f"OCR unavailable: {exc}")
+            text = ocr_text_from_image(image)
+        except Exception:
+            text = ""
         return self._parse_text(text)
 
     def extract_from_pdf(self, path: str) -> list[list[str]]:
