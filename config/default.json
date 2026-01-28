@@ -32,7 +32,7 @@
     },
     "input_tracking": {
       "flush_interval_ms": 250,
-      "mode": "raw",
+      "mode": "activity",
       "store_derived": true
     },
     "video": {

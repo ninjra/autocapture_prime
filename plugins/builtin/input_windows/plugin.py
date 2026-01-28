@@ -36,6 +36,7 @@ class InputTrackerWindows(PluginBase):
         self._event_builder = None
         self._batch_seq = 0
         self._activity_events: deque[float] = deque(maxlen=128)
+        self._mode = "raw"
 
     def capabilities(self) -> dict[str, Any]:
         return {"tracking.input": self}
@@ -103,7 +104,9 @@ class InputTrackerWindows(PluginBase):
         event_builder = self.context.get_capability("event.builder")
         self._event_builder = event_builder
         capture_cfg = self.context.config.get("capture", {}).get("input_tracking", {})
-        mode = capture_cfg.get("mode", "raw")
+        mode = str(capture_cfg.get("mode", "raw") or "raw").lower()
+        self._mode = mode
+        self._batcher = _InputBatcher(store_events=(mode == "raw"))
         self._flush_interval_ms = int(capture_cfg.get("flush_interval_ms", 250))
         if mode == "off":
             return
@@ -111,14 +114,14 @@ class InputTrackerWindows(PluginBase):
         def on_key_press(key):
             ts = datetime.now(timezone.utc).isoformat()
             payload = {"action": "press"}
-            if mode == "raw":
+            if self._mode == "raw":
                 payload["key"] = str(key)
             self._record_event("key", payload, ts)
 
         def on_click(x, y, button, pressed):
             ts = datetime.now(timezone.utc).isoformat()
             payload = {"button": str(button), "pressed": pressed}
-            if mode == "raw":
+            if self._mode == "raw":
                 payload["x"] = int(x)
                 payload["y"] = int(y)
             self._record_event("mouse", payload, ts)
@@ -147,7 +150,9 @@ class InputTrackerWindows(PluginBase):
         self._flush_batch()
 
     def _record_event(self, kind: str, payload: dict[str, Any], ts_utc: str) -> None:
-        event = {"kind": kind, "ts_utc": ts_utc, **payload}
+        event = {"kind": kind, "ts_utc": ts_utc}
+        if self._mode == "raw":
+            event.update(payload)
         with self._lock:
             self._batcher.add(event)
             if kind in self._counts:
@@ -167,17 +172,17 @@ class InputTrackerWindows(PluginBase):
         if event_builder is None:
             return
         with self._lock:
-            events, start_ts, end_ts = self._batcher.drain()
-        if not events:
+            events, start_ts, end_ts, counts = self._batcher.drain()
+        total_events = sum(int(counts.get(kind, 0)) for kind in ("key", "mouse"))
+        if total_events <= 0:
             return
         payload = {
             "start_ts_utc": start_ts,
             "end_ts_utc": end_ts,
             "events": events,
-            "counts": {
-                "key": sum(1 for event in events if event.get("kind") == "key"),
-                "mouse": sum(1 for event in events if event.get("kind") == "mouse"),
-            },
+            "counts": dict(counts),
+            "event_count": int(total_events),
+            "mode": self._mode,
         }
         event_id = event_builder.journal_event("input.batch", payload, ts_utc=end_ts)
         with self._lock:
@@ -196,26 +201,32 @@ class InputTrackerWindows(PluginBase):
         run_id = ensure_run_id(self.context.config)
         seq = self._batch_seq
         self._batch_seq += 1
-        log_id = prefixed_id(run_id, "derived.input.log", seq)
+        log_id = None
+        content_hash = None
+        if events:
+            log_id = prefixed_id(run_id, "derived.input.log", seq)
+            encoded = _encode_input_log(events)
+            if hasattr(storage_media, "put_new"):
+                storage_media.put_new(log_id, encoded, ts_utc=end_ts)
+            else:
+                storage_media.put(log_id, encoded, ts_utc=end_ts)
+            content_hash = hashlib.sha256(encoded).hexdigest()
         summary_id = prefixed_id(run_id, "derived.input.summary", seq)
-        encoded = _encode_input_log(events)
-        if hasattr(storage_media, "put_new"):
-            storage_media.put_new(log_id, encoded, ts_utc=end_ts)
-        else:
-            storage_media.put(log_id, encoded, ts_utc=end_ts)
-        content_hash = hashlib.sha256(encoded).hexdigest()
         summary = {
             "record_type": "derived.input.summary",
             "run_id": run_id,
             "ts_utc": end_ts,
             "start_ts_utc": start_ts,
             "end_ts_utc": end_ts,
-            "log_id": log_id,
             "event_id": event_id,
-            "event_count": int(len(events)),
+            "event_count": int(total_events),
             "counts": payload["counts"],
-            "content_hash": content_hash,
+            "mode": self._mode,
         }
+        if log_id:
+            summary["log_id"] = log_id
+        if content_hash:
+            summary["content_hash"] = content_hash
         summary["payload_hash"] = sha256_canonical({k: v for k, v in summary.items() if k != "payload_hash"})
         if hasattr(storage_meta, "put_new"):
             storage_meta.put_new(summary_id, summary)
@@ -224,7 +235,7 @@ class InputTrackerWindows(PluginBase):
         event_builder.ledger_entry(
             "input.batch",
             inputs=[event_id],
-            outputs=[log_id, summary_id],
+            outputs=[summary_id] + ([log_id] if log_id else []),
             payload=summary,
             entry_id=summary_id,
             ts_utc=end_ts,
@@ -236,26 +247,34 @@ def create_plugin(plugin_id: str, context: PluginContext) -> InputTrackerWindows
 
 
 class _InputBatcher:
-    def __init__(self) -> None:
+    def __init__(self, *, store_events: bool = True) -> None:
         self._events: deque[dict[str, Any]] = deque()
         self._first_ts: str | None = None
         self._last_ts: str | None = None
+        self._store_events = bool(store_events)
+        self._counts = {"key": 0, "mouse": 0}
 
     def add(self, event: dict[str, Any]) -> None:
-        self._events.append(event)
+        kind = str(event.get("kind", ""))
+        if kind in self._counts:
+            self._counts[kind] += 1
+        if self._store_events:
+            self._events.append(event)
         ts = str(event.get("ts_utc", ""))
         if self._first_ts is None:
             self._first_ts = ts
         self._last_ts = ts
 
-    def drain(self) -> tuple[list[dict[str, Any]], str | None, str | None]:
+    def drain(self) -> tuple[list[dict[str, Any]], str | None, str | None, dict[str, int]]:
         events = list(self._events)
         self._events.clear()
         start = self._first_ts
         end = self._last_ts
+        counts = dict(self._counts)
         self._first_ts = None
         self._last_ts = None
-        return events, start, end
+        self._counts = {"key": 0, "mouse": 0}
+        return events, start, end, counts
 
 
 def _encode_input_log(events: list[dict[str, Any]]) -> bytes:
