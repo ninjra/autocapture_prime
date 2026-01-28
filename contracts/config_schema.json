@@ -183,6 +183,9 @@
             },
             "idle_jpeg_quality": {
               "type": "integer"
+            },
+            "preserve_quality": {
+              "type": "boolean"
             }
           },
           "type": "object"

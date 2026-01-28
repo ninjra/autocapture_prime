@@ -136,6 +136,7 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "capture.video.activity.active_window_s",
         "capture.video.activity.check_interval_s",
         "capture.video.activity.assume_idle_when_missing",
+        "capture.video.activity.preserve_quality",
         "capture.video.dedupe.enabled",
         "capture.video.dedupe.mode",
         "capture.video.dedupe.hash",

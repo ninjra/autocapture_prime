@@ -410,6 +410,7 @@ class CapturePipeline:
         activity_window_s = float(activity_cfg.get("active_window_s", 3))
         activity_check_s = float(activity_cfg.get("check_interval_s", 1))
         assume_idle = bool(activity_cfg.get("assume_idle_when_missing", False))
+        preserve_quality = bool(activity_cfg.get("preserve_quality", True))
         active_fps = int(activity_cfg.get("active_fps", fps_target))
         idle_fps = int(activity_cfg.get("idle_fps", fps_target))
         active_bitrate = int(activity_cfg.get("active_bitrate_kbps", bitrate_kbps))
@@ -419,6 +420,11 @@ class CapturePipeline:
         base_fps = int(fps_target)
         base_bitrate = int(bitrate_kbps)
         base_quality = int(jpeg_quality)
+        if preserve_quality:
+            active_bitrate = int(base_bitrate)
+            idle_bitrate = int(base_bitrate)
+            active_quality = int(base_quality)
+            idle_quality = int(base_quality)
         activity_mode: str | None = None
         last_activity_check = 0.0
         backend = str(capture_cfg.get("backend", "mss"))
@@ -452,8 +458,12 @@ class CapturePipeline:
             min_fps = int(backpressure_cfg.get("min_fps", 5))
             min_bitrate = int(backpressure_cfg.get("min_bitrate_kbps", 1000))
             degraded_fps = max(min_fps, max(1, int(base_fps_val) // 2))
-            degraded_bitrate = max(min_bitrate, max(1, int(base_bitrate_val) // 2))
-            degraded_quality = max(10, int(int(base_quality_val) * 0.7))
+            if preserve_quality:
+                degraded_bitrate = int(base_bitrate_val)
+                degraded_quality = int(base_quality_val)
+            else:
+                degraded_bitrate = max(min_bitrate, max(1, int(base_bitrate_val) // 2))
+                degraded_quality = max(10, int(int(base_quality_val) * 0.7))
             return degraded_fps, degraded_bitrate, degraded_quality
 
         def _activity_snapshot() -> tuple[str, float, float]:
@@ -531,6 +541,7 @@ class CapturePipeline:
                         "bitrate_kbps": int(bitrate_kbps),
                         "jpeg_quality": int(quality),
                         "disk_degraded": bool(degraded),
+                        "preserve_quality": bool(preserve_quality),
                     }
                     self._logger.log("capture.activity", activity_payload)
                     self._event_builder.journal_event("capture.activity", activity_payload)
@@ -657,6 +668,8 @@ class CapturePipeline:
                 degraded_fps, degraded_bitrate, _quality = _apply_disk_degrade(base_fps, base_bitrate, base_quality)
                 updated_fps = min(updated_fps, int(degraded_fps))
                 updated_bitrate = min(updated_bitrate, int(degraded_bitrate))
+            if preserve_quality:
+                updated_bitrate = int(base_bitrate)
             if updated_fps != fps_target or updated_bitrate != bitrate_kbps:
                 self._logger.log(
                     "capture.rate_change",
