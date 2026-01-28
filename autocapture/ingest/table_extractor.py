@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import warnings
 
 from autocapture.ingest.ocr_basic import ocr_text_from_image
 
@@ -28,11 +29,17 @@ class TableExtractor:
         return self._parse_text(text)
 
     def extract_from_pdf(self, path: str) -> list[list[str]]:
+        reader_cls = None
         try:
-            from PyPDF2 import PdfReader
-        except Exception as exc:
-            raise RuntimeError(f"PDF extraction unavailable: {exc}")
-        reader = PdfReader(path)
+            from pypdf import PdfReader as reader_cls
+        except Exception:
+            try:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", category=DeprecationWarning, module="PyPDF2")
+                    from PyPDF2 import PdfReader as reader_cls
+            except Exception as exc:
+                raise RuntimeError(f"PDF extraction unavailable: {exc}")
+        reader = reader_cls(path)
         text = "\n".join(page.extract_text() or "" for page in reader.pages)
         return self._parse_text(text)
 

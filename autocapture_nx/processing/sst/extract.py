@@ -569,7 +569,10 @@ def _detect_code_highlights(
 def _detect_caret_bbox(image: Any) -> BBox | None:
     gray = image.convert("L")
     width, height = gray.size
-    pixels = list(gray.getdata())
+    if hasattr(gray, "get_flattened_data"):
+        pixels = list(gray.get_flattened_data())
+    else:
+        pixels = list(gray.getdata())
     if width <= 2 or height <= 2:
         return None
     means: list[float] = []
@@ -605,7 +608,14 @@ def _detect_caret_bbox(image: Any) -> BBox | None:
 def _detect_selection_bbox(image: Any) -> BBox | None:
     rgb = image.convert("RGB")
     width, height = rgb.size
-    pixels = list(rgb.getdata())
+    if hasattr(rgb, "get_flattened_data"):
+        flat = list(rgb.get_flattened_data())
+        if flat and isinstance(flat[0], tuple):
+            pixels = flat
+        else:
+            pixels = list(zip(flat[0::3], flat[1::3], flat[2::3]))
+    else:
+        pixels = list(rgb.getdata())
     if width <= 2 or height <= 2:
         return None
     xs: list[int] = []

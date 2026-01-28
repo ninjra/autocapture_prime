@@ -93,6 +93,7 @@ class EgressGatewayTests(unittest.TestCase):
         finally:
             server.shutdown()
             thread.join(timeout=2)
+            server.server_close()
 
 
 if __name__ == "__main__":
