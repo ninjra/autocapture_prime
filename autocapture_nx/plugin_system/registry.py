@@ -333,7 +333,14 @@ class PluginRegistry:
                 raise PluginError("Network permission denied by policy")
 
     def validate_allowlist_and_hashes(self, manifests: list[PluginManifest]) -> None:
-        allowlist = set(self.config.get("plugins", {}).get("allowlist", []))
+        allowlist_raw = self.config.get("plugins", {}).get("allowlist", [])
+        alias_map: dict[str, str] = {}
+        for manifest in manifests:
+            for old_id in manifest.replaces:
+                old = str(old_id).strip()
+                if old and old not in alias_map:
+                    alias_map[old] = manifest.plugin_id
+        allowlist = set(self._normalize_ids(allowlist_raw, alias_map))
         locks_cfg = self.config.get("plugins", {}).get("locks", {})
         lockfile = self.load_lockfile() if locks_cfg.get("enforce", True) else {"plugins": {}}
         plugin_locks = lockfile.get("plugins", {})
@@ -367,6 +374,39 @@ class PluginRegistry:
         if plugin_id:
             out.discard(plugin_id)
         return out
+
+    def _alias_map(self, manifests_by_id: dict[str, tuple[Path, dict[str, Any]]]) -> dict[str, str]:
+        alias_map: dict[str, str] = {}
+        for plugin_id, (_, manifest) in manifests_by_id.items():
+            replaces = manifest.get("replaces", [])
+            if isinstance(replaces, list):
+                for old_id in replaces:
+                    old = str(old_id).strip()
+                    if old and old not in alias_map:
+                        alias_map[old] = plugin_id
+        return alias_map
+
+    def _normalize_ids(self, raw_ids: Any, alias_map: dict[str, str]) -> list[str]:
+        if not isinstance(raw_ids, (list, tuple, set)):
+            return []
+        normalized: list[str] = []
+        for pid in raw_ids:
+            pid_str = str(pid).strip()
+            if not pid_str:
+                continue
+            normalized.append(alias_map.get(pid_str, pid_str))
+        return normalized
+
+    def _normalize_enabled_map(self, enabled_map: Any, alias_map: dict[str, str]) -> dict[str, bool]:
+        if not isinstance(enabled_map, dict):
+            return {}
+        normalized: dict[str, bool] = {}
+        for pid, enabled in enabled_map.items():
+            pid_str = str(pid).strip()
+            if not pid_str:
+                continue
+            normalized[alias_map.get(pid_str, pid_str)] = bool(enabled)
+        return normalized
 
     def _conflict_pairs(
         self,
@@ -538,14 +578,10 @@ class PluginRegistry:
     def load_plugins(self) -> tuple[list[LoadedPlugin], CapabilityRegistry]:
         manifests = self.discover_manifest_paths()
         lockfile = self.load_lockfile()
-        allowlist = set(self.config.get("plugins", {}).get("allowlist", []))
-        enabled_map = self.config.get("plugins", {}).get("enabled", {})
-        default_pack = set(self.config.get("plugins", {}).get("default_pack", []))
         hosting_cfg = self.config.get("plugins", {}).get("hosting", {})
         hosting_mode = hosting_cfg.get("mode", "inproc")
         if self.safe_mode or self.config.get("plugins", {}).get("safe_mode", False):
             hosting_mode = "inproc"
-        inproc_allowlist = set(hosting_cfg.get("inproc_allowlist", []))
 
         manifests_by_id: dict[str, tuple[Path, dict[str, Any]]] = {}
         for manifest_path in manifests:
@@ -555,6 +591,12 @@ class PluginRegistry:
             self._check_compat(manifest)
             plugin_id = manifest["plugin_id"]
             manifests_by_id[plugin_id] = (manifest_path, manifest)
+
+        alias_map = self._alias_map(manifests_by_id)
+        allowlist = set(self._normalize_ids(self.config.get("plugins", {}).get("allowlist", []), alias_map))
+        enabled_map = self._normalize_enabled_map(self.config.get("plugins", {}).get("enabled", {}), alias_map)
+        default_pack = set(self._normalize_ids(self.config.get("plugins", {}).get("default_pack", []), alias_map))
+        inproc_allowlist = set(self._normalize_ids(hosting_cfg.get("inproc_allowlist", []), alias_map))
 
         loaded: list[LoadedPlugin] = []
         capabilities = CapabilityRegistry()

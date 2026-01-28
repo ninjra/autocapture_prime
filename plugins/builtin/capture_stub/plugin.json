@@ -1,5 +1,5 @@
 {
-  "plugin_id": "builtin.capture.stub",
+  "plugin_id": "builtin.capture.basic",
   "version": "0.1.0",
   "enabled": false,
   "entrypoints": [
@@ -40,5 +40,8 @@
   "hash_lock": {
     "manifest_sha256": "",
     "artifact_sha256": ""
-  }
+  },
+  "replaces": [
+    "builtin.capture.stub"
+  ]
 }

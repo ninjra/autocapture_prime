@@ -116,6 +116,52 @@ def _schema_for_path(schema: dict[str, Any], path: str) -> dict[str, Any] | None
     return node if isinstance(node, dict) else None
 
 
+def _capability_constraints(config: dict[str, Any], capability: str, field: str) -> dict[str, Any] | None:
+    plugins_cfg = config.get("plugins", {}) if isinstance(config, dict) else {}
+    caps_cfg = plugins_cfg.get("capabilities", {}) if isinstance(plugins_cfg, dict) else {}
+    policy = caps_cfg.get(capability, {}) if isinstance(caps_cfg, dict) else {}
+    if not isinstance(policy, dict):
+        return None
+    mode = str(policy.get("mode", "single"))
+    max_providers = int(policy.get("max_providers", 0) or 0)
+    if field in {"provider_ids", "preferred"}:
+        if mode == "single":
+            return {"mode": mode, "max_items": 1}
+        if max_providers > 0:
+            return {"mode": mode, "max_items": max_providers}
+        return {"mode": mode}
+    return {"mode": mode} if field == "mode" else None
+
+
+def _stage_constraints(config: dict[str, Any], stage: str, field: str) -> dict[str, Any] | None:
+    sst_cfg = config.get("processing", {}).get("sst", {}) if isinstance(config, dict) else {}
+    providers_cfg = sst_cfg.get("stage_providers", {}) if isinstance(sst_cfg, dict) else {}
+    stage_cfg = providers_cfg.get(stage, {}) if isinstance(providers_cfg, dict) else {}
+    if not isinstance(stage_cfg, dict):
+        return None
+    fanout = bool(stage_cfg.get("fanout", True))
+    max_providers = int(stage_cfg.get("max_providers", 0) or 0)
+    if field == "provider_ids":
+        if not fanout:
+            return {"fanout": False, "max_items": 1}
+        if max_providers > 0:
+            return {"fanout": True, "max_items": max_providers}
+        return {"fanout": True}
+    return None
+
+
+def _constraints_for_path(config: dict[str, Any], path: str) -> dict[str, Any] | None:
+    cap_target = _capability_policy_target(path)
+    if cap_target is not None:
+        capability, field = cap_target
+        return _capability_constraints(config, capability, field)
+    stage_target = _stage_policy_target(path)
+    if stage_target is not None:
+        stage, field = stage_target
+        return _stage_constraints(config, stage, field)
+    return None
+
+
 PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
     "builtin.capture.windows": [
         "capture.video.backend",
@@ -351,7 +397,7 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "runtime.timezone",
         "plugins.capabilities.time.intent_parser.preferred",
     ],
-    "builtin.capture.stub": [
+    "builtin.capture.basic": [
         "capture.stub.frames_dir",
         "capture.stub.loop",
         "capture.stub.max_frames",
@@ -379,7 +425,7 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "capture.video.dedupe.min_repeat",
         "capture.video.dedupe.window_ms",
     ],
-    "builtin.vlm.stub": [
+    "builtin.vlm.basic": [
         "models.vlm_path",
         "processing.idle.extractors.vlm",
         "processing.on_query.extractors.vlm",
@@ -387,10 +433,10 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "plugins.capabilities.vision.extractor.provider_ids",
         "plugins.capabilities.vision.extractor.max_providers",
     ],
-    "builtin.reranker.stub": [
+    "builtin.reranker.basic": [
         "models.reranker_path",
     ],
-    "builtin.embedder.stub": [
+    "builtin.embedder.basic": [
         "indexing.embedder_model",
     ],
     "mx.core.embed_local": [
@@ -438,7 +484,7 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "plugins.capabilities.storage.media.preferred",
         "plugins.capabilities.storage.entity_map.preferred",
     ],
-    "builtin.ocr.stub": [
+    "builtin.ocr.basic": [
         "processing.idle.extractors.ocr",
         "processing.on_query.extractors.ocr",
         "plugins.capabilities.ocr.engine.mode",
@@ -661,6 +707,7 @@ def build_plugin_options(config: dict[str, Any]) -> dict[str, Any]:
             field_type = None
             if isinstance(schema_node, dict):
                 field_type = schema_node.get("type")
+            constraints = _constraints_for_path(config, path)
             items.append(
                 {
                     "id": path,
@@ -668,6 +715,7 @@ def build_plugin_options(config: dict[str, Any]) -> dict[str, Any]:
                     "path": path,
                     "type": field_type,
                     "value": value,
+                    "constraints": constraints,
                 }
             )
         options[plugin_id] = items

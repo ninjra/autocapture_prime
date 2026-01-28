@@ -206,6 +206,7 @@ def _make_patch(patch_id: str, bbox: BBox, image_rgb: PILImage) -> dict[str, Any
     return {
         "patch_id": patch_id,
         "bbox": (x1, y1, x2, y2),
+        "image_rgb": patch,
         "image_bytes": buf.getvalue(),
         "width": int(x2 - x1),
         "height": int(y2 - y1),

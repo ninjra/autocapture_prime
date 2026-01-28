@@ -90,6 +90,8 @@ def _parse_element_graph(
     raw_elements = data.get("elements")
     if not isinstance(raw_elements, list):
         return None
+    if not _validate_element_schema(raw_elements):
+        return None
     state_id = "vlm"
     elements: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
@@ -155,6 +157,29 @@ def _parse_element_graph(
     _link_children(elements)
     elements.sort(key=lambda e: (e["z"], e["bbox"][1], e["bbox"][0], e["element_id"]))
     return {"state_id": state_id, "elements": tuple(elements), "edges": tuple(edges)}
+
+
+def _validate_element_schema(elements: list[Any]) -> bool:
+    def _valid_element(el: Any) -> bool:
+        if not isinstance(el, dict):
+            return False
+        if not isinstance(el.get("type"), str):
+            return False
+        bbox = el.get("bbox")
+        if not (isinstance(bbox, (list, tuple)) and len(bbox) == 4):
+            return False
+        try:
+            _ = [float(v) for v in bbox]
+        except Exception:
+            return False
+        children = el.get("children")
+        if children is None:
+            return True
+        if not isinstance(children, list):
+            return False
+        return all(_valid_element(child) for child in children)
+
+    return all(_valid_element(el) for el in elements)
 
 
 def _coerce_bbox(bbox: Any, frame_bbox: tuple[int, int, int, int]) -> tuple[int, int, int, int] | None:

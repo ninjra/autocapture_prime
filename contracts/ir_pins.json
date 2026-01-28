@@ -68,7 +68,7 @@
     },
     {
       "enabled": false,
-      "id": "builtin.capture.stub"
+      "id": "builtin.capture.basic"
     },
     {
       "enabled": true,
@@ -96,7 +96,7 @@
     },
     {
       "enabled": true,
-      "id": "builtin.embedder.stub"
+      "id": "builtin.embedder.basic"
     },
     {
       "enabled": true,
@@ -120,7 +120,7 @@
     },
     {
       "enabled": true,
-      "id": "builtin.ocr.stub"
+      "id": "builtin.ocr.basic"
     },
     {
       "enabled": true,
@@ -136,7 +136,7 @@
     },
     {
       "enabled": true,
-      "id": "builtin.reranker.stub"
+      "id": "builtin.reranker.basic"
     },
     {
       "enabled": true,
@@ -236,7 +236,7 @@
     },
     {
       "enabled": true,
-      "id": "builtin.vlm.stub"
+      "id": "builtin.vlm.basic"
     },
     {
       "enabled": true,

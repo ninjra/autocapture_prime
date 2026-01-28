@@ -340,7 +340,16 @@ class OcrOnnxPlugin(SSTStagePluginBase):
             avg_conf = sum(int(t.get("confidence_bp", 0)) for t in sorted_tokens) / (10000.0 * len(sorted_tokens))
             metrics["ocr.tokens"] = float(len(sorted_tokens))
             metrics["ocr.avg_conf"] = float(avg_conf)
-        return PluginOutput(items={"tokens": sorted_tokens, "tokens_raw": tokens_raw}, metrics=metrics, diagnostics=diagnostics)
+        return PluginOutput(
+            items={
+                "tokens": sorted_tokens,
+                "text_tokens": sorted_tokens,
+                "tokens_raw": tokens_raw,
+                "text_tokens_raw": tokens_raw,
+            },
+            metrics=metrics,
+            diagnostics=diagnostics,
+        )
 
 
 class LayoutAssemblePlugin(SSTStagePluginBase):
@@ -369,7 +378,8 @@ class ExtractTablePlugin(SSTStagePluginBase):
     stage_names = ("extract.table",)
 
     def run(self, inp: PluginInput, ctx: RunContext) -> PluginOutput:
-        tokens = _tokens_from_items(inp.items)
+        items = inp.items
+        tokens = _tokens_from_items(items)
         tables = extract_tables(
             tokens=tokens,
             state_id="pending",
@@ -378,6 +388,8 @@ class ExtractTablePlugin(SSTStagePluginBase):
             max_cells=int(self._sst_cfg["table_max_cells"]),
             row_gap_px=int(self._sst_cfg["table_row_gap_px"]),
             col_gap_px=int(self._sst_cfg["table_col_gap_px"]),
+            element_graph=items.get("element_graph"),
+            frame_bbox=items.get("frame_bbox"),
         )
         cells = sum(len(t.get("cells", ())) for t in tables)
         metrics = {"table.count": float(len(tables)), "table.cells": float(cells)}
@@ -458,7 +470,8 @@ class UiParsePlugin(SSTStagePluginBase):
         frame_bbox = items.get("frame_bbox")
         if not frame_bbox:
             diagnostics.append({"kind": "sst.ui_missing_bbox", "plugin": self.meta.id})
-            return PluginOutput(items={"element_graph": {"state_id": "pending", "elements": tuple(), "edges": tuple()}}, metrics={}, diagnostics=diagnostics)
+            empty = {"state_id": "pending", "elements": tuple(), "edges": tuple()}
+            return PluginOutput(items={"element_graph": empty, "element_graph_raw": empty}, metrics={}, diagnostics=diagnostics)
         raw_sst = _raw_sst_config(ctx.config)
         ui_cfg = raw_sst.get("ui_parse", {}) if isinstance(raw_sst, dict) else {}
         if not isinstance(ui_cfg, dict):
@@ -504,7 +517,11 @@ class UiParsePlugin(SSTStagePluginBase):
             element_graph = {"state_id": "pending", "elements": tuple(), "edges": tuple()}
         elements = element_graph.get("elements") if isinstance(element_graph, dict) else []
         metrics = {"ui.elements": float(len(elements or ())) }
-        return PluginOutput(items={"element_graph": element_graph}, metrics=metrics, diagnostics=diagnostics)
+        return PluginOutput(
+            items={"element_graph": element_graph, "element_graph_raw": element_graph},
+            metrics=metrics,
+            diagnostics=diagnostics,
+        )
 
 
 class TrackCursorPlugin(SSTStagePluginBase):
@@ -980,6 +997,8 @@ def _parse_element_graph(
     raw_elements = data.get("elements")
     if not isinstance(raw_elements, list):
         return None
+    if not _validate_element_schema(raw_elements):
+        return None
     state_id = "vlm"
     elements: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
@@ -1046,6 +1065,29 @@ def _parse_element_graph(
     _link_children(elements)
     elements.sort(key=lambda e: (e["z"], e["bbox"][1], e["bbox"][0], e["element_id"]))
     return {"state_id": state_id, "elements": tuple(elements), "edges": tuple(edges)}
+
+
+def _validate_element_schema(elements: list[Any]) -> bool:
+    def _valid_element(el: Any) -> bool:
+        if not isinstance(el, dict):
+            return False
+        if not isinstance(el.get("type"), str):
+            return False
+        bbox = el.get("bbox")
+        if not (isinstance(bbox, (list, tuple)) and len(bbox) == 4):
+            return False
+        try:
+            _ = [float(v) for v in bbox]
+        except Exception:
+            return False
+        children = el.get("children")
+        if children is None:
+            return True
+        if not isinstance(children, list):
+            return False
+        return all(_valid_element(child) for child in children)
+
+    return all(_valid_element(el) for el in elements)
 
 
 def _tokens_for_bbox(tokens: list[dict[str, Any]], bbox: tuple[int, int, int, int]) -> list[str]:

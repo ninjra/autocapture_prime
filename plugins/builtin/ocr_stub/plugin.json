@@ -1,5 +1,5 @@
 {
-  "plugin_id": "builtin.ocr.stub",
+  "plugin_id": "builtin.ocr.basic",
   "version": "0.1.0",
   "enabled": false,
   "entrypoints": [
@@ -30,5 +30,8 @@
   "hash_lock": {
     "manifest_sha256": "",
     "artifact_sha256": ""
-  }
+  },
+  "replaces": [
+    "builtin.ocr.stub"
+  ]
 }

@@ -52,9 +52,10 @@ class PluginManager:
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def _enabled_plugin_ids(self, manifests: list[PluginManifest]) -> set[str]:
-        allowlist = set(self.config.get("plugins", {}).get("allowlist", []))
-        enabled_map = self.config.get("plugins", {}).get("enabled", {})
-        default_pack = set(self.config.get("plugins", {}).get("default_pack", []))
+        alias_map = self._alias_map(manifests)
+        allowlist = set(self._normalize_ids(self.config.get("plugins", {}).get("allowlist", []), alias_map))
+        enabled_map = self._normalize_enabled_map(self.config.get("plugins", {}).get("enabled", {}), alias_map)
+        default_pack = set(self._normalize_ids(self.config.get("plugins", {}).get("default_pack", []), alias_map))
         enabled: set[str] = set()
         for manifest in manifests:
             pid = manifest.plugin_id
@@ -71,10 +72,42 @@ class PluginManager:
                 enabled.add(pid)
         return enabled
 
+    def _alias_map(self, manifests: list[PluginManifest]) -> dict[str, str]:
+        alias_map: dict[str, str] = {}
+        for manifest in manifests:
+            for old_id in manifest.replaces:
+                old = str(old_id).strip()
+                if old and old not in alias_map:
+                    alias_map[old] = manifest.plugin_id
+        return alias_map
+
+    def _normalize_ids(self, raw_ids: Any, alias_map: dict[str, str]) -> list[str]:
+        if not isinstance(raw_ids, (list, tuple, set)):
+            return []
+        normalized: list[str] = []
+        for pid in raw_ids:
+            pid_str = str(pid).strip()
+            if not pid_str:
+                continue
+            normalized.append(alias_map.get(pid_str, pid_str))
+        return normalized
+
+    def _normalize_enabled_map(self, enabled_map: Any, alias_map: dict[str, str]) -> dict[str, bool]:
+        if not isinstance(enabled_map, dict):
+            return {}
+        normalized: dict[str, bool] = {}
+        for pid, enabled in enabled_map.items():
+            pid_str = str(pid).strip()
+            if not pid_str:
+                continue
+            normalized[alias_map.get(pid_str, pid_str)] = bool(enabled)
+        return normalized
+
     def list_plugins(self) -> list[PluginStatus]:
         manifests = self._registry.discover_manifests()
         enabled_ids = self._enabled_plugin_ids(manifests)
-        allowlist = set(self.config.get("plugins", {}).get("allowlist", []))
+        alias_map = self._alias_map(manifests)
+        allowlist = set(self._normalize_ids(self.config.get("plugins", {}).get("allowlist", []), alias_map))
         locks_cfg = self.config.get("plugins", {}).get("locks", {})
         lockfile = self._registry.load_lockfile() if locks_cfg.get("enforce", True) else {"plugins": {}}
         plugin_locks = lockfile.get("plugins", {})
@@ -159,6 +192,9 @@ class PluginManager:
         return sorted(rows, key=lambda r: r.plugin_id)
 
     def enable(self, plugin_id: str) -> None:
+        manifests = self._registry.discover_manifests()
+        alias_map = self._alias_map(manifests)
+        plugin_id = alias_map.get(plugin_id, plugin_id)
         user_cfg = self._load_user_config()
         plugins_cfg = user_cfg.setdefault("plugins", {})
         enabled_map = plugins_cfg.setdefault("enabled", {})
@@ -166,6 +202,9 @@ class PluginManager:
         self._write_user_config(user_cfg)
 
     def disable(self, plugin_id: str) -> None:
+        manifests = self._registry.discover_manifests()
+        alias_map = self._alias_map(manifests)
+        plugin_id = alias_map.get(plugin_id, plugin_id)
         user_cfg = self._load_user_config()
         plugins_cfg = user_cfg.setdefault("plugins", {})
         enabled_map = plugins_cfg.setdefault("enabled", {})

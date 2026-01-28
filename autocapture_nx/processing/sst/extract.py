@@ -258,21 +258,67 @@ def extract_tables(
     max_cells: int,
     row_gap_px: int,
     col_gap_px: int,
+    element_graph: dict[str, Any] | None = None,
+    frame_bbox: BBox | None = None,
 ) -> list[dict[str, Any]]:
     if not tokens:
         return []
+    regions = _table_regions(element_graph, frame_bbox)
+    tables: list[dict[str, Any]] = []
+    if regions:
+        for idx, region in enumerate(regions):
+            region_tokens = [t for t in tokens if _mid_in_bbox(t["bbox"], region)]
+            table = _build_table(
+                region_tokens,
+                state_id=state_id,
+                min_rows=min_rows,
+                min_cols=min_cols,
+                max_cells=max_cells,
+                row_gap_px=row_gap_px,
+                col_gap_px=col_gap_px,
+            )
+            if table is None:
+                continue
+            table["region_bbox"] = region
+            table["region_index"] = idx
+            tables.append(table)
+        return tables
+    table = _build_table(
+        tokens,
+        state_id=state_id,
+        min_rows=min_rows,
+        min_cols=min_cols,
+        max_cells=max_cells,
+        row_gap_px=row_gap_px,
+        col_gap_px=col_gap_px,
+    )
+    return [table] if table else []
+
+
+def _build_table(
+    tokens: list[dict[str, Any]],
+    *,
+    state_id: str,
+    min_rows: int,
+    min_cols: int,
+    max_cells: int,
+    row_gap_px: int,
+    col_gap_px: int,
+) -> dict[str, Any] | None:
+    if not tokens:
+        return None
     rows = _cluster_rows(tokens, row_gap_px=row_gap_px)
     if len(rows) < min_rows:
-        return []
+        return None
     col_centers = _cluster_cols(rows, col_gap_px=col_gap_px)
     if len(col_centers) < min_cols:
-        return []
+        return None
     col_edges = _edges_from_centers(col_centers)
     row_edges = _edges_from_centers([r["center_y"] for r in rows])
     rows_n = max(0, len(row_edges) - 1)
     cols_n = max(0, len(col_edges) - 1)
     if rows_n * cols_n <= 0 or rows_n * cols_n > max_cells:
-        return []
+        return None
 
     cells: list[dict[str, Any]] = []
     for r in range(rows_n):
@@ -298,29 +344,56 @@ def extract_tables(
     csv_text = _cells_to_csv(cells, rows_n, cols_n)
     tsv_text = _cells_to_tsv(cells, rows_n, cols_n)
     merges = _detect_merges(tokens, row_edges, col_edges)
-    return [
-        {
-            "table_id": table_id,
-            "state_id": state_id,
-            "bbox": table_bbox,
+    return {
+        "table_id": table_id,
+        "state_id": state_id,
+        "bbox": table_bbox,
+        "rows": rows_n,
+        "cols": cols_n,
+        "row_y": tuple(row_edges),
+        "col_x": tuple(col_edges),
+        "merges": tuple(merges),
+        "grid": {
             "rows": rows_n,
             "cols": cols_n,
             "row_y": tuple(row_edges),
             "col_x": tuple(col_edges),
             "merges": tuple(merges),
-            "grid": {
-                "rows": rows_n,
-                "cols": cols_n,
-                "row_y": tuple(row_edges),
-                "col_x": tuple(col_edges),
-                "merges": tuple(merges),
-            },
-            "cells": tuple(cells),
-            "csv": csv_text,
-            "tsv": tsv_text,
-            "kind": "table",
-        }
-    ]
+        },
+        "cells": tuple(cells),
+        "csv": csv_text,
+        "tsv": tsv_text,
+        "kind": "table",
+    }
+
+
+def _table_regions(element_graph: dict[str, Any] | None, frame_bbox: BBox | None) -> list[BBox]:
+    if not element_graph or frame_bbox is None:
+        return []
+    elements = element_graph.get("elements") if isinstance(element_graph, dict) else None
+    if not isinstance(elements, (list, tuple)):
+        return []
+    regions: list[BBox] = []
+    for el in elements:
+        if not isinstance(el, dict):
+            continue
+        el_type = str(el.get("type", ""))
+        if el_type not in {"table", "grid"}:
+            continue
+        bbox = el.get("bbox")
+        if not (isinstance(bbox, (list, tuple)) and len(bbox) == 4):
+            continue
+        x1, y1, x2, y2 = [int(v) for v in bbox]
+        fx1, fy1, fx2, fy2 = frame_bbox
+        x1 = max(fx1, min(x1, fx2))
+        y1 = max(fy1, min(y1, fy2))
+        x2 = max(fx1, min(x2, fx2))
+        y2 = max(fy1, min(y2, fy2))
+        if x2 <= x1 or y2 <= y1:
+            continue
+        regions.append((x1, y1, x2, y2))
+    regions.sort(key=lambda b: (b[1], b[0], b[3], b[2]))
+    return regions
 
 
 def extract_spreadsheets(
