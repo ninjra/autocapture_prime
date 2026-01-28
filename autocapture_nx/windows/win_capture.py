@@ -29,7 +29,9 @@ def iter_screenshots(
     frame_source: Iterator[Frame] | None = None,
     now_fn: Callable[[], float] = time.monotonic,
     sleep_fn: Callable[[float], None] = time.sleep,
-    jpeg_quality: int = 90,
+    jpeg_quality: int | Callable[[], int] = 90,
+    monitor_index: int = 0,
+    resolution: str | None = None,
 ) -> Iterator[Frame]:
     if callable(fps):
         fps_provider = fps
@@ -48,20 +50,28 @@ def iter_screenshots(
 
         def _frames() -> Iterator[Frame]:
             with mss.mss() as sct:
-                monitor = sct.monitors[0]
+                monitors = sct.monitors
+                idx = int(monitor_index)
+                if idx < 0 or idx >= len(monitors):
+                    idx = 0
+                monitor = monitors[idx]
+                target_size = _parse_resolution(resolution, monitor.get("width"), monitor.get("height"))
                 while True:
                     raw = sct.grab(monitor)
                     img = Image.frombytes("RGB", raw.size, raw.rgb)
+                    if target_size and (img.width, img.height) != target_size:
+                        img = img.resize(target_size)
                     from io import BytesIO
 
                     bio = BytesIO()
-                    img.save(bio, format="JPEG", quality=int(jpeg_quality))
+                    quality = jpeg_quality() if callable(jpeg_quality) else jpeg_quality
+                    img.save(bio, format="JPEG", quality=int(quality))
                     data = bio.getvalue()
                     yield Frame(
                         ts_utc=_iso_utc(),
                         data=data,
-                        width=raw.width,
-                        height=raw.height,
+                        width=img.width,
+                        height=img.height,
                         ts_monotonic=time.monotonic(),
                     )
 
@@ -82,3 +92,22 @@ def iter_screenshots(
         elapsed = now_fn() - start
         if elapsed < interval:
             sleep_fn(interval - elapsed)
+
+
+def _parse_resolution(value: str | None, width: int | None, height: int | None) -> tuple[int, int] | None:
+    if not value:
+        return None
+    text = str(value).strip().lower()
+    if not text or text == "native":
+        return None
+    if "x" not in text:
+        return None
+    left, right = text.split("x", 1)
+    try:
+        w = int(left)
+        h = int(right)
+    except Exception:
+        return None
+    if w <= 0 or h <= 0:
+        return None
+    return (w, h)

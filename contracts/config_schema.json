@@ -148,18 +148,78 @@
           ],
           "type": "object"
         },
-        "video": {
+    "video": {
+      "additionalProperties": false,
+      "properties": {
+        "activity": {
           "additionalProperties": false,
           "properties": {
-            "backend": {
+            "active_bitrate_kbps": {
+              "type": "integer"
+            },
+            "active_fps": {
+              "type": "integer"
+            },
+            "active_jpeg_quality": {
+              "type": "integer"
+            },
+            "active_window_s": {
+              "type": "number"
+            },
+            "assume_idle_when_missing": {
+              "type": "boolean"
+            },
+            "check_interval_s": {
+              "type": "number"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "idle_bitrate_kbps": {
+              "type": "integer"
+            },
+            "idle_fps": {
+              "type": "integer"
+            },
+            "idle_jpeg_quality": {
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "backend": {
+          "type": "string"
+        },
+        "container": {
+          "type": "string"
+        },
+        "dedupe": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "hash": {
               "type": "string"
             },
-            "container": {
+            "min_repeat": {
+              "type": "integer"
+            },
+            "mode": {
               "type": "string"
             },
-            "encoder": {
-              "type": "string"
+            "sample_bytes": {
+              "type": "integer"
             },
+            "window_ms": {
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "encoder": {
+          "type": "string"
+        },
             "enabled": {
               "type": "boolean"
             },

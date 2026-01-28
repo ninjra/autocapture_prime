@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
 import threading
 import time
+import zlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
@@ -39,6 +41,8 @@ class SegmentArtifact:
     encode_ms_max: int
     dropped_frames: int = 0
     queue_depth_max: int = 0
+    duplicate_frames: int = 0
+    duplicate_dropped: int = 0
 
 
 class DiskPressure:
@@ -60,6 +64,48 @@ class DiskPressure:
         changed = new_level != self.level
         self.level = new_level
         return new_level, changed
+
+
+@dataclass
+class DedupeDecision:
+    duplicate: bool
+    fingerprint: str
+    repeat_count: int
+    window_ms: int
+
+
+class FrameDeduper:
+    def __init__(self, config: dict[str, Any] | None) -> None:
+        cfg = config if isinstance(config, dict) else {}
+        self.enabled = bool(cfg.get("enabled", False))
+        self.mode = str(cfg.get("mode", "mark_only") or "mark_only")
+        self.hash_algo = str(cfg.get("hash", "blake2b") or "blake2b")
+        self.sample_bytes = max(0, int(cfg.get("sample_bytes", 0) or 0))
+        self.min_repeat = max(1, int(cfg.get("min_repeat", 1) or 1))
+        self.window_ms = max(0, int(cfg.get("window_ms", 1500) or 0))
+        self._last_hash: str | None = None
+        self._last_ts: float | None = None
+        self._repeat = 0
+
+    def check(self, frame: Frame) -> DedupeDecision:
+        if not self.enabled:
+            return DedupeDecision(False, "", 0, self.window_ms)
+        fingerprint = _hash_frame(frame.data, algo=self.hash_algo, sample_bytes=self.sample_bytes)
+        now = _frame_monotonic(frame)
+        duplicate = False
+        if self._last_hash == fingerprint and self._last_ts is not None:
+            delta_ms = int(max(0.0, (now - self._last_ts) * 1000.0))
+            if self.window_ms <= 0 or delta_ms <= self.window_ms:
+                self._repeat += 1
+                if self._repeat >= self.min_repeat:
+                    duplicate = True
+            else:
+                self._repeat = 0
+        else:
+            self._repeat = 0
+        self._last_hash = fingerprint
+        self._last_ts = now
+        return DedupeDecision(duplicate, fingerprint, self._repeat, self.window_ms)
 
 
 class ZipFrameWriter:
@@ -169,6 +215,15 @@ class SegmentWriter:
         self._encode_ms_max = 0
         self._final_path = self._segment_path(final=True)
         self._tmp_path = self._segment_path(final=False)
+
+    @property
+    def frame_count(self) -> int:
+        return int(self._frame_count)
+
+    def matches_frame(self, frame: Frame) -> bool:
+        if self._frame_count == 0:
+            return True
+        return int(frame.width) == int(self._width) and int(frame.height) == int(self._height)
 
     def _segment_path(self, *, final: bool) -> str:
         safe = encode_record_id_component(self.segment_id)
@@ -290,6 +345,7 @@ class CapturePipeline:
         self._rate_lock = threading.Lock()
         self._fps_target = int(capture_cfg.get("fps_target", backpressure_cfg.get("max_fps", 30)))
         self._bitrate_kbps = int(backpressure_cfg.get("max_bitrate_kbps", 8000))
+        self._jpeg_quality = int(capture_cfg.get("jpeg_quality", 90))
 
     def start(self) -> None:
         backpressure_cfg = self._config.get("backpressure", {})
@@ -322,6 +378,23 @@ class CapturePipeline:
         backpressure_cfg = self._config.get("backpressure", {})
         fps_target = self._fps_target
         bitrate_kbps = self._bitrate_kbps
+        jpeg_quality = int(capture_cfg.get("jpeg_quality", self._jpeg_quality))
+        activity_cfg = capture_cfg.get("activity", {})
+        activity_enabled = bool(activity_cfg.get("enabled", False))
+        activity_window_s = float(activity_cfg.get("active_window_s", 3))
+        activity_check_s = float(activity_cfg.get("check_interval_s", 1))
+        assume_idle = bool(activity_cfg.get("assume_idle_when_missing", False))
+        active_fps = int(activity_cfg.get("active_fps", fps_target))
+        idle_fps = int(activity_cfg.get("idle_fps", fps_target))
+        active_bitrate = int(activity_cfg.get("active_bitrate_kbps", bitrate_kbps))
+        idle_bitrate = int(activity_cfg.get("idle_bitrate_kbps", bitrate_kbps))
+        active_quality = int(activity_cfg.get("active_jpeg_quality", jpeg_quality))
+        idle_quality = int(activity_cfg.get("idle_jpeg_quality", jpeg_quality))
+        base_fps = int(fps_target)
+        base_bitrate = int(bitrate_kbps)
+        base_quality = int(jpeg_quality)
+        activity_mode: str | None = None
+        last_activity_check = 0.0
         backend = str(capture_cfg.get("backend", "mss"))
         disk_cfg = self._config.get("storage", {}).get("disk_pressure", {})
         warn_free = int(disk_cfg.get("warn_free_gb", 200))
@@ -338,12 +411,42 @@ class CapturePipeline:
         def fps_provider() -> int:
             return max(1, int(fps_target))
 
-        jpeg_quality = int(capture_cfg.get("jpeg_quality", 90))
+        def jpeg_quality_provider() -> int:
+            with self._rate_lock:
+                return int(self._jpeg_quality)
+
+        monitor_index = int(capture_cfg.get("monitor_index", 0))
+        resolution = capture_cfg.get("resolution", "native")
+
+        def _activity_snapshot() -> tuple[str, float, float]:
+            idle_seconds = 0.0
+            activity_score = 0.0
+            if self._input_tracker is not None and hasattr(self._input_tracker, "activity_signal"):
+                try:
+                    signal = self._input_tracker.activity_signal()
+                except Exception:
+                    signal = {}
+                if isinstance(signal, dict):
+                    idle_seconds = float(signal.get("idle_seconds", 0.0))
+                    activity_score = float(signal.get("activity_score", 0.0) or 0.0)
+                    user_active = bool(signal.get("user_active", idle_seconds < activity_window_s)) or activity_score >= 0.5
+                    return ("active" if user_active else "idle", idle_seconds, activity_score)
+            if self._input_tracker is not None and hasattr(self._input_tracker, "idle_seconds"):
+                try:
+                    idle_seconds = float(self._input_tracker.idle_seconds())
+                except Exception:
+                    idle_seconds = 0.0
+                user_active = idle_seconds < activity_window_s
+                return ("active" if user_active else "idle", idle_seconds, activity_score)
+            idle_seconds = float("inf") if assume_idle else 0.0
+            return ("idle" if idle_seconds >= activity_window_s else "active", idle_seconds, activity_score)
         backend_used, frame_iter = _frame_iter(
             backend,
             fps_provider,
             frame_source=self._frame_source,
-            jpeg_quality=jpeg_quality,
+            jpeg_quality=jpeg_quality_provider if activity_enabled else int(jpeg_quality),
+            monitor_index=monitor_index,
+            resolution=resolution,
         )
         self._backend_used = backend_used
         if backend_used != backend:
@@ -359,6 +462,42 @@ class CapturePipeline:
         for frame in frame_iter:
             if self._stop.is_set():
                 break
+            now = time.monotonic()
+            if activity_enabled and (now - last_activity_check) >= max(0.2, activity_check_s):
+                mode, idle_seconds, activity_score = _activity_snapshot()
+                if mode != activity_mode:
+                    activity_mode = mode
+                    if mode == "active":
+                        base_fps = int(active_fps)
+                        base_bitrate = int(active_bitrate)
+                        base_quality = int(active_quality)
+                    else:
+                        base_fps = int(idle_fps)
+                        base_bitrate = int(idle_bitrate)
+                        base_quality = int(idle_quality)
+                    fps_target = int(base_fps)
+                    bitrate_kbps = int(base_bitrate)
+                    with self._rate_lock:
+                        self._fps_target = fps_target
+                        self._bitrate_kbps = bitrate_kbps
+                        self._jpeg_quality = int(base_quality)
+                    activity_payload: dict[str, Any] = {
+                        "mode": mode,
+                        "idle_seconds": float(idle_seconds),
+                        "activity_score": float(activity_score),
+                        "fps_target": int(fps_target),
+                        "bitrate_kbps": int(bitrate_kbps),
+                        "jpeg_quality": int(base_quality),
+                    }
+                    self._logger.log("capture.activity", activity_payload)
+                    self._event_builder.journal_event("capture.activity", activity_payload)
+                    self._event_builder.ledger_entry(
+                        "capture.activity",
+                        inputs=[],
+                        outputs=[],
+                        payload={"event": "capture.activity", **activity_payload},
+                    )
+                last_activity_check = now
             before_drops = frame_queue.stats.dropped
             ok = frame_queue.put(frame)
             after_drops = frame_queue.stats.dropped
@@ -385,7 +524,6 @@ class CapturePipeline:
             with self._drops_lock:
                 self._queue_depth_max = max(self._queue_depth_max, frame_queue.qsize())
 
-            now = time.monotonic()
             if now - last_disk_check >= 1.0:
                 free_gb = _free_gb(self._config.get("storage", {}).get("data_dir", "."))
                 level, changed = disk_pressure.evaluate(free_gb)
@@ -439,8 +577,8 @@ class CapturePipeline:
                     break
                 elif level == "ok" and degraded:
                     degraded = False
-                    fps_target = int(capture_cfg.get("fps_target", fps_target))
-                    bitrate_kbps = int(backpressure_cfg.get("max_bitrate_kbps", bitrate_kbps))
+                    fps_target = int(base_fps)
+                    bitrate_kbps = int(base_bitrate)
                     with self._rate_lock:
                         self._fps_target = fps_target
                         self._bitrate_kbps = bitrate_kbps
@@ -465,6 +603,9 @@ class CapturePipeline:
             )
             updated_fps = int(update.get("fps_target", fps_target))
             updated_bitrate = int(update.get("bitrate_kbps", bitrate_kbps))
+            if activity_enabled:
+                updated_fps = min(updated_fps, int(base_fps))
+                updated_bitrate = min(updated_bitrate, int(base_bitrate))
             if updated_fps != fps_target or updated_bitrate != bitrate_kbps:
                 self._logger.log(
                     "capture.rate_change",
@@ -508,6 +649,7 @@ class CapturePipeline:
         spool_dir = self._config.get("storage", {}).get("spool_dir", "data/spool")
         run_id = self._config.get("runtime", {}).get("run_id", "run")
         backend = self._backend_used
+        deduper = FrameDeduper(capture_cfg.get("dedupe", {}))
 
         frame_queue = self._frame_queue
         segment_queue = self._segment_queue
@@ -516,6 +658,8 @@ class CapturePipeline:
 
         segment: SegmentWriter | None = None
         segment_start_mono: float | None = None
+        segment_dup_frames = 0
+        segment_dup_dropped = 0
         while True:
             frame = frame_queue.get(timeout=0.2)
             if frame is None:
@@ -529,12 +673,27 @@ class CapturePipeline:
                         dropped_frames, depth_max = self._pop_drop_stats()
                         artifact.dropped_frames = dropped_frames
                         artifact.queue_depth_max = depth_max
+                        artifact.duplicate_frames = int(segment_dup_frames)
+                        artifact.duplicate_dropped = int(segment_dup_dropped)
                         segment_queue.put((artifact, backend))
                     segment = None
                 segment_queue.put(STOP_SENTINEL)
                 break
             if self._stop.is_set():
                 continue
+            if segment is not None and not segment.matches_frame(frame):
+                artifact = segment.finalize()
+                if artifact:
+                    dropped_frames, depth_max = self._pop_drop_stats()
+                    artifact.dropped_frames = dropped_frames
+                    artifact.queue_depth_max = depth_max
+                    artifact.duplicate_frames = int(segment_dup_frames)
+                    artifact.duplicate_dropped = int(segment_dup_dropped)
+                    segment_queue.put((artifact, backend))
+                segment = None
+                segment_start_mono = None
+                segment_dup_frames = 0
+                segment_dup_dropped = 0
             if segment is None:
                 with self._rate_lock:
                     fps_target = self._fps_target
@@ -551,6 +710,14 @@ class CapturePipeline:
                     ffmpeg_path=ffmpeg_path,
                 )
                 segment_start_mono = _frame_monotonic(frame)
+                segment_dup_frames = 0
+                segment_dup_dropped = 0
+            dedupe_decision = deduper.check(frame)
+            if dedupe_decision.duplicate:
+                segment_dup_frames += 1
+                if deduper.mode == "drop" and segment.frame_count > 0:
+                    segment_dup_dropped += 1
+                    continue
             segment.add_frame(frame)
             if segment_start_mono is None:
                 segment_start_mono = _frame_monotonic(frame)
@@ -561,9 +728,13 @@ class CapturePipeline:
                     dropped_frames, depth_max = self._pop_drop_stats()
                     artifact.dropped_frames = dropped_frames
                     artifact.queue_depth_max = depth_max
+                    artifact.duplicate_frames = int(segment_dup_frames)
+                    artifact.duplicate_dropped = int(segment_dup_dropped)
                     segment_queue.put((artifact, backend))
                 segment = None
                 segment_start_mono = None
+                segment_dup_frames = 0
+                segment_dup_dropped = 0
 
     def _write_loop(self) -> None:
         segment_queue = self._segment_queue
@@ -590,6 +761,13 @@ class CapturePipeline:
         monitor_index = int(capture_cfg.get("monitor_index", 0))
         jpeg_quality = int(capture_cfg.get("jpeg_quality", 90))
         segment_seconds = int(capture_cfg.get("segment_seconds", 60))
+        dedupe_cfg = capture_cfg.get("dedupe", {})
+        dedupe_enabled = bool(dedupe_cfg.get("enabled", False)) if isinstance(dedupe_cfg, dict) else False
+        dedupe_mode = str(dedupe_cfg.get("mode", "mark_only") or "mark_only") if isinstance(dedupe_cfg, dict) else "mark_only"
+        dedupe_hash = str(dedupe_cfg.get("hash", "blake2b") or "blake2b") if isinstance(dedupe_cfg, dict) else "blake2b"
+        dedupe_window_ms = int(dedupe_cfg.get("window_ms", 1500) or 0) if isinstance(dedupe_cfg, dict) else 1500
+        dedupe_min_repeat = int(dedupe_cfg.get("min_repeat", 1) or 1) if isinstance(dedupe_cfg, dict) else 1
+        dedupe_sample_bytes = int(dedupe_cfg.get("sample_bytes", 0) or 0) if isinstance(dedupe_cfg, dict) else 0
         fps_effective = _safe_div(artifact.frame_count * 1000, artifact.duration_ms or 1)
         run_id = str(self._config.get("runtime", {}).get("run_id", ""))
         metadata = {
@@ -619,6 +797,16 @@ class CapturePipeline:
                 "frames": int(artifact.dropped_frames),
                 "queue_depth_max": int(artifact.queue_depth_max),
                 "policy": "drop_oldest",
+            },
+            "dedupe": {
+                "enabled": bool(dedupe_enabled),
+                "mode": dedupe_mode,
+                "hash": dedupe_hash,
+                "window_ms": int(dedupe_window_ms),
+                "min_repeat": int(dedupe_min_repeat),
+                "sample_bytes": int(dedupe_sample_bytes),
+                "duplicate_frames": int(artifact.duplicate_frames),
+                "duplicate_dropped": int(artifact.duplicate_dropped),
             },
             "encode_ms_total": int(artifact.encode_ms_total),
             "encode_ms_max": int(artifact.encode_ms_max),
@@ -787,6 +975,58 @@ def _free_gb(path: str) -> int:
     return int(free // (1024 ** 3))
 
 
+def _hash_frame(data: bytes, *, algo: str, sample_bytes: int) -> str:
+    payload = data[:sample_bytes] if sample_bytes and sample_bytes > 0 else data
+    name = str(algo).lower()
+    if name in {"adler32", "adler"}:
+        checksum = zlib.adler32(payload)
+        return f"adler32:{checksum:08x}:{len(payload)}"
+    if name in {"blake2", "blake2b"}:
+        return f"blake2b:{hashlib.blake2b(payload, digest_size=16).hexdigest()}"
+    return f"sha256:{hashlib.sha256(payload).hexdigest()}"
+
+
+def _parse_resolution(value: str | None) -> tuple[int, int] | None:
+    if not value:
+        return None
+    text = str(value).strip().lower()
+    if not text or text == "native":
+        return None
+    if "x" not in text:
+        return None
+    left, right = text.split("x", 1)
+    try:
+        w = int(left)
+        h = int(right)
+    except Exception:
+        return None
+    if w <= 0 or h <= 0:
+        return None
+    return (w, h)
+
+
+def _create_dxcam(monitor_index: int):
+    import dxcam
+
+    candidates = [
+        {"output_color": "RGB", "output_idx": int(monitor_index)},
+        {"output_color": "RGB", "output_index": int(monitor_index)},
+        {"output_color": "RGB", "monitor_idx": int(monitor_index)},
+        {"output_color": "RGB", "monitor": int(monitor_index)},
+        {"output_color": "RGB"},
+    ]
+    for kwargs in candidates:
+        try:
+            cam = dxcam.create(**kwargs)
+        except TypeError:
+            continue
+        except Exception:
+            continue
+        if cam is not None:
+            return cam
+    return None
+
+
 def _snapshot_window(window_tracker: Any | None) -> dict[str, Any] | None:
     if window_tracker is None:
         return None
@@ -822,41 +1062,80 @@ def _frame_iter(
     fps_provider: Callable[[], int],
     *,
     frame_source: Any | None,
-    jpeg_quality: int,
+    jpeg_quality: int | Callable[[], int],
+    monitor_index: int,
+    resolution: str | None,
 ) -> tuple[str, Any]:
     if backend == "auto":
         try:
-            return "dxcam", _dxcam_frames(fps_provider, jpeg_quality=jpeg_quality)
+            return "dxcam", _dxcam_frames(
+                fps_provider,
+                jpeg_quality=jpeg_quality,
+                monitor_index=monitor_index,
+                resolution=resolution,
+            )
         except Exception:
-            return "mss", iter_screenshots(fps_provider, frame_source=frame_source, jpeg_quality=jpeg_quality)
+            return "mss", iter_screenshots(
+                fps_provider,
+                frame_source=frame_source,
+                jpeg_quality=jpeg_quality,
+                monitor_index=monitor_index,
+                resolution=resolution,
+            )
     if backend == "dxcam":
         try:
-            return "dxcam", _dxcam_frames(fps_provider, jpeg_quality=jpeg_quality)
+            return "dxcam", _dxcam_frames(
+                fps_provider,
+                jpeg_quality=jpeg_quality,
+                monitor_index=monitor_index,
+                resolution=resolution,
+            )
         except Exception:
-            return "mss", iter_screenshots(fps_provider, frame_source=frame_source, jpeg_quality=jpeg_quality)
-    return backend, iter_screenshots(fps_provider, frame_source=frame_source, jpeg_quality=jpeg_quality)
+            return "mss", iter_screenshots(
+                fps_provider,
+                frame_source=frame_source,
+                jpeg_quality=jpeg_quality,
+                monitor_index=monitor_index,
+                resolution=resolution,
+            )
+    return backend, iter_screenshots(
+        fps_provider,
+        frame_source=frame_source,
+        jpeg_quality=jpeg_quality,
+        monitor_index=monitor_index,
+        resolution=resolution,
+    )
 
 
-def _dxcam_frames(fps_provider: Callable[[], int], *, jpeg_quality: int):
+def _dxcam_frames(
+    fps_provider: Callable[[], int],
+    *,
+    jpeg_quality: int | Callable[[], int],
+    monitor_index: int,
+    resolution: str | None,
+):
     if os.name != "nt":
         raise RuntimeError("DXCAM capture supported on Windows only")
     try:
-        import dxcam
         from PIL import Image
     except Exception as exc:
         raise RuntimeError(f"Missing DXCAM dependency: {exc}")
-    cam = dxcam.create(output_color="RGB")
+    cam = _create_dxcam(monitor_index)
     if cam is None:
         raise RuntimeError("DXCAM not available")
+    target_size = _parse_resolution(resolution)
     while True:
         frame = cam.grab()
         if frame is None:
             time.sleep(1.0 / max(1, int(fps_provider())))
             continue
         img = Image.fromarray(frame)
+        if target_size and (img.width, img.height) != target_size:
+            img = img.resize(target_size)
         from io import BytesIO
 
         bio = BytesIO()
-        img.save(bio, format="JPEG", quality=int(jpeg_quality))
+        quality = jpeg_quality() if callable(jpeg_quality) else jpeg_quality
+        img.save(bio, format="JPEG", quality=int(quality))
         data = bio.getvalue()
         yield Frame(ts_utc=_iso_utc(), data=data, width=img.width, height=img.height, ts_monotonic=time.monotonic())

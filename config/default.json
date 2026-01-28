@@ -36,8 +36,28 @@
       "store_derived": true
     },
     "video": {
+      "activity": {
+        "active_bitrate_kbps": 2000,
+        "active_fps": 8,
+        "active_jpeg_quality": 70,
+        "active_window_s": 3,
+        "assume_idle_when_missing": true,
+        "check_interval_s": 1,
+        "enabled": true,
+        "idle_bitrate_kbps": 8000,
+        "idle_fps": 30,
+        "idle_jpeg_quality": 90
+      },
       "backend": "mss",
       "container": "avi_mjpeg",
+      "dedupe": {
+        "enabled": true,
+        "hash": "blake2b",
+        "min_repeat": 1,
+        "mode": "mark_only",
+        "sample_bytes": 65536,
+        "window_ms": 1500
+      },
       "encoder": "cpu",
       "enabled": true,
       "fps_target": 30,
