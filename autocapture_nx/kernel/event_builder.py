@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from autocapture_nx.kernel.canonical_json import dumps
+from autocapture_nx.kernel.evidence import validate_evidence_record
 from autocapture_nx.kernel.hashing import sha256_text
 from autocapture_nx.kernel.ids import prefixed_id
 
@@ -55,6 +56,8 @@ class EventBuilder:
         tzid: str | None = None,
         offset_minutes: int = 0,
     ) -> str:
+        if isinstance(payload, dict) and "record_type" in payload:
+            validate_evidence_record(payload, event_id)
         return self._journal.append_event(
             event_type,
             payload,
@@ -77,6 +80,8 @@ class EventBuilder:
         with self._lock:
             seq = self._ledger_seq
             self._ledger_seq += 1
+        if isinstance(payload, dict) and "record_type" in payload:
+            validate_evidence_record(payload, entry_id)
         if not ts_utc:
             ts_utc = datetime.now(timezone.utc).isoformat()
         if not entry_id:

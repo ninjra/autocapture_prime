@@ -513,6 +513,9 @@
         "vector_idle_seconds": {
           "type": "number"
         },
+        "allow_full_scan": {
+          "type": "boolean"
+        },
         "window_limit": {
           "type": "integer"
         },
@@ -531,6 +534,7 @@
         "vector_enabled",
         "vector_requires_idle",
         "vector_idle_seconds",
+        "allow_full_scan",
         "window_limit"
       ],
       "type": "object"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+from datetime import datetime
 from typing import Any
 
 from autocapture.core.hashing import hash_text, normalize_text
@@ -96,6 +97,7 @@ class CitationValidator(PluginBase):
             if expected_evidence_hash and str(evidence_hash) != expected_evidence_hash:
                 errors.append({**ctx, "error": "evidence_hash_mismatch", "evidence_id": evidence_id})
                 continue
+            derived_record = None
             if derived_id:
                 derived_record = metadata.get(derived_id)
                 if not isinstance(derived_record, dict):
@@ -115,6 +117,36 @@ class CitationValidator(PluginBase):
                     continue
                 if expected_derived_hash and str(derived_hash) != expected_derived_hash:
                     errors.append({**ctx, "error": "derived_hash_mismatch", "derived_id": derived_id})
+                    continue
+            span_ref = citation.get("span_ref")
+            if span_ref is not None:
+                if not isinstance(span_ref, dict):
+                    errors.append({**ctx, "error": "span_ref_invalid"})
+                    continue
+                target_record = derived_record if derived_id else evidence_record
+                expected_span = None
+                if isinstance(target_record, dict):
+                    expected_span = target_record.get("span_ref")
+                if expected_span:
+                    mismatch = False
+                    for key, value in span_ref.items():
+                        if expected_span.get(key) != value:
+                            mismatch = True
+                            break
+                    if mismatch:
+                        errors.append({**ctx, "error": "span_ref_mismatch"})
+                        continue
+                else:
+                    if span_ref.get("kind") == "time":
+                        if not _span_within_record(target_record, span_ref):
+                            errors.append({**ctx, "error": "span_ref_out_of_bounds"})
+                            continue
+                    else:
+                        errors.append({**ctx, "error": "span_ref_missing"})
+                        continue
+                span_source = span_ref.get("source_id")
+                if span_source and span_source != evidence_id:
+                    errors.append({**ctx, "error": "span_source_mismatch"})
                     continue
             if span_kind == "text":
                 source_record = derived_record if derived_id else evidence_record
@@ -140,6 +172,7 @@ class CitationValidator(PluginBase):
                     "derived_id": derived_id,
                     "derived_hash": citation.get("derived_hash") if derived_id else None,
                     "span_kind": span_kind,
+                    "span_ref": citation.get("span_ref"),
                     "ledger_head": ledger_head,
                     "anchor_ref": anchor_ref,
                     "source": source,
@@ -277,6 +310,35 @@ def _record_hash(record: dict[str, Any]) -> str | None:
     if text:
         return hash_text(normalize_text(str(text)))
     return None
+
+
+def _parse_ts(ts: str | None) -> datetime | None:
+    if not ts:
+        return None
+    if ts.endswith("Z"):
+        ts = ts[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(ts)
+    except ValueError:
+        return None
+
+
+def _span_within_record(record: dict[str, Any] | None, span_ref: dict[str, Any]) -> bool:
+    if not isinstance(record, dict):
+        return False
+    start_ts = _parse_ts(span_ref.get("start_ts_utc"))
+    end_ts = _parse_ts(span_ref.get("end_ts_utc"))
+    rec_start = _parse_ts(record.get("ts_start_utc") or record.get("ts_utc"))
+    rec_end = _parse_ts(record.get("ts_end_utc") or record.get("ts_utc"))
+    if rec_start is None:
+        return False
+    if rec_end is None:
+        rec_end = rec_start
+    if start_ts and start_ts < rec_start:
+        return False
+    if end_ts and end_ts > rec_end:
+        return False
+    return True
 
 
 def _decode_anchor_line(line: str) -> dict[str, Any] | None:

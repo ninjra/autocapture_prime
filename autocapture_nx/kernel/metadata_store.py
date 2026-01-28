@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from autocapture_nx.kernel.evidence import validate_evidence_record, is_evidence_like
+
 
 def is_evidence_record(record: dict[str, Any]) -> bool:
     record_type = str(record.get("record_type", ""))
@@ -15,13 +17,12 @@ def is_derived_record(record: dict[str, Any]) -> bool:
     return record_type.startswith("derived.")
 
 
-def _validate_evidence(value: dict[str, Any], record_id: str) -> None:
-    if not is_evidence_record(value):
-        return
-    if not value.get("run_id"):
-        raise ValueError(f"Evidence record {record_id} missing run_id")
-    if not value.get("content_hash") and not value.get("payload_hash"):
-        raise ValueError(f"Evidence record {record_id} missing content_hash")
+def _validate_record(value: dict[str, Any], record_id: str) -> None:
+    record_type = str(value.get("record_type", ""))
+    if not record_type:
+        raise ValueError(f"Metadata record {record_id} missing record_type")
+    if is_evidence_like(value):
+        validate_evidence_record(value, record_id)
 
 
 class ImmutableMetadataStore:
@@ -32,19 +33,15 @@ class ImmutableMetadataStore:
         existing = self._store.get(record_id)
         if isinstance(existing, dict) and (is_evidence_record(existing) or is_derived_record(existing)):
             raise RuntimeError(f"Refusing to overwrite immutable record {record_id}")
-        if isinstance(value, dict) and "record_type" not in value:
-            raise ValueError(f"Metadata record {record_id} missing record_type")
+        if isinstance(value, dict):
+            _validate_record(value, record_id)
         if isinstance(value, dict) and existing is not None and is_derived_record(value):
             raise RuntimeError(f"Refusing to overwrite immutable record {record_id}")
-        if isinstance(value, dict):
-            _validate_evidence(value, record_id)
         self._store.put(record_id, value)
 
     def put_new(self, record_id: str, value: Any) -> None:
-        if isinstance(value, dict) and "record_type" not in value:
-            raise ValueError(f"Metadata record {record_id} missing record_type")
         if isinstance(value, dict):
-            _validate_evidence(value, record_id)
+            _validate_record(value, record_id)
         if hasattr(self._store, "put_new"):
             return self._store.put_new(record_id, value)
         existing = self._store.get(record_id)
@@ -58,10 +55,8 @@ class ImmutableMetadataStore:
             raise RuntimeError(f"Refusing to overwrite immutable record {record_id}")
         if isinstance(value, dict) and (is_evidence_record(value) or is_derived_record(value)):
             raise RuntimeError(f"Refusing to overwrite immutable record {record_id}")
-        if isinstance(value, dict) and "record_type" not in value:
-            raise ValueError(f"Metadata record {record_id} missing record_type")
         if isinstance(value, dict):
-            _validate_evidence(value, record_id)
+            _validate_record(value, record_id)
         if hasattr(self._store, "put_replace"):
             return self._store.put_replace(record_id, value)
         self._store.put(record_id, value)

@@ -96,6 +96,9 @@ class StorageRecoveryScannerTests(unittest.TestCase):
                 "segment_id": record_id,
                 "ts_start_utc": ts_utc,
                 "ts_end_utc": ts_utc,
+                "width": 1,
+                "height": 1,
+                "container": {"type": "zip"},
                 "content_hash": hashlib.sha256(payload).hexdigest(),
             }
             meta_payload["payload_hash"] = sha256_canonical(

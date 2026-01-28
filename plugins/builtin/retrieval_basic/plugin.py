@@ -53,7 +53,16 @@ class RetrievalStrategy(PluginBase):
             )
         results, trace = self._search_indexed(store, query_text, time_window, trace, candidate_ids)
         if not results:
-            results = _scan_metadata(store, query_text.lower(), time_window, candidate_ids)
+            retrieval_cfg = self._config.get("retrieval", {}) if isinstance(self._config, dict) else {}
+            allow_full_scan = bool(retrieval_cfg.get("allow_full_scan", False))
+            if candidate_ids is not None:
+                results = _scan_metadata(store, query_text.lower(), time_window, candidate_ids)
+                trace.append({"tier": "CANDIDATE_SCAN", "result_count": len(results)})
+            elif allow_full_scan:
+                results = _scan_metadata(store, query_text.lower(), time_window, candidate_ids)
+                trace.append({"tier": "FULL_SCAN", "result_count": len(results)})
+            else:
+                trace.append({"tier": "FULL_SCAN_SKIPPED", "reason": "disabled"})
         results.sort(
             key=lambda r: (
                 -float(r.get("score", 0.0)),

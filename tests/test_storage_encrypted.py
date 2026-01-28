@@ -31,7 +31,16 @@ class EncryptedStorageTests(unittest.TestCase):
             plugin = EncryptedStoragePlugin("test", ctx)
             store = plugin.capabilities()["storage.metadata"]
             ts_utc = "2026-01-26T00:00:00+00:00"
-            store.put("record1", {"record_type": "derived.test", "secret": "value", "ts_utc": ts_utc})
+            store.put(
+                "record1",
+                {
+                    "record_type": "derived.test",
+                    "run_id": "run1",
+                    "secret": "value",
+                    "ts_utc": ts_utc,
+                    "content_hash": "hash",
+                },
+            )
             safe_run = _encode_record_id("run1")
             safe_record = _encode_record_id("record1")
             path = (
@@ -63,8 +72,8 @@ class EncryptedStorageTests(unittest.TestCase):
             ctx = PluginContext(config=config, get_capability=lambda _k: None, logger=lambda _m: None)
             plugin = EncryptedStoragePlugin("test", ctx)
             store = plugin.capabilities()["storage.metadata"]
-            store.put("b", {"record_type": "derived.test", "value": 2})
-            store.put("a", {"record_type": "derived.test", "value": 1})
+            store.put("b", {"record_type": "derived.test", "run_id": "run1", "content_hash": "hash", "value": 2})
+            store.put("a", {"record_type": "derived.test", "run_id": "run1", "content_hash": "hash", "value": 1})
             self.assertEqual(store.keys(), ["a", "b"])
 
     def test_media_blob_binary_format(self) -> None:

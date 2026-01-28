@@ -22,18 +22,27 @@ class MetadataRecordTypeTests(unittest.TestCase):
         store = ImmutableMetadataStore(_Store())
         with self.assertRaises(ValueError):
             store.put("rec", {"value": 1})
-        store.put("rec", {"record_type": "derived.test", "value": 1})
+        store.put("rec", {"record_type": "derived.test", "run_id": "run1", "content_hash": "hash", "value": 1})
         self.assertEqual(store.get("rec")["value"], 1)
 
     def test_evidence_requires_run_id_and_hash(self) -> None:
         store = ImmutableMetadataStore(_Store())
+        base = {
+            "record_type": "evidence.capture.segment",
+            "segment_id": "seg0",
+            "ts_start_utc": "2026-01-01T00:00:00+00:00",
+            "ts_end_utc": "2026-01-01T00:00:10+00:00",
+            "width": 1,
+            "height": 1,
+            "container": {"type": "zip"},
+        }
         with self.assertRaises(ValueError):
-            store.put("rec1", {"record_type": "evidence.capture.segment", "content_hash": "hash"})
+            store.put("rec1", {**base, "content_hash": "hash"})
         with self.assertRaises(ValueError):
-            store.put("rec2", {"record_type": "evidence.capture.segment", "run_id": "run1"})
+            store.put("rec2", {**base, "run_id": "run1"})
         store.put(
             "rec3",
-            {"record_type": "evidence.capture.segment", "run_id": "run1", "content_hash": "hash"},
+            {**base, "run_id": "run1", "content_hash": "hash"},
         )
         self.assertEqual(store.get("rec3")["run_id"], "run1")
 

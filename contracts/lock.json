@@ -1,8 +1,8 @@
 {
   "files": {
     "contracts/citation.schema.json": "964a7b3df5e83bff7fc196f826df98c8845d90b493cd3598a1ac8572e3e7516b",
-    "contracts/config_schema.json": "621afccbb5438d6694c0787f56b5fb02165cc5dd9e6540fdf8f7274f673df43b",
-    "contracts/evidence.schema.json": "257e79462d3b30b54b7d8c264b770b49f6e1afe40f9ff9174bd7a1597b42b8d2",
+    "contracts/config_schema.json": "bdcebc68a944aa09631b079cf7a34258e1ad7c3bf66c0f53c60bd293855592f8",
+    "contracts/evidence.schema.json": "d02feec554022ebb3722e9e0dcd33f6d5f0baf6ee2ae46ff64c4fc87d61a0135",
     "contracts/ir_pins.json": "c82766b341d058d0ecae2c29e34d785135e17444b78558c5f77bc6e47f58e162",
     "contracts/journal_schema.json": "8f380b9ebc3f4cfa903c14c32e907c55410e3fc65418f27e32761f1a45fa930a",
     "contracts/ledger_schema.json": "4dcc4657309e1326c739fb924a6cf2ef00d994f88de7a5833a30628fa493ccc8",
@@ -13,6 +13,6 @@
     "contracts/time_intent.schema.json": "6696c55883e35e0f2eb0689d61b7a05c637959d1d53ba7d8f985bbc2d5e397d8",
     "contracts/user_surface.md": "f814b6a390dd01903e45fadaa99db2203f9f15f7791ef5b4acb245149ee4ad22"
   },
-  "generated_at": "2026-01-28T03:02:09.332667+00:00",
+  "generated_at": "2026-01-28T15:31:45.102377+00:00",
   "version": 1
 }

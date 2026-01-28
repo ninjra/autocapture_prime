@@ -156,6 +156,7 @@
     "vector_enabled": true,
     "vector_requires_idle": true,
     "vector_idle_seconds": 45,
+    "allow_full_scan": false,
     "window_limit": 1000
   },
   "plugins": {

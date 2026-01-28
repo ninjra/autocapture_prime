@@ -1,8 +1,12 @@
 import io
+import tempfile
 import unittest
 import zipfile
+from pathlib import Path
 
 from autocapture.core.hashing import hash_text, normalize_text
+from autocapture.indexing.lexical import LexicalIndex
+from autocapture_nx.kernel.hashing import sha256_canonical
 from autocapture_nx.kernel.query import extract_on_demand
 from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.plugin_system.api import PluginContext
@@ -43,7 +47,20 @@ class QueryDerivedRecordTests(unittest.TestCase):
     def test_extract_on_demand_creates_derived_record(self) -> None:
         metadata = _MetadataStore()
         record_id = "run1/segment/0"
-        metadata.put(record_id, {"record_type": "evidence.capture.segment", "ts_utc": "2024-01-01T00:00:00+00:00"})
+        evidence = {
+            "record_type": "evidence.capture.segment",
+            "run_id": "run1",
+            "segment_id": "seg0",
+            "ts_start_utc": "2024-01-01T00:00:00+00:00",
+            "ts_end_utc": "2024-01-01T00:00:10+00:00",
+            "ts_utc": "2024-01-01T00:00:00+00:00",
+            "width": 1,
+            "height": 1,
+            "container": {"type": "zip"},
+            "content_hash": "hash",
+        }
+        evidence["payload_hash"] = sha256_canonical({k: v for k, v in evidence.items() if k != "payload_hash"})
+        metadata.put(record_id, evidence)
 
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
@@ -77,28 +94,58 @@ class QueryDerivedRecordTests(unittest.TestCase):
         self.assertEqual(derived_ocr["content_hash"], hash_text(normalize_text("ocr text")))
 
     def test_retrieval_returns_source_id_for_derived_records(self) -> None:
-        metadata = _MetadataStore()
-        record_id = "run1/segment/1"
-        metadata.put(record_id, {"record_type": "evidence.capture.segment", "ts_utc": "2024-01-02T00:00:00+00:00"})
-        encoded = encode_record_id_component(record_id)
-        vlm_provider = encode_record_id_component("vision.extractor")
-        metadata.put(
-            f"run1/derived.text.vlm/{vlm_provider}/{encoded}",
-            {
+        with tempfile.TemporaryDirectory() as tmp:
+            metadata = _MetadataStore()
+            record_id = "run1/segment/1"
+            evidence = {
+                "record_type": "evidence.capture.segment",
+                "run_id": "run1",
+                "segment_id": "seg1",
+                "ts_start_utc": "2024-01-02T00:00:00+00:00",
+                "ts_end_utc": "2024-01-02T00:00:10+00:00",
+                "ts_utc": "2024-01-02T00:00:00+00:00",
+                "width": 1,
+                "height": 1,
+                "container": {"type": "zip"},
+                "content_hash": "hash",
+            }
+            evidence["payload_hash"] = sha256_canonical({k: v for k, v in evidence.items() if k != "payload_hash"})
+            metadata.put(record_id, evidence)
+            encoded = encode_record_id_component(record_id)
+            vlm_provider = encode_record_id_component("vision.extractor")
+            derived_id = f"run1/derived.text.vlm/{vlm_provider}/{encoded}"
+            derived = {
                 "record_type": "derived.text.vlm",
+                "run_id": "run1",
                 "ts_utc": "2024-01-02T00:00:00+00:00",
                 "text": "hello world",
                 "source_id": record_id,
+                "parent_evidence_id": record_id,
+                "span_ref": {"kind": "time", "source_id": record_id},
+                "method": "vlm",
                 "provider_id": "vision.extractor",
-            },
-        )
-        ctx = PluginContext(config={}, get_capability=lambda _k: metadata, logger=lambda _m: None)
-        retrieval = RetrievalStrategy("retrieval", ctx)
+                "model_id": "vision.extractor",
+                "model_digest": "digest",
+                "content_hash": hash_text(normalize_text("hello world")),
+            }
+            derived["payload_hash"] = sha256_canonical({k: v for k, v in derived.items() if k != "payload_hash"})
+            metadata.put(derived_id, derived)
+            lexical_path = Path(tmp) / "lexical.db"
+            vector_path = Path(tmp) / "vector.db"
+            lexical = LexicalIndex(lexical_path)
+            lexical.index(derived_id, "hello world")
+            config = {
+                "storage": {"lexical_path": str(lexical_path), "vector_path": str(vector_path)},
+                "indexing": {"vector_backend": "sqlite"},
+                "retrieval": {"vector_enabled": False},
+            }
+            ctx = PluginContext(config=config, get_capability=lambda _k: metadata, logger=lambda _m: None)
+            retrieval = RetrievalStrategy("retrieval", ctx)
 
-        results = retrieval.search("hello", time_window=None)
-        self.assertTrue(results)
-        self.assertEqual(results[0]["record_id"], record_id)
-        self.assertEqual(results[0]["derived_id"], f"run1/derived.text.vlm/{vlm_provider}/{encoded}")
+            results = retrieval.search("hello", time_window=None)
+            self.assertTrue(results)
+            self.assertEqual(results[0]["record_id"], record_id)
+            self.assertEqual(results[0]["derived_id"], derived_id)
 
 
 if __name__ == "__main__":

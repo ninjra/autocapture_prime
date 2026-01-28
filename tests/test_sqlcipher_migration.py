@@ -24,7 +24,13 @@ class SqlCipherMigrationTests(unittest.TestCase):
             payload = {
                 "record_type": "evidence.capture.segment",
                 "run_id": "run1",
+                "segment_id": "seg0",
+                "ts_start_utc": "2024-01-01T00:00:00+00:00",
+                "ts_end_utc": "2024-01-01T00:00:10+00:00",
                 "ts_utc": "2024-01-01T00:00:00+00:00",
+                "width": 1,
+                "height": 1,
+                "container": {"type": "zip"},
                 "content_hash": "hash",
                 "payload_hash": "payloadhash",
             }

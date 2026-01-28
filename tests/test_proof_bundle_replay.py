@@ -33,7 +33,13 @@ class ProofBundleReplayTests(unittest.TestCase):
                 {
                     "record_type": "evidence.capture.segment",
                     "run_id": "run1",
+                    "segment_id": "seg0",
+                    "ts_start_utc": "2026-01-01T00:00:00+00:00",
+                    "ts_end_utc": "2026-01-01T00:00:10+00:00",
                     "ts_utc": "2026-01-01T00:00:00+00:00",
+                    "width": 1,
+                    "height": 1,
+                    "container": {"type": "zip"},
                     "content_hash": evidence_hash,
                     "text": evidence_text,
                 },

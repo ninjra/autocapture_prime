@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from autocapture_nx.kernel.canonical_json import dumps
-from autocapture_nx.kernel.hashing import sha256_text
+from autocapture_nx.kernel.hashing import sha256_text, sha256_canonical
 from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 from autocapture_nx.windows.win_window import active_window
@@ -75,22 +75,29 @@ class WindowMetadataWindows(PluginBase):
                 }
                 content_hash = sha256_text(dumps(payload))
                 record_id = prefixed_id(run_id, "window", seq)
+                record = {
+                    "record_type": "evidence.window.meta",
+                    "ts_utc": ts,
+                    "run_id": run_id,
+                    "text": f"{info.title} {info.process_path}".strip(),
+                    "content_hash": content_hash,
+                    "window": payload,
+                }
+                record["payload_hash"] = sha256_canonical({k: v for k, v in record.items() if k != "payload_hash"})
                 event_builder.journal_event(
                     "window.meta",
-                    payload,
+                    record,
                     event_id=record_id,
                     ts_utc=ts,
                 )
-                metadata_store.put(
-                    record_id,
-                    {
-                        "record_type": "evidence.window.meta",
-                        "ts_utc": ts,
-                        "run_id": run_id,
-                        "text": f"{info.title} {info.process_path}".strip(),
-                        "content_hash": content_hash,
-                        "window": payload,
-                    },
+                metadata_store.put(record_id, record)
+                event_builder.ledger_entry(
+                    "window.meta",
+                    inputs=[],
+                    outputs=[record_id],
+                    payload=record,
+                    entry_id=record_id,
+                    ts_utc=ts,
                 )
                 seq += 1
                 last_hwnd = info.hwnd

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-01-28T05:12:23.986776+00:00",
+  "generated_at": "2026-01-28T15:31:50.540804+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "5cc1c94085943e29dbfd9732be2e9bd938b716239ae0fb6be03532b5bdde9a6a",
@@ -26,7 +26,7 @@
       "manifest_sha256": "0ef83c67135e2f68fd678a1abba71b8231fc1593693221479602331bbefd0817"
     },
     "builtin.citation.basic": {
-      "artifact_sha256": "803b6ae43bf977686cd571dd7dc995dc6b5168cd64170e16a555d200fa052196",
+      "artifact_sha256": "cbb3e204e2d2989808ff64549137dc5dc76a3ff539d202ca29d82e55ec508a85",
       "manifest_sha256": "65ad757f63666189f3581cd1a2b2e218eafe813728cb4bf6e2baeb8b27735718"
     },
     "builtin.cursor.windows": {
@@ -90,7 +90,7 @@
       "manifest_sha256": "6991ea487886c7ee84d6d263b4e9c1764aca406b76c82dd21e987898c81a895d"
     },
     "builtin.retrieval.basic": {
-      "artifact_sha256": "d09b7cf23158964967a62e48987e2aa56e15632760360ecbf9abcc547f508a28",
+      "artifact_sha256": "b6ccfe6cd2b1f95f852a98a2a83fa055fc33a4d174de7ace7a2e226fabf2d594",
       "manifest_sha256": "0207b3fbedaa5c330bc49c1d3860b05b4b79eb7d80ff33c41e71cbc05164b20e"
     },
     "builtin.runtime.governor": {
@@ -198,7 +198,7 @@
       "manifest_sha256": "17bd6abdc752f44701c077fb18045644c154f5386c7b24f85797ca2464923cc1"
     },
     "builtin.window.metadata.windows": {
-      "artifact_sha256": "7594c47f3a3be829acd3a88bc156624cbdf74cd4612c8df8e52217f6a92c97f9",
+      "artifact_sha256": "7b131f41de9e50fc2fdf211a077f785031609dc2fd3d86b983388f6ff36635df",
       "manifest_sha256": "baf7f5b942b27d832d7c3ba8b39d047e02e01bab26cb07076361ab83aa416ca8"
     }
   },

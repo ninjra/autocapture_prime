@@ -41,6 +41,8 @@ class SchemaLiteValidator:
     """Minimal schema validator supporting object/array/scalar types."""
 
     def validate(self, schema: dict[str, Any], data: Any, path: str = "$") -> None:
+        if "const" in schema and data != schema["const"]:
+            raise ConfigError(f"{path}: value {data!r} does not match const {schema['const']!r}")
         if "enum" in schema and data not in schema["enum"]:
             raise ConfigError(f"{path}: value {data!r} not in enum {schema['enum']}")
 
@@ -54,6 +56,32 @@ class SchemaLiteValidator:
             self._validate_array(schema, data, path)
         elif expected_type in ("integer", "number"):
             self._validate_number(schema, data, path)
+
+        if "allOf" in schema:
+            for subschema in schema["allOf"]:
+                self.validate(subschema, data, path)
+        if "anyOf" in schema:
+            if not self._matches_any(schema["anyOf"], data, path):
+                raise ConfigError(f"{path}: did not match anyOf schema")
+        if "oneOf" in schema:
+            matches = 0
+            for subschema in schema["oneOf"]:
+                try:
+                    self.validate(subschema, data, path)
+                    matches += 1
+                except ConfigError:
+                    continue
+            if matches != 1:
+                raise ConfigError(f"{path}: expected oneOf match, got {matches}")
+
+    def _matches_any(self, schemas: list[dict[str, Any]], data: Any, path: str) -> bool:
+        for subschema in schemas:
+            try:
+                self.validate(subschema, data, path)
+                return True
+            except ConfigError:
+                continue
+        return False
 
     def _validate_type(self, expected: str | list[str], data: Any, path: str) -> None:
         type_map: dict[str, type | tuple[type, ...]] = {

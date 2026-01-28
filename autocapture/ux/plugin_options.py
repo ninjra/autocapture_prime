@@ -481,6 +481,7 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "retrieval.vector_limit",
         "retrieval.fast_threshold",
         "retrieval.fusion_threshold",
+        "retrieval.allow_full_scan",
         "plugins.capabilities.retrieval.strategy.mode",
         "plugins.capabilities.retrieval.strategy.preferred",
     ],
