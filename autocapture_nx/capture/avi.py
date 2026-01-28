@@ -33,6 +33,12 @@ class AviMjpegWriter:
     def frame_count(self) -> int:
         return self._frame_count
 
+    def index_entries(self) -> list[dict[str, int]]:
+        return [{"offset": entry.offset, "size": entry.size} for entry in self._index]
+
+    def header_info(self) -> dict[str, int]:
+        return {"width": int(self._width), "height": int(self._height), "fps": int(self._fps)}
+
     def _write_header(self) -> None:
         f = self._fp
         # RIFF header

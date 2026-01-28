@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-01-27T23:37:51.774111+00:00",
+  "generated_at": "2026-01-28T01:08:14.507027+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "5cc1c94085943e29dbfd9732be2e9bd938b716239ae0fb6be03532b5bdde9a6a",
@@ -14,7 +14,7 @@
       "manifest_sha256": "91ba547faac18da58d2ab878fbf0f91d7cff75afd6faa3ebe424a4d3342e07c5"
     },
     "builtin.capture.audio.windows": {
-      "artifact_sha256": "b3790927ef4898c5e783719698e111ccda8f0b958f67e7c407e26f1c1b968066",
+      "artifact_sha256": "71caa753575a9c50bb425bf6173586a6e1f50035ed41caf794b2462388f911a8",
       "manifest_sha256": "60ecb2135011c82cbc1f17b70e804d3a9be67d17dcc52d624492c1bef8401e2e"
     },
     "builtin.capture.stub": {

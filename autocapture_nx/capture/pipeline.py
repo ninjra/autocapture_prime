@@ -17,7 +17,7 @@ from autocapture_nx.capture.avi import AviMjpegWriter
 from autocapture_nx.capture.queues import BoundedQueue
 from autocapture_nx.kernel.hashing import sha256_canonical
 from autocapture_nx.kernel.ids import encode_record_id_component, prefixed_id
-from autocapture_nx.windows.win_capture import Frame, iter_screenshots
+from autocapture_nx.windows.win_capture import Frame, iter_screenshots, list_monitors
 
 STOP_SENTINEL = object()
 
@@ -43,6 +43,8 @@ class SegmentArtifact:
     queue_depth_max: int = 0
     duplicate_frames: int = 0
     duplicate_dropped: int = 0
+    container_index: list[dict[str, int]] | None = None
+    container_header: dict[str, int] | None = None
 
 
 class DiskPressure:
@@ -155,6 +157,13 @@ class FfmpegWriter:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
         )
+        if os.name == "nt":
+            try:
+                from autocapture_nx.windows.win_sandbox import assign_job_object
+
+                assign_job_object(self._proc.pid)
+            except Exception:
+                pass
         self._frame_count = 0
 
     @property
@@ -195,6 +204,7 @@ class SegmentWriter:
         container_type: str,
         encoder: str,
         ffmpeg_path: str | None,
+        fsync_policy: str = "none",
     ) -> None:
         self.segment_id = segment_id
         self._spool_dir = spool_dir
@@ -213,6 +223,7 @@ class SegmentWriter:
         self._mono_end: float | None = None
         self._encode_ms_total = 0
         self._encode_ms_max = 0
+        self._fsync_policy = fsync_policy
         self._final_path = self._segment_path(final=True)
         self._tmp_path = self._segment_path(final=False)
 
@@ -285,8 +296,21 @@ class SegmentWriter:
             self._mono_end,
         )
         assert self._writer is not None
+        container_index = None
+        container_header = None
+        if isinstance(self._writer, AviMjpegWriter):
+            try:
+                container_index = self._writer.index_entries()
+                container_header = self._writer.header_info()
+            except Exception:
+                container_index = None
+                container_header = None
         self._writer.close(duration_ms)
+        if self._fsync_policy in ("bulk", "critical"):
+            _fsync_file(self._tmp_path)
         os.replace(self._tmp_path, self._final_path)
+        if self._fsync_policy == "critical":
+            _fsync_dir(self._spool_dir)
         return SegmentArtifact(
             segment_id=self.segment_id,
             path=self._final_path,
@@ -303,6 +327,8 @@ class SegmentWriter:
             container_ext=self.container_ext(),
             encode_ms_total=self._encode_ms_total,
             encode_ms_max=self._encode_ms_max,
+            container_index=container_index,
+            container_header=container_header,
         )
 
 
@@ -401,6 +427,10 @@ class CapturePipeline:
         soft_free = int(disk_cfg.get("soft_free_gb", warn_free))
         critical_free = int(disk_cfg.get("critical_free_gb", 50))
         disk_pressure = DiskPressure(warn_free, soft_free, critical_free)
+        disk_interval_s = float(disk_cfg.get("interval_s", 1.0) or 1.0)
+        if disk_interval_s <= 0:
+            disk_interval_s = 1.0
+        disk_interval_s = min(max(1.0, disk_interval_s), 60.0)
         last_disk_check = 0.0
         degraded = False
 
@@ -417,6 +447,14 @@ class CapturePipeline:
 
         monitor_index = int(capture_cfg.get("monitor_index", 0))
         resolution = capture_cfg.get("resolution", "native")
+
+        def _apply_disk_degrade(base_fps_val: int, base_bitrate_val: int, base_quality_val: int) -> tuple[int, int, int]:
+            min_fps = int(backpressure_cfg.get("min_fps", 5))
+            min_bitrate = int(backpressure_cfg.get("min_bitrate_kbps", 1000))
+            degraded_fps = max(min_fps, max(1, int(base_fps_val) // 2))
+            degraded_bitrate = max(min_bitrate, max(1, int(base_bitrate_val) // 2))
+            degraded_quality = max(10, int(int(base_quality_val) * 0.7))
+            return degraded_fps, degraded_bitrate, degraded_quality
 
         def _activity_snapshot() -> tuple[str, float, float]:
             idle_seconds = 0.0
@@ -475,19 +513,24 @@ class CapturePipeline:
                         base_fps = int(idle_fps)
                         base_bitrate = int(idle_bitrate)
                         base_quality = int(idle_quality)
-                    fps_target = int(base_fps)
-                    bitrate_kbps = int(base_bitrate)
+                    if degraded:
+                        fps_target, bitrate_kbps, quality = _apply_disk_degrade(base_fps, base_bitrate, base_quality)
+                    else:
+                        fps_target = int(base_fps)
+                        bitrate_kbps = int(base_bitrate)
+                        quality = int(base_quality)
                     with self._rate_lock:
                         self._fps_target = fps_target
                         self._bitrate_kbps = bitrate_kbps
-                        self._jpeg_quality = int(base_quality)
+                        self._jpeg_quality = int(quality)
                     activity_payload: dict[str, Any] = {
                         "mode": mode,
                         "idle_seconds": float(idle_seconds),
                         "activity_score": float(activity_score),
                         "fps_target": int(fps_target),
                         "bitrate_kbps": int(bitrate_kbps),
-                        "jpeg_quality": int(base_quality),
+                        "jpeg_quality": int(quality),
+                        "disk_degraded": bool(degraded),
                     }
                     self._logger.log("capture.activity", activity_payload)
                     self._event_builder.journal_event("capture.activity", activity_payload)
@@ -524,7 +567,7 @@ class CapturePipeline:
             with self._drops_lock:
                 self._queue_depth_max = max(self._queue_depth_max, frame_queue.qsize())
 
-            if now - last_disk_check >= 1.0:
+            if now - last_disk_check >= disk_interval_s:
                 free_gb = _free_gb(self._config.get("storage", {}).get("data_dir", "."))
                 level, changed = disk_pressure.evaluate(free_gb)
                 if changed:
@@ -542,16 +585,17 @@ class CapturePipeline:
                         outputs=[],
                         payload={"event": "disk.pressure", **pressure_payload},
                     )
-                if level == "soft":
+                if level == "soft" and not degraded:
                     degraded = True
-                    fps_target = max(int(backpressure_cfg.get("min_fps", 5)), fps_target // 2)
-                    bitrate_kbps = max(int(backpressure_cfg.get("min_bitrate_kbps", 1000)), bitrate_kbps // 2)
+                    fps_target, bitrate_kbps, quality = _apply_disk_degrade(base_fps, base_bitrate, base_quality)
                     with self._rate_lock:
                         self._fps_target = fps_target
                         self._bitrate_kbps = bitrate_kbps
+                        self._jpeg_quality = int(quality)
                     degrade_payload: dict[str, Any] = {
                         "fps_target": int(fps_target),
                         "bitrate_kbps": int(bitrate_kbps),
+                        "jpeg_quality": int(quality),
                         "level": level,
                     }
                     self._event_builder.journal_event("capture.degrade", degrade_payload)
@@ -579,12 +623,15 @@ class CapturePipeline:
                     degraded = False
                     fps_target = int(base_fps)
                     bitrate_kbps = int(base_bitrate)
+                    quality = int(base_quality)
                     with self._rate_lock:
                         self._fps_target = fps_target
                         self._bitrate_kbps = bitrate_kbps
+                        self._jpeg_quality = int(quality)
                     restore_payload: dict[str, Any] = {
                         "fps_target": int(fps_target),
                         "bitrate_kbps": int(bitrate_kbps),
+                        "jpeg_quality": int(quality),
                         "level": level,
                     }
                     self._event_builder.journal_event("capture.restore", restore_payload)
@@ -606,6 +653,10 @@ class CapturePipeline:
             if activity_enabled:
                 updated_fps = min(updated_fps, int(base_fps))
                 updated_bitrate = min(updated_bitrate, int(base_bitrate))
+            if degraded:
+                degraded_fps, degraded_bitrate, _quality = _apply_disk_degrade(base_fps, base_bitrate, base_quality)
+                updated_fps = min(updated_fps, int(degraded_fps))
+                updated_bitrate = min(updated_bitrate, int(degraded_bitrate))
             if updated_fps != fps_target or updated_bitrate != bitrate_kbps:
                 self._logger.log(
                     "capture.rate_change",
@@ -647,6 +698,8 @@ class CapturePipeline:
             fps_target = self._fps_target
             bitrate_kbps = self._bitrate_kbps
         spool_dir = self._config.get("storage", {}).get("spool_dir", "data/spool")
+        storage_cfg = self._config.get("storage", {})
+        fsync_policy = str(storage_cfg.get("fsync_policy", "none") or "none")
         run_id = self._config.get("runtime", {}).get("run_id", "run")
         backend = self._backend_used
         deduper = FrameDeduper(capture_cfg.get("dedupe", {}))
@@ -708,6 +761,7 @@ class CapturePipeline:
                     container_type=container_type,
                     encoder=encoder,
                     ffmpeg_path=ffmpeg_path,
+                    fsync_policy=fsync_policy,
                 )
                 segment_start_mono = _frame_monotonic(frame)
                 segment_dup_frames = 0
@@ -780,6 +834,7 @@ class CapturePipeline:
             "frame_count": int(artifact.frame_count),
             "width": int(artifact.width),
             "height": int(artifact.height),
+            "resolution": f"{int(artifact.width)}x{int(artifact.height)}",
             "backend": backend,
             "container": {
                 "type": artifact.container_type,
@@ -812,10 +867,22 @@ class CapturePipeline:
             "encode_ms_max": int(artifact.encode_ms_max),
             "policy_snapshot_hash": policy_hash,
         }
+        if artifact.container_index:
+            metadata["container"]["index"] = artifact.container_index
+        if artifact.container_header:
+            metadata["container"]["header"] = artifact.container_header
         if window_ref:
             metadata["window_ref"] = window_ref
         if input_ref:
             metadata["input_ref"] = input_ref
+        monitor_layout = _monitor_layout()
+        if monitor_layout:
+            metadata["monitor_layout"] = monitor_layout
+            if monitor_index is not None:
+                for entry in monitor_layout:
+                    if int(entry.get("index", -1)) == int(monitor_index):
+                        metadata["monitor"] = entry
+                        break
         cursor_cfg = self._config.get("capture", {}).get("cursor", {})
         if isinstance(cursor_cfg, dict) and cursor_cfg.get("enabled", False):
             try:
@@ -975,6 +1042,30 @@ def _free_gb(path: str) -> int:
     return int(free // (1024 ** 3))
 
 
+def _fsync_file(path: str) -> None:
+    try:
+        with open(path, "rb") as handle:
+            os.fsync(handle.fileno())
+    except Exception:
+        return
+
+
+def _fsync_dir(path: str) -> None:
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except Exception:
+        return
+    try:
+        os.fsync(fd)
+    except Exception:
+        pass
+    finally:
+        try:
+            os.close(fd)
+        except Exception:
+            pass
+
+
 def _hash_frame(data: bytes, *, algo: str, sample_bytes: int) -> str:
     payload = data[:sample_bytes] if sample_bytes and sample_bytes > 0 else data
     name = str(algo).lower()
@@ -1003,6 +1094,13 @@ def _parse_resolution(value: str | None) -> tuple[int, int] | None:
     if w <= 0 or h <= 0:
         return None
     return (w, h)
+
+
+def _monitor_layout() -> list[dict[str, int | bool]] | None:
+    try:
+        return list_monitors()
+    except Exception:
+        return None
 
 
 def _create_dxcam(monitor_index: int):

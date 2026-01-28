@@ -111,3 +111,30 @@ def _parse_resolution(value: str | None, width: int | None, height: int | None) 
     if w <= 0 or h <= 0:
         return None
     return (w, h)
+
+
+def list_monitors() -> list[dict[str, int | bool]] | None:
+    if os.name != "nt":
+        return None
+    try:
+        import mss
+    except Exception:
+        return None
+    try:
+        with mss.mss() as sct:
+            monitors = sct.monitors
+    except Exception:
+        return None
+    layout: list[dict[str, int | bool]] = []
+    for idx, monitor in enumerate(monitors):
+        layout.append(
+            {
+                "index": int(idx),
+                "left": int(monitor.get("left", 0)),
+                "top": int(monitor.get("top", 0)),
+                "width": int(monitor.get("width", 0)),
+                "height": int(monitor.get("height", 0)),
+                "combined": bool(idx == 0),
+            }
+        )
+    return layout

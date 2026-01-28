@@ -60,6 +60,15 @@ class AudioCaptureWindows(PluginBase):
         blocksize = int(audio_cfg.get("blocksize", samplerate))
         encoding = str(audio_cfg.get("encoding", "wav"))
         ffmpeg_path = str(audio_cfg.get("ffmpeg_path", "")).strip()
+        device = audio_cfg.get("device")
+        device_name = None
+        if device is not None:
+            try:
+                info = sd.query_devices(device)
+                if isinstance(info, dict):
+                    device_name = info.get("name")
+            except Exception:
+                device_name = None
         seq = 0
         run_id = ensure_run_id(self.context.config)
         audio_buffer = _AudioBuffer(max_queue=self.context.config.get("capture", {}).get("audio", {}).get("queue_max", 8))
@@ -88,6 +97,17 @@ class AudioCaptureWindows(PluginBase):
                     data, frames, time_info = audio_buffer.queue.get(timeout=0.2)
                 except queue.Empty:
                     continue
+                dropped = audio_buffer.consume_drops()
+                if dropped > 0:
+                    _record_audio_drop(
+                        event_builder,
+                        {
+                            "dropped": int(dropped),
+                            "queue_max": int(audio_buffer.max_queue),
+                            "policy": "drop_newest",
+                            "source": mode,
+                        },
+                    )
                 record_id = prefixed_id(run_id, "audio", seq)
                 ts_utc = _iso_utc()
                 encoded_bytes, encoding_used = _encode_audio_bytes(
@@ -110,6 +130,9 @@ class AudioCaptureWindows(PluginBase):
                     "sample_rate": int(samplerate),
                     "encoding": encoding_used,
                     "source": mode,
+                    "device": device,
+                    "device_name": device_name,
+                    "drops": {"count": int(dropped), "queue_max": int(audio_buffer.max_queue), "policy": "drop_newest"},
                     "content_hash": hashlib.sha256(encoded_bytes).hexdigest(),
                 }
                 payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
@@ -132,6 +155,17 @@ class AudioCaptureWindows(PluginBase):
                 data, frames, time_info = audio_buffer.queue.get_nowait()
             except queue.Empty:
                 break
+            dropped = audio_buffer.consume_drops()
+            if dropped > 0:
+                _record_audio_drop(
+                    event_builder,
+                    {
+                        "dropped": int(dropped),
+                        "queue_max": int(audio_buffer.max_queue),
+                        "policy": "drop_newest",
+                        "source": mode,
+                    },
+                )
             record_id = prefixed_id(run_id, "audio", seq)
             ts_utc = _iso_utc()
             encoded_bytes, encoding_used = _encode_audio_bytes(
@@ -154,6 +188,9 @@ class AudioCaptureWindows(PluginBase):
                 "sample_rate": int(samplerate),
                 "encoding": encoding_used,
                 "source": mode,
+                "device": device,
+                "device_name": device_name,
+                "drops": {"count": int(dropped), "queue_max": int(audio_buffer.max_queue), "policy": "drop_newest"},
                 "content_hash": hashlib.sha256(encoded_bytes).hexdigest(),
             }
             payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
@@ -191,6 +228,21 @@ def _iso_utc() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _record_audio_drop(event_builder: Any, payload: dict[str, Any]) -> None:
+    if event_builder is None:
+        return
+    try:
+        event_builder.journal_event("audio.drop", payload)
+        event_builder.ledger_entry(
+            "audio.drop",
+            inputs=[],
+            outputs=[],
+            payload=payload,
+        )
+    except Exception:
+        return
+
+
 @dataclass
 class _AudioBuffer:
     max_queue: int
@@ -205,6 +257,11 @@ class _AudioBuffer:
             self.queue.put_nowait((data, frames, time_info))
         except queue.Full:
             self.dropped += 1
+
+    def consume_drops(self) -> int:
+        dropped = int(self.dropped)
+        self.dropped = 0
+        return dropped
 
 
 def _resolve_audio_mode(audio_cfg: dict[str, Any]) -> str:

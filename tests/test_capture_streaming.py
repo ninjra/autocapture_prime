@@ -94,6 +94,11 @@ class CaptureStreamingTests(unittest.TestCase):
             self.assertTrue(payload.startswith(b"RIFF"))
             self.assertIn("run1/segment/0", meta.data)
             self.assertEqual(meta.data["run1/segment/0"]["frame_count"], 2)
+            container = meta.data["run1/segment/0"]["container"]
+            self.assertIn("index", container)
+            self.assertEqual(len(container["index"]), 2)
+            self.assertIn("header", container)
+            self.assertEqual(container["header"]["width"], 1)
             self.assertIn("content_hash", meta.data["run1/segment/0"])
             self.assertIn("drops", meta.data["run1/segment/0"])
             events = [entry.get("event") for entry in event_builder.ledger if isinstance(entry, dict)]
