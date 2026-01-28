@@ -9,7 +9,7 @@ class KeyringProtectionTests(unittest.TestCase):
         with patch("autocapture_nx.kernel.keyring.os.name", "nt"):
             with patch("autocapture_nx.kernel.keyring._protect", return_value=(b"secret", False)):
                 with self.assertRaises(RuntimeError):
-                    KeyRing._from_key("/tmp/keyring.json", b"secret", require_protection=True)
+                    KeyRing._new_keyset("metadata", require_protection=True)
 
 
 if __name__ == "__main__":

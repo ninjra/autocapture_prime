@@ -79,7 +79,7 @@ def _version_satisfies(current: str, requirement: str) -> bool:
 
 def _capability_guard(capabilities, plugin_id: str, required_capabilities: set[str] | None):
     if required_capabilities is None:
-        return capabilities.get
+        required_capabilities = set()
     allowed = set(required_capabilities)
 
     def _get_capability(name: str):
@@ -331,6 +331,11 @@ class PluginRegistry:
             )
             if manifest.get("plugin_id") not in allowed:
                 raise PluginError("Network permission denied by policy")
+            hosting = self.config.get("plugins", {}).get("hosting", {})
+            hosting_mode = str(hosting.get("mode", "subprocess")).lower()
+            inproc_allowlist = set(hosting.get("inproc_allowlist", []) or [])
+            if hosting_mode != "subprocess" or manifest.get("plugin_id") in inproc_allowlist:
+                raise PluginError("Network-capable plugins must run in subprocess hosting mode")
 
     def validate_allowlist_and_hashes(self, manifests: list[PluginManifest]) -> None:
         allowlist_raw = self.config.get("plugins", {}).get("allowlist", [])
@@ -640,11 +645,12 @@ class PluginRegistry:
                     raise PluginError(f"Missing entrypoint module {module_path}")
                 module_name = f"autocapture_plugin_{plugin_id.replace('.', '_')}"
                 network_allowed = bool(manifest.get("permissions", {}).get("network", False))
-                required_caps_raw = manifest.get("required_capabilities", None)
-                if isinstance(required_caps_raw, list):
-                    required_capabilities = {str(cap) for cap in required_caps_raw if str(cap).strip()}
-                else:
-                    required_capabilities = None
+                if "required_capabilities" not in manifest:
+                    raise PluginError(f"Plugin {plugin_id} missing required_capabilities")
+                required_caps_raw = manifest.get("required_capabilities", [])
+                if not isinstance(required_caps_raw, list):
+                    raise PluginError(f"Plugin {plugin_id} required_capabilities must be a list")
+                required_capabilities = {str(cap) for cap in required_caps_raw if str(cap).strip()}
                 if hosting_mode == "subprocess" and plugin_id not in inproc_allowlist:
                     instance = SubprocessPlugin(
                         module_path,

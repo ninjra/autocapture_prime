@@ -16,7 +16,10 @@ class KeyExportImportTests(unittest.TestCase):
             # Create a new keyring and import
             new_ring = KeyRing.load(str(Path(tmp) / "keyring2.json"))
             import_keys(new_ring, export_path)
-            self.assertEqual(set(keyring.all_keys().keys()).issubset(set(new_ring.all_keys().keys())), True)
+            for purpose in keyring.purposes():
+                self.assertTrue(
+                    set(keyring.all_keys(purpose).keys()).issubset(set(new_ring.all_keys(purpose).keys()))
+                )
 
 
 if __name__ == "__main__":

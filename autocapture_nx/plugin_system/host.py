@@ -142,7 +142,7 @@ class PluginProcess:
         )
         if self._proc.stdin is None or self._proc.stdout is None:
             raise PluginError("Failed to start plugin host")
-        assign_job_object(self._proc.pid)
+        assign_job_object(self._proc.pid, limits=hosting.get("job_limits", {}))
         self._stdin: IO[str] = self._proc.stdin
         self._stdout: IO[str] = self._proc.stdout
         self._req_id = 0

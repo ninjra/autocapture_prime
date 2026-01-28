@@ -127,20 +127,15 @@ def _ensure_tooling(repo_root: Path, log_path: Path) -> str | None:
 
 
 def main() -> int:
-    env = os.environ.copy()
+    base_env = os.environ.copy()
     root = Path(__file__).resolve().parents[1]
-    env.setdefault("PYTHONPATH", str(root))
+    base_env.setdefault("PYTHONPATH", str(root))
     test_root = root / ".dev" / "test_env"
     if test_root.exists():
         import shutil
 
         shutil.rmtree(test_root)
-    config_dir = test_root / "config"
-    data_dir = test_root / "data"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    data_dir.mkdir(parents=True, exist_ok=True)
-    env.setdefault("AUTOCAPTURE_CONFIG_DIR", str(config_dir))
-    env.setdefault("AUTOCAPTURE_DATA_DIR", str(data_dir))
+    test_root.mkdir(parents=True, exist_ok=True)
     log_path = root / "tools" / "run_all_tests.log"
     report_path = root / "tools" / "run_all_tests_report.json"
     log_path.write_text("", encoding="utf-8")
@@ -150,13 +145,21 @@ def main() -> int:
     try:
         tool_python = _ensure_tooling(root, log_path)
         if tool_python:
-            env["AUTO_CAPTURE_TOOL_PYTHON"] = tool_python
+            base_env["AUTO_CAPTURE_TOOL_PYTHON"] = tool_python
     except Exception as exc:
         _write_log(log_path, f"FAILED: tooling ({exc})")
         _write_report(report_path, log_path, "failed", "tooling", 1, str(sys.executable))
         return 1
 
-    for cmd in _commands(sys.executable):
+    for idx, cmd in enumerate(_commands(sys.executable)):
+        env = base_env.copy()
+        step_dir = test_root / f"step_{idx:02d}"
+        config_dir = step_dir / "config"
+        data_dir = step_dir / "data"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        data_dir.mkdir(parents=True, exist_ok=True)
+        env["AUTOCAPTURE_CONFIG_DIR"] = str(config_dir)
+        env["AUTOCAPTURE_DATA_DIR"] = str(data_dir)
         step = " ".join(cmd[1:]) if len(cmd) > 1 else "command"
         _write_log(log_path, f"Running: {' '.join(cmd)}")
         code = _run(cmd, env)

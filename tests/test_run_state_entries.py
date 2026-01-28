@@ -5,6 +5,7 @@ from pathlib import Path
 
 from autocapture_nx.kernel.config import ConfigPaths
 from autocapture_nx.kernel.loader import Kernel
+from autocapture_nx.plugin_system.runtime import global_network_deny, set_global_network_deny
 
 
 def _paths(tmp: str) -> ConfigPaths:
@@ -80,13 +81,17 @@ class RunStateEntryTests(unittest.TestCase):
 
     def test_crash_entry_on_next_boot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
+            prev_deny = global_network_deny()
             paths = _paths(tmp)
             kernel = Kernel(paths, safe_mode=False)
-            kernel.boot()
-            # Intentionally skip shutdown to simulate crash.
-            kernel2 = Kernel(paths, safe_mode=False)
-            kernel2.boot()
-            kernel2.shutdown()
+            try:
+                kernel.boot()
+                # Intentionally skip shutdown to simulate crash.
+                kernel2 = Kernel(paths, safe_mode=False)
+                kernel2.boot()
+                kernel2.shutdown()
+            finally:
+                set_global_network_deny(prev_deny)
             ledger_path = Path(tmp) / "data" / "ledger.ndjson"
             entries = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines() if line.strip()]
             events = [entry.get("payload", {}).get("event") for entry in entries]

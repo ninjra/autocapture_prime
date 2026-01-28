@@ -278,7 +278,7 @@ class CitationValidator(PluginBase):
         if not key_id or not anchor_hmac:
             return False
         try:
-            root = keyring.key_for(str(key_id))
+            root = keyring.key_for("anchor", str(key_id))
         except Exception:
             return False
         from autocapture_nx.kernel.crypto import derive_key
@@ -288,6 +288,7 @@ class CitationValidator(PluginBase):
         key = derive_key(root, "anchor")
         payload = dict(record)
         payload.pop("anchor_hmac", None)
+        payload.pop("anchor_key_id", None)
         payload_bytes = dumps(payload).encode("utf-8")
         expected = hmac.new(key, payload_bytes, hashlib.sha256).hexdigest()
         return expected == anchor_hmac

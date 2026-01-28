@@ -5,7 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+try:
+    from PIL import Image, ImageDraw, ImageFont, ImageOps
+    _PIL_AVAILABLE = True
+except Exception:  # pragma: no cover - optional dependency
+    Image = None  # type: ignore[assignment]
+    ImageDraw = None  # type: ignore[assignment]
+    ImageFont = None  # type: ignore[assignment]
+    ImageOps = None  # type: ignore[assignment]
+    _PIL_AVAILABLE = False
 
 _GLYPH_SIZE = (12, 16)
 _GLYPH_CHARS = (
@@ -27,6 +35,8 @@ _GLYPH_CACHE: dict[str, tuple[int, ...]] | None = None
 
 
 def ocr_tokens_from_bytes(image_bytes: bytes) -> list[OCRToken]:
+    if not _PIL_AVAILABLE:
+        return []
     if not image_bytes:
         return []
     try:
@@ -37,16 +47,22 @@ def ocr_tokens_from_bytes(image_bytes: bytes) -> list[OCRToken]:
 
 
 def ocr_text_from_bytes(image_bytes: bytes) -> str:
+    if not _PIL_AVAILABLE:
+        return ""
     tokens = ocr_tokens_from_bytes(image_bytes)
     return _tokens_to_text(tokens)
 
 
 def ocr_text_from_image(image: Image.Image) -> str:
+    if not _PIL_AVAILABLE:
+        return ""
     tokens = ocr_tokens_from_image(image)
     return _tokens_to_text(tokens)
 
 
 def ocr_tokens_from_image(image: Image.Image) -> list[OCRToken]:
+    if not _PIL_AVAILABLE:
+        return []
     tokens = _tesseract_tokens(image)
     if tokens is not None:
         return tokens
@@ -88,6 +104,8 @@ def _tesseract_tokens(image: Image.Image) -> list[OCRToken] | None:
 
 
 def _basic_tokens(image: Image.Image) -> list[OCRToken]:
+    if not _PIL_AVAILABLE:
+        return []
     img = image.convert("L")
     width, height = img.size
     scale = 1.0

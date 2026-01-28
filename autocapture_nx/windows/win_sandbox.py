@@ -8,6 +8,11 @@ from ctypes import wintypes
 
 
 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008
+JOB_OBJECT_LIMIT_PROCESS_MEMORY = 0x00000100
+JOB_OBJECT_LIMIT_JOB_MEMORY = 0x00000200
+JOB_OBJECT_LIMIT_PROCESS_TIME = 0x00000002
+JOB_OBJECT_LIMIT_JOB_TIME = 0x00000004
 
 
 class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
@@ -49,7 +54,41 @@ class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
 _job_handle = None
 
 
-def assign_job_object(pid: int) -> None:
+def _apply_limits(info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION, limits: dict | None) -> None:
+    if not limits:
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        return
+    limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    max_processes = int(limits.get("max_processes", 1) or 0)
+    if max_processes > 0:
+        limit_flags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+        info.BasicLimitInformation.ActiveProcessLimit = max_processes
+    max_memory_mb = int(limits.get("max_memory_mb", 0) or 0)
+    if max_memory_mb > 0:
+        bytes_limit = int(max_memory_mb) * 1024 * 1024
+        limit_flags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY | JOB_OBJECT_LIMIT_JOB_MEMORY
+        info.ProcessMemoryLimit = bytes_limit
+        info.JobMemoryLimit = bytes_limit
+    cpu_time_ms = int(limits.get("cpu_time_ms", 0) or 0)
+    if cpu_time_ms > 0:
+        limit_flags |= JOB_OBJECT_LIMIT_PROCESS_TIME | JOB_OBJECT_LIMIT_JOB_TIME
+        units = int(cpu_time_ms) * 10_000  # 100ns units
+        try:
+            info.BasicLimitInformation.PerProcessUserTimeLimit.QuadPart = units
+            info.BasicLimitInformation.PerJobUserTimeLimit.QuadPart = units
+        except Exception:
+            info.BasicLimitInformation.PerProcessUserTimeLimit = wintypes.LARGE_INTEGER(units)
+            info.BasicLimitInformation.PerJobUserTimeLimit = wintypes.LARGE_INTEGER(units)
+    info.BasicLimitInformation.LimitFlags = limit_flags
+
+
+def build_job_limits(limits: dict | None) -> JOBOBJECT_EXTENDED_LIMIT_INFORMATION:
+    info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+    _apply_limits(info, limits)
+    return info
+
+
+def assign_job_object(pid: int, *, limits: dict | None = None) -> None:
     if os.name != "nt":
         return
     global _job_handle
@@ -57,7 +96,7 @@ def assign_job_object(pid: int) -> None:
     if _job_handle is None:
         _job_handle = kernel32.CreateJobObjectW(None, None)
         info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        _apply_limits(info, limits)
         kernel32.SetInformationJobObject(
             _job_handle,
             9,  # JobObjectExtendedLimitInformation

@@ -129,7 +129,7 @@ def build_hasher(config: dict) -> tuple[EntityHasher, EntityMap]:
     root_key_path = crypto_cfg.get("root_key_path", "data/vault/root.key")
     keyring_path = crypto_cfg.get("keyring_path", "data/vault/keyring.json")
     keyring = KeyRing.load(keyring_path, legacy_root_path=root_key_path)
-    _key_id, root = keyring.active_key()
+    _key_id, root = keyring.active_key("entity_tokens")
     key = derive_key(root, "entity_tokens")
     token_format = config.get("privacy", {}).get("egress", {}).get("token_format", "⟦ENT:{type}:{token}⟧")
     return EntityHasher(key, token_format), EntityMap()

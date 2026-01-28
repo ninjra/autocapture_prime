@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 from typing import Any
 
@@ -26,17 +27,24 @@ def sha256_directory(path: str | Path) -> str:
     root = Path(path)
     digest = hashlib.sha256()
     entries: list[tuple[str, Path]] = []
-    for file_path in root.rglob("*"):
-        if file_path.is_symlink():
-            raise ValueError(f"symlinks are not allowed in hashed directories: {file_path}")
-        if not file_path.is_file():
-            continue
-        if "__pycache__" in file_path.parts:
-            continue
-        if file_path.suffix == ".pyc":
-            continue
-        rel = file_path.relative_to(root).as_posix()
-        entries.append((rel, file_path))
+    for current, dirs, files in os.walk(root, followlinks=False):
+        current_path = Path(current)
+        for dirname in list(dirs):
+            dir_path = current_path / dirname
+            if dir_path.is_symlink():
+                raise ValueError(f"symlinks are not allowed in hashed directories: {dir_path}")
+        for filename in files:
+            file_path = current_path / filename
+            if file_path.is_symlink():
+                raise ValueError(f"symlinks are not allowed in hashed directories: {file_path}")
+            if not file_path.is_file():
+                continue
+            if "__pycache__" in file_path.parts:
+                continue
+            if file_path.suffix == ".pyc":
+                continue
+            rel = file_path.relative_to(root).as_posix()
+            entries.append((rel, file_path))
 
     def _sort_key(item: tuple[str, Path]) -> tuple[str, str]:
         rel = item[0]

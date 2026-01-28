@@ -47,6 +47,16 @@ class KeyRotationTests(unittest.TestCase):
                 self.assertEqual(store.get("rec1")["value"], 123)
                 rotate_keys(system)
                 self.assertEqual(store.get("rec1")["value"], 123)
+                ledger_path = Path(safe_tmp) / "ledger.ndjson"
+                entries = []
+                if ledger_path.exists():
+                    with open(ledger_path, "r", encoding="utf-8") as handle:
+                        for line in handle:
+                            if not line.strip():
+                                continue
+                            entries.append(json.loads(line))
+                events = [e.get("payload", {}).get("event") for e in entries if isinstance(e, dict)]
+                self.assertIn("key_rotation", events)
             finally:
                 kernel.shutdown()
 

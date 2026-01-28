@@ -229,37 +229,50 @@ def _iter_stream_chunks(handle) -> Iterable[EncryptedBlobRaw]:
         yield EncryptedBlobRaw(nonce=nonce, ciphertext=ciphertext, key_id=None)
 
 
+LEGACY_DERIVE_PURPOSES = {
+    "entity_tokens": ["tokenization"],
+}
+
+
 class DerivedKeyProvider:
     def __init__(self, keyring: KeyRing, purpose: str) -> None:
         self._keyring = keyring
         self._purpose = purpose
 
     def active(self) -> tuple[str, bytes]:
-        key_id, root = self._keyring.active_key()
+        key_id, root = self._keyring.active_key(self._purpose)
         return key_id, derive_key(root, self._purpose)
 
     def for_id(self, key_id: str) -> bytes:
-        root = self._keyring.key_for(key_id)
+        root = self._keyring.key_for(self._purpose, key_id)
         return derive_key(root, self._purpose)
+
+    def _purpose_variants(self) -> list[str]:
+        legacy = LEGACY_DERIVE_PURPOSES.get(self._purpose, [])
+        return [self._purpose, *legacy]
 
     def candidates(self, key_id: str | None) -> list[bytes]:
         keys: list[bytes] = []
         seen: set[str] = set()
         if key_id:
             try:
-                keys.append(self.for_id(key_id))
+                root = self._keyring.key_for(self._purpose, key_id)
+                for purpose in self._purpose_variants():
+                    keys.append(derive_key(root, purpose))
                 seen.add(key_id)
             except KeyError:
                 pass
-        active_id, active_root = self._keyring.active_key()
+        active_id, active_root = self._keyring.active_key(self._purpose)
         if active_id not in seen:
-            keys.append(derive_key(active_root, self._purpose))
+            for purpose in self._purpose_variants():
+                keys.append(derive_key(active_root, purpose))
             seen.add(active_id)
-        for record in self._keyring.records:
-            if record.key_id in seen:
+        for key_id, root in self._keyring.all_keys(self._purpose).items():
+            if key_id in seen:
                 continue
-            keys.append(derive_key(record.key_bytes(), self._purpose))
-            seen.add(record.key_id)
+            for purpose in self._purpose_variants():
+                keys.append(derive_key(root, purpose))
+            seen.add(key_id)
         return keys
 
 

@@ -47,6 +47,7 @@ def _write_slow_plugin(root: Path, plugin_id: str) -> None:
             "raw_input": False,
             "network": False,
         },
+        "required_capabilities": [],
         "compat": {
             "requires_kernel": ">=0.0.0",
             "requires_schema_versions": [1],
@@ -91,4 +92,3 @@ class PluginHostTimeoutTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

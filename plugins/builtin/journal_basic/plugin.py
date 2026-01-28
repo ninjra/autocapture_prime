@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 from dataclasses import dataclass
@@ -161,6 +162,23 @@ class JournalWriter(PluginBase):
         }
         self.append(entry)
         return entry["event_id"]
+
+    def verify(self) -> tuple[bool, list[str]]:
+        errors: list[str] = []
+        if not os.path.exists(self._path):
+            return False, ["journal_missing"]
+        try:
+            with open(self._path, "r", encoding="utf-8") as handle:
+                for idx, line in enumerate(handle):
+                    if not line.strip():
+                        continue
+                    try:
+                        _ = json.loads(line)
+                    except Exception:
+                        errors.append(f"journal_parse_error:{idx}")
+        except Exception:
+            errors.append("journal_read_failed")
+        return len(errors) == 0, errors
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> JournalWriter:

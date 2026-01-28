@@ -41,6 +41,7 @@ def _write_temp_plugin(root: Path, plugin_id: str, capability: str) -> None:
             "raw_input": False,
             "network": False,
         },
+        "required_capabilities": [],
         "compat": {"requires_kernel": ">=0.1.0", "requires_schema_versions": [1]},
         "depends_on": [],
         "hash_lock": {"manifest_sha256": "", "artifact_sha256": ""},

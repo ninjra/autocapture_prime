@@ -16,6 +16,9 @@ except Exception:  # pragma: no cover - optional dependency guard
     Image = None
     ImageDraw = None
 
+if Image is None or ImageDraw is None:  # pragma: no cover - optional dependency guard
+    raise unittest.SkipTest("Pillow not installed")
+
 
 class _MetadataStore:
     def __init__(self) -> None:

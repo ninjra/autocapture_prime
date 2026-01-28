@@ -68,7 +68,10 @@ class CaptureStubPluginTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             frames_dir = Path(tmp) / "frames"
             frames_dir.mkdir(parents=True, exist_ok=True)
-            from PIL import Image
+            try:
+                from PIL import Image
+            except Exception:
+                self.skipTest("Pillow not installed")
 
             img = Image.new("RGB", (64, 64), (200, 180, 160))
             img.save(frames_dir / "frame1.jpg", format="JPEG", quality=90)

@@ -75,7 +75,7 @@ class AnchorWriter(PluginBase):
                 self._keyring = None
         if self._keyring is None:
             return None
-        key_id, root = self._keyring.active_key()
+        key_id, root = self._keyring.active_key("anchor")
         return key_id, derive_key(root, "anchor")
 
 

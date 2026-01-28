@@ -2,7 +2,10 @@ import json
 import unittest
 from io import BytesIO
 
-from PIL import Image, ImageDraw
+try:
+    from PIL import Image, ImageDraw
+except Exception:  # pragma: no cover - optional dependency guard
+    raise unittest.SkipTest("Pillow not installed")
 
 from autocapture_nx.plugin_system.api import PluginContext
 from plugins.builtin.embedder_stub.plugin import EmbedderLocal

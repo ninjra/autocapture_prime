@@ -16,8 +16,8 @@
       "blocksize": 44100,
       "channels": 2,
       "device": null,
-      "encoding": "wav",
       "enabled": true,
+      "encoding": "wav",
       "ffmpeg_path": "",
       "microphone": true,
       "mode": "auto",
@@ -34,6 +34,14 @@
       "flush_interval_ms": 250,
       "mode": "activity",
       "store_derived": true
+    },
+    "stub": {
+      "frame_height": 720,
+      "frame_width": 1280,
+      "frames_dir": "",
+      "jpeg_quality": 90,
+      "loop": false,
+      "max_frames": 0
     },
     "video": {
       "activity": {
@@ -59,21 +67,13 @@
         "sample_bytes": 65536,
         "window_ms": 1500
       },
-      "encoder": "cpu",
       "enabled": true,
+      "encoder": "cpu",
       "fps_target": 30,
       "jpeg_quality": 90,
       "monitor_index": 0,
       "resolution": "native",
       "segment_seconds": 60
-    },
-    "stub": {
-      "frames_dir": "",
-      "loop": false,
-      "max_frames": 0,
-      "frame_width": 1280,
-      "frame_height": 720,
-      "jpeg_quality": 90
     },
     "window_metadata": {
       "enabled": true,
@@ -90,9 +90,9 @@
     }
   },
   "gateway": {
-    "openai_base_url": "",
-    "openai_api_key": "",
     "egress_path": "/v1/egress",
+    "openai_api_key": "",
+    "openai_base_url": "",
     "timeout_s": 30
   },
   "indexing": {
@@ -145,20 +145,9 @@
   },
   "performance": {
     "ingestion_mb_s": 50,
+    "memory_ceiling_mb": 512,
     "query_latency_ms": 2000,
-    "startup_ms": 500,
-    "memory_ceiling_mb": 512
-  },
-  "retrieval": {
-    "limit": 25,
-    "vector_limit": 25,
-    "fast_threshold": 3,
-    "fusion_threshold": 5,
-    "vector_enabled": true,
-    "vector_requires_idle": true,
-    "vector_idle_seconds": 45,
-    "allow_full_scan": false,
-    "window_limit": 1000
+    "startup_ms": 500
   },
   "plugins": {
     "allowlist": [
@@ -227,6 +216,289 @@
       "builtin.sst.persist",
       "builtin.sst.index"
     ],
+    "capabilities": {
+      "anchor.writer": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.anchor.basic"
+        ],
+        "provider_ids": []
+      },
+      "answer.builder": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.answer.basic"
+        ],
+        "provider_ids": []
+      },
+      "capture.audio": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.capture.audio.windows"
+        ],
+        "provider_ids": []
+      },
+      "capture.backpressure": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.backpressure.basic"
+        ],
+        "provider_ids": []
+      },
+      "capture.source": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.capture.windows",
+          "builtin.capture.basic"
+        ],
+        "provider_ids": []
+      },
+      "citation.validator": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.citation.basic"
+        ],
+        "provider_ids": []
+      },
+      "devtools.ast_ir": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.devtools.ast_ir"
+        ],
+        "provider_ids": []
+      },
+      "devtools.diffusion": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.devtools.diffusion"
+        ],
+        "provider_ids": []
+      },
+      "egress.gateway": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.egress.gateway"
+        ],
+        "provider_ids": []
+      },
+      "embedder.text": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.embedder.basic"
+        ],
+        "provider_ids": []
+      },
+      "journal.writer": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.journal.basic"
+        ],
+        "provider_ids": []
+      },
+      "ledger.writer": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.ledger.basic"
+        ],
+        "provider_ids": []
+      },
+      "observability.logger": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.observability.basic"
+        ],
+        "provider_ids": []
+      },
+      "ocr.engine": {
+        "fanout": true,
+        "max_providers": 8,
+        "mode": "multi",
+        "preferred": [
+          "mx.core.ocr_local",
+          "builtin.ocr.basic"
+        ],
+        "provider_ids": []
+      },
+      "privacy.egress_sanitizer": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.privacy.egress_sanitizer"
+        ],
+        "provider_ids": []
+      },
+      "processing.pipeline": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.processing.sst.pipeline"
+        ],
+        "provider_ids": []
+      },
+      "processing.stage.hooks": {
+        "fanout": true,
+        "max_providers": 16,
+        "mode": "multi",
+        "preferred": [],
+        "provider_ids": []
+      },
+      "reranker": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.reranker.basic"
+        ],
+        "provider_ids": []
+      },
+      "retrieval.strategy": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.retrieval.basic"
+        ],
+        "provider_ids": []
+      },
+      "runtime.governor": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.runtime.governor"
+        ],
+        "provider_ids": []
+      },
+      "runtime.scheduler": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.runtime.scheduler"
+        ],
+        "provider_ids": []
+      },
+      "storage.entity_map": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.storage.sqlcipher",
+          "builtin.storage.encrypted",
+          "builtin.storage.memory"
+        ],
+        "provider_ids": []
+      },
+      "storage.keyring": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.storage.sqlcipher",
+          "builtin.storage.encrypted"
+        ],
+        "provider_ids": []
+      },
+      "storage.media": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.storage.sqlcipher",
+          "builtin.storage.encrypted",
+          "builtin.storage.memory"
+        ],
+        "provider_ids": []
+      },
+      "storage.metadata": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.storage.sqlcipher",
+          "builtin.storage.encrypted",
+          "builtin.storage.memory"
+        ],
+        "provider_ids": []
+      },
+      "time.intent_parser": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.time.advanced"
+        ],
+        "provider_ids": []
+      },
+      "tracking.cursor": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.cursor.windows"
+        ],
+        "provider_ids": []
+      },
+      "tracking.input": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.tracking.input.windows"
+        ],
+        "provider_ids": []
+      },
+      "vision.extractor": {
+        "fanout": true,
+        "max_providers": 8,
+        "mode": "multi",
+        "preferred": [
+          "builtin.vlm.basic"
+        ],
+        "provider_ids": []
+      },
+      "window.metadata": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.window.metadata.windows"
+        ],
+        "provider_ids": []
+      }
+    },
+    "conflicts": {
+      "allow_pairs": [],
+      "enforce": true
+    },
     "default_pack": [
       "builtin.anchor.basic",
       "builtin.answer.basic",
@@ -276,8 +548,8 @@
       "builtin.capture.audio.windows": true,
       "builtin.capture.basic": false,
       "builtin.capture.windows": true,
-      "builtin.cursor.windows": false,
       "builtin.citation.basic": true,
+      "builtin.cursor.windows": false,
       "builtin.devtools.ast_ir": true,
       "builtin.devtools.diffusion": true,
       "builtin.egress.gateway": true,
@@ -295,35 +567,34 @@
       "builtin.retrieval.basic": true,
       "builtin.runtime.governor": true,
       "builtin.runtime.scheduler": true,
+      "builtin.sst.build.delta": false,
+      "builtin.sst.build.state": false,
+      "builtin.sst.compliance.redact": false,
+      "builtin.sst.extract.chart": false,
+      "builtin.sst.extract.code": false,
+      "builtin.sst.extract.spreadsheet": false,
+      "builtin.sst.extract.table": false,
+      "builtin.sst.index": false,
+      "builtin.sst.infer.action": false,
+      "builtin.sst.layout.assemble": false,
+      "builtin.sst.match.ids": false,
+      "builtin.sst.ocr.onnx": false,
+      "builtin.sst.persist": false,
+      "builtin.sst.preprocess.normalize": false,
+      "builtin.sst.preprocess.tile": false,
+      "builtin.sst.temporal.segment": false,
+      "builtin.sst.track.cursor": false,
+      "builtin.sst.ui.parse": false,
       "builtin.storage.encrypted": false,
       "builtin.storage.sqlcipher": true,
       "builtin.time.advanced": true,
       "builtin.tracking.input.windows": true,
       "builtin.vlm.basic": true,
-      "builtin.window.metadata.windows": true,
-      "builtin.sst.preprocess.normalize": false,
-      "builtin.sst.preprocess.tile": false,
-      "builtin.sst.ocr.onnx": false,
-      "builtin.sst.ui.parse": false,
-      "builtin.sst.layout.assemble": false,
-      "builtin.sst.extract.table": false,
-      "builtin.sst.extract.spreadsheet": false,
-      "builtin.sst.extract.code": false,
-      "builtin.sst.extract.chart": false,
-      "builtin.sst.track.cursor": false,
-      "builtin.sst.build.state": false,
-      "builtin.sst.match.ids": false,
-      "builtin.sst.temporal.segment": false,
-      "builtin.sst.build.delta": false,
-      "builtin.sst.infer.action": false,
-      "builtin.sst.compliance.redact": false,
-      "builtin.sst.persist": false,
-      "builtin.sst.index": false
+      "builtin.window.metadata.windows": true
     },
     "hosting": {
       "cache_dir": "data/cache/plugins",
       "inproc_allowlist": [
-        "builtin.egress.gateway",
         "builtin.privacy.egress_sanitizer",
         "builtin.storage.sqlcipher",
         "builtin.storage.encrypted",
@@ -365,6 +636,11 @@
         "builtin.sst.persist",
         "builtin.sst.index"
       ],
+      "job_limits": {
+        "cpu_time_ms": 60000,
+        "max_memory_mb": 512,
+        "max_processes": 1
+      },
       "mode": "subprocess",
       "rpc_max_message_bytes": 2000000,
       "rpc_timeout_s": 10,
@@ -374,10 +650,6 @@
       "enforce": true,
       "lockfile": "config/plugin_locks.json"
     },
-    "conflicts": {
-      "enforce": true,
-      "allow_pairs": []
-    },
     "meta": {
       "configurator_allowed": [],
       "policy_allowed": []
@@ -386,285 +658,6 @@
       "network_allowed_plugin_ids": [
         "builtin.egress.gateway"
       ]
-    },
-    "capabilities": {
-      "anchor.writer": {
-        "mode": "single",
-        "preferred": [
-          "builtin.anchor.basic"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "answer.builder": {
-        "mode": "single",
-        "preferred": [
-          "builtin.answer.basic"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "capture.audio": {
-        "mode": "single",
-        "preferred": [
-          "builtin.capture.audio.windows"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "capture.backpressure": {
-        "mode": "single",
-        "preferred": [
-          "builtin.backpressure.basic"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "capture.source": {
-        "mode": "single",
-        "preferred": [
-          "builtin.capture.windows",
-          "builtin.capture.basic"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "citation.validator": {
-        "mode": "single",
-        "preferred": [
-          "builtin.citation.basic"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "devtools.ast_ir": {
-        "mode": "single",
-        "preferred": [
-          "builtin.devtools.ast_ir"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "devtools.diffusion": {
-        "mode": "single",
-        "preferred": [
-          "builtin.devtools.diffusion"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "egress.gateway": {
-        "mode": "single",
-        "preferred": [
-          "builtin.egress.gateway"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "embedder.text": {
-        "mode": "single",
-        "preferred": [
-          "builtin.embedder.basic"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "journal.writer": {
-        "mode": "single",
-        "preferred": [
-          "builtin.journal.basic"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "ledger.writer": {
-        "mode": "single",
-        "preferred": [
-          "builtin.ledger.basic"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "observability.logger": {
-        "mode": "single",
-        "preferred": [
-          "builtin.observability.basic"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "ocr.engine": {
-        "mode": "multi",
-        "preferred": [
-          "mx.core.ocr_local",
-          "builtin.ocr.basic"
-        ],
-        "provider_ids": [],
-        "fanout": true,
-        "max_providers": 8
-      },
-      "privacy.egress_sanitizer": {
-        "mode": "single",
-        "preferred": [
-          "builtin.privacy.egress_sanitizer"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "reranker": {
-        "mode": "single",
-        "preferred": [
-          "builtin.reranker.basic"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "retrieval.strategy": {
-        "mode": "single",
-        "preferred": [
-          "builtin.retrieval.basic"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "processing.pipeline": {
-        "mode": "single",
-        "preferred": [
-          "builtin.processing.sst.pipeline"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "processing.stage.hooks": {
-        "mode": "multi",
-        "preferred": [],
-        "provider_ids": [],
-        "fanout": true,
-        "max_providers": 16
-      },
-      "runtime.governor": {
-        "mode": "single",
-        "preferred": [
-          "builtin.runtime.governor"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "runtime.scheduler": {
-        "mode": "single",
-        "preferred": [
-          "builtin.runtime.scheduler"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "storage.entity_map": {
-        "mode": "single",
-        "preferred": [
-          "builtin.storage.sqlcipher",
-          "builtin.storage.encrypted",
-          "builtin.storage.memory"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "storage.keyring": {
-        "mode": "single",
-        "preferred": [
-          "builtin.storage.sqlcipher",
-          "builtin.storage.encrypted"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "storage.media": {
-        "mode": "single",
-        "preferred": [
-          "builtin.storage.sqlcipher",
-          "builtin.storage.encrypted",
-          "builtin.storage.memory"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "storage.metadata": {
-        "mode": "single",
-        "preferred": [
-          "builtin.storage.sqlcipher",
-          "builtin.storage.encrypted",
-          "builtin.storage.memory"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "time.intent_parser": {
-        "mode": "single",
-        "preferred": [
-          "builtin.time.advanced"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "tracking.input": {
-        "mode": "single",
-        "preferred": [
-          "builtin.tracking.input.windows"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "tracking.cursor": {
-        "mode": "single",
-        "preferred": [
-          "builtin.cursor.windows"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      },
-      "vision.extractor": {
-        "mode": "multi",
-        "preferred": [
-          "builtin.vlm.basic"
-        ],
-        "provider_ids": [],
-        "fanout": true,
-        "max_providers": 8
-      },
-      "window.metadata": {
-        "mode": "single",
-        "preferred": [
-          "builtin.window.metadata.windows"
-        ],
-        "provider_ids": [],
-        "fanout": false,
-        "max_providers": 1
-      }
     },
     "safe_mode": false,
     "search_paths": [
@@ -696,6 +689,222 @@
       "token_scope": "per_provider"
     }
   },
+  "processing": {
+    "idle": {
+      "auto_start": true,
+      "enabled": true,
+      "extractors": {
+        "ocr": true,
+        "vlm": true
+      },
+      "max_concurrency_cpu": 2,
+      "max_concurrency_gpu": 1,
+      "max_items_per_run": 20,
+      "max_seconds_per_run": 30,
+      "sleep_ms": 2000
+    },
+    "on_query": {
+      "allow_decode_extract": false,
+      "extractors": {
+        "ocr": true,
+        "vlm": false
+      },
+      "max_window_minutes": 120,
+      "require_idle": true
+    },
+    "sst": {
+      "chart_min_ticks": 2,
+      "code_detect_caret": false,
+      "code_detect_selection": false,
+      "code_min_keywords": 1,
+      "cursor_detect": {
+        "downscale": 5000,
+        "enabled": false,
+        "scales": [
+          7500,
+          10000,
+          12500
+        ],
+        "stride_px": 4,
+        "threshold": 6500
+      },
+      "d_boundary": 12,
+      "d_stable": 4,
+      "delta_bbox_shift_px": 24,
+      "delta_table_match_iou_bp": 3000,
+      "diff_threshold_bp": 1800,
+      "enabled": true,
+      "heavy_always": false,
+      "heavy_on_boundary": true,
+      "layout_align_tol_px": 48,
+      "layout_block_gap_px": 28,
+      "layout_line_y_px": 12,
+      "ocr_max_patches": 64,
+      "ocr_max_tokens": 4000,
+      "ocr_min_conf_bp": 3500,
+      "ocr_nms_iou_bp": 7000,
+      "persist": {
+        "mode": "shadow"
+      },
+      "phash_downscale": 32,
+      "phash_size": 8,
+      "redact_denylist": [],
+      "redact_enabled": true,
+      "schema_version": 1,
+      "segment_downscale_px": 64,
+      "sheet_header_scan_rows": 2,
+      "stage_providers": {
+        "build.delta": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "build.state": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "compliance.redact": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "extract.chart": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "extract.code": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "extract.spreadsheet": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "extract.table": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "index.text": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "infer.action": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "ingest.frame": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "layout.assemble": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "match.ids": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "ocr.onnx": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "persist.bundle": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "preprocess.normalize": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "preprocess.tile": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "temporal.segment": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "track.cursor": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "ui.parse": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "vision.vlm": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        }
+      },
+      "strip_alpha": true,
+      "table_col_gap_px": 36,
+      "table_max_cells": 2500,
+      "table_min_cols": 2,
+      "table_min_rows": 2,
+      "table_row_gap_px": 18,
+      "temporal_segment": {
+        "mode": "shadow"
+      },
+      "tile_add_full_frame": true,
+      "tile_max_px": 1024,
+      "tile_overlap_px": 64,
+      "tile_refine_cluster_gap_px": 48,
+      "tile_refine_enabled": false,
+      "tile_refine_low_conf_bp": 6500,
+      "tile_refine_max_patches": 12,
+      "tile_refine_padding_px": 24,
+      "ui_parse": {
+        "enabled": true,
+        "fallback_detector": true,
+        "max_providers": 1,
+        "mode": "detector"
+      },
+      "ui_vlm": {
+        "enabled": false,
+        "max_providers": 1
+      }
+    }
+  },
+  "profile": "justin_full_fidelity",
   "promptops": {
     "banned_patterns": [
       "http://",
@@ -729,222 +938,6 @@
     "sources": [],
     "strategy": "append_sources"
   },
-  "processing": {
-    "idle": {
-      "auto_start": true,
-      "enabled": true,
-      "extractors": {
-        "ocr": true,
-        "vlm": true
-      },
-      "max_concurrency_cpu": 2,
-      "max_concurrency_gpu": 1,
-      "max_items_per_run": 20,
-      "max_seconds_per_run": 30,
-      "sleep_ms": 2000
-    },
-    "on_query": {
-      "allow_decode_extract": false,
-      "extractors": {
-        "ocr": true,
-        "vlm": false
-      },
-      "max_window_minutes": 120,
-      "require_idle": true
-    },
-    "sst": {
-      "enabled": true,
-      "strip_alpha": true,
-      "phash_size": 8,
-      "phash_downscale": 32,
-      "d_stable": 4,
-      "d_boundary": 12,
-      "diff_threshold_bp": 1800,
-      "segment_downscale_px": 64,
-      "heavy_on_boundary": true,
-      "heavy_always": false,
-      "tile_max_px": 1024,
-      "tile_overlap_px": 64,
-      "tile_add_full_frame": true,
-      "tile_refine_enabled": false,
-      "tile_refine_low_conf_bp": 6500,
-      "tile_refine_padding_px": 24,
-      "tile_refine_max_patches": 12,
-      "tile_refine_cluster_gap_px": 48,
-      "ocr_min_conf_bp": 3500,
-      "ocr_nms_iou_bp": 7000,
-      "ocr_max_tokens": 4000,
-      "ocr_max_patches": 64,
-      "layout_line_y_px": 12,
-      "layout_block_gap_px": 28,
-      "layout_align_tol_px": 48,
-      "table_min_rows": 2,
-      "table_min_cols": 2,
-      "table_max_cells": 2500,
-      "table_row_gap_px": 18,
-      "table_col_gap_px": 36,
-      "sheet_header_scan_rows": 2,
-      "code_min_keywords": 1,
-      "code_detect_caret": false,
-      "code_detect_selection": false,
-      "chart_min_ticks": 2,
-      "ui_vlm": {
-        "enabled": false,
-        "max_providers": 1
-      },
-      "delta_bbox_shift_px": 24,
-      "delta_table_match_iou_bp": 3000,
-      "redact_enabled": true,
-      "redact_denylist": [],
-      "stage_providers": {
-        "ingest.frame": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "preprocess.normalize": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "preprocess.tile": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "ocr.onnx": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "vision.vlm": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "layout.assemble": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "extract.table": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "extract.spreadsheet": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "extract.code": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "extract.chart": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "ui.parse": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "track.cursor": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "build.state": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "match.ids": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "build.delta": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "infer.action": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "compliance.redact": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "persist.bundle": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "index.text": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        },
-        "temporal.segment": {
-          "enabled": true,
-          "provider_ids": [],
-          "fanout": true,
-          "max_providers": 0
-        }
-      },
-      "schema_version": 1,
-      "ui_parse": {
-        "enabled": true,
-        "mode": "detector",
-        "max_providers": 1,
-        "fallback_detector": true
-      },
-      "cursor_detect": {
-        "enabled": false,
-        "threshold": 6500,
-        "stride_px": 4,
-        "scales": [
-          7500,
-          10000,
-          12500
-        ],
-        "downscale": 5000
-      },
-      "temporal_segment": {
-        "mode": "shadow"
-      },
-      "persist": {
-        "mode": "shadow"
-      }
-    }
-  },
-  "profile": "justin_full_fidelity",
   "research": {
     "cache_dir": "data/research/cache",
     "enabled": true,
@@ -958,6 +951,17 @@
       "tags": []
     },
     "watchlist_name": "default"
+  },
+  "retrieval": {
+    "allow_full_scan": false,
+    "fast_threshold": 3,
+    "fusion_threshold": 5,
+    "limit": 25,
+    "vector_enabled": true,
+    "vector_idle_seconds": 45,
+    "vector_limit": 25,
+    "vector_requires_idle": true,
+    "window_limit": 1000
   },
   "runtime": {
     "active_window_s": 3,
@@ -992,11 +996,11 @@
   "schema_version": 1,
   "storage": {
     "anchor": {
-      "path": "data_anchor/anchors.ndjson",
-      "use_dpapi": true,
-      "sign": true,
       "every_entries": 50,
-      "every_minutes": 5
+      "every_minutes": 5,
+      "path": "data_anchor/anchors.ndjson",
+      "sign": true,
+      "use_dpapi": true
     },
     "blob_dir": "data/blobs",
     "crypto": {
@@ -1011,7 +1015,6 @@
       "soft_free_gb": 100,
       "warn_free_gb": 200
     },
-    "fsync_policy": "critical",
     "encryption_required": true,
     "entity_map": {
       "persist": true
@@ -1020,6 +1023,7 @@
       "enabled": true,
       "warn_days": 14
     },
+    "fsync_policy": "critical",
     "lexical_path": "data/lexical.db",
     "media_dir": "data/media",
     "metadata_path": "data/metadata.db",

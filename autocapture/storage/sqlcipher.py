@@ -193,7 +193,7 @@ class SqlCipherMetadataStore:
             self._fallback = EncryptedMetadataStore(path, keyring)
             self._store = None
             return
-        key_id, root = keyring.active_key()
+        key_id, root = keyring.active_key("metadata")
         key = derive_key(root, "metadata")
         self._store = _SQLCipherStore(path, key, run_id, fsync_policy)
         self._key_id = key_id

@@ -23,10 +23,11 @@ class BlobStore:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.keyring = keyring
+        self._purpose = "media"
         self._count_cache: int | None = None
 
     def _derive(self, key_id: str) -> bytes:
-        root = self.keyring.key_for(key_id)
+        root = self.keyring.key_for(self._purpose, key_id)
         return derive_key(root, "blob_store")
 
     def _candidate_keys(self, key_id: str | None) -> list[bytes]:
@@ -38,15 +39,15 @@ class BlobStore:
                 seen.add(key_id)
             except KeyError:
                 pass
-        active_id, active_root = self.keyring.active_key()
+        active_id, active_root = self.keyring.active_key(self._purpose)
         if active_id not in seen:
             keys.append(derive_key(active_root, "blob_store"))
             seen.add(active_id)
-        for record in self.keyring.records:
-            if record.key_id in seen:
+        for key_id, root in self.keyring.all_keys(self._purpose).items():
+            if key_id in seen:
                 continue
-            keys.append(derive_key(record.key_bytes(), "blob_store"))
-            seen.add(record.key_id)
+            keys.append(derive_key(root, "blob_store"))
+            seen.add(key_id)
         return keys
 
     def _pack_blob(self, blob: EncryptedBlobRaw) -> bytes:
@@ -86,7 +87,7 @@ class BlobStore:
         path = self.root / f"{blob_id}.blob"
         if path.exists():
             return blob_id
-        key_id, root = self.keyring.active_key()
+        key_id, root = self.keyring.active_key(self._purpose)
         key = derive_key(root, "blob_store")
         blob = encrypt_bytes_raw(key, data, key_id=key_id)
         payload = self._pack_blob(blob)

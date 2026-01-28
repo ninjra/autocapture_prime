@@ -56,9 +56,14 @@ def load_root_key(path: str) -> bytes:
     with open(path, "wb") as handle:
         handle.write(data)
     try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+        from autocapture_nx.windows.acl import harden_path_permissions
+
+        harden_path_permissions(path, is_dir=False)
+    except Exception:
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
     return key
 
 

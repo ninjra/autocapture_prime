@@ -5,7 +5,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from PIL import Image
+try:
+    from PIL import Image
+    _PIL_AVAILABLE = True
+except Exception:  # pragma: no cover - optional dependency guard
+    Image = None  # type: ignore[assignment]
+    _PIL_AVAILABLE = False
 
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 from autocapture_nx.kernel.ids import encode_record_id_component
@@ -31,6 +36,8 @@ class VLMStub(PluginBase):
 
     def extract(self, image_bytes: bytes) -> dict[str, Any]:
         if not image_bytes:
+            return {"text": json.dumps({"elements": [], "edges": []})}
+        if not _PIL_AVAILABLE:
             return {"text": json.dumps({"elements": [], "edges": []})}
         try:
             image = Image.open(_as_bytes_io(image_bytes)).convert("RGB")

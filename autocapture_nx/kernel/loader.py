@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import getpass
 from importlib import metadata as importlib_metadata
 from email.message import Message
 from datetime import datetime, timezone
@@ -21,6 +22,7 @@ from autocapture_nx import __version__ as kernel_version
 from autocapture_nx.kernel.event_builder import EventBuilder
 from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
 from autocapture_nx.plugin_system.registry import PluginRegistry
+from autocapture_nx.plugin_system.runtime import global_network_deny, set_global_network_deny
 
 from .system import System
 
@@ -65,6 +67,7 @@ class Kernel:
         self._run_started_at: str | None = None
         self._conductor: Any | None = None
         self._package_versions_cache: dict[str, str] | None = None
+        self._network_deny_prev: bool | None = None
 
     def boot(self, *, start_conductor: bool = True) -> System:
         effective = self.load_effective_config()
@@ -72,6 +75,9 @@ class Kernel:
         self.config = effective.data
         ensure_run_id(self.config)
         self._verify_contract_lock()
+        allow_kernel_net = os.getenv("AUTOCAPTURE_ALLOW_KERNEL_NETWORK", "").lower() in {"1", "true", "yes"}
+        self._network_deny_prev = global_network_deny()
+        set_global_network_deny(not allow_kernel_net)
         registry = PluginRegistry(self.config, safe_mode=self.safe_mode)
         plugins, capabilities = registry.load_plugins()
 
@@ -206,7 +212,12 @@ class Kernel:
             started_at=self._run_started_at,
             stopped_at=ts_utc,
             ledger_head=stop_hash,
+            locks=self._lock_hashes(),
+            config_hash=self.effective_config.effective_hash if self.effective_config else None,
         )
+        if self._network_deny_prev is not None:
+            set_global_network_deny(self._network_deny_prev)
+            self._network_deny_prev = None
 
     def _run_state_path(self) -> Path:
         data_dir = self.config.get("storage", {}).get("data_dir", "data")
@@ -229,16 +240,26 @@ class Kernel:
         started_at: str | None = None,
         stopped_at: str | None = None,
         ledger_head: str | None = None,
+        locks: dict[str, str | None] | None = None,
+        config_hash: str | None = None,
     ) -> None:
         path = self._run_state_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"run_id": run_id, "state": state, "ts_utc": datetime.now(timezone.utc).isoformat()}
+        payload: dict[str, Any] = {
+            "run_id": run_id,
+            "state": state,
+            "ts_utc": datetime.now(timezone.utc).isoformat(),
+        }
         if started_at:
             payload["started_at"] = started_at
         if stopped_at:
             payload["stopped_at"] = stopped_at
         if ledger_head:
             payload["ledger_head"] = ledger_head
+        if locks is not None:
+            payload["locks"] = locks
+        if config_hash:
+            payload["config_hash"] = config_hash
         path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 
     def _parse_ts(self, ts: str | None) -> datetime | None:
@@ -301,9 +322,39 @@ class Kernel:
                 "previous_ledger_head": builder.ledger_head(),
             }
             builder.ledger_entry("system", inputs=[], outputs=[], payload=crash_payload)
+        lock_hashes = self._lock_hashes()
+        effective = self.effective_config
+        actor = getpass.getuser()
+        if isinstance(previous, dict):
+            prev_locks = previous.get("locks")
+            if isinstance(prev_locks, dict) and prev_locks and prev_locks != lock_hashes:
+                builder.ledger_entry(
+                    "security",
+                    inputs=[value for value in prev_locks.values() if value is not None],
+                    outputs=[value for value in lock_hashes.values() if value is not None],
+                    payload={
+                        "event": "lock_update",
+                        "actor": actor,
+                        "previous": prev_locks,
+                        "current": lock_hashes,
+                    },
+                )
+            prev_config = previous.get("config_hash")
+            curr_config = effective.effective_hash if effective else None
+            if prev_config and curr_config and prev_config != curr_config:
+                builder.ledger_entry(
+                    "security",
+                    inputs=[str(prev_config)],
+                    outputs=[str(curr_config)],
+                    payload={
+                        "event": "config_change",
+                        "actor": actor,
+                        "previous": prev_config,
+                        "current": curr_config,
+                    },
+                )
         start_ts = datetime.now(timezone.utc).isoformat()
         self._run_started_at = start_ts
-        effective = self.effective_config
         payload = {
             "event": "system.start",
             "run_id": builder.run_id,
@@ -312,10 +363,16 @@ class Kernel:
                 "schema_hash": effective.schema_hash if effective else None,
                 "effective_hash": effective.effective_hash if effective else None,
             },
-            "locks": self._lock_hashes(),
+            "locks": lock_hashes,
         }
         builder.ledger_entry("system", inputs=[], outputs=[], payload=payload, ts_utc=start_ts)
-        self._write_run_state(builder.run_id, "running", started_at=start_ts)
+        self._write_run_state(
+            builder.run_id,
+            "running",
+            started_at=start_ts,
+            locks=lock_hashes,
+            config_hash=effective.effective_hash if effective else None,
+        )
 
     def _record_storage_manifest(self, builder: EventBuilder, capabilities, plugins: list) -> None:
         metadata = capabilities.get("storage.metadata")

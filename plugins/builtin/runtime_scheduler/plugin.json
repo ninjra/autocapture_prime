@@ -1,21 +1,4 @@
 {
-  "plugin_id": "builtin.runtime.scheduler",
-  "version": "0.1.0",
-  "enabled": true,
-  "entrypoints": [
-    {
-      "kind": "runtime.scheduler",
-      "id": "default",
-      "path": "plugin.py",
-      "callable": "create_plugin"
-    }
-  ],
-  "permissions": {
-    "filesystem": "read",
-    "gpu": false,
-    "raw_input": false,
-    "network": false
-  },
   "compat": {
     "requires_kernel": ">=0.1.0",
     "requires_schema_versions": [
@@ -23,11 +6,28 @@
     ]
   },
   "depends_on": [],
+  "enabled": true,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "runtime.scheduler",
+      "path": "plugin.py"
+    }
+  ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "permissions": {
+    "filesystem": "read",
+    "gpu": false,
+    "network": false,
+    "raw_input": false
+  },
+  "plugin_id": "builtin.runtime.scheduler",
   "required_capabilities": [
     "runtime.governor"
   ],
-  "hash_lock": {
-    "manifest_sha256": "",
-    "artifact_sha256": ""
-  }
+  "version": "0.1.0"
 }

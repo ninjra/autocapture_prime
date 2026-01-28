@@ -1,24 +1,9 @@
 {
-  "plugin_id": "builtin.capture.windows",
-  "version": "0.1.0",
-  "enabled": true,
-  "entrypoints": [
-    {
-      "kind": "capture.source",
-      "id": "default",
-      "path": "plugin.py",
-      "callable": "create_plugin"
-    }
-  ],
-  "permissions": {
-    "filesystem": "readwrite",
-    "gpu": true,
-    "raw_input": true,
-    "network": false
-  },
   "compat": {
     "requires_kernel": ">=0.1.0",
-    "requires_schema_versions": [1]
+    "requires_schema_versions": [
+      1
+    ]
   },
   "depends_on": [
     "builtin.journal.basic",
@@ -26,17 +11,32 @@
     "builtin.anchor.basic",
     "builtin.backpressure.basic"
   ],
-  "required_capabilities": [
-    "storage.media",
-    "storage.metadata",
-    "event.builder",
-    "capture.backpressure",
-    "observability.logger",
-    "window.metadata",
-    "tracking.input"
+  "enabled": true,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "capture.source",
+      "path": "plugin.py"
+    }
   ],
   "hash_lock": {
-    "manifest_sha256": "",
-    "artifact_sha256": ""
-  }
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "permissions": {
+    "filesystem": "readwrite",
+    "gpu": true,
+    "network": false,
+    "raw_input": true
+  },
+  "plugin_id": "builtin.capture.windows",
+  "required_capabilities": [
+    "capture.backpressure",
+    "event.builder",
+    "observability.logger",
+    "storage.media",
+    "storage.metadata"
+  ],
+  "version": "0.1.0"
 }

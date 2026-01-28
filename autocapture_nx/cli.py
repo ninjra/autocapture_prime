@@ -273,6 +273,73 @@ def cmd_provenance_verify(args: argparse.Namespace) -> int:
     return 2
 
 
+def cmd_verify_ledger(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from autocapture.config.defaults import default_config_paths
+    from autocapture.config.load import load_config
+    from autocapture.pillars.citable import verify_ledger
+
+    if args.path:
+        ledger_path = Path(args.path)
+    else:
+        config = load_config(default_config_paths(), safe_mode=args.safe_mode)
+        data_dir = Path(config.get("storage", {}).get("data_dir", "data"))
+        ledger_path = data_dir / "ledger.ndjson"
+
+    if not ledger_path.exists():
+        print(f"OK ledger_missing: {ledger_path}")
+        return 0
+
+    ok, errors = verify_ledger(ledger_path)
+    if ok:
+        print("OK ledger_verified")
+        return 0
+    _print_json({"ok": False, "errors": errors, "path": str(ledger_path)})
+    return 2
+
+
+def cmd_verify_anchors(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from autocapture.config.defaults import default_config_paths
+    from autocapture.config.load import load_config
+    from autocapture.pillars.citable import verify_anchors
+    from autocapture.storage.keys import load_keyring
+
+    config = load_config(default_config_paths(), safe_mode=args.safe_mode)
+    if args.path:
+        anchor_path = Path(args.path)
+    else:
+        anchor_cfg = config.get("storage", {}).get("anchor", {})
+        anchor_path = Path(anchor_cfg.get("path", "data_anchor/anchors.ndjson"))
+    keyring = load_keyring(config)
+    ok, errors = verify_anchors(anchor_path, keyring)
+    if ok:
+        print("OK anchors_verified")
+        return 0
+    _print_json({"ok": False, "errors": errors, "path": str(anchor_path)})
+    return 2
+
+
+def cmd_verify_evidence(args: argparse.Namespace) -> int:
+    from autocapture.pillars.citable import verify_evidence
+
+    kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
+    system = kernel.boot(start_conductor=False)
+    try:
+        metadata = system.get("storage.metadata")
+        media = system.get("storage.media")
+        ok, errors = verify_evidence(metadata, media)
+        if ok:
+            print("OK evidence_verified")
+            return 0
+        _print_json({"ok": False, "errors": errors})
+        return 2
+    finally:
+        kernel.shutdown()
+
+
 def cmd_citations_resolve(args: argparse.Namespace) -> int:
     try:
         payload = _load_json_payload(args.path, args.json)
@@ -573,6 +640,17 @@ def build_parser() -> argparse.ArgumentParser:
     citations_verify.add_argument("--path", default="")
     citations_verify.add_argument("--json", default="")
     citations_verify.set_defaults(func=cmd_citations_verify)
+
+    verify = sub.add_parser("verify")
+    verify_sub = verify.add_subparsers(dest="verify_cmd", required=True)
+    verify_ledger = verify_sub.add_parser("ledger")
+    verify_ledger.add_argument("--path", default="")
+    verify_ledger.set_defaults(func=cmd_verify_ledger)
+    verify_anchors = verify_sub.add_parser("anchors")
+    verify_anchors.add_argument("--path", default="")
+    verify_anchors.set_defaults(func=cmd_verify_anchors)
+    verify_evidence = verify_sub.add_parser("evidence")
+    verify_evidence.set_defaults(func=cmd_verify_evidence)
 
     research = sub.add_parser("research")
     research_sub = research.add_subparsers(dest="research_cmd", required=True)

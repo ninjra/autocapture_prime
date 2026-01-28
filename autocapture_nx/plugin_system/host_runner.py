@@ -11,7 +11,7 @@ from typing import Any
 
 from autocapture_nx.kernel.errors import PermissionError, PluginError
 from autocapture_nx.plugin_system.api import PluginContext
-from autocapture_nx.plugin_system.runtime import network_guard
+from autocapture_nx.plugin_system.runtime import network_guard, set_global_network_deny
 
 
 def _decode(obj: Any) -> Any:
@@ -207,6 +207,7 @@ def main() -> None:
         raise SystemExit("usage: host_runner <plugin_path> <callable> <plugin_id> <network_allowed>")
     plugin_path, callable_name, plugin_id, network_allowed_text = sys.argv[1:5]
     network_allowed = network_allowed_text.lower() == "true"
+    set_global_network_deny(not network_allowed)
 
     init_line = sys.stdin.readline()
     if not init_line:
@@ -280,4 +281,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

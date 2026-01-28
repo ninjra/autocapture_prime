@@ -94,6 +94,11 @@ class LedgerWriter(PluginBase):
     def head_hash(self) -> str | None:
         return self._last_hash
 
+    def verify(self) -> tuple[bool, list[str]]:
+        from autocapture.pillars.citable import verify_ledger
+
+        return verify_ledger(self._path)
+
 
 def create_plugin(plugin_id: str, context: PluginContext) -> LedgerWriter:
     return LedgerWriter(plugin_id, context)

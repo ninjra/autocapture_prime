@@ -12,7 +12,7 @@ class KeyringStatusTests(unittest.TestCase):
             ring = Keyring.load(path)
             status = ring.status()
             self.assertIsInstance(status, KeyringStatus)
-            self.assertEqual(status.active_key_id, ring.active_key_id)
+            self.assertEqual(status.active_key_ids.get("metadata"), ring.active_key_id)
             self.assertEqual(status.keyring_path, path)
 
 

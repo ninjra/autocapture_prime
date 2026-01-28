@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from autocapture.ux.facade import create_facade
-from autocapture.web.routes import health, query, settings, citations, plugins, metrics
+from autocapture.web.routes import health, query, settings, citations, plugins, metrics, verify
 
 
 def get_app() -> FastAPI:
@@ -15,6 +15,7 @@ def get_app() -> FastAPI:
     app.include_router(query.router)
     app.include_router(settings.router)
     app.include_router(citations.router)
+    app.include_router(verify.router)
     app.include_router(plugins.router)
     app.include_router(metrics.router)
     return app

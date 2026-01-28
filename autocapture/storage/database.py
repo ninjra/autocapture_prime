@@ -32,7 +32,7 @@ class EncryptedMetadataStore:
         self._conn.commit()
 
     def _derive(self, key_id: str) -> bytes:
-        root = self.keyring.key_for(key_id)
+        root = self.keyring.key_for("metadata", key_id)
         return derive_key(root, "metadata_store")
 
     def put(self, record_id: str, payload: dict[str, Any]) -> None:
@@ -42,7 +42,7 @@ class EncryptedMetadataStore:
                 return
             raise ValueError(f"record already exists: {record_id}")
 
-        key_id, root = self.keyring.active_key()
+        key_id, root = self.keyring.active_key("metadata")
         key = derive_key(root, "metadata_store")
         data = json.dumps(payload, sort_keys=True).encode("utf-8")
         blob = encrypt_bytes(key, data, key_id=key_id)
@@ -62,7 +62,7 @@ class EncryptedMetadataStore:
         return self.put(record_id, payload)
 
     def put_replace(self, record_id: str, payload: dict[str, Any]) -> None:
-        key_id, root = self.keyring.active_key()
+        key_id, root = self.keyring.active_key("metadata")
         key = derive_key(root, "metadata_store")
         data = json.dumps(payload, sort_keys=True).encode("utf-8")
         blob = encrypt_bytes(key, data, key_id=key_id)

@@ -6,9 +6,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 from autocapture_nx.kernel.config import ConfigPaths, SchemaLiteValidator, load_config
-from autocapture_nx.plugin_system.api import PluginContext
-from plugins.builtin.egress_gateway.plugin import EgressGateway
-from plugins.builtin.egress_sanitizer.plugin import EgressSanitizer
+from autocapture_nx.plugin_system.registry import PluginRegistry
 
 
 class EgressGatewayTests(unittest.TestCase):
@@ -64,17 +62,9 @@ class EgressGatewayTests(unittest.TestCase):
                 with open(paths.user_path, "w", encoding="utf-8") as handle:
                     json.dump(user_override, handle)
                 config = load_config(paths, safe_mode=False)
-                sanitizer = EgressSanitizer("sanitizer", PluginContext(config=config, get_capability=lambda _k: (_ for _ in ()).throw(Exception()), logger=lambda _m: None))
-
-                def get_capability(name: str):
-                    if name == "privacy.egress_sanitizer":
-                        return sanitizer
-                    raise KeyError(name)
-
-                gateway = EgressGateway(
-                    "builtin.egress.gateway",
-                    PluginContext(config=config, get_capability=get_capability, logger=lambda _m: None),
-                )
+                registry = PluginRegistry(config, safe_mode=False)
+                _plugins, caps = registry.load_plugins()
+                gateway = caps.get("egress.gateway")
                 payload = {
                     "query": "Email john@example.com about the report",
                     "facts": [{"type": "event", "ts_utc": "2025-01-01T00:00:00Z", "fields": {"owner": "John Doe"}}],

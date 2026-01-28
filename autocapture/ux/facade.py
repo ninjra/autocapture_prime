@@ -76,6 +76,37 @@ class UXFacade:
         result = self.resolve_citations(citations)
         return {"ok": bool(result.get("ok")), "errors": result.get("errors", [])}
 
+    def verify_ledger(self, path: str | None = None) -> dict[str, Any]:
+        from autocapture.pillars.citable import verify_ledger
+
+        if path:
+            ledger_path = Path(path)
+        else:
+            data_dir = Path(self.config.get("storage", {}).get("data_dir", "data"))
+            ledger_path = data_dir / "ledger.ndjson"
+        ok, errors = verify_ledger(ledger_path)
+        return {"ok": ok, "errors": errors, "path": str(ledger_path)}
+
+    def verify_anchors(self, path: str | None = None) -> dict[str, Any]:
+        from autocapture.pillars.citable import verify_anchors
+
+        with self._kernel_context() as system:
+            config = system.config if hasattr(system, "config") else {}
+            anchor_cfg = config.get("storage", {}).get("anchor", {})
+            anchor_path = Path(path) if path else Path(anchor_cfg.get("path", "data_anchor/anchors.ndjson"))
+            keyring = system.get("storage.keyring") if system.has("storage.keyring") else None
+            ok, errors = verify_anchors(anchor_path, keyring)
+            return {"ok": ok, "errors": errors, "path": str(anchor_path)}
+
+    def verify_evidence(self) -> dict[str, Any]:
+        from autocapture.pillars.citable import verify_evidence
+
+        with self._kernel_context() as system:
+            metadata = system.get("storage.metadata")
+            media = system.get("storage.media")
+            ok, errors = verify_evidence(metadata, media)
+            return {"ok": ok, "errors": errors}
+
     def export_proof_bundle(
         self,
         evidence_ids: list[str],

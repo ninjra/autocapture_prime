@@ -40,6 +40,7 @@ def _write_plugin(root: Path, plugin_id: str, *, conflicts_with: list[str] | Non
             "raw_input": False,
             "network": False,
         },
+        "required_capabilities": [],
         "compat": {
             "requires_kernel": ">=0.0.0",
             "requires_schema_versions": [1],
