@@ -226,6 +226,18 @@ def cmd_query(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_enrich(args: argparse.Namespace) -> int:
+    kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
+    system = kernel.boot(start_conductor=False)
+    from autocapture.runtime.conductor import create_conductor
+
+    conductor = create_conductor(system)
+    result = conductor.run_once(force=True)
+    _print_json(result)
+    kernel.shutdown()
+    return 0
+
+
 def cmd_keys_rotate(args: argparse.Namespace) -> int:
     kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
     system = kernel.boot()
@@ -525,6 +537,9 @@ def build_parser() -> argparse.ArgumentParser:
     query_cmd = sub.add_parser("query")
     query_cmd.add_argument("text")
     query_cmd.set_defaults(func=cmd_query)
+
+    enrich_cmd = sub.add_parser("enrich")
+    enrich_cmd.set_defaults(func=cmd_enrich)
 
     devtools = sub.add_parser("devtools")
     devtools_sub = devtools.add_subparsers(dest="devtools_cmd", required=True)

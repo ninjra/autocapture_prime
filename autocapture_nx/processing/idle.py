@@ -27,6 +27,13 @@ class IdleProcessStats:
     errors: int = 0
 
 
+@dataclass
+class IdleCheckpoint:
+    last_record_id: str | None
+    processed_total: int
+    updated_utc: str
+
+
 def _derive_run_id(config: dict[str, Any], record_id: str) -> str:
     if "/" in record_id:
         return record_id.split("/", 1)[0]
@@ -104,6 +111,8 @@ class IdleProcessor:
         self._lexical = None
         self._vector = None
         self._indexes_ready = False
+        self._checkpoint_loaded = False
+        self._checkpoint: IdleCheckpoint | None = None
 
     def _cap(self, name: str) -> Any | None:
         if hasattr(self._system, "has") and self._system.has(name):
@@ -111,6 +120,66 @@ class IdleProcessor:
         if isinstance(self._system, dict):
             return self._system.get(name)
         return None
+
+    def _checkpoint_id(self) -> str:
+        run_id = str(self._config.get("runtime", {}).get("run_id", "run"))
+        return f"{run_id}/derived.idle.checkpoint"
+
+    def _load_checkpoint(self) -> IdleCheckpoint | None:
+        if self._checkpoint_loaded:
+            return self._checkpoint
+        self._checkpoint_loaded = True
+        if self._metadata is None:
+            return None
+        record = self._metadata.get(self._checkpoint_id(), None)
+        if isinstance(record, dict) and record.get("record_type") == "derived.idle.checkpoint":
+            last_record_id = record.get("last_record_id")
+            processed_total = int(record.get("processed_total", 0) or 0)
+            updated = str(record.get("ts_utc") or "")
+            if updated:
+                self._checkpoint = IdleCheckpoint(last_record_id=str(last_record_id) if last_record_id else None, processed_total=processed_total, updated_utc=updated)
+        return self._checkpoint
+
+    def _store_checkpoint(self, last_record_id: str, processed_total: int) -> None:
+        if self._metadata is None:
+            return
+        ts_utc = datetime.now(timezone.utc).isoformat()
+        run_id = str(self._config.get("runtime", {}).get("run_id", "run"))
+        payload = {
+            "record_type": "derived.idle.checkpoint",
+            "run_id": run_id,
+            "ts_utc": ts_utc,
+            "last_record_id": last_record_id,
+            "processed_total": int(processed_total),
+        }
+        if hasattr(self._metadata, "put_replace"):
+            try:
+                self._metadata.put_replace(self._checkpoint_id(), payload)
+            except Exception:
+                self._metadata.put(self._checkpoint_id(), payload)
+        else:
+            self._metadata.put(self._checkpoint_id(), payload)
+        self._checkpoint = IdleCheckpoint(last_record_id=last_record_id, processed_total=int(processed_total), updated_utc=ts_utc)
+        if self._events is not None:
+            try:
+                event_id = self._events.journal_event("idle.checkpoint", payload, event_id=self._checkpoint_id(), ts_utc=ts_utc)
+                self._events.ledger_entry(
+                    "idle.checkpoint",
+                    inputs=[],
+                    outputs=[event_id],
+                    payload=payload,
+                    entry_id=event_id,
+                    ts_utc=ts_utc,
+                )
+            except Exception:
+                pass
+
+    def _record_ids(self) -> list[str]:
+        if self._metadata is None:
+            return []
+        keys = list(getattr(self._metadata, "keys", lambda: [])())
+        keys.sort()
+        return keys
 
     def _ensure_indexes(self) -> None:
         if self._indexes_ready:
@@ -143,9 +212,20 @@ class IdleProcessor:
                     self._logger.log("index.vector_error", {"doc_id": doc_id, "error": str(exc)})
 
     def process(self, *, should_abort: Callable[[], bool] | None = None) -> IdleProcessStats:
+        done, stats = self.process_step(should_abort=should_abort, budget_ms=0, persist_checkpoint=False)
+        _ = done
+        return stats
+
+    def process_step(
+        self,
+        *,
+        should_abort: Callable[[], bool] | None = None,
+        budget_ms: int = 0,
+        persist_checkpoint: bool = True,
+    ) -> tuple[bool, IdleProcessStats]:
         stats = IdleProcessStats()
         if self._metadata is None or self._media is None:
-            return stats
+            return True, stats
         self._ensure_indexes()
         idle_cfg = self._config.get("processing", {}).get("idle", {})
         max_items = int(idle_cfg.get("max_items_per_run", 20))
@@ -155,18 +235,52 @@ class IdleProcessor:
         allow_vlm = bool(extractors.get("vlm", True))
         sst_cfg = self._config.get("processing", {}).get("sst", {})
         pipeline_enabled = bool(sst_cfg.get("enabled", True)) and self._pipeline is not None
-        deadline = time.time() + max(1, max_seconds)
+        start_mono = time.monotonic()
+        start_wall = time.time()
+        deadline_mono = start_mono + max(1, max_seconds)
+        deadline_wall = start_wall + max(1, max_seconds)
+        budget_mono = None
+        budget_wall = None
+        if budget_ms and budget_ms > 0:
+            budget_mono = start_mono + (budget_ms / 1000.0)
+            budget_wall = start_wall + (budget_ms / 1000.0)
 
-        keys = list(getattr(self._metadata, "keys", lambda: [])())
-        for record_id in keys:
+        def _expired() -> bool:
+            now = time.monotonic()
+            if now >= deadline_mono:
+                return True
+            if budget_mono is not None and now >= budget_mono:
+                return True
+            return False
+
+        record_ids = self._record_ids()
+        evidence_ids = []
+        for record_id in record_ids:
+            record = self._metadata.get(record_id, {})
+            record_type = str(record.get("record_type", ""))
+            if record_type.startswith("evidence.capture."):
+                evidence_ids.append(record_id)
+
+        start_index = 0
+        checkpoint = self._load_checkpoint() if persist_checkpoint else None
+        if checkpoint and checkpoint.last_record_id in evidence_ids:
+            start_index = evidence_ids.index(checkpoint.last_record_id) + 1
+
+        processed_total = checkpoint.processed_total if checkpoint else 0
+        last_record_id: str | None = None
+        aborted = False
+
+        for record_id in evidence_ids[start_index:]:
             if should_abort and should_abort():
+                aborted = True
                 break
-            if time.time() >= deadline:
+            if _expired():
                 break
             record = self._metadata.get(record_id, {})
             record_type = str(record.get("record_type", ""))
             if not record_type.startswith("evidence.capture."):
                 stats.skipped += 1
+                last_record_id = record_id
                 continue
             stats.scanned += 1
             run_id = _derive_run_id(self._config, record_id)
@@ -198,15 +312,18 @@ class IdleProcessor:
                     )
             if not derived_items:
                 stats.skipped += 1
+                last_record_id = record_id
                 continue
 
             blob = _get_media_blob(self._media, record_id)
             if not blob:
                 stats.errors += 1
+                last_record_id = record_id
                 continue
             frame = _extract_frame(blob, record)
             if not frame:
                 stats.errors += 1
+                last_record_id = record_id
                 continue
 
             pipeline = self._pipeline
@@ -219,25 +336,29 @@ class IdleProcessor:
                         allow_ocr=allow_ocr,
                         allow_vlm=allow_vlm,
                         should_abort=should_abort,
-                        deadline_ts=deadline,
+                        deadline_ts=budget_wall if budget_wall is not None else deadline_wall,
                     )
                 except Exception as exc:
                     stats.errors += 1
                     if self._logger is not None:
                         self._logger.log("sst.pipeline_error", {"source_id": record_id, "error": str(exc)})
+                    last_record_id = record_id
                     continue
                 stats.sst_runs += 1
                 stats.sst_heavy += int(result.heavy_ran)
                 stats.sst_tokens += int(result.ocr_tokens)
                 stats.processed += int(result.derived_records)
+                processed_total += int(result.derived_records)
+                last_record_id = record_id
                 if stats.processed >= max_items:
                     break
                 continue
 
             for kind, provider_id, derived_id, extractor in derived_items:
                 if should_abort and should_abort():
+                    aborted = True
                     break
-                if time.time() >= deadline:
+                if _expired():
                     break
                 if self._metadata.get(derived_id):
                     continue
@@ -268,6 +389,7 @@ class IdleProcessor:
                     self._metadata.put(derived_id, payload)
                 self._index_text(derived_id, payload.get("text", ""))
                 stats.processed += 1
+                processed_total += 1
                 if kind == "ocr":
                     stats.ocr_ok += 1
                 if kind == "vlm":
@@ -310,6 +432,14 @@ class IdleProcessor:
                         entry_id=derived_id,
                         ts_utc=ts_utc,
                     )
-            if stats.processed >= max_items:
+                if stats.processed >= max_items:
+                    break
+            last_record_id = record_id
+            if aborted or _expired() or stats.processed >= max_items:
                 break
-        return stats
+
+        if persist_checkpoint and last_record_id:
+            self._store_checkpoint(last_record_id, processed_total)
+
+        done = not aborted and (start_index >= len(evidence_ids) or (last_record_id == evidence_ids[-1] if evidence_ids else True)) and not _expired()
+        return done, stats

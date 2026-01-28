@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from autocapture.runtime.governor import RuntimeGovernor
 from autocapture.runtime.scheduler import Scheduler, Job, JobStepResult
@@ -81,6 +82,30 @@ class GovernorGatingTests(unittest.TestCase):
         )
         self.assertFalse(governor.should_preempt({"user_active": False, "idle_seconds": 10}))
         self.assertTrue(governor.should_preempt({"user_active": True, "idle_seconds": 0}))
+
+    def test_suspend_deadline_overrides_preempt_grace(self) -> None:
+        governor = RuntimeGovernor(idle_window_s=1)
+        governor.update_config(
+            {
+                "runtime": {
+                    "idle_window_s": 1,
+                    "mode_enforcement": {"suspend_workers": True, "suspend_deadline_ms": 50},
+                    "budgets": {
+                        "window_s": 60,
+                        "window_budget_ms": 1000,
+                        "per_job_max_ms": 1000,
+                        "max_jobs_per_window": 10,
+                        "max_heavy_concurrency": 1,
+                        "preempt_grace_ms": 1000,
+                        "min_idle_seconds": 1,
+                        "allow_heavy_during_active": False,
+                    },
+                }
+            }
+        )
+        with patch("autocapture.runtime.governor.time.monotonic", side_effect=[0.0, 0.0, 0.06]):
+            governor.decide({"user_active": True, "idle_seconds": 0, "query_intent": False})
+            self.assertTrue(governor.should_preempt({"user_active": True, "idle_seconds": 0}))
 
 
 if __name__ == "__main__":

@@ -38,6 +38,7 @@ SUPPORT_KINDS = sorted({
     "storage.metadata",
     "storage.entity_map",
     "runtime.governor",
+    "runtime.scheduler",
     "time.intent_parser",
 })
 
