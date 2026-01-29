@@ -76,7 +76,7 @@ class UIWindow:
         try:
             self._window = webview.create_window(
                 "Autocapture NX",
-                url=f"{self._base_url}/#settings",
+                url=f"{self._base_url}/#capture",
                 width=1280,
                 height=820,
             )
@@ -91,14 +91,14 @@ class UIWindow:
                 if action is None:
                     break
                 if not self._window:
-                    _open_browser(f"{self._base_url}/#settings")
+                    _open_browser(f"{self._base_url}/#capture")
                     continue
                 if action == "settings":
                     url = f"{self._base_url}/#settings"
                 elif action == "plugins":
                     url = f"{self._base_url}/#plugins"
                 else:
-                    url = f"{self._base_url}/#settings"
+                    url = f"{self._base_url}/#capture"
                 try:
                     self._window.load_url(url)
                 except Exception:
@@ -231,7 +231,7 @@ def main() -> int:
     ui.start()
     if ui._fallback:
         _log("pywebview unavailable; using browser fallback")
-        _open_browser(f"{base_url}/#settings")
+        _open_browser(f"{base_url}/#capture")
         try:
             while tray_thread.is_alive():
                 time.sleep(0.5)

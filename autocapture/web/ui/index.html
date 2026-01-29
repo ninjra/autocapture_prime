@@ -24,15 +24,16 @@
       </header>
 
       <nav class="nav">
-        <button class="nav-btn active" data-panel="settings">Settings</button>
+        <button class="nav-btn" data-panel="settings">Settings</button>
+        <button class="nav-btn active" data-panel="capture">Capture</button>
         <button class="nav-btn" data-panel="plugins">Plugins</button>
         <button class="nav-btn" data-panel="status">Status</button>
         <button class="nav-btn" data-panel="ops">Ops</button>
       </nav>
 
       <main class="panels">
-        <section class="panel active" id="panel-settings">
-          <section class="grid" id="settingsSummary">
+        <section class="panel active" id="panel-capture">
+          <section class="grid" id="captureOverview">
             <article class="card" id="quickControlsCard">
               <div class="card-header">
                 <h2>Quick Controls</h2>
@@ -71,6 +72,40 @@
                 </div>
               </div>
               <ul id="bookmarkList" class="list"></ul>
+            </article>
+
+            <article class="card" id="captureEssentialsCard">
+              <div class="card-header">
+                <h2>Capture Essentials</h2>
+                <div class="actions">
+                  <button id="captureEssentialsReload" class="ghost">Reload</button>
+                  <button id="captureEssentialsApply">Apply</button>
+                </div>
+              </div>
+              <div id="captureEssentialsStatus" class="status-line"></div>
+              <div id="captureEssentialsList" class="settings-list essentials-list"></div>
+            </article>
+
+            <article class="card" id="storageEssentialsCard">
+              <div class="card-header">
+                <h2>Storage Essentials</h2>
+                <div class="actions">
+                  <button id="storageEssentialsReload" class="ghost">Reload</button>
+                  <button id="storageEssentialsApply">Apply</button>
+                </div>
+              </div>
+              <div id="storageEssentialsStatus" class="status-line"></div>
+              <div id="storageEssentialsList" class="settings-list essentials-list"></div>
+            </article>
+
+            <article class="card" id="capturePluginsCard">
+              <div class="card-header">
+                <h2>Capture Plugin Coverage</h2>
+                <div class="actions">
+                  <button id="refreshCapturePlugins" class="ghost">Refresh</button>
+                </div>
+              </div>
+              <div id="capturePluginsList" class="table capture-table"></div>
             </article>
 
             <article class="card" id="captureHealthCard">
@@ -145,7 +180,11 @@
               </div>
               <div id="storageHint" class="status-line"></div>
             </article>
+          </section>
+        </section>
 
+        <section class="panel" id="panel-settings">
+          <section class="grid" id="settingsSummary">
             <article class="card" id="activityTimelineCard">
               <div class="card-header">
                 <h2>Activity Timeline</h2>

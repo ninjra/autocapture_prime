@@ -434,6 +434,34 @@ class EncryptedJSONStore:
             matched = matched[: int(limit)]
         return [record_id for _ts, record_id in matched]
 
+    def latest(self, record_type: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+        import heapq
+
+        limit_val = int(limit) if limit is not None else 25
+        limit_val = max(1, limit_val)
+        heap: list[tuple[float, str, dict[str, Any]]] = []
+        for record_id in self.keys():
+            try:
+                record = self.get(record_id)
+            except RuntimeError:
+                continue
+            if not isinstance(record, dict):
+                continue
+            if record_type and record.get("record_type") != record_type:
+                continue
+            ts_val = _extract_ts(record)
+            if not ts_val:
+                continue
+            ts_key = _parse_ts(ts_val).timestamp()
+            entry = (ts_key, record_id, record)
+            if len(heap) < limit_val:
+                heapq.heappush(heap, entry)
+            else:
+                if entry[0] > heap[0][0]:
+                    heapq.heapreplace(heap, entry)
+        heap.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return [{"record_id": record_id, "record": record} for _ts, record_id, record in heap]
+
     def delete(self, record_id: str) -> bool:
         removed = False
         for path in self._path_candidates(record_id):

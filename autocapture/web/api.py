@@ -17,6 +17,7 @@ from autocapture.web.routes import (
     citations,
     health,
     metrics,
+    metadata,
     plugins,
     query,
     settings,
@@ -61,6 +62,7 @@ def get_app() -> FastAPI:
     app.include_router(verify.router)
     app.include_router(plugins.router)
     app.include_router(metrics.router)
+    app.include_router(metadata.router)
     app.include_router(alerts.router)
     app.include_router(timeline.router)
     app.include_router(keys.router)

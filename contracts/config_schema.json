@@ -2041,6 +2041,9 @@
         "media_dir": {
           "type": "string"
         },
+        "metadata_require_db": {
+          "type": "boolean"
+        },
         "metadata_path": {
           "type": "string"
         },

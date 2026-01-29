@@ -640,6 +640,24 @@ class UXFacade:
         result = forecast_from_journal(str(target))
         return asdict(result)
 
+    def metadata_latest(self, record_type: str | None = None, limit: int = 25) -> dict[str, Any]:
+        limit_val = max(1, min(int(limit or 0), 200))
+        with self._kernel_mgr.session() as system:
+            metadata = system.get("storage.metadata")
+            if metadata is None:
+                return {"records": [], "error": "metadata_unavailable"}
+            if hasattr(metadata, "latest"):
+                records = metadata.latest(record_type=record_type, limit=limit_val)
+                return {"records": records}
+            return {"records": [], "error": "metadata_backend_not_queryable"}
+
+    def metadata_get(self, record_id: str) -> dict[str, Any]:
+        with self._kernel_mgr.session() as system:
+            metadata = system.get("storage.metadata")
+            if metadata is None:
+                return {"record_id": record_id, "record": None, "error": "metadata_unavailable"}
+            return {"record_id": record_id, "record": metadata.get(record_id, None)}
+
     def telemetry(self) -> dict[str, Any]:
         return telemetry_snapshot()
 

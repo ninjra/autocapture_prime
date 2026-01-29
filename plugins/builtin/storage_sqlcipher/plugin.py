@@ -300,6 +300,32 @@ class SQLCipherStore:
         cur = self._conn.execute(sql, tuple(params))
         return [row[0] for row in cur.fetchall()]
 
+    def latest(self, record_type: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+        import json
+
+        self._ensure()
+        params: list[Any] = []
+        sql = "SELECT id, payload FROM metadata"
+        if record_type:
+            sql += " WHERE record_type = ?"
+            params.append(str(record_type))
+        sql += " ORDER BY ts_utc DESC, id DESC"
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(int(limit))
+        cur = self._conn.execute(sql, tuple(params))
+        rows = cur.fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            record_id = row[0]
+            raw = row[1]
+            try:
+                payload = json.loads(raw)
+            except Exception:
+                payload = {"payload": raw}
+            out.append({"record_id": record_id, "record": payload})
+        return out
+
     def delete(self, record_id: str) -> bool:
         self._ensure()
         before = self._conn.total_changes
@@ -431,6 +457,7 @@ class SQLCipherStoragePlugin(PluginBase):
         self._fsync_policy = fsync_policy
         self._require_decrypt = require_decrypt
         self._entity_persist = storage_cfg.get("entity_map", {}).get("persist", True)
+        self._metadata_require_db = bool(storage_cfg.get("metadata_require_db", False))
         self._lazy = _LazyStores(self._build_stores)
         self._metadata = _LazyProxy(self._lazy, "metadata")
         self._entity_map = _LazyProxy(self._lazy, "entity_map")
@@ -444,6 +471,8 @@ class SQLCipherStoragePlugin(PluginBase):
             metadata = ImmutableMetadataStore(store)
             entity_map = EntityMapAdapter(store)
         else:
+            if self._metadata_require_db:
+                raise RuntimeError(f"SQLCipher unavailable ({reason}); metadata_db_required")
             self.context.logger(f"SQLCipher unavailable ({reason}); falling back to encrypted JSON store")
             metadata = ImmutableMetadataStore(
                 EncryptedJSONStore(

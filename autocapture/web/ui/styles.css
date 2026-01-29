@@ -310,9 +310,9 @@ button.ghost {
 
 .settings-row {
   display: grid;
-  grid-template-columns: minmax(200px, 1.2fr) minmax(220px, 1fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
   gap: 12px;
-  align-items: center;
+  align-items: start;
   padding: 12px;
   border-radius: 14px;
   background: rgba(15, 23, 42, 0.55);
@@ -323,7 +323,9 @@ button.ghost {
   font-family: "JetBrains Mono", "IBM Plex Mono", "Fira Code", monospace;
   font-size: 12px;
   color: var(--muted);
-  word-break: break-all;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .settings-label {
@@ -338,6 +340,9 @@ button.ghost {
   font-family: "JetBrains Mono", "IBM Plex Mono", "Fira Code", monospace;
   font-size: 11px;
   color: var(--muted);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .settings-input textarea,
@@ -348,6 +353,14 @@ button.ghost {
 
 .settings-input textarea {
   min-height: 90px;
+}
+
+.essentials-list .settings-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.essentials-list .settings-input {
+  margin-top: 8px;
 }
 
 .quick-grid {
@@ -675,6 +688,19 @@ pre {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.capture-table .table-row {
+  grid-template-columns: 1.4fr 0.6fr 2fr;
+}
+
+.capture-table .table-row span:last-child {
+  white-space: normal;
+}
+
+.capture-table .table-row span {
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .plugin-name {

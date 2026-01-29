@@ -938,6 +938,17 @@ class Kernel:
                     detail="encrypted storage loaded" if ok else "encrypted storage missing",
                 )
             )
+        if config.get("storage", {}).get("metadata_require_db", False):
+            metadata = self.system.get("storage.metadata") if self.system is not None else None
+            backend = type(getattr(metadata, "_store", metadata)).__name__ if metadata is not None else "missing"
+            ok = backend == "SQLCipherStore"
+            checks.append(
+                DoctorCheck(
+                    name="metadata_db_required",
+                    ok=ok,
+                    detail="sqlcipher metadata store active" if ok else f"metadata backend is {backend}",
+                )
+            )
         def _check_model_path(label: str, value: Any) -> None:
             if not value:
                 checks.append(

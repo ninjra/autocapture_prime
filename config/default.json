@@ -1209,6 +1209,7 @@
     "fsync_policy": "critical",
     "lexical_path": "data/lexical.db",
     "media_dir": "data/media",
+    "metadata_require_db": true,
     "metadata_path": "data/metadata.db",
     "retention": {
       "evidence": "60d",

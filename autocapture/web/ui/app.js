@@ -14,6 +14,7 @@ const state = {
   activePluginSettings: {},
   config: {},
   telemetry: {},
+  telemetryPoller: null,
   status: {},
   activityFilters: {
     activity: localStorage.getItem("acFilterActivity") !== "false",
@@ -54,6 +55,16 @@ const settingsFilter = qs("settingsFilter");
 const settingsApply = qs("settingsApply");
 const settingsReload = qs("settingsReload");
 const settingsStatus = qs("settingsStatus");
+const captureEssentialsList = qs("captureEssentialsList");
+const captureEssentialsApply = qs("captureEssentialsApply");
+const captureEssentialsReload = qs("captureEssentialsReload");
+const captureEssentialsStatus = qs("captureEssentialsStatus");
+const storageEssentialsList = qs("storageEssentialsList");
+const storageEssentialsApply = qs("storageEssentialsApply");
+const storageEssentialsReload = qs("storageEssentialsReload");
+const storageEssentialsStatus = qs("storageEssentialsStatus");
+const capturePluginsList = qs("capturePluginsList");
+const refreshCapturePlugins = qs("refreshCapturePlugins");
 const pluginSettingsList = qs("pluginSettingsList");
 const pluginSettingsApply = qs("pluginSettingsApply");
 const pluginSettingsTitle = qs("pluginSettingsTitle");
@@ -135,6 +146,12 @@ function setStatus(text, ok = true) {
   telemetryState.classList.toggle("warn", !ok);
 }
 
+function setSettingsStatusText(text) {
+  if (settingsStatus) settingsStatus.textContent = text;
+  if (captureEssentialsStatus) captureEssentialsStatus.textContent = text;
+  if (storageEssentialsStatus) storageEssentialsStatus.textContent = text;
+}
+
 function showPanel(name) {
   document.querySelectorAll(".panel").forEach((panel) => {
     panel.classList.toggle("active", panel.id === `panel-${name}`);
@@ -155,7 +172,7 @@ function initNav() {
   if (hash) {
     showPanel(hash);
   } else {
-    showPanel("settings");
+    showPanel("capture");
   }
 }
 
@@ -311,6 +328,42 @@ const SETTINGS_GROUPS = [
     prefixes: ["time"],
     summary: ["time.timezone", "runtime.timezone"],
   },
+];
+
+const CAPTURE_ESSENTIAL_FIELDS = [
+  "capture.screenshot.enabled",
+  "capture.screenshot.include_cursor",
+  "capture.screenshot.fps_target",
+  "capture.screenshot.dedupe.force_interval_s",
+  "capture.video.enabled",
+  "capture.video.container",
+  "capture.video.ffmpeg_path",
+  "capture.video.include_cursor",
+  "capture.video.fps_target",
+  "capture.video.segment_seconds",
+  "capture.cursor.enabled",
+  "runtime.telemetry.enabled",
+];
+
+const STORAGE_ESSENTIAL_FIELDS = [
+  "storage.data_dir",
+  "storage.media_dir",
+  "storage.metadata_path",
+  "storage.metadata_require_db",
+  "storage.encryption_required",
+  "storage.retention.evidence",
+  "storage.anchor.sign",
+];
+
+const CAPTURE_PLUGIN_GROUPS = [
+  { id: "capture.source", title: "Screen capture source", kinds: ["capture.source"] },
+  { id: "capture.screenshot", title: "Screenshot capture", kinds: ["capture.screenshot"] },
+  { id: "capture.encoder", title: "Video encoding", kinds: ["capture.encoder"] },
+  { id: "capture.audio", title: "Audio capture", kinds: ["capture.audio"] },
+  { id: "tracking.cursor", title: "Cursor tracking", kinds: ["tracking.cursor"] },
+  { id: "tracking.input", title: "Input tracking", kinds: ["tracking.input"] },
+  { id: "window.metadata", title: "Window metadata", kinds: ["window.metadata"] },
+  { id: "storage.backends", title: "Storage backends", kinds: ["storage.metadata_store", "storage.media_backend"] },
 ];
 
 const PLUGIN_GROUPS = [
@@ -829,6 +882,58 @@ function renderPluginDetail() {
   pluginSettingsList.appendChild(fragment);
 }
 
+function renderCapturePlugins() {
+  if (!capturePluginsList) return;
+  capturePluginsList.innerHTML = "";
+  if (!state.plugins.length) {
+    capturePluginsList.textContent = "No plugins discovered";
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  CAPTURE_PLUGIN_GROUPS.forEach((group) => {
+    const matching = state.plugins.filter((plugin) =>
+      pluginKinds(plugin).some((kind) => group.kinds.includes(kind))
+    );
+    const enabled = matching.filter((plugin) => plugin.enabled);
+    const hasMismatch = enabled.some((plugin) => !plugin.hash_ok);
+    let statusText = "OK";
+    let statusClass = "badge";
+    if (!matching.length) {
+      statusText = "Missing";
+      statusClass = "badge warn";
+    } else if (!enabled.length) {
+      statusText = "Off";
+      statusClass = "badge off";
+    } else if (hasMismatch) {
+      statusText = "Check";
+      statusClass = "badge warn";
+    }
+
+    const row = document.createElement("div");
+    row.className = "table-row";
+    const nameCell = document.createElement("span");
+    nameCell.textContent = group.title;
+    const statusCell = document.createElement("span");
+    statusCell.className = statusClass;
+    statusCell.textContent = statusText;
+    const pluginCell = document.createElement("span");
+    if (enabled.length) {
+      pluginCell.textContent = enabled.map((plugin) => pluginDisplayName(plugin)).join(", ");
+    } else if (matching.length) {
+      pluginCell.textContent = `Disabled: ${matching.map((plugin) => pluginDisplayName(plugin)).join(", ")}`;
+      pluginCell.className = "muted";
+    } else {
+      pluginCell.textContent = "—";
+      pluginCell.className = "muted";
+    }
+    row.appendChild(nameCell);
+    row.appendChild(statusCell);
+    row.appendChild(pluginCell);
+    fragment.appendChild(row);
+  });
+  capturePluginsList.appendChild(fragment);
+}
+
 async function refreshPlugins() {
   const resp = await apiFetch("/api/plugins");
   const data = await readJson(resp);
@@ -840,6 +945,7 @@ async function refreshPlugins() {
   renderPluginGroups();
   renderPluginList();
   renderPluginDetail();
+  renderCapturePlugins();
 }
 
 async function postConfigPatch(patch) {
@@ -938,9 +1044,7 @@ function updateCaptureHealth() {
 
 async function refreshHealth() {
   await refreshTimelineSummary();
-  const resp = await apiFetch("/api/telemetry");
-  const data = await readJson(resp);
-  applyTelemetryPayload(data);
+  await refreshTelemetrySnapshot();
 }
 
 async function refreshTimelineSummary() {
@@ -1322,6 +1426,26 @@ function filterFields(fields, query) {
   });
 }
 
+function selectFieldsByPaths(fields, paths) {
+  const map = new Map(fields.map((field) => [field.path, field]));
+  return paths.map((path) => map.get(path)).filter(Boolean);
+}
+
+function renderEssentialsList(container, fields, paths, emptyText) {
+  if (!container) return;
+  container.innerHTML = "";
+  const essentials = selectFieldsByPaths(fields, paths);
+  if (!essentials.length) {
+    container.textContent = emptyText || "No essentials found";
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  essentials.forEach((field) => {
+    renderField(fragment, field, state.settingsDirty);
+  });
+  container.appendChild(fragment);
+}
+
 function settingsGroupForPath(path) {
   const prefix = (path || "").split(".")[0];
   for (const group of SETTINGS_GROUPS) {
@@ -1372,6 +1496,8 @@ async function refreshSettings() {
   state.settingsFields = data.fields || [];
   state.settingsDirty = {};
   renderSettings();
+  renderCaptureEssentials();
+  renderStorageEssentials();
 }
 
 function renderSettings() {
@@ -1457,6 +1583,24 @@ function renderSettings() {
   settingsList.appendChild(fragment);
 }
 
+function renderCaptureEssentials() {
+  if (!captureEssentialsList) return;
+  const fields = state.settingsFields.map((field) => ({
+    ...field,
+    label: field.label || prettyLabel(field.path || ""),
+  }));
+  renderEssentialsList(captureEssentialsList, fields, CAPTURE_ESSENTIAL_FIELDS, "No capture essentials available");
+}
+
+function renderStorageEssentials() {
+  if (!storageEssentialsList) return;
+  const fields = state.settingsFields.map((field) => ({
+    ...field,
+    label: field.label || prettyLabel(field.path || ""),
+  }));
+  renderEssentialsList(storageEssentialsList, fields, STORAGE_ESSENTIAL_FIELDS, "No storage essentials available");
+}
+
 function flattenSettings(obj, prefix = []) {
   const fields = [];
   if (obj && typeof obj === "object" && !Array.isArray(obj)) {
@@ -1496,10 +1640,10 @@ async function loadPluginSettings(pluginId) {
 
 async function applySettings() {
   if (!Object.keys(state.settingsDirty).length) {
-    settingsStatus.textContent = "No changes to apply";
+    setSettingsStatusText("No changes to apply");
     return;
   }
-  settingsStatus.textContent = "Applying...";
+  setSettingsStatusText("Applying...");
   const patch = buildPatch(state.settingsDirty);
   const resp = await apiFetch("/api/config", {
     method: "POST",
@@ -1507,7 +1651,7 @@ async function applySettings() {
     body: JSON.stringify({ patch }),
   });
   const data = await readJson(resp);
-  settingsStatus.textContent = data.error ? `Error: ${data.error}` : "Applied";
+  setSettingsStatusText(data.error ? `Error: ${data.error}` : "Applied");
   await refreshSettings();
   await refreshConfigHistory();
 }
@@ -1534,18 +1678,82 @@ async function applyPluginSettings() {
   await refreshConfigHistory();
 }
 
+async function ensureToken() {
+  if (state.token) return;
+  const statusResp = await apiFetch("/api/auth/status");
+  const status = await readJson(statusResp);
+  if (!status || status.allow_remote) return;
+  const tokenResp = await apiFetch("/api/auth/token");
+  const tokenData = await readJson(tokenResp);
+  if (tokenData && tokenData.token) {
+    setToken(tokenData.token);
+  }
+}
+
+function telemetryIntervalMs() {
+  const fallback = 2000;
+  const interval = Number(state.config?.web?.telemetry_interval_s || 0);
+  if (!Number.isFinite(interval) || interval <= 0) return fallback;
+  return Math.max(500, interval * 1000);
+}
+
+async function refreshTelemetrySnapshot() {
+  try {
+    const resp = await apiFetch("/api/telemetry");
+    const data = await readJson(resp);
+    if (telemetryPayload) {
+      telemetryPayload.textContent = JSON.stringify(data, null, 2);
+    }
+    applyTelemetryPayload(data);
+  } catch (err) {
+    setStatus("offline", false);
+  }
+}
+
+function startTelemetryPolling(label = "polling") {
+  if (state.telemetryPoller) return;
+  setStatus(label, true);
+  state.telemetryPoller = setInterval(refreshTelemetrySnapshot, telemetryIntervalMs());
+  refreshTelemetrySnapshot();
+}
+
+function stopTelemetryPolling() {
+  if (!state.telemetryPoller) return;
+  clearInterval(state.telemetryPoller);
+  state.telemetryPoller = null;
+}
+
 async function connectTelemetry() {
   if (!telemetryState) return;
   if (state.ws) {
     state.ws.close();
   }
   try {
-    const wsUrl = `${location.origin.replace("http", "ws")}/api/ws/telemetry`;
-    state.ws = new WebSocket(wsUrl);
-    state.ws.onopen = () => setStatus("live", true);
-    state.ws.onclose = () => setStatus("offline", false);
-    state.ws.onerror = () => setStatus("error", false);
-    state.ws.onmessage = (evt) => {
+    stopTelemetryPolling();
+    await ensureToken();
+    const wsBase = `${location.origin.replace("http", "ws")}/api/ws/telemetry`;
+    const wsUrl = new URL(wsBase);
+    if (state.token) {
+      wsUrl.searchParams.set("token", state.token);
+    }
+    const ws = new WebSocket(wsUrl.toString());
+    state.ws = ws;
+    ws.onopen = () => {
+      if (state.ws !== ws) return;
+      setStatus("live", true);
+      stopTelemetryPolling();
+    };
+    ws.onclose = () => {
+      if (state.ws !== ws) return;
+      setStatus("polling", true);
+      startTelemetryPolling();
+    };
+    ws.onerror = () => {
+      if (state.ws !== ws) return;
+      setStatus("polling", true);
+      startTelemetryPolling();
+    };
+    ws.onmessage = (evt) => {
       try {
         const data = JSON.parse(evt.data);
         telemetryPayload.textContent = JSON.stringify(data, null, 2);
@@ -1555,7 +1763,8 @@ async function connectTelemetry() {
       }
     };
   } catch (err) {
-    setStatus("offline", false);
+    setStatus("polling", true);
+    startTelemetryPolling();
   }
 }
 
@@ -1586,7 +1795,10 @@ async function applyConfigPatch() {
 }
 
 if (saveTokenBtn) {
-  saveTokenBtn.addEventListener("click", () => setToken(tokenInput.value));
+  saveTokenBtn.addEventListener("click", () => {
+    setToken(tokenInput.value);
+    connectTelemetry();
+  });
 }
 
 if (settingsFilter) {
@@ -1599,6 +1811,22 @@ if (settingsApply) {
 
 if (settingsReload) {
   settingsReload.addEventListener("click", refreshSettings);
+}
+
+if (captureEssentialsApply) {
+  captureEssentialsApply.addEventListener("click", applySettings);
+}
+
+if (captureEssentialsReload) {
+  captureEssentialsReload.addEventListener("click", refreshSettings);
+}
+
+if (storageEssentialsApply) {
+  storageEssentialsApply.addEventListener("click", applySettings);
+}
+
+if (storageEssentialsReload) {
+  storageEssentialsReload.addEventListener("click", refreshSettings);
 }
 
 if (pluginSettingsApply) {
@@ -1795,6 +2023,7 @@ qs("runStop")?.addEventListener("click", async () => {
 qs("refreshAlerts")?.addEventListener("click", refreshAlerts);
 qs("refreshTimeline")?.addEventListener("click", refreshTimeline);
 qs("refreshPlugins")?.addEventListener("click", refreshPlugins);
+refreshCapturePlugins?.addEventListener("click", refreshPlugins);
 qs("reloadPlugins")?.addEventListener("click", async () => {
   await apiFetch("/api/plugins/reload", {
     method: "POST",
