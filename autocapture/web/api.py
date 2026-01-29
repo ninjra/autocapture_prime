@@ -36,7 +36,7 @@ def get_app() -> FastAPI:
     app.state.facade = create_facade(persistent=True, start_conductor=False)
     ui_dir = Path(__file__).resolve().parent / "ui"
     if ui_dir.exists():
-        app.mount("/ui", StaticFiles(directory=ui_dir), name="ui")
+        app.mount("/ui", StaticFiles(directory=ui_dir, html=True), name="ui")
 
         @app.get("/", include_in_schema=False)
         def ui_root():

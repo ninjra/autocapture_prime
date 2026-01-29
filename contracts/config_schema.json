@@ -350,8 +350,17 @@
             "ffmpeg_path": {
               "type": "string"
             },
+            "frame_format": {
+              "type": "string"
+            },
             "fps_target": {
               "type": "integer"
+            },
+            "include_cursor": {
+              "type": "boolean"
+            },
+            "include_cursor_shape": {
+              "type": "boolean"
             },
             "jpeg_quality": {
               "type": "integer"
@@ -374,6 +383,9 @@
             "segment_seconds",
             "fps_target",
             "jpeg_quality",
+            "frame_format",
+            "include_cursor",
+            "include_cursor_shape",
             "monitor_index",
             "resolution"
           ],
@@ -691,6 +703,9 @@
           "type": "string"
         },
         "data_dir": {
+          "type": "string"
+        },
+        "preferred_data_dir_windows": {
           "type": "string"
         }
       },
@@ -2034,6 +2049,15 @@
           "properties": {
             "evidence": {
               "type": "string"
+            },
+            "interval_s": {
+              "type": "number"
+            },
+            "max_delete_per_run": {
+              "type": "integer"
+            },
+            "record_batches": {
+              "type": "boolean"
             }
           },
           "required": [

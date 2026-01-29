@@ -15,6 +15,16 @@ class CaptureContainerResolutionTests(unittest.TestCase):
             self.assertEqual(resolved, "avi_mjpeg")
             self.assertIsNone(path)
 
+    def test_lossless_container_falls_back(self) -> None:
+        resolved, path = _resolve_container("ffmpeg_lossless", "")
+        ffmpeg_present = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
+        if ffmpeg_present:
+            self.assertEqual(resolved, "ffmpeg_lossless")
+            self.assertTrue(path)
+        else:
+            self.assertEqual(resolved, "zip")
+            self.assertIsNone(path)
+
 
 if __name__ == "__main__":
     unittest.main()

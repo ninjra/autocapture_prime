@@ -20,7 +20,7 @@ class TestConfigDefaults(unittest.TestCase):
         on_query = cfg.get("processing", {}).get("on_query", {})
         self.assertFalse(on_query.get("allow_decode_extract", True))
         cursor_cfg = cfg.get("capture", {}).get("cursor", {})
-        self.assertFalse(cursor_cfg.get("enabled", True))
+        self.assertTrue(cursor_cfg.get("enabled", False))
 
     def test_safe_mode_forces_flag(self) -> None:
         paths = default_config_paths()

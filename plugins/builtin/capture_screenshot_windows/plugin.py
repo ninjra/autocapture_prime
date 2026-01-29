@@ -149,6 +149,7 @@ class ScreenshotCaptureWindows(PluginBase):
                                 img.paste(cursor_img, pos, cursor_img)
 
                 raw_bytes = img.tobytes()
+                pixel_hash = hashlib.sha256(raw_bytes).hexdigest()
                 fingerprint = deduper.fingerprint(raw_bytes)
                 now = time.monotonic()
                 should_store, duplicate = deduper.should_store(fingerprint, now=now)
@@ -194,6 +195,10 @@ class ScreenshotCaptureWindows(PluginBase):
                         "encoding": "png",
                         "content_type": "image/png",
                         "content_size": int(len(png_bytes)),
+                        "pixel_hash": pixel_hash,
+                        "pixel_hash_algo": "sha256",
+                        "pixel_size": int(len(raw_bytes)),
+                        "lossless": True,
                         "backend": "mss",
                         "monitor_index": int(idx),
                         "dedupe": {
@@ -202,6 +207,7 @@ class ScreenshotCaptureWindows(PluginBase):
                             "sample_bytes": int(deduper.sample_bytes),
                             "force_interval_s": float(deduper.force_interval_s),
                             "duplicate": bool(duplicate),
+                            "fingerprint": fingerprint,
                         },
                         "content_hash": content_hash,
                         "policy_snapshot_hash": event_builder.policy_snapshot_hash(),

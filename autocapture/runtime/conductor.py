@@ -9,6 +9,7 @@ from typing import Any
 
 from autocapture.research.runner import ResearchRunner
 from autocapture.storage.pressure import StoragePressureMonitor
+from autocapture.storage.retention import StorageRetentionMonitor
 from autocapture.runtime.governor import RuntimeGovernor
 from autocapture.runtime.scheduler import Job, JobStepResult, Scheduler
 from autocapture_nx.kernel.telemetry import record_telemetry
@@ -19,6 +20,7 @@ class ConductorStats:
     last_idle_run: float | None = None
     last_research_run: float | None = None
     last_storage_sample: float | None = None
+    last_retention_run: float | None = None
     last_telemetry_emit: float | None = None
     last_mode: str | None = None
     last_reason: str | None = None
@@ -33,6 +35,7 @@ class RuntimeConductor:
         self._input_tracker = self._resolve_input_tracker(system)
         self._idle_processor = None
         self._storage_monitor = StoragePressureMonitor(system)
+        self._retention_monitor = StorageRetentionMonitor(system)
         self._research_runner = ResearchRunner(self._config)
         self._events = self._resolve_event_builder(system)
         self._logger = self._resolve_logger(system)
@@ -225,6 +228,22 @@ class RuntimeConductor:
         self._scheduler.enqueue(Job(name="storage.pressure", fn=job_fn, heavy=True, estimated_ms=300))
         self._queued.add("storage.pressure")
 
+    def _schedule_storage_retention(self) -> None:
+        if self._retention_monitor is None:
+            return
+        if not self._retention_monitor.due():
+            return
+        if "storage.retention" in self._queued:
+            return
+
+        def job_fn():
+            result = self._retention_monitor.record()
+            if result is not None:
+                self._stats.last_retention_run = time.time()
+
+        self._scheduler.enqueue(Job(name="storage.retention", fn=job_fn, heavy=True, estimated_ms=500))
+        self._queued.add("storage.retention")
+
     def _should_abort(self) -> bool:
         if self._stop.is_set():
             return True
@@ -286,6 +305,7 @@ class RuntimeConductor:
         self._schedule_idle()
         self._schedule_research()
         self._schedule_storage_pressure()
+        self._schedule_storage_retention()
         signals = self._signals(query_intent=True if force else None)
         executed = self._scheduler.run_pending(signals)
         self._emit_telemetry(signals, executed)

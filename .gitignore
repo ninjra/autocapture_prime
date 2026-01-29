@@ -13,6 +13,7 @@ tools/hypervisor/variants/
 tools/run_all_tests.log
 tools/run_all_tests_report.json
 .dev/
+.codex/
 ops/dev/common.env
 ops/dev/ports.env
 node_modules/

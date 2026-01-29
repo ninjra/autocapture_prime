@@ -41,6 +41,7 @@ def _measure_ingestion_mb_s(spool_dir: str) -> float:
         container_type="avi_mjpeg",
         encoder="cpu",
         ffmpeg_path=None,
+        frame_format="jpeg",
     )
     start = time.perf_counter()
     for frame in frames:

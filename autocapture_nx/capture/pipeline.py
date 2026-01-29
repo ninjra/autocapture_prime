@@ -112,18 +112,20 @@ class FrameDeduper:
 
 
 class ZipFrameWriter:
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, frame_ext: str = "jpg") -> None:
         import zipfile
 
         self._zip = zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED)
         self._frame_count = 0
+        ext = str(frame_ext or "jpg").strip().lstrip(".")
+        self._frame_ext = ext or "jpg"
 
     @property
     def frame_count(self) -> int:
         return self._frame_count
 
     def add_frame(self, jpeg_bytes: bytes) -> None:
-        name = f"frame_{self._frame_count}.jpg"
+        name = f"frame_{self._frame_count}.{self._frame_ext}"
         self._zip.writestr(name, jpeg_bytes)
         self._frame_count += 1
 
@@ -195,6 +197,73 @@ class FfmpegWriter:
             raise RuntimeError(f"ffmpeg failed: {stderr[:200].decode(errors='ignore')}")
 
 
+class FfmpegRawWriter:
+    def __init__(self, path: str, fps: int, ffmpeg_path: str, width: int, height: int) -> None:
+        self._path = path
+        cmd = [
+            ffmpeg_path,
+            "-y",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-s",
+            f"{int(width)}x{int(height)}",
+            "-r",
+            str(max(1, int(fps))),
+            "-i",
+            "pipe:0",
+            "-c:v",
+            "ffv1",
+            "-level",
+            "3",
+            "-g",
+            "1",
+            path,
+        ]
+        self._proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        if os.name == "nt":
+            try:
+                from autocapture_nx.windows.win_sandbox import assign_job_object
+
+                assign_job_object(self._proc.pid)
+            except Exception:
+                pass
+        self._frame_count = 0
+
+    @property
+    def frame_count(self) -> int:
+        return self._frame_count
+
+    def add_frame(self, rgb_bytes: bytes) -> None:
+        if not self._proc.stdin:
+            raise RuntimeError("ffmpeg stdin unavailable")
+        self._proc.stdin.write(rgb_bytes)
+        self._frame_count += 1
+
+    def close(self, _duration_ms: int | None = None) -> None:
+        if self._proc.stdin:
+            try:
+                self._proc.stdin.close()
+            except Exception:
+                pass
+        try:
+            self._proc.wait(timeout=20)
+        except subprocess.TimeoutExpired as exc:
+            self._proc.kill()
+            raise RuntimeError("ffmpeg did not finish") from exc
+        if self._proc.returncode != 0:
+            stderr = b""
+            if self._proc.stderr:
+                stderr = self._proc.stderr.read() or b""
+            raise RuntimeError(f"ffmpeg failed: {stderr[:200].decode(errors='ignore')}")
+
+
 class SegmentWriter:
     def __init__(
         self,
@@ -205,6 +274,7 @@ class SegmentWriter:
         container_type: str,
         encoder: str,
         ffmpeg_path: str | None,
+        frame_format: str = "jpeg",
         fsync_policy: str = "none",
     ) -> None:
         self.segment_id = segment_id
@@ -214,7 +284,10 @@ class SegmentWriter:
         self._container_type = container_type
         self._encoder = encoder
         self._ffmpeg_path = ffmpeg_path
-        self._writer: AviMjpegWriter | ZipFrameWriter | FfmpegWriter | None = None
+        self._frame_format = str(frame_format or "jpeg").strip().lower()
+        if self._frame_format not in {"jpeg", "png", "rgb"}:
+            self._frame_format = "jpeg"
+        self._writer: AviMjpegWriter | ZipFrameWriter | FfmpegWriter | FfmpegRawWriter | None = None
         self._width = 0
         self._height = 0
         self._frame_count = 0
@@ -252,6 +325,8 @@ class SegmentWriter:
             return "zip"
         if self._container_type == "ffmpeg_mp4":
             return "mp4"
+        if self._container_type == "ffmpeg_lossless":
+            return "mkv"
         return "bin"
 
     def add_frame(self, frame: Frame) -> None:
@@ -260,10 +335,17 @@ class SegmentWriter:
             self._height = int(frame.height)
             os.makedirs(self._spool_dir, exist_ok=True)
             if self._container_type == "avi_mjpeg":
+                if self._frame_format != "jpeg":
+                    raise RuntimeError("avi_mjpeg requires jpeg frames")
                 self._writer = AviMjpegWriter(self._tmp_path, self._width, self._height, self._fps_target)
             elif self._container_type == "zip":
-                self._writer = ZipFrameWriter(self._tmp_path)
+                if self._frame_format not in {"jpeg", "png"}:
+                    raise RuntimeError("zip container requires jpeg or png frames")
+                frame_ext = "jpg" if self._frame_format == "jpeg" else "png"
+                self._writer = ZipFrameWriter(self._tmp_path, frame_ext=frame_ext)
             elif self._container_type == "ffmpeg_mp4":
+                if self._frame_format != "jpeg":
+                    raise RuntimeError("ffmpeg_mp4 requires jpeg frames")
                 if not self._ffmpeg_path:
                     raise RuntimeError("ffmpeg path required for ffmpeg_mp4 container")
                 self._writer = FfmpegWriter(
@@ -272,6 +354,18 @@ class SegmentWriter:
                     self._encoder,
                     self._ffmpeg_path,
                     self._bitrate_kbps,
+                )
+            elif self._container_type == "ffmpeg_lossless":
+                if self._frame_format != "rgb":
+                    raise RuntimeError("ffmpeg_lossless requires rgb frames")
+                if not self._ffmpeg_path:
+                    raise RuntimeError("ffmpeg path required for ffmpeg_lossless container")
+                self._writer = FfmpegRawWriter(
+                    self._tmp_path,
+                    self._fps_target,
+                    self._ffmpeg_path,
+                    self._width,
+                    self._height,
                 )
             else:
                 raise RuntimeError(f"Unsupported container: {self._container_type}")
@@ -370,9 +464,48 @@ class CapturePipeline:
         self._queue_depth_max = 0
         self._drops_lock = threading.Lock()
         self._segment_seq = 0
-        self._backend_used = str(config.get("capture", {}).get("video", {}).get("backend", "mss"))
-        backpressure_cfg = config.get("backpressure", {})
         capture_cfg = config.get("capture", {}).get("video", {})
+        self._backend_used = str(capture_cfg.get("backend", "mss"))
+        requested_container = str(capture_cfg.get("container", "avi_mjpeg") or "avi_mjpeg")
+        ffmpeg_path_cfg = str(capture_cfg.get("ffmpeg_path", "") or "").strip()
+        resolved_container, ffmpeg_path = _resolve_container(requested_container, ffmpeg_path_cfg)
+        if resolved_container != requested_container and self._event_builder is not None:
+            container_payload: dict[str, Any] = {"requested": requested_container, "used": resolved_container}
+            try:
+                self._event_builder.journal_event("capture.container_fallback", container_payload)
+                self._event_builder.ledger_entry(
+                    "capture.container_fallback",
+                    inputs=[],
+                    outputs=[],
+                    payload={"event": "capture.container_fallback", **container_payload},
+                )
+            except Exception:
+                pass
+        self._container_type = resolved_container
+        self._ffmpeg_path = ffmpeg_path
+        frame_format = _resolve_frame_format(
+            capture_cfg.get("frame_format", "auto"),
+            requested_container,
+            resolved_container,
+        )
+        coerced = _coerce_frame_format(frame_format, self._container_type)
+        if coerced != frame_format and self._event_builder is not None:
+            payload = {"requested": frame_format, "used": coerced, "container": self._container_type}
+            try:
+                self._event_builder.journal_event("capture.frame_format_fallback", payload)
+                self._event_builder.ledger_entry(
+                    "capture.frame_format_fallback",
+                    inputs=[],
+                    outputs=[],
+                    payload={"event": "capture.frame_format_fallback", **payload},
+                )
+            except Exception:
+                pass
+        self._frame_format = coerced
+        self._include_cursor = bool(capture_cfg.get("include_cursor", False))
+        self._include_cursor_shape = bool(capture_cfg.get("include_cursor_shape", True))
+        self._lossless = self._frame_format in {"rgb", "png"}
+        backpressure_cfg = config.get("backpressure", {})
         self._rate_lock = threading.Lock()
         self._fps_target = int(capture_cfg.get("fps_target", backpressure_cfg.get("max_fps", 30)))
         self._bitrate_kbps = int(backpressure_cfg.get("max_bitrate_kbps", 8000))
@@ -473,6 +606,9 @@ class CapturePipeline:
 
         monitor_index = int(capture_cfg.get("monitor_index", 0))
         resolution = capture_cfg.get("resolution", "native")
+        frame_format = self._frame_format
+        include_cursor = self._include_cursor
+        include_cursor_shape = self._include_cursor_shape
 
         def _apply_disk_degrade(base_fps_val: int, base_bitrate_val: int, base_quality_val: int) -> tuple[int, int, int]:
             min_fps = int(backpressure_cfg.get("min_fps", 5))
@@ -580,8 +716,11 @@ class CapturePipeline:
             fps_provider,
             frame_source=self._frame_source,
             jpeg_quality=jpeg_quality_provider if activity_enabled else int(jpeg_quality),
+            frame_format=frame_format,
             monitor_index=monitor_index,
             resolution=resolution,
+            include_cursor=include_cursor,
+            include_cursor_shape=include_cursor_shape,
         )
         self._backend_used = backend_used
         if backend_used != backend:
@@ -806,20 +945,10 @@ class CapturePipeline:
     def _encode_loop(self) -> None:
         capture_cfg = self._config.get("capture", {}).get("video", {})
         segment_seconds = int(capture_cfg.get("segment_seconds", 60))
-        container_type = str(capture_cfg.get("container", "avi_mjpeg"))
+        container_type = self._container_type
         encoder = str(capture_cfg.get("encoder", "cpu"))
-        ffmpeg_path_cfg = str(capture_cfg.get("ffmpeg_path", "")).strip()
-        resolved_container, ffmpeg_path = _resolve_container(container_type, ffmpeg_path_cfg)
-        if resolved_container != container_type:
-            container_payload: dict[str, Any] = {"requested": container_type, "used": resolved_container}
-            self._event_builder.journal_event("capture.container_fallback", container_payload)
-            self._event_builder.ledger_entry(
-                "capture.container_fallback",
-                inputs=[],
-                outputs=[],
-                payload={"event": "capture.container_fallback", **container_payload},
-            )
-        container_type = resolved_container
+        ffmpeg_path = self._ffmpeg_path
+        frame_format = self._frame_format
         with self._rate_lock:
             fps_target = self._fps_target
             bitrate_kbps = self._bitrate_kbps
@@ -887,6 +1016,7 @@ class CapturePipeline:
                     container_type=container_type,
                     encoder=encoder,
                     ffmpeg_path=ffmpeg_path,
+                    frame_format=frame_format,
                     fsync_policy=fsync_policy,
                 )
                 segment_start_mono = _frame_monotonic(frame)
@@ -955,6 +1085,7 @@ class CapturePipeline:
             "record_type": "evidence.capture.segment",
             "run_id": run_id,
             "segment_id": artifact.segment_id,
+            "ts_utc": artifact.ts_start_utc,
             "ts_start_utc": artifact.ts_start_utc,
             "ts_end_utc": artifact.ts_end_utc,
             "duration_ms": int(artifact.duration_ms),
@@ -968,6 +1099,8 @@ class CapturePipeline:
                 "ext": artifact.container_ext,
                 "version": 1,
             },
+            "frame_format": self._frame_format,
+            "lossless": bool(self._lossless),
             "fps_target": int(artifact.fps_target),
             "fps_effective": int(fps_effective),
             "bitrate_kbps": int(artifact.bitrate_kbps),
@@ -1375,7 +1508,36 @@ def _resolve_container(container_type: str, ffmpeg_path: str | None) -> tuple[st
         if not path:
             return "avi_mjpeg", None
         return "ffmpeg_mp4", path
+    if container_type == "ffmpeg_lossless":
+        path = ffmpeg_path or shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
+        if not path:
+            return "zip", None
+        return "ffmpeg_lossless", path
     return container_type, None
+
+
+def _resolve_frame_format(frame_format: str, requested_container: str, resolved_container: str) -> str:
+    mode = str(frame_format or "auto").strip().lower()
+    if mode not in {"auto", "jpeg", "png", "rgb"}:
+        mode = "auto"
+    if mode != "auto":
+        return mode
+    if requested_container == "ffmpeg_lossless":
+        return "rgb" if resolved_container == "ffmpeg_lossless" else "png"
+    if resolved_container == "zip":
+        return "jpeg"
+    return "jpeg"
+
+
+def _coerce_frame_format(frame_format: str, container_type: str) -> str:
+    mode = str(frame_format or "jpeg").strip().lower()
+    if container_type in {"avi_mjpeg", "ffmpeg_mp4"}:
+        return "jpeg"
+    if container_type == "ffmpeg_lossless":
+        return "rgb"
+    if container_type == "zip":
+        return "png" if mode == "rgb" else (mode if mode in {"jpeg", "png"} else "png")
+    return mode
 
 
 def _frame_iter(
@@ -1384,47 +1546,65 @@ def _frame_iter(
     *,
     frame_source: Any | None,
     jpeg_quality: int | Callable[[], int],
+    frame_format: str,
     monitor_index: int,
     resolution: str | None,
+    include_cursor: bool,
+    include_cursor_shape: bool,
 ) -> tuple[str, Any]:
     if backend == "auto":
         try:
             return "dxcam", _dxcam_frames(
                 fps_provider,
                 jpeg_quality=jpeg_quality,
+                frame_format=frame_format,
                 monitor_index=monitor_index,
                 resolution=resolution,
+                include_cursor=include_cursor,
+                include_cursor_shape=include_cursor_shape,
             )
         except Exception:
             return "mss", iter_screenshots(
                 fps_provider,
                 frame_source=frame_source,
                 jpeg_quality=jpeg_quality,
+                frame_format=frame_format,
                 monitor_index=monitor_index,
                 resolution=resolution,
+                include_cursor=include_cursor,
+                include_cursor_shape=include_cursor_shape,
             )
     if backend == "dxcam":
         try:
             return "dxcam", _dxcam_frames(
                 fps_provider,
                 jpeg_quality=jpeg_quality,
+                frame_format=frame_format,
                 monitor_index=monitor_index,
                 resolution=resolution,
+                include_cursor=include_cursor,
+                include_cursor_shape=include_cursor_shape,
             )
         except Exception:
             return "mss", iter_screenshots(
                 fps_provider,
                 frame_source=frame_source,
                 jpeg_quality=jpeg_quality,
+                frame_format=frame_format,
                 monitor_index=monitor_index,
                 resolution=resolution,
+                include_cursor=include_cursor,
+                include_cursor_shape=include_cursor_shape,
             )
     return backend, iter_screenshots(
         fps_provider,
         frame_source=frame_source,
         jpeg_quality=jpeg_quality,
+        frame_format=frame_format,
         monitor_index=monitor_index,
         resolution=resolution,
+        include_cursor=include_cursor,
+        include_cursor_shape=include_cursor_shape,
     )
 
 
@@ -1432,8 +1612,11 @@ def _dxcam_frames(
     fps_provider: Callable[[], int],
     *,
     jpeg_quality: int | Callable[[], int],
+    frame_format: str,
     monitor_index: int,
     resolution: str | None,
+    include_cursor: bool,
+    include_cursor_shape: bool,
 ):
     if os.name != "nt":
         raise RuntimeError("DXCAM capture supported on Windows only")
@@ -1445,6 +1628,43 @@ def _dxcam_frames(
     if cam is None:
         raise RuntimeError("DXCAM not available")
     target_size = _parse_resolution(resolution)
+    frame_mode = str(frame_format or "jpeg").strip().lower()
+    if frame_mode not in {"jpeg", "png", "rgb"}:
+        frame_mode = "jpeg"
+    mon_left = 0
+    mon_top = 0
+    if include_cursor:
+        try:
+            layout = list_monitors() or []
+            for entry in layout:
+                if int(entry.get("index", -1)) == int(monitor_index):
+                    mon_left = int(entry.get("left", 0))
+                    mon_top = int(entry.get("top", 0))
+                    break
+        except Exception:
+            mon_left = 0
+            mon_top = 0
+    if include_cursor:
+        try:
+            from autocapture_nx.windows.win_cursor import current_cursor, cursor_shape
+        except Exception:
+            current_cursor = None
+            cursor_shape = None  # type: ignore[assignment]
+    else:
+        current_cursor = None
+        cursor_shape = None  # type: ignore[assignment]
+    cursor_handle = None
+    cursor_cached = None
+
+    def _cursor_shape_cached(handle: int):
+        nonlocal cursor_handle, cursor_cached
+        if not handle or cursor_shape is None:
+            return None
+        if cursor_handle != handle or cursor_cached is None:
+            cursor_handle = handle
+            cursor_cached = cursor_shape(handle)
+        return cursor_cached
+
     while True:
         frame = cam.grab()
         if frame is None:
@@ -1453,10 +1673,41 @@ def _dxcam_frames(
         img = Image.fromarray(frame)
         if target_size and (img.width, img.height) != target_size:
             img = img.resize(target_size)
+        if include_cursor and current_cursor is not None:
+            cursor_info = current_cursor()
+            if cursor_info is not None and cursor_info.visible:
+                shape = None
+                if include_cursor_shape:
+                    shape = _cursor_shape_cached(cursor_info.handle)
+                if shape is not None:
+                    offset_x = int(cursor_info.x) - mon_left
+                    offset_y = int(cursor_info.y) - mon_top
+                    if target_size and frame.shape[1] and frame.shape[0]:
+                        scale_x = target_size[0] / frame.shape[1]
+                        scale_y = target_size[1] / frame.shape[0]
+                        offset_x = int(offset_x * scale_x)
+                        offset_y = int(offset_y * scale_y)
+                        hotspot_x = int(shape.hotspot_x * scale_x)
+                        hotspot_y = int(shape.hotspot_y * scale_y)
+                        cursor_img = shape.image.resize(
+                            (int(shape.width * scale_x), int(shape.height * scale_y))
+                        )
+                    else:
+                        hotspot_x = shape.hotspot_x
+                        hotspot_y = shape.hotspot_y
+                        cursor_img = shape.image
+                    pos = (offset_x - hotspot_x, offset_y - hotspot_y)
+                    img.paste(cursor_img, pos, cursor_img)
         from io import BytesIO
 
         bio = BytesIO()
-        quality = jpeg_quality() if callable(jpeg_quality) else jpeg_quality
-        img.save(bio, format="JPEG", quality=int(quality))
-        data = bio.getvalue()
+        if frame_mode == "rgb":
+            data = img.tobytes()
+        elif frame_mode == "png":
+            img.save(bio, format="PNG", compress_level=3, optimize=False)
+            data = bio.getvalue()
+        else:
+            quality = jpeg_quality() if callable(jpeg_quality) else jpeg_quality
+            img.save(bio, format="JPEG", quality=int(quality))
+            data = bio.getvalue()
         yield Frame(ts_utc=_iso_utc(), data=data, width=img.width, height=img.height, ts_monotonic=time.monotonic())

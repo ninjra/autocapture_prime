@@ -17,6 +17,7 @@ class CaptureZipContainerTests(unittest.TestCase):
                 container_type="zip",
                 encoder="cpu",
                 ffmpeg_path=None,
+                frame_format="jpeg",
             )
             frame = Frame(ts_utc="t0", data=b"jpeg", width=1, height=1, ts_monotonic=0.0)
             segment.add_frame(frame)

@@ -1,7 +1,7 @@
 {
   "files": {
     "contracts/citation.schema.json": "964a7b3df5e83bff7fc196f826df98c8845d90b493cd3598a1ac8572e3e7516b",
-    "contracts/config_schema.json": "a5aefb9a6f5e23b9c90309436df9cb1d3944896fe8c7bb25f3dac346949d3fcc",
+    "contracts/config_schema.json": "09f26794f3c861b3da0273c67867dc522a7d3bcd6449ffefe456a69f5a1ad66e",
     "contracts/evidence.schema.json": "1c325144e0f0ca136610fc709605f05da3af6144ffc75525183311c914be8f51",
     "contracts/ir_pins.json": "674e2034e5f9b7c5dbca82ad7a87d552c9fb7a6533e1785e4364e9568e0ab639",
     "contracts/journal_schema.json": "8f380b9ebc3f4cfa903c14c32e907c55410e3fc65418f27e32761f1a45fa930a",
@@ -13,6 +13,6 @@
     "contracts/time_intent.schema.json": "6696c55883e35e0f2eb0689d61b7a05c637959d1d53ba7d8f985bbc2d5e397d8",
     "contracts/user_surface.md": "7f44da70f20655037997ca91fefd7f0bac9598cc84e528516af3bfc92abf7429"
   },
-  "generated_at": "2026-01-29T18:42:53.858084+00:00",
+  "generated_at": "2026-01-29T19:53:05.079668+00:00",
   "version": 1
 }

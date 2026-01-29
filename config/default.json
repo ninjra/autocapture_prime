@@ -26,7 +26,7 @@
       "system_audio": true
     },
     "cursor": {
-      "enabled": false,
+      "enabled": true,
       "include_shape": true,
       "sample_hz": 5
     },
@@ -80,7 +80,7 @@
         "preserve_quality": true
       },
       "backend": "mss",
-      "container": "avi_mjpeg",
+      "container": "ffmpeg_lossless",
       "dedupe": {
         "enabled": true,
         "hash": "blake2b",
@@ -90,6 +90,10 @@
         "window_ms": 1500
       },
       "enabled": true,
+      "ffmpeg_path": "",
+      "frame_format": "auto",
+      "include_cursor": true,
+      "include_cursor_shape": true,
       "encoder": "cpu",
       "fps_target": 30,
       "jpeg_quality": 90,
@@ -101,7 +105,7 @@
       "backend": "mss",
       "dedupe": {
         "enabled": true,
-        "force_interval_s": 0,
+        "force_interval_s": 60,
         "hash": "blake2b",
         "sample_bytes": 0
       },
@@ -117,6 +121,9 @@
       "enabled": true,
       "sample_hz": 5
     }
+  },
+  "paths": {
+    "preferred_data_dir_windows": "D:\\autocapture"
   },
   "devtools": {
     "ast_ir": {
@@ -1204,7 +1211,10 @@
     "media_dir": "data/media",
     "metadata_path": "data/metadata.db",
     "retention": {
-      "evidence": "infinite"
+      "evidence": "60d",
+      "interval_s": 3600,
+      "max_delete_per_run": 500,
+      "record_batches": true
     },
     "spool_dir": "data/spool",
     "vector_path": "data/vector.db"

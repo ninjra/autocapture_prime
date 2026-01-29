@@ -30,14 +30,21 @@ def iter_screenshots(
     now_fn: Callable[[], float] = time.monotonic,
     sleep_fn: Callable[[float], None] = time.sleep,
     jpeg_quality: int | Callable[[], int] = 90,
+    frame_format: str = "jpeg",
     monitor_index: int = 0,
     resolution: str | None = None,
+    include_cursor: bool = False,
+    include_cursor_shape: bool = True,
 ) -> Iterator[Frame]:
     if callable(fps):
         fps_provider = fps
     else:
         def fps_provider() -> int:
             return fps
+
+    frame_mode = str(frame_format or "jpeg").strip().lower()
+    if frame_mode not in {"jpeg", "png", "rgb"}:
+        frame_mode = "jpeg"
 
     if frame_source is None:
         if os.name != "nt":
@@ -55,18 +62,72 @@ def iter_screenshots(
                 if idx < 0 or idx >= len(monitors):
                     idx = 0
                 monitor = monitors[idx]
+                mon_left = int(monitor.get("left", 0))
+                mon_top = int(monitor.get("top", 0))
                 target_size = _parse_resolution(resolution, monitor.get("width"), monitor.get("height"))
+                cursor_handle = None
+                cursor_cached = None
+                if include_cursor:
+                    try:
+                        from autocapture_nx.windows.win_cursor import current_cursor, cursor_shape
+                    except Exception:
+                        current_cursor = None
+                        cursor_shape = None  # type: ignore[assignment]
+                else:
+                    current_cursor = None
+                    cursor_shape = None  # type: ignore[assignment]
+
+                def _cursor_shape_cached(handle: int):
+                    nonlocal cursor_handle, cursor_cached
+                    if not handle or cursor_shape is None:
+                        return None
+                    if cursor_handle != handle or cursor_cached is None:
+                        cursor_handle = handle
+                        cursor_cached = cursor_shape(handle)
+                    return cursor_cached
+
                 while True:
                     raw = sct.grab(monitor)
                     img = Image.frombytes("RGB", raw.size, raw.rgb)
                     if target_size and (img.width, img.height) != target_size:
                         img = img.resize(target_size)
+                    if include_cursor and current_cursor is not None:
+                        cursor_info = current_cursor()
+                        if cursor_info is not None and cursor_info.visible:
+                            shape = None
+                            if include_cursor_shape:
+                                shape = _cursor_shape_cached(cursor_info.handle)
+                            if shape is not None:
+                                offset_x = int(cursor_info.x) - mon_left
+                                offset_y = int(cursor_info.y) - mon_top
+                                if target_size and raw.size != target_size:
+                                    scale_x = target_size[0] / raw.size[0]
+                                    scale_y = target_size[1] / raw.size[1]
+                                    offset_x = int(offset_x * scale_x)
+                                    offset_y = int(offset_y * scale_y)
+                                    hotspot_x = int(shape.hotspot_x * scale_x)
+                                    hotspot_y = int(shape.hotspot_y * scale_y)
+                                    cursor_img = shape.image.resize(
+                                        (int(shape.width * scale_x), int(shape.height * scale_y))
+                                    )
+                                else:
+                                    hotspot_x = shape.hotspot_x
+                                    hotspot_y = shape.hotspot_y
+                                    cursor_img = shape.image
+                                pos = (offset_x - hotspot_x, offset_y - hotspot_y)
+                                img.paste(cursor_img, pos, cursor_img)
                     from io import BytesIO
 
                     bio = BytesIO()
-                    quality = jpeg_quality() if callable(jpeg_quality) else jpeg_quality
-                    img.save(bio, format="JPEG", quality=int(quality))
-                    data = bio.getvalue()
+                    if frame_mode == "rgb":
+                        data = img.tobytes()
+                    elif frame_mode == "png":
+                        img.save(bio, format="PNG", compress_level=3, optimize=False)
+                        data = bio.getvalue()
+                    else:
+                        quality = jpeg_quality() if callable(jpeg_quality) else jpeg_quality
+                        img.save(bio, format="JPEG", quality=int(quality))
+                        data = bio.getvalue()
                     yield Frame(
                         ts_utc=_iso_utc(),
                         data=data,

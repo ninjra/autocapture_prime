@@ -210,13 +210,23 @@ def apply_path_defaults(
         or paths.get("config_dir")
         or str(default_config_dir())
     )
+    preferred_windows = ""
+    if isinstance(user_paths, dict) and user_paths.get("preferred_data_dir_windows"):
+        preferred_windows = str(user_paths.get("preferred_data_dir_windows") or "")
+    elif isinstance(paths, dict) and paths.get("preferred_data_dir_windows"):
+        preferred_windows = str(paths.get("preferred_data_dir_windows") or "")
+    preferred_windows = preferred_windows.strip()
     data_dir_value = (
         user_paths.get("data_dir")
         or os.getenv(_DATA_ENV)
         or user_storage.get("data_dir")
         or paths.get("data_dir")
-        or str(default_data_dir())
     )
+    if not data_dir_value:
+        if os.name == "nt" and preferred_windows:
+            data_dir_value = preferred_windows
+        else:
+            data_dir_value = str(default_data_dir())
 
     config_dir_abs = _resolve_dir(str(config_dir_value))
     data_dir_abs = _resolve_dir(str(data_dir_value))

@@ -7,6 +7,8 @@ import queue
 import socket
 import threading
 import time
+import urllib.error
+import urllib.request
 
 from autocapture_nx.kernel.config import load_config
 from autocapture_nx.kernel.loader import default_config_paths
@@ -58,7 +60,7 @@ class UIServer:
 
 class UIWindow:
     def __init__(self, base_url: str) -> None:
-        self._base_url = base_url
+        self._base_url = base_url.rstrip("/")
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._window = None
         self._fallback = False
@@ -89,6 +91,7 @@ class UIWindow:
                 if action is None:
                     break
                 if not self._window:
+                    _open_browser(f"{self._base_url}/#settings")
                     continue
                 if action == "settings":
                     url = f"{self._base_url}/#settings"
@@ -99,7 +102,7 @@ class UIWindow:
                 try:
                     self._window.load_url(url)
                 except Exception:
-                    pass
+                    _open_browser(url)
                 try:
                     self._window.restore()
                 except Exception:
@@ -112,13 +115,13 @@ class UIWindow:
             self._fallback = True
 
     def show_settings(self) -> None:
-        if self._fallback:
+        if self._fallback or self._window is None:
             _open_browser(f"{self._base_url}/#settings")
             return
         self._queue.put("settings")
 
     def show_plugins(self) -> None:
-        if self._fallback:
+        if self._fallback or self._window is None:
             _open_browser(f"{self._base_url}/#plugins")
             return
         self._queue.put("plugins")
@@ -146,6 +149,25 @@ def _open_browser(url: str) -> None:
         _log(f"browser open failed: {exc}")
 
 
+def _http_status(url: str) -> int | None:
+    try:
+        with urllib.request.urlopen(url, timeout=2) as resp:
+            return int(resp.status)
+    except urllib.error.HTTPError as exc:
+        return int(exc.code)
+    except Exception:
+        return None
+
+
+def _validate_ui(base_url: str) -> None:
+    root_status = _http_status(base_url)
+    ui_status = _http_status(f"{base_url}/ui")
+    if root_status and root_status >= 400:
+        _log(f"ui root returned {root_status} for {base_url}")
+    if ui_status and ui_status >= 400:
+        _log(f"ui /ui returned {ui_status} for {base_url}/ui")
+
+
 def main() -> int:
     if os.name != "nt":
         raise RuntimeError("tray_supported_on_windows_only")
@@ -163,10 +185,11 @@ def main() -> int:
             port = int(env_port)
         except ValueError:
             _log(f"invalid AUTOCAPTURE_TRAY_BIND_PORT: {env_port}")
-    base_url = f"http://{host}:{port}/ui"
+    base_url = f"http://{host}:{port}"
 
     server = UIServer(host, port)
     server.start()
+    _validate_ui(base_url)
 
     if os.getenv("AUTOCAPTURE_TRAY_SMOKE") == "1":
         _log("smoke mode: ui server running")

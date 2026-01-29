@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import ctypes
+import os
 from ctypes import wintypes
 from typing import Any, Callable, cast
 
@@ -21,12 +22,17 @@ NIF_TIP = 0x00000004
 NIM_ADD = 0x00000000
 NIM_MODIFY = 0x00000001
 NIM_DELETE = 0x00000002
+NIM_SETVERSION = 0x00000004
+
+NOTIFYICON_VERSION_4 = 4
 
 TPM_LEFTALIGN = 0x0000
 TPM_BOTTOMALIGN = 0x0020
 TPM_RIGHTBUTTON = 0x0002
 
 IDI_APPLICATION = 32512
+LR_LOADFROMFILE = 0x00000010
+LR_DEFAULTSIZE = 0x00000040
 PTR_LONG = ctypes.c_longlong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_long
 PTR_ULONG = ctypes.c_ulonglong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_ulong
 LRESULT = getattr(wintypes, "LRESULT", PTR_LONG)
@@ -48,6 +54,7 @@ class NOTIFYICONDATA(ctypes.Structure):
         ("uCallbackMessage", wintypes.UINT),
         ("hIcon", wintypes.HICON),
         ("szTip", wintypes.WCHAR * 128),
+        ("uVersion", wintypes.UINT),
     ]
 
 
@@ -62,18 +69,38 @@ class TrayApp:
         self._notify_id = 1
         self._message_id = WM_USER + 1
         self._wndproc = None
+        self._icon_handle: HICON | None = None
 
     def run(self) -> None:
-        self._register_window_class()
-        self._create_window()
-        self._add_icon()
-        atexit.register(self._remove_icon)
-        self._message_loop()
+        try:
+            self._register_window_class()
+            self._create_window()
+            self._add_icon()
+            atexit.register(self._remove_icon)
+            self._message_loop()
+        except Exception as exc:
+            self._log(f"Tray run failed: {exc}")
 
     def stop(self) -> None:
         if self._hwnd:
             windll.user32.DestroyWindow(self._hwnd)
             self._hwnd = None
+        if self._icon_handle:
+            try:
+                windll.user32.DestroyIcon(self._icon_handle)
+            except Exception:
+                pass
+            self._icon_handle = None
+
+    def _log(self, message: str) -> None:
+        print(f"[tray] {message}", flush=True)
+
+    def _last_error(self) -> str:
+        err = ctypes.get_last_error()
+        try:
+            return ctypes.FormatError(err)
+        except Exception:
+            return str(err)
 
     def _register_window_class(self) -> None:
         WNDPROC = WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT, WPARAM, LPARAM)
@@ -127,7 +154,9 @@ class TrayApp:
         wc.hbrBackground = 0
         wc.lpszMenuName = None
         wc.lpszClassName = "AutocaptureNxTray"
-        windll.user32.RegisterClassW(ctypes.byref(wc))
+        result = windll.user32.RegisterClassW(ctypes.byref(wc))
+        if not result:
+            self._log(f"RegisterClassW failed: {self._last_error()}")
 
     def _create_window(self) -> None:
         hwnd = windll.user32.CreateWindowExW(
@@ -145,11 +174,28 @@ class TrayApp:
             None,
         )
         self._hwnd = hwnd
+        if not hwnd:
+            self._log(f"CreateWindowExW failed: {self._last_error()}")
 
     def _add_icon(self) -> None:
         if not self._hwnd:
             return
-        icon = windll.user32.LoadIconW(None, IDI_APPLICATION)
+        icon_path = os.getenv("AUTOCAPTURE_TRAY_ICON", "").strip()
+        icon = None
+        if icon_path:
+            icon = windll.user32.LoadImageW(
+                None,
+                icon_path,
+                1,
+                0,
+                0,
+                LR_LOADFROMFILE | LR_DEFAULTSIZE,
+            )
+            if not icon:
+                self._log(f"LoadImageW failed for icon {icon_path}: {self._last_error()}")
+        if not icon:
+            icon = windll.user32.LoadIconW(None, IDI_APPLICATION)
+        self._icon_handle = icon
         nid = NOTIFYICONDATA()
         nid.cbSize = ctypes.sizeof(NOTIFYICONDATA)
         nid.hWnd = self._hwnd
@@ -158,7 +204,14 @@ class TrayApp:
         nid.uCallbackMessage = self._message_id
         nid.hIcon = icon
         nid.szTip = self._title
-        windll.shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid))
+        if not windll.shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid)):
+            self._log(f"Shell_NotifyIconW(NIM_ADD) failed: {self._last_error()}")
+            return
+        try:
+            nid.uVersion = NOTIFYICON_VERSION_4  # type: ignore[attr-defined]
+            windll.shell32.Shell_NotifyIconW(NIM_SETVERSION, ctypes.byref(nid))
+        except Exception:
+            pass
 
     def _remove_icon(self) -> None:
         if not self._hwnd:
@@ -192,6 +245,10 @@ class TrayApp:
             hwnd,
             None,
         )
+        try:
+            windll.user32.PostMessageW(hwnd, 0, 0, 0)
+        except Exception:
+            pass
         windll.user32.DestroyMenu(menu)
 
     def _invoke(self, item_id: int) -> None:
