@@ -6,8 +6,6 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from zoneinfo import ZoneInfo
-
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 
 
@@ -26,9 +24,13 @@ class TimeIntentParser(PluginBase):
     def _tz(self):
         tz_name = self.context.config.get("time", {}).get("timezone") or self.context.config.get("runtime", {}).get("timezone", "UTC")
         try:
+            from zoneinfo import ZoneInfo
+
             return ZoneInfo(tz_name)
         except Exception:
             try:
+                from zoneinfo import ZoneInfo
+
                 return ZoneInfo("UTC")
             except Exception:
                 return timezone.utc

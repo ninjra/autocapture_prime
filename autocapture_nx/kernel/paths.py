@@ -25,8 +25,8 @@ _APP_NAME = "Autocapture"
 def repo_root() -> Path:
     override = os.getenv(_ROOT_ENV)
     if override:
-        return Path(override).expanduser().resolve()
-    start = Path(__file__).resolve()
+        return Path(override).expanduser().absolute()
+    start = Path(__file__).absolute().parent
     for parent in [start, *start.parents]:
         if (parent / "pyproject.toml").exists():
             return parent
@@ -98,8 +98,23 @@ def default_data_dir() -> Path:
     if override:
         return _resolve_dir(override)
     if PlatformDirs is None:
-        return _fallback_data_dir()
-    return Path(PlatformDirs(_APP_NAME, appauthor=False).user_data_dir)
+        candidate = _fallback_data_dir()
+    else:
+        candidate = Path(PlatformDirs(_APP_NAME, appauthor=False).user_data_dir)
+    if _is_writable_dir(candidate):
+        return candidate
+    fallback = repo_root() / "data"
+    if _is_writable_dir(fallback):
+        return fallback
+    return candidate
+
+
+def _is_writable_dir(path: Path) -> bool:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return False
+    return os.access(path, os.W_OK)
 
 
 def _resource_text_from(pkg: str, rel_path: str) -> str | None:

@@ -97,6 +97,22 @@
       "resolution": "native",
       "segment_seconds": 60
     },
+    "screenshot": {
+      "backend": "mss",
+      "dedupe": {
+        "enabled": true,
+        "force_interval_s": 0,
+        "hash": "blake2b",
+        "sample_bytes": 0
+      },
+      "enabled": true,
+      "fps_target": 2,
+      "include_cursor": true,
+      "include_cursor_shape": true,
+      "monitor_index": 0,
+      "png_compress_level": 3,
+      "resolution": "native"
+    },
     "window_metadata": {
       "enabled": true,
       "sample_hz": 5
@@ -128,6 +144,15 @@
     "vector_backend": "sqlite"
   },
   "kernel": {
+    "safe_mode_fast_boot": true,
+    "safe_mode_required_capabilities": [
+      "storage.keyring",
+      "storage.metadata",
+      "storage.media",
+      "ledger.writer",
+      "journal.writer",
+      "anchor.writer"
+    ],
     "required_capabilities": [
       "egress.gateway",
       "privacy.egress_sanitizer",
@@ -148,7 +173,18 @@
       "observability.logger",
       "devtools.diffusion",
       "devtools.ast_ir"
-    ]
+    ],
+    "dependency_pinning": {
+      "enforce": true,
+      "allow_missing": [
+        "mypy",
+        "pynput",
+        "pywebview",
+        "ruff",
+        "sounddevice",
+        "uvicorn"
+      ]
+    }
   },
   "llm": {
     "model": "sshleifer/tiny-gpt2"
@@ -207,6 +243,7 @@
       "builtin.answer.basic",
       "builtin.backpressure.basic",
       "builtin.capture.audio.windows",
+      "builtin.capture.screenshot.windows",
       "builtin.capture.basic",
       "builtin.capture.windows",
       "builtin.cursor.windows",
@@ -304,6 +341,15 @@
         "mode": "single",
         "preferred": [
           "builtin.backpressure.basic"
+        ],
+        "provider_ids": []
+      },
+      "capture.screenshot": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.capture.screenshot.windows"
         ],
         "provider_ids": []
       },
@@ -576,6 +622,7 @@
       "builtin.answer.basic",
       "builtin.backpressure.basic",
       "builtin.capture.audio.windows",
+      "builtin.capture.screenshot.windows",
       "builtin.capture.windows",
       "builtin.citation.basic",
       "builtin.devtools.ast_ir",
@@ -619,6 +666,7 @@
       "builtin.backpressure.basic": true,
       "builtin.capture.audio.windows": true,
       "builtin.capture.basic": false,
+      "builtin.capture.screenshot.windows": true,
       "builtin.capture.windows": true,
       "builtin.citation.basic": true,
       "builtin.cursor.windows": false,
@@ -683,6 +731,40 @@
         "readwrite": [
           "{anchor_dir}"
         ]
+      },
+      "builtin.storage.encrypted": {
+        "readwrite": [
+          "{keyring_dir}",
+          "{root_key_dir}"
+        ]
+      },
+      "builtin.storage.sqlcipher": {
+        "readwrite": [
+          "{keyring_dir}",
+          "{root_key_dir}"
+        ]
+      },
+      "builtin.privacy.egress_sanitizer": {
+        "readwrite": [
+          "{keyring_dir}",
+          "{root_key_dir}"
+        ]
+      },
+      "builtin.devtools.ast_ir": {
+        "read": [
+          "{repo_root}/autocapture_nx"
+        ],
+        "readwrite": [
+          "{repo_root}/tools/hypervisor/runs"
+        ]
+      },
+      "builtin.devtools.diffusion": {
+        "read": [
+          "{repo_root}/autocapture_nx"
+        ],
+        "readwrite": [
+          "{repo_root}/tools/hypervisor/runs"
+        ]
       }
     },
     "hosting": {
@@ -716,6 +798,7 @@
       "rpc_max_message_bytes": 2000000,
       "rpc_timeout_limit": 3,
       "rpc_timeout_s": 10,
+      "rpc_startup_timeout_s": 60,
       "rpc_timeout_window_s": 60,
       "rpc_watchdog_backoff_s": 0.2,
       "rpc_watchdog_restart_max": 3,
@@ -741,6 +824,7 @@
       ]
     },
     "safe_mode": false,
+    "safe_mode_minimal": false,
     "search_paths": [
       "autocapture_plugins"
     ]

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import threading
+import uuid
 from contextlib import contextmanager
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -25,6 +26,54 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
         else:
             merged[key] = value
     return merged
+
+
+_MISSING = object()
+
+
+def _deleted_marker() -> dict[str, Any]:
+    return {"__deleted__": True}
+
+
+def _is_deleted_marker(value: Any) -> bool:
+    return isinstance(value, dict) and value.get("__deleted__") is True and len(value) == 1
+
+
+def _snapshot_patch_values(current: Any, patch: Any) -> Any:
+    if not isinstance(patch, dict):
+        if current is _MISSING:
+            return _deleted_marker()
+        return current
+    snapshot: dict[str, Any] = {}
+    for key, value in patch.items():
+        if isinstance(value, dict):
+            if isinstance(current, dict) and key in current:
+                snapshot[key] = _snapshot_patch_values(current.get(key), value)
+            else:
+                snapshot[key] = _snapshot_patch_values(_MISSING, value)
+        else:
+            if isinstance(current, dict) and key in current:
+                snapshot[key] = current.get(key)
+            else:
+                snapshot[key] = _deleted_marker()
+    return snapshot
+
+
+def _apply_revert_patch(target: Any, patch: Any) -> None:
+    if not isinstance(target, dict) or not isinstance(patch, dict):
+        return
+    for key, value in patch.items():
+        if _is_deleted_marker(value):
+            if key in target:
+                target.pop(key, None)
+            continue
+        if isinstance(value, dict):
+            existing = target.get(key)
+            if not isinstance(existing, dict):
+                target[key] = {}
+            _apply_revert_patch(target[key], value)
+            continue
+        target[key] = value
 
 
 class KernelManager:
@@ -94,6 +143,10 @@ class UXFacade:
             start_conductor=start_conductor,
         )
         self._run_active = False
+        self._pause_lock = threading.Lock()
+        self._pause_timer: threading.Timer | None = None
+        self._paused_until_utc: str | None = None
+        self._history_lock = threading.Lock()
 
     @property
     def config(self) -> dict[str, Any]:
@@ -119,12 +172,110 @@ class UXFacade:
             "checks": [check.__dict__ for check in checks],
         }
 
+    def resolve_citations(self, citations: list[dict[str, Any]]) -> dict[str, Any]:
+        with self._kernel_mgr.session() as system:
+            validator = system.get("citation.validator")
+            return validator.resolve(citations)
+
+    def verify_citations(self, citations: list[dict[str, Any]]) -> dict[str, Any]:
+        result = self.resolve_citations(citations)
+        return {"ok": bool(result.get("ok")), "errors": result.get("errors", [])}
+
     def config_get(self) -> dict[str, Any]:
         return dict(self._config)
+
+    def _now_utc(self) -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def _history_path(self) -> Path:
+        data_dir = Path(self._config.get("storage", {}).get("data_dir", "data"))
+        return data_dir / "config_history.ndjson"
+
+    def _bookmarks_path(self) -> Path:
+        data_dir = Path(self._config.get("storage", {}).get("data_dir", "data"))
+        return data_dir / "bookmarks.ndjson"
+
+    def _append_ndjson(self, path: Path, payload: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(payload, sort_keys=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+
+    def _record_config_change(self, entry: dict[str, Any]) -> None:
+        with self._history_lock:
+            self._append_ndjson(self._history_path(), entry)
+
+    def _load_history(self) -> list[dict[str, Any]]:
+        path = self._history_path()
+        if not path.exists():
+            return []
+        entries: list[dict[str, Any]] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                entries.append(json.loads(line))
+            except Exception:
+                continue
+        return entries
+
+    def config_history(self, limit: int = 20) -> dict[str, Any]:
+        entries = self._load_history()
+        if limit > 0:
+            entries = entries[-limit:]
+        return {"changes": entries}
+
+    def config_revert(self, change_id: str) -> dict[str, Any]:
+        if not change_id:
+            raise ValueError("config_change_id_missing")
+        history = self._load_history()
+        target = None
+        for entry in reversed(history):
+            if entry.get("id") == change_id:
+                target = entry
+                break
+        if target is None:
+            raise KeyError("config_change_not_found")
+        previous = target.get("previous")
+        if not isinstance(previous, dict):
+            raise ValueError("config_change_missing_previous")
+        user_cfg = {}
+        if self._paths.user_path.exists():
+            user_cfg = json.loads(self._paths.user_path.read_text(encoding="utf-8"))
+        prior_text = json.dumps(user_cfg, indent=2, sort_keys=True)
+        _apply_revert_patch(user_cfg, previous)
+        self._paths.user_path.parent.mkdir(parents=True, exist_ok=True)
+        self._paths.user_path.write_text(json.dumps(user_cfg, indent=2, sort_keys=True), encoding="utf-8")
+        try:
+            self.reload_config()
+        except Exception as exc:
+            self._paths.user_path.write_text(prior_text, encoding="utf-8")
+            self.reload_config()
+            raise exc
+        revert_entry = {
+            "id": f"revert_{uuid.uuid4().hex}",
+            "ts_utc": self._now_utc(),
+            "scope": "config_revert",
+            "source": "web",
+            "target_id": str(change_id),
+            "patch": previous,
+        }
+        self._record_config_change(revert_entry)
+        return {"ok": True, "reverted": change_id}
+
+    def _clear_pause_locked(self) -> None:
+        if self._pause_timer is not None:
+            try:
+                self._pause_timer.cancel()
+            except Exception:
+                pass
+            self._pause_timer = None
+        self._paused_until_utc = None
 
     def config_set(self, patch: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(patch, dict):
             raise ValueError("config_patch_invalid")
+        previous = _snapshot_patch_values(self._config, patch)
         user_cfg = {}
         if self._paths.user_path.exists():
             user_cfg = json.loads(self._paths.user_path.read_text(encoding="utf-8"))
@@ -132,7 +283,17 @@ class UXFacade:
         validate_config(self._paths.schema_path, _deep_merge(self._config, patch))
         self._paths.user_path.parent.mkdir(parents=True, exist_ok=True)
         self._paths.user_path.write_text(json.dumps(merged, indent=2, sort_keys=True), encoding="utf-8")
-        return self.reload_config()
+        updated = self.reload_config()
+        entry = {
+            "id": f"cfg_{uuid.uuid4().hex}",
+            "ts_utc": self._now_utc(),
+            "scope": "config",
+            "source": "web",
+            "patch": patch,
+            "previous": previous,
+        }
+        self._record_config_change(entry)
+        return updated
 
     def settings_schema(self) -> dict[str, Any]:
         from autocapture_nx.ux.settings_schema import build_settings_schema
@@ -160,20 +321,62 @@ class UXFacade:
         return {"plugin_id": plugin_id, "settings": settings, "schema": schema}
 
     def plugins_settings_set(self, plugin_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        previous_leaf = _snapshot_patch_values(
+            self._config.get("plugins", {}).get("settings", {}).get(plugin_id, _MISSING),
+            patch,
+        )
         manager = PluginManager(self._config, safe_mode=self._safe_mode)
         manager.settings_set(plugin_id, patch)
         self.reload_config()
+        entry = {
+            "id": f"plugin_{uuid.uuid4().hex}",
+            "ts_utc": self._now_utc(),
+            "scope": "plugin_settings",
+            "source": "web",
+            "plugin_id": plugin_id,
+            "patch": {"plugins": {"settings": {plugin_id: patch}}},
+            "previous": {"plugins": {"settings": {plugin_id: previous_leaf}}},
+        }
+        self._record_config_change(entry)
         return manager.settings_get(plugin_id)
 
     def plugins_enable(self, plugin_id: str) -> None:
+        previous_leaf = _snapshot_patch_values(
+            self._config.get("plugins", {}).get("enabled", {}).get(plugin_id, _MISSING),
+            True,
+        )
         manager = PluginManager(self._config, safe_mode=self._safe_mode)
         manager.enable(plugin_id)
         self.reload_config()
+        entry = {
+            "id": f"plugin_enable_{uuid.uuid4().hex}",
+            "ts_utc": self._now_utc(),
+            "scope": "plugin_enable",
+            "source": "web",
+            "plugin_id": plugin_id,
+            "patch": {"plugins": {"enabled": {plugin_id: True}}},
+            "previous": {"plugins": {"enabled": {plugin_id: previous_leaf}}},
+        }
+        self._record_config_change(entry)
 
     def plugins_disable(self, plugin_id: str) -> None:
+        previous_leaf = _snapshot_patch_values(
+            self._config.get("plugins", {}).get("enabled", {}).get(plugin_id, _MISSING),
+            False,
+        )
         manager = PluginManager(self._config, safe_mode=self._safe_mode)
         manager.disable(plugin_id)
         self.reload_config()
+        entry = {
+            "id": f"plugin_disable_{uuid.uuid4().hex}",
+            "ts_utc": self._now_utc(),
+            "scope": "plugin_disable",
+            "source": "web",
+            "plugin_id": plugin_id,
+            "patch": {"plugins": {"enabled": {plugin_id: False}}},
+            "previous": {"plugins": {"enabled": {plugin_id: previous_leaf}}},
+        }
+        self._record_config_change(entry)
 
     def plugins_approve(self) -> dict[str, Any]:
         manager = PluginManager(self._config, safe_mode=self._safe_mode)
@@ -223,41 +426,110 @@ class UXFacade:
                 "plugins_loaded": len(getattr(system, "plugins", []) or []),
                 "safe_mode": bool(self._safe_mode),
                 "capture_active": bool(self._run_active),
+                "paused_until_utc": self._paused_until_utc,
+                "paused": bool(self._paused_until_utc),
             }
 
-    def run_start(self) -> dict[str, Any]:
+    def _start_components(self) -> None:
         with self._kernel_mgr.session() as system:
             capture = system.get("capture.source") if system and hasattr(system, "get") else None
+            screenshot = (
+                system.get("capture.screenshot")
+                if system and hasattr(system, "has") and system.has("capture.screenshot")
+                else None
+            )
             audio = system.get("capture.audio") if system and hasattr(system, "get") else None
             input_tracker = system.get("tracking.input") if system and hasattr(system, "get") else None
             window_meta = system.get("window.metadata") if system and hasattr(system, "get") else None
-            cursor_tracker = system.get("tracking.cursor") if system and hasattr(system, "has") and system.has("tracking.cursor") else None
-            clipboard = system.get("tracking.clipboard") if system and hasattr(system, "has") and system.has("tracking.clipboard") else None
-            file_activity = system.get("tracking.file_activity") if system and hasattr(system, "has") and system.has("tracking.file_activity") else None
-            for component in (capture, audio, input_tracker, window_meta, cursor_tracker, clipboard, file_activity):
+            cursor_tracker = (
+                system.get("tracking.cursor")
+                if system and hasattr(system, "has") and system.has("tracking.cursor")
+                else None
+            )
+            clipboard = (
+                system.get("tracking.clipboard")
+                if system and hasattr(system, "has") and system.has("tracking.clipboard")
+                else None
+            )
+            file_activity = (
+                system.get("tracking.file_activity")
+                if system and hasattr(system, "has") and system.has("tracking.file_activity")
+                else None
+            )
+            for component in (capture, screenshot, audio, input_tracker, window_meta, cursor_tracker, clipboard, file_activity):
                 if component is None:
                     continue
                 if hasattr(component, "start"):
                     component.start()
-            self._run_active = True
-            return {"ok": True, "running": True}
+        self._run_active = True
 
-    def run_stop(self) -> dict[str, Any]:
+    def _stop_components(self) -> None:
         with self._kernel_mgr.session() as system:
             capture = system.get("capture.source") if system and hasattr(system, "get") else None
+            screenshot = (
+                system.get("capture.screenshot")
+                if system and hasattr(system, "has") and system.has("capture.screenshot")
+                else None
+            )
             audio = system.get("capture.audio") if system and hasattr(system, "get") else None
             input_tracker = system.get("tracking.input") if system and hasattr(system, "get") else None
             window_meta = system.get("window.metadata") if system and hasattr(system, "get") else None
-            cursor_tracker = system.get("tracking.cursor") if system and hasattr(system, "has") and system.has("tracking.cursor") else None
-            clipboard = system.get("tracking.clipboard") if system and hasattr(system, "has") and system.has("tracking.clipboard") else None
-            file_activity = system.get("tracking.file_activity") if system and hasattr(system, "has") and system.has("tracking.file_activity") else None
-            for component in (capture, audio, input_tracker, window_meta, cursor_tracker, clipboard, file_activity):
+            cursor_tracker = (
+                system.get("tracking.cursor")
+                if system and hasattr(system, "has") and system.has("tracking.cursor")
+                else None
+            )
+            clipboard = (
+                system.get("tracking.clipboard")
+                if system and hasattr(system, "has") and system.has("tracking.clipboard")
+                else None
+            )
+            file_activity = (
+                system.get("tracking.file_activity")
+                if system and hasattr(system, "has") and system.has("tracking.file_activity")
+                else None
+            )
+            for component in (capture, screenshot, audio, input_tracker, window_meta, cursor_tracker, clipboard, file_activity):
                 if component is None:
                     continue
                 if hasattr(component, "stop"):
                     component.stop()
-            self._run_active = False
-            return {"ok": True, "running": False}
+        self._run_active = False
+
+    def run_start(self) -> dict[str, Any]:
+        with self._pause_lock:
+            self._clear_pause_locked()
+        self._start_components()
+        return {"ok": True, "running": True}
+
+    def run_stop(self, *, preserve_pause: bool = False) -> dict[str, Any]:
+        if not preserve_pause:
+            with self._pause_lock:
+                self._clear_pause_locked()
+        self._stop_components()
+        return {"ok": True, "running": False}
+
+    def run_pause(self, minutes: float) -> dict[str, Any]:
+        delay_s = max(0.0, float(minutes) * 60.0)
+        self._stop_components()
+        paused_until = None
+        with self._pause_lock:
+            self._clear_pause_locked()
+            if delay_s > 0:
+                paused_until = datetime.now(timezone.utc) + timedelta(seconds=delay_s)
+                self._paused_until_utc = paused_until.isoformat()
+
+                def _resume() -> None:
+                    with self._pause_lock:
+                        self._paused_until_utc = None
+                        self._pause_timer = None
+                    self._start_components()
+
+                timer = threading.Timer(delay_s, _resume)
+                timer.daemon = True
+                self._pause_timer = timer
+                timer.start()
+        return {"ok": True, "paused_until_utc": self._paused_until_utc}
 
     def scheduler_status(self) -> dict[str, Any]:
         with self._kernel_mgr.session() as system:
@@ -384,6 +656,42 @@ class UXFacade:
             except Exception:
                 continue
         return out
+
+    def bookmark_add(self, note: str, tags: list[str] | None = None) -> dict[str, Any]:
+        note = str(note or "").strip()
+        if not note:
+            raise ValueError("bookmark_note_missing")
+        payload = {
+            "id": f"bookmark_{uuid.uuid4().hex}",
+            "ts_utc": self._now_utc(),
+            "note": note,
+            "tags": [str(tag).strip() for tag in (tags or []) if str(tag).strip()],
+        }
+        self._append_ndjson(self._bookmarks_path(), payload)
+        try:
+            with self._kernel_mgr.session() as system:
+                builder = system.get("event.builder") if system and hasattr(system, "get") else None
+                if builder is not None:
+                    builder.journal_event("user.bookmark", payload, event_id=payload["id"], ts_utc=payload["ts_utc"])
+        except Exception:
+            pass
+        return payload
+
+    def bookmarks_list(self, limit: int = 20) -> dict[str, Any]:
+        path = self._bookmarks_path()
+        if not path.exists():
+            return {"bookmarks": []}
+        items: list[dict[str, Any]] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                items.append(json.loads(line))
+            except Exception:
+                continue
+        if limit > 0:
+            items = items[-limit:]
+        return {"bookmarks": items}
 
     def alerts(self, limit: int = 50) -> dict[str, Any]:
         from autocapture_nx.kernel.alerts import derive_alerts

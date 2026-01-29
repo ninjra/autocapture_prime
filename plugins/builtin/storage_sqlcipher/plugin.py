@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
 from typing import Any
 
 from dataclasses import dataclass
@@ -31,6 +32,43 @@ def _sqlcipher_available() -> tuple[bool, str | None]:
 def sqlcipher_available() -> bool:
     ok, _reason = _sqlcipher_available()
     return ok
+
+
+class _LazyStores:
+    def __init__(self, builder):
+        self._builder = builder
+        self._lock = threading.Lock()
+        self._ready = False
+        self.metadata = None
+        self.media = None
+        self.entity_map = None
+
+    def ensure(self) -> "_LazyStores":
+        if self._ready:
+            return self
+        with self._lock:
+            if not self._ready:
+                self.metadata, self.media, self.entity_map = self._builder()
+                self._ready = True
+        return self
+
+
+class _LazyProxy:
+    def __init__(self, stores: _LazyStores, attr: str) -> None:
+        self._stores = stores
+        self._attr = attr
+
+    def _target(self):
+        return getattr(self._stores.ensure(), self._attr)
+
+    def __getattr__(self, name: str):
+        return getattr(self._target(), name)
+
+    def __dir__(self):
+        try:
+            return dir(self._target())
+        except Exception:
+            return super().__dir__()
 
 
 @dataclass(frozen=True)
@@ -371,9 +409,10 @@ class SQLCipherStoragePlugin(PluginBase):
         encryption_required = storage_cfg.get("encryption_required", False)
         require_protection = bool(encryption_required and os.name == "nt")
         keyring = KeyRing.load(keyring_path, legacy_root_path=root_key_path, require_protection=require_protection)
-        meta_provider = DerivedKeyProvider(keyring, "metadata")
-        media_provider = DerivedKeyProvider(keyring, "media")
-        entity_provider = DerivedKeyProvider(keyring, "entity_tokens")
+        self._keyring = keyring
+        self._meta_provider = DerivedKeyProvider(keyring, "metadata")
+        self._media_provider = DerivedKeyProvider(keyring, "media")
+        self._entity_provider = DerivedKeyProvider(keyring, "entity_tokens")
         data_dir = storage_cfg.get("data_dir", "data")
         run_id = str(context.config.get("runtime", {}).get("run_id", "run"))
         fsync_policy = _FsyncPolicy.normalize(storage_cfg.get("fsync_policy"))
@@ -385,40 +424,51 @@ class SQLCipherStoragePlugin(PluginBase):
                 metadata_path = legacy_meta_path
         else:
             metadata_path = legacy_meta_path
-        metadata_dir = storage_cfg.get("metadata_dir") or os.path.join(data_dir, "metadata")
+        self._metadata_dir = storage_cfg.get("metadata_dir") or os.path.join(data_dir, "metadata")
+        self._metadata_path = metadata_path
+        self._data_dir = data_dir
+        self._run_id = run_id
+        self._fsync_policy = fsync_policy
+        self._require_decrypt = require_decrypt
+        self._entity_persist = storage_cfg.get("entity_map", {}).get("persist", True)
+        self._lazy = _LazyStores(self._build_stores)
+        self._metadata = _LazyProxy(self._lazy, "metadata")
+        self._entity_map = _LazyProxy(self._lazy, "entity_map")
+        self._media = _LazyProxy(self._lazy, "media")
+
+    def _build_stores(self):
         available, reason = _sqlcipher_available()
         if available:
-            _meta_id, meta_key = meta_provider.active()
-            store = SQLCipherStore(metadata_path, meta_key, run_id, fsync_policy)
-            self._metadata = ImmutableMetadataStore(store)
-            self._entity_map = EntityMapAdapter(store)
+            _meta_id, meta_key = self._meta_provider.active()
+            store = SQLCipherStore(self._metadata_path, meta_key, self._run_id, self._fsync_policy)
+            metadata = ImmutableMetadataStore(store)
+            entity_map = EntityMapAdapter(store)
         else:
-            context.logger(f"SQLCipher unavailable ({reason}); falling back to encrypted JSON store")
-            self._metadata = ImmutableMetadataStore(
+            self.context.logger(f"SQLCipher unavailable ({reason}); falling back to encrypted JSON store")
+            metadata = ImmutableMetadataStore(
                 EncryptedJSONStore(
-                    metadata_dir,
-                    meta_provider,
-                    run_id,
-                    require_decrypt=require_decrypt,
-                    fsync_policy=fsync_policy,
+                    self._metadata_dir,
+                    self._meta_provider,
+                    self._run_id,
+                    require_decrypt=self._require_decrypt,
+                    fsync_policy=self._fsync_policy,
                 )
             )
-            persist = storage_cfg.get("entity_map", {}).get("persist", True)
-            self._entity_map = EntityMapStore(
-                os.path.join(data_dir, "entity_map"),
-                entity_provider,
-                persist,
-                require_decrypt=require_decrypt,
-                fsync_policy=fsync_policy,
+            entity_map = EntityMapStore(
+                os.path.join(self._data_dir, "entity_map"),
+                self._entity_provider,
+                self._entity_persist,
+                require_decrypt=self._require_decrypt,
+                fsync_policy=self._fsync_policy,
             )
-        self._media = EncryptedBlobStore(
-            os.path.join(data_dir, "media"),
-            media_provider,
-            run_id,
-            require_decrypt=require_decrypt,
-            fsync_policy=fsync_policy,
+        media = EncryptedBlobStore(
+            os.path.join(self._data_dir, "media"),
+            self._media_provider,
+            self._run_id,
+            require_decrypt=self._require_decrypt,
+            fsync_policy=self._fsync_policy,
         )
-        self._keyring = keyring
+        return metadata, media, entity_map
 
     def capabilities(self) -> dict[str, Any]:
         return {

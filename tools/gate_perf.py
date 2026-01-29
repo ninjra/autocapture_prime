@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 import tempfile
 import sys
@@ -71,6 +72,7 @@ def _measure_query_latency_ms() -> float:
 
 
 def main() -> int:
+    os.environ.setdefault("AUTOCAPTURE_SAFE_MODE_MINIMAL", "1")
     paths = default_config_paths()
     config = load_config(paths, safe_mode=True)
     perf_cfg = config.get("performance", {})

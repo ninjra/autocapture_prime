@@ -22,6 +22,8 @@ class PluginStatus:
     allowlisted: bool
     hash_ok: bool
     version: str
+    kinds: List[str]
+    provides: List[str]
     permissions: Dict[str, Any]
     depends_on: List[str]
     conflicts_with: List[str]
@@ -188,6 +190,8 @@ class PluginManager:
                     allowlisted=manifest.plugin_id in allowlist,
                     hash_ok=hash_ok,
                     version=manifest.version,
+                    kinds=sorted({entry.kind for entry in manifest.entrypoints if entry.kind}),
+                    provides=sorted({str(item) for item in (manifest.provides or []) if str(item).strip()}),
                     permissions={
                         "filesystem": manifest.permissions.filesystem,
                         "gpu": manifest.permissions.gpu,

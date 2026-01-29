@@ -21,6 +21,9 @@ class CaptureWindows(PluginBase):
         return {"capture.source": self}
 
     def start(self) -> None:
+        capture_cfg = self.context.config.get("capture", {}).get("video", {})
+        if not bool(capture_cfg.get("enabled", True)):
+            return
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
@@ -47,6 +50,7 @@ class CaptureWindows(PluginBase):
 
         pipeline = CapturePipeline(
             self.context.config,
+            plugin_id=self.plugin_id,
             storage_media=storage_media,
             storage_meta=storage_meta,
             event_builder=event_builder,

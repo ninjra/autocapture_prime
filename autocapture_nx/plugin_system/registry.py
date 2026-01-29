@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import site
+import sys
+import sysconfig
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, cast
 
 from autocapture_nx import __version__ as kernel_version
 from autocapture_nx.kernel.config import SchemaLiteValidator
@@ -311,7 +315,7 @@ class PluginRegistry:
             raise PluginError(f"Plugin {manifest.get('plugin_id')} requires kernel {requires_kernel}, have {kernel_version}")
         required_schemas = compat.get("requires_schema_versions", [])
         if required_schemas:
-            schema_version = self.config.get("schema_version")
+            schema_version = self.config.get("schema_version", 1)
             if schema_version not in required_schemas:
                 raise PluginError(
                     f"Plugin {manifest.get('plugin_id')} requires schema versions {required_schemas}, have {schema_version}"
@@ -364,6 +368,91 @@ class PluginRegistry:
         if missing:
             raise PluginError(f"Missing inproc justification for: {', '.join(missing)}")
 
+    def _manifest_provides(self, manifest: dict[str, Any]) -> set[str]:
+        provides: set[str] = set()
+        for entry in manifest.get("entrypoints", []) or []:
+            kind = entry.get("kind")
+            if kind:
+                provides.add(str(kind))
+        for item in manifest.get("provides", []) or []:
+            if item:
+                provides.add(str(item))
+        return provides
+
+    def _minimal_safe_mode_set(
+        self,
+        manifests_by_id: dict[str, tuple[Path, dict[str, Any]]],
+        allowlist: set[str],
+        alias_map: dict[str, str],
+    ) -> set[str]:
+        kernel_cfg = self.config.get("kernel", {}) if isinstance(self.config, dict) else {}
+        required_caps = kernel_cfg.get("required_capabilities", [])
+        safe_caps = kernel_cfg.get("safe_mode_required_capabilities", [])
+        if isinstance(safe_caps, list) and safe_caps:
+            required_caps = safe_caps
+        if not isinstance(required_caps, list) or not required_caps:
+            return set()
+        providers_by_cap: dict[str, list[str]] = {}
+        for pid, (_path, manifest) in manifests_by_id.items():
+            if pid not in allowlist:
+                continue
+            for cap in self._manifest_provides(manifest):
+                providers_by_cap.setdefault(cap, []).append(pid)
+        selected: set[str] = set()
+        for cap in required_caps:
+            cap_name = str(cap).strip()
+            if not cap_name:
+                continue
+            candidates = sorted(set(providers_by_cap.get(cap_name, [])))
+            if not candidates:
+                continue
+            policy = self._capability_policy(cap_name)
+            preferred = policy.get("preferred", [])
+            chosen = None
+            for pid in preferred:
+                if pid in candidates:
+                    chosen = pid
+                    break
+            if chosen is None:
+                chosen = candidates[0]
+            selected.add(chosen)
+        queue = list(selected)
+        while queue:
+            pid = queue.pop()
+            manifest_entry = manifests_by_id.get(pid)
+            if manifest_entry is None:
+                continue
+            deps = manifest_entry[1].get("depends_on", []) or []
+            for dep in deps:
+                dep_id = alias_map.get(str(dep).strip(), str(dep).strip())
+                if not dep_id or dep_id not in allowlist:
+                    continue
+                if dep_id not in selected:
+                    selected.add(dep_id)
+                    queue.append(dep_id)
+            required_raw = manifest_entry[1].get("required_capabilities", [])
+            if isinstance(required_raw, list):
+                for cap in required_raw:
+                    cap_name = str(cap).strip()
+                    if not cap_name:
+                        continue
+                    candidates = sorted(set(providers_by_cap.get(cap_name, [])))
+                    if not candidates:
+                        continue
+                    policy = self._capability_policy(cap_name)
+                    preferred = policy.get("preferred", [])
+                    chosen = None
+                    for pref in preferred:
+                        if pref in candidates:
+                            chosen = pref
+                            break
+                    if chosen is None:
+                        chosen = candidates[0]
+                    if chosen not in selected:
+                        selected.add(chosen)
+                        queue.append(chosen)
+        return selected
+
     def _plugin_load_order(
         self,
         manifests_by_id: dict[str, tuple[Path, dict[str, Any]]],
@@ -405,7 +494,7 @@ class PluginRegistry:
                 capability = cap.strip()
                 if not capability:
                     continue
-                providers = [(provider_id, None) for provider_id in provided_by_cap.get(capability, [])]
+                providers = [(provider_id, cast(CapabilityProxy, None)) for provider_id in provided_by_cap.get(capability, [])]
                 if not providers:
                     continue
                 policy = self._capability_policy(capability)
@@ -474,6 +563,36 @@ class PluginRegistry:
             if isinstance(source, dict):
                 read_roots.extend(_collect(source.get("read")))
                 write_roots.extend(_collect(source.get("readwrite")))
+        python_roots: list[str] = []
+        try:
+            paths = sysconfig.get_paths()
+            for key in ("stdlib", "platstdlib", "purelib", "platlib"):
+                path = paths.get(key)
+                if path:
+                    python_roots.append(str(path))
+        except Exception:
+            pass
+        for root in (sys.prefix, getattr(sys, "base_prefix", None), getattr(sys, "exec_prefix", None)):
+            if root:
+                python_roots.append(str(root))
+        try:
+            python_roots.extend(site.getsitepackages())
+        except Exception:
+            pass
+        try:
+            user_site = site.getusersitepackages()
+            if user_site:
+                python_roots.append(str(user_site))
+        except Exception:
+            pass
+        try:
+            import zoneinfo
+
+            for tz_path in getattr(zoneinfo, "TZPATH", ()):
+                if tz_path:
+                    python_roots.append(str(tz_path))
+        except Exception:
+            pass
 
         fs_perm = str(perms.get("filesystem", "none")).lower().strip() if isinstance(perms, dict) else "none"
         # Always allow read access to the plugin root for module resources.
@@ -485,6 +604,7 @@ class PluginRegistry:
             write_roots = []
         elif fs_perm == "readwrite":
             pass
+        read_roots.extend(python_roots)
         # Expand simple template variables.
         config = self.config if isinstance(self.config, dict) else {}
         data_dir = str(config.get("storage", {}).get("data_dir", "data"))
@@ -492,6 +612,10 @@ class PluginRegistry:
         config_dir = str(config.get("paths", {}).get("config_dir", "config"))
         anchor_path = ""
         anchor_dir = ""
+        keyring_path = ""
+        root_key_path = ""
+        keyring_dir = ""
+        root_key_dir = ""
         try:
             anchor_cfg = config.get("storage", {}).get("anchor", {})
             if isinstance(anchor_cfg, dict):
@@ -502,6 +626,28 @@ class PluginRegistry:
         except Exception:
             anchor_path = ""
             anchor_dir = ""
+        try:
+            crypto_cfg = config.get("storage", {}).get("crypto", {})
+            if isinstance(crypto_cfg, dict):
+                raw_keyring = crypto_cfg.get("keyring_path")
+                if isinstance(raw_keyring, str) and raw_keyring.strip():
+                    keyring_path = raw_keyring
+                    try:
+                        keyring_dir = str(Path(raw_keyring).expanduser().resolve().parent)
+                    except Exception:
+                        keyring_dir = ""
+                raw_root = crypto_cfg.get("root_key_path")
+                if isinstance(raw_root, str) and raw_root.strip():
+                    root_key_path = raw_root
+                    try:
+                        root_key_dir = str(Path(raw_root).expanduser().resolve().parent)
+                    except Exception:
+                        root_key_dir = ""
+        except Exception:
+            keyring_path = ""
+            root_key_path = ""
+            keyring_dir = ""
+            root_key_dir = ""
         repo_root = str(resolve_repo_path("."))
         mapping = {
             "data_dir": data_dir,
@@ -511,6 +657,10 @@ class PluginRegistry:
             "repo_root": repo_root,
             "anchor_path": anchor_path,
             "anchor_dir": anchor_dir,
+            "keyring_path": keyring_path,
+            "root_key_path": root_key_path,
+            "keyring_dir": keyring_dir,
+            "root_key_dir": root_key_dir,
         }
 
         def _expand(paths: list[str]) -> list[str]:
@@ -521,7 +671,8 @@ class PluginRegistry:
                     value = value.format(**mapping)
                 except Exception:
                     value = raw
-                expanded.append(value)
+                if str(value).strip():
+                    expanded.append(value)
             return expanded
 
         read_roots = _expand(read_roots)
@@ -905,6 +1056,15 @@ class PluginRegistry:
             if pid in allowlist and is_enabled(pid, manifest)
         }
 
+        plugins_cfg = self.config.get("plugins", {}) if isinstance(self.config, dict) else {}
+        safe_mode_minimal = bool(plugins_cfg.get("safe_mode_minimal", False))
+        if os.getenv("AUTOCAPTURE_SAFE_MODE_MINIMAL", "").lower() in {"1", "true", "yes"}:
+            safe_mode_minimal = True
+        if (self.safe_mode or plugins_cfg.get("safe_mode", False)) and safe_mode_minimal:
+            minimal = self._minimal_safe_mode_set(manifests_by_id, allowlist, alias_map)
+            if minimal:
+                enabled_set = minimal
+
         self._check_conflicts(manifests_by_id, enabled_set)
 
         load_order = self._plugin_load_order(manifests_by_id, enabled_set)
@@ -970,7 +1130,8 @@ class PluginRegistry:
                     import sys
 
                     sys.modules[module_name] = module
-                    spec.loader.exec_module(module)  # type: ignore[call-arg]
+                    source = module_path.read_text(encoding="utf-8")
+                    exec(compile(source, str(module_path), "exec"), module.__dict__)
                     factory = getattr(module, entry["callable"], None)
                     if factory is None:
                         raise PluginError(f"Missing callable {entry['callable']} in {module_path}")
@@ -985,6 +1146,14 @@ class PluginRegistry:
                         if not hasattr(instance, "capabilities"):
                             raise PluginError(f"Plugin {plugin_id} missing capabilities()")
                         caps = instance.capabilities()
+                if isinstance(caps, dict):
+                    manifest_provides = manifest.get("provides", [])
+                    if isinstance(manifest_provides, list) and caps:
+                        fallback_impl = next(iter(caps.values()))
+                        for cap in manifest_provides:
+                            cap_name = str(cap).strip()
+                            if cap_name and cap_name not in caps:
+                                caps[cap_name] = fallback_impl
                 for cap_name, impl in caps.items():
                     proxy = CapabilityProxy(impl, network_allowed, filesystem_policy)
                     providers_by_cap.setdefault(cap_name, []).append((plugin_id, proxy))

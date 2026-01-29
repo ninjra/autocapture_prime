@@ -35,6 +35,8 @@
   ],
   "settings_paths": [
     "gateway",
+    "plugins.permissions",
+    "plugins.safe_mode",
     "privacy",
     "storage"
   ],

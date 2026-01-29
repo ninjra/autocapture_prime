@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import queue
 import sys
 import threading
+from pathlib import Path
 from typing import Any
 
 from autocapture_nx.kernel.errors import PermissionError, PluginError
@@ -17,6 +19,12 @@ from autocapture_nx.plugin_system.runtime import (
     set_global_filesystem_policy,
     set_global_network_deny,
 )
+
+
+def _debug(message: str) -> None:
+    if os.getenv("AUTOCAPTURE_HOST_DEBUG", ""):
+        sys.stderr.write(f"[host_runner] {message}\n")
+        sys.stderr.flush()
 
 
 def _decode(obj: Any) -> Any:
@@ -36,6 +44,12 @@ def _encode(obj: Any) -> Any:
         import base64
 
         return {"__bytes__": base64.b64encode(obj).decode("ascii")}
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, tuple):
+        return [_encode(v) for v in obj]
+    if isinstance(obj, set):
+        return [_encode(v) for v in obj]
     if isinstance(obj, list):
         return [_encode(v) for v in obj]
     if isinstance(obj, dict):
@@ -229,6 +243,7 @@ def main() -> None:
     if not init_line:
         raise SystemExit("missing init payload")
     init_payload = json.loads(init_line)
+    _debug("init payload received")
     if isinstance(init_payload, dict) and "config" in init_payload:
         config = init_payload.get("config", {})
         host_config = init_payload.get("host_config", config)
@@ -241,7 +256,10 @@ def main() -> None:
         fs_policy = None
 
     set_global_filesystem_policy(fs_policy)
+    _debug("filesystem policy installed")
 
+    if not isinstance(host_config, dict):
+        host_config = {}
     hosting = _hosting_cfg(host_config)
     bridge = _Bridge(
         rpc_timeout_s=float(hosting.get("rpc_timeout_s", 10)),
@@ -255,6 +273,7 @@ def main() -> None:
             raise PermissionError(f"capability not allowed: {cap}")
         return _CapabilityProxy(bridge, cap)
 
+    _debug(f"loading plugin module {plugin_path}")
     spec = importlib.util.spec_from_file_location("plugin_module", plugin_path)
     if spec is None or spec.loader is None:
         raise RuntimeError("Failed to load plugin module")
@@ -262,13 +281,26 @@ def main() -> None:
     sys.modules["plugin_module"] = module
     spec.loader.exec_module(module)  # type: ignore[call-arg]
     factory = getattr(module, callable_name)
+    _debug("plugin module loaded")
 
     context = PluginContext(config=config, get_capability=_get_capability, logger=lambda _m: None)
+    trace_enabled = os.getenv("AUTOCAPTURE_HOST_TRACE", "")
     with network_guard(network_allowed):
+        if trace_enabled:
+            import faulthandler
+
+            faulthandler.dump_traceback_later(5.0, repeat=False, file=sys.stderr)
         instance = factory(plugin_id, context)
+        if trace_enabled:
+            import faulthandler
+
+            faulthandler.cancel_dump_traceback_later()
+        _debug("plugin instance created")
         caps = instance.capabilities()
+        _debug("plugin capabilities collected")
 
     cap_map = {name: cap for name, cap in caps.items()}
+    _debug("entering request loop")
 
     try:
         while True:

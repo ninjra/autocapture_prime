@@ -36,8 +36,9 @@ class UIServer:
         import uvicorn
 
         config = uvicorn.Config(app, host=self._host, port=self._port, log_level="warning")
-        self._server = uvicorn.Server(config)
-        self._thread = threading.Thread(target=self._server.run, daemon=True)
+        server = uvicorn.Server(config)
+        self._server = server
+        self._thread = threading.Thread(target=server.run, daemon=True)
         self._thread.start()
         deadline = time.time() + 5
         while time.time() < deadline:

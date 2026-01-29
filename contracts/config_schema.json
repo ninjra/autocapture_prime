@@ -379,6 +379,71 @@
           ],
           "type": "object"
         },
+        "screenshot": {
+          "additionalProperties": false,
+          "properties": {
+            "backend": {
+              "type": "string"
+            },
+            "dedupe": {
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "force_interval_s": {
+                  "type": "number"
+                },
+                "hash": {
+                  "type": "string"
+                },
+                "sample_bytes": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "enabled",
+                "hash",
+                "sample_bytes",
+                "force_interval_s"
+              ],
+              "type": "object"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "fps_target": {
+              "type": "integer"
+            },
+            "include_cursor": {
+              "type": "boolean"
+            },
+            "include_cursor_shape": {
+              "type": "boolean"
+            },
+            "monitor_index": {
+              "type": "integer"
+            },
+            "png_compress_level": {
+              "type": "integer"
+            },
+            "resolution": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "enabled",
+            "fps_target",
+            "monitor_index",
+            "resolution",
+            "backend",
+            "include_cursor",
+            "include_cursor_shape",
+            "png_compress_level",
+            "dedupe"
+          ],
+          "type": "object"
+        },
         "window_metadata": {
           "additionalProperties": false,
           "properties": {
@@ -403,6 +468,7 @@
         "window_metadata",
         "input_tracking",
         "cursor",
+        "screenshot",
         "clipboard",
         "file_activity"
       ],
@@ -504,11 +570,35 @@
     "kernel": {
       "additionalProperties": false,
       "properties": {
+        "safe_mode_fast_boot": {
+          "type": "boolean"
+        },
+        "safe_mode_required_capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "required_capabilities": {
           "items": {
             "type": "string"
           },
           "type": "array"
+        },
+        "dependency_pinning": {
+          "additionalProperties": false,
+          "properties": {
+            "enforce": {
+              "type": "boolean"
+            },
+            "allow_missing": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
         }
       },
       "required": [
@@ -803,6 +893,9 @@
             "rpc_timeout_s": {
               "type": "number"
             },
+            "rpc_startup_timeout_s": {
+              "type": "number"
+            },
             "rpc_timeout_window_s": {
               "type": "number"
             },
@@ -908,6 +1001,9 @@
         "safe_mode": {
           "type": "boolean"
         },
+        "safe_mode_minimal": {
+          "type": "boolean"
+        },
         "search_paths": {
           "items": {
             "type": "string"
@@ -917,6 +1013,7 @@
       },
       "required": [
         "safe_mode",
+        "safe_mode_minimal",
         "allowlist",
         "capabilities",
         "conflicts",

@@ -13,6 +13,9 @@ $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\\..")).Path
 $devDir = Join-Path $Root ".dev"
 $logDir = Join-Path $devDir "logs"
 if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
+$dataDir = $env:AUTOCAPTURE_DATA_DIR
+if (-not $dataDir) { $dataDir = "D:\\autocapture"; $env:AUTOCAPTURE_DATA_DIR = $dataDir }
+if (-not (Test-Path $dataDir)) { New-Item -Path $dataDir -ItemType Directory -Force | Out-Null }
 $timestamp = (Get-Date).ToString("yyyyMMdd_HHmmss")
 $logLatest = Join-Path $logDir "tray_launcher.latest.log"
 $logRun = Join-Path $logDir ("tray_launcher_{0}.log" -f $timestamp)

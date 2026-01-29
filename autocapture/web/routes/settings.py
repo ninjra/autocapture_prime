@@ -12,6 +12,10 @@ class ConfigPatch(BaseModel):
     patch: dict
 
 
+class ConfigRevert(BaseModel):
+    change_id: str
+
+
 @router.get("/api/config")
 def config_get(request: Request):
     return request.app.state.facade.config_get()
@@ -25,3 +29,13 @@ def config_set(req: ConfigPatch, request: Request):
 @router.get("/api/settings/schema")
 def settings_schema(request: Request):
     return request.app.state.facade.settings_schema()
+
+
+@router.get("/api/config/history")
+def config_history(request: Request, limit: int = 20):
+    return request.app.state.facade.config_history(limit=limit)
+
+
+@router.post("/api/config/revert")
+def config_revert(req: ConfigRevert, request: Request):
+    return request.app.state.facade.config_revert(req.change_id)

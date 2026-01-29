@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any, IO
 
 from autocapture_nx.kernel.errors import PermissionError, PluginError, PluginTimeoutError
+from autocapture_nx.kernel.paths import resolve_repo_path
+from autocapture_nx.plugin_system.runtime import filesystem_guard_suspended
 from autocapture_nx.windows.win_sandbox import assign_job_object
 
 
@@ -60,6 +62,11 @@ def _build_env(hosting: dict[str, Any], config: dict[str, Any]) -> dict[str, str
     if not bool(hosting.get("sanitize_env", True)):
         return None
     env = os.environ.copy()
+    if "AUTOCAPTURE_ROOT" not in env:
+        try:
+            env["AUTOCAPTURE_ROOT"] = str(resolve_repo_path("."))
+        except Exception:
+            env["AUTOCAPTURE_ROOT"] = str(Path(__file__).absolute().parents[2])
     for key in (
         "HTTP_PROXY",
         "HTTPS_PROXY",
@@ -179,6 +186,7 @@ class PluginProcess:
     ) -> None:
         hosting = _hosting_cfg(host_config)
         self._rpc_timeout_s = float(hosting.get("rpc_timeout_s", 10))
+        self._rpc_startup_timeout_s = float(hosting.get("rpc_startup_timeout_s", self._rpc_timeout_s))
         self._rpc_max_message_bytes = int(hosting.get("rpc_max_message_bytes", 2_000_000))
         self._write_lock = threading.Lock()
         self._response_lock = threading.Lock()
@@ -221,12 +229,12 @@ class PluginProcess:
             None if self._allowed_capabilities is None else sorted(self._allowed_capabilities)
         )
         init_payload["filesystem_policy"] = self._filesystem_policy
-        self._send_payload(init_payload)
+        self._send_payload(init_payload, enforce_limit=False)
 
-    def _send_payload(self, payload: dict[str, Any]) -> None:
+    def _send_payload(self, payload: dict[str, Any], *, enforce_limit: bool = True) -> None:
         text = json.dumps(payload)
         size = len(text.encode("utf-8"))
-        if size > self._rpc_max_message_bytes:
+        if enforce_limit and size > self._rpc_max_message_bytes:
             raise PluginError(f"payload too large for plugin host ({size} bytes)")
         with self._write_lock:
             self._stdin.write(text + "\n")
@@ -376,7 +384,7 @@ class PluginProcess:
                     pass
             self._proc = None
 
-    def _request(self, payload: dict[str, Any]) -> Any:
+    def _request(self, payload: dict[str, Any], *, timeout_s: float | None = None) -> Any:
         if self._reader_error:
             raise PluginError(self._reader_error)
         self._req_id += 1
@@ -386,11 +394,14 @@ class PluginProcess:
         with self._response_lock:
             self._responses[req_id] = resp_q
         self._send_payload(payload)
+        timeout = max(0.1, float(timeout_s if timeout_s is not None else self._rpc_timeout_s))
         try:
-            response = resp_q.get(timeout=max(0.1, float(self._rpc_timeout_s)))
+            response = resp_q.get(timeout=timeout)
         except queue.Empty as exc:
             self.close()
-            raise PluginTimeoutError(f"Plugin host request timed out after {self._rpc_timeout_s:.2f}s") from exc
+            raise PluginTimeoutError(
+                f"Plugin host request timed out after {timeout:.2f}s (plugin={self._plugin_id})"
+            ) from exc
         finally:
             with self._response_lock:
                 self._responses.pop(req_id, None)
@@ -399,7 +410,7 @@ class PluginProcess:
         return response.get("result")
 
     def capabilities(self) -> dict[str, list[str]]:
-        return self._request({"method": "capabilities"})
+        return self._request({"method": "capabilities"}, timeout_s=self._rpc_startup_timeout_s)
 
     def call(self, capability: str, function: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
         payload = {
@@ -437,6 +448,7 @@ class SubprocessPlugin:
         self._network_allowed = network_allowed
         self._config = config
         self._plugin_config = plugin_config if isinstance(plugin_config, dict) else config
+        self.settings = dict(self._plugin_config)
         self._capabilities = capabilities
         self._allowed_capabilities = allowed_capabilities
         self._filesystem_policy = filesystem_policy
@@ -466,18 +478,19 @@ class SubprocessPlugin:
             self._host = None
 
     def _start_host(self) -> None:
-        self._host = PluginProcess(
-            self._plugin_path,
-            self._callable_name,
-            self._plugin_id,
-            self._network_allowed,
-            self._config,
-            self._plugin_config,
-            capabilities=self._capabilities,
-            allowed_capabilities=self._allowed_capabilities,
-            filesystem_policy=self._filesystem_policy,
-        )
-        self._refresh_caps()
+        with filesystem_guard_suspended():
+            self._host = PluginProcess(
+                self._plugin_path,
+                self._callable_name,
+                self._plugin_id,
+                self._network_allowed,
+                self._config,
+                self._plugin_config,
+                capabilities=self._capabilities,
+                allowed_capabilities=self._allowed_capabilities,
+                filesystem_policy=self._filesystem_policy,
+            )
+            self._refresh_caps()
 
     def _refresh_caps(self) -> None:
         if self._host is None:

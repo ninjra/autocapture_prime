@@ -32,44 +32,218 @@
 
       <main class="panels">
         <section class="panel active" id="panel-settings">
-          <article class="card">
+          <section class="grid" id="settingsSummary">
+            <article class="card" id="quickControlsCard">
+              <div class="card-header">
+                <h2>Quick Controls</h2>
+              </div>
+              <div class="quick-grid">
+                <div class="control-row">
+                  <label for="quickCaptureToggle">Capture running</label>
+                  <input id="quickCaptureToggle" type="checkbox" />
+                </div>
+                <div id="quickPauseStatus" class="status-line"></div>
+                <div class="control-row">
+                  <label>Pause capture</label>
+                  <div class="actions">
+                    <button id="quickPause10" class="ghost">10 min</button>
+                    <button id="quickPause30" class="ghost">30 min</button>
+                    <button id="quickResume">Resume</button>
+                  </div>
+                </div>
+                <div class="control-row">
+                  <label for="quickPrivacyMode">Privacy lockdown</label>
+                  <input id="quickPrivacyMode" type="checkbox" />
+                </div>
+                <div class="control-row">
+                  <label for="quickFidelityMode">High fidelity</label>
+                  <input id="quickFidelityMode" type="checkbox" />
+                </div>
+                <div id="fidelitySummary" class="status-line"></div>
+              </div>
+              <div class="bookmark-block">
+                <div class="bookmark-title">Bookmark moment</div>
+                <input id="bookmarkNote" type="text" placeholder="Note about what just happened" />
+                <input id="bookmarkTags" type="text" placeholder="Tags (comma separated)" />
+                <div class="actions">
+                  <button id="bookmarkSave">Save bookmark</button>
+                  <span id="bookmarkStatus" class="status-line"></span>
+                </div>
+              </div>
+              <ul id="bookmarkList" class="list"></ul>
+            </article>
+
+            <article class="card" id="captureHealthCard">
+              <div class="card-header">
+                <h2>Capture Health</h2>
+                <div class="actions">
+                  <button id="refreshHealth" class="ghost">Refresh</button>
+                </div>
+              </div>
+              <div class="stat-list">
+                <div class="stat-item">
+                  <p class="label">Last screenshot</p>
+                  <p id="healthScreenshot">—</p>
+                </div>
+                <div class="stat-item">
+                  <p class="label">Last video segment</p>
+                  <p id="healthVideo">—</p>
+                </div>
+                <div class="stat-item">
+                  <p class="label">Queue depth</p>
+                  <p id="healthQueue">—</p>
+                </div>
+                <div class="stat-item">
+                  <p class="label">Capture lag</p>
+                  <p id="healthLag">—</p>
+                </div>
+                <div class="stat-item">
+                  <p class="label">Last journal event</p>
+                  <p id="healthEvent">—</p>
+                </div>
+              </div>
+              <div class="sparkline-block">
+                <div class="sparkline-row">
+                  <span class="sparkline-label">Shot write ms</span>
+                  <div id="healthSparkScreenshot" class="sparkline"></div>
+                </div>
+                <div class="sparkline-row">
+                  <span class="sparkline-label">Video write ms</span>
+                  <div id="healthSparkVideo" class="sparkline"></div>
+                </div>
+              </div>
+            </article>
+
+            <article class="card" id="storageCard">
+              <div class="card-header">
+                <h2>Storage Runway</h2>
+                <div class="actions">
+                  <button id="refreshStorage" class="ghost">Refresh</button>
+                </div>
+              </div>
+              <div class="stat-list">
+                <div class="stat-item">
+                  <p class="label">Data dir</p>
+                  <p id="storageDir">—</p>
+                </div>
+                <div class="stat-item">
+                  <p class="label">Free / Total</p>
+                  <p id="storageFree">—</p>
+                </div>
+                <div class="stat-item">
+                  <p class="label">Days remaining</p>
+                  <p id="storageDays">—</p>
+                </div>
+                <div class="stat-item">
+                  <p class="label">Evidence / day</p>
+                  <p id="storageEvidence">—</p>
+                </div>
+                <div class="stat-item">
+                  <p class="label">Derived / day</p>
+                  <p id="storageDerived">—</p>
+                </div>
+              </div>
+              <div id="storageHint" class="status-line"></div>
+            </article>
+
+            <article class="card" id="activityTimelineCard">
+              <div class="card-header">
+                <h2>Activity Timeline</h2>
+                <div class="actions">
+                  <button id="refreshActivityTimeline" class="ghost">Refresh</button>
+                </div>
+              </div>
+              <div class="pill-row">
+                <label class="toggle">
+                  <input id="filterActivity" type="checkbox" />
+                  Activity
+                </label>
+                <label class="toggle">
+                  <input id="filterChanges" type="checkbox" />
+                  Changes
+                </label>
+                <label class="toggle">
+                  <input id="filterBookmarks" type="checkbox" />
+                  Bookmarks
+                </label>
+              </div>
+              <ul id="activityTimelineList" class="list"></ul>
+            </article>
+          </section>
+
+          <article class="card" id="configChangesCard">
+            <div class="card-header">
+              <h2>Recent Changes</h2>
+              <div class="actions">
+                <button id="configUndoLast" class="ghost">Undo last</button>
+                <button id="refreshConfigHistory" class="ghost">Refresh</button>
+              </div>
+            </div>
+            <div id="configHistoryStatus" class="status-line"></div>
+            <div id="configHistoryList" class="settings-list"></div>
+          </article>
+
+          <article class="card settings-card">
             <div class="card-header">
               <h2>Settings</h2>
               <div class="actions">
-                <input id="settingsFilter" type="search" placeholder="Filter paths" />
+                <input id="settingsFilter" type="search" placeholder="Search all settings" />
                 <button id="settingsReload" class="ghost">Reload</button>
                 <button id="settingsApply">Apply</button>
               </div>
             </div>
             <div id="settingsStatus" class="status-line"></div>
-            <div id="settingsList" class="settings-list"></div>
+            <div id="settingsList" class="settings-groups"></div>
           </article>
         </section>
 
         <section class="panel" id="panel-plugins">
-          <div class="grid">
-            <article class="card" id="pluginsCard">
+          <section class="plugin-shell">
+            <article class="card plugin-pane" id="pluginGroupsPane">
               <div class="card-header">
-                <h2>Plugin Manager</h2>
+                <h2>Plugin Areas</h2>
                 <div class="actions">
                   <button id="refreshPlugins" class="ghost">Refresh</button>
                   <button id="reloadPlugins">Reload</button>
                 </div>
               </div>
+              <div id="pluginGroupsList" class="group-list"></div>
+            </article>
+
+            <article class="card plugin-pane" id="pluginListPane">
+              <div class="card-header">
+                <div>
+                  <h2 id="pluginGroupTitle">Select a group</h2>
+                  <p id="pluginGroupMeta" class="muted"></p>
+                </div>
+                <div class="actions">
+                  <button id="pluginEnableAll" class="ghost">Enable all</button>
+                  <button id="pluginDisableAll" class="ghost">Disable all</button>
+                </div>
+              </div>
+              <div id="pluginGroupControls" class="group-controls"></div>
               <div id="pluginsList" class="table"></div>
             </article>
 
-            <article class="card" id="pluginSettingsCard">
+            <article class="card plugin-pane" id="pluginDetailPane">
               <div class="card-header">
-                <h2 id="pluginSettingsTitle">Plugin Settings</h2>
+                <div>
+                  <h2 id="pluginSettingsTitle">Plugin Details</h2>
+                  <p id="pluginSettingsSubtitle" class="muted"></p>
+                </div>
                 <div class="actions">
+                  <label class="toggle">
+                    <input id="pluginShowAll" type="checkbox" />
+                    Show all settings
+                  </label>
                   <button id="pluginSettingsApply">Apply</button>
                 </div>
               </div>
               <div id="pluginSettingsStatus" class="status-line"></div>
+              <div id="pluginOptionGroups" class="pill-row"></div>
               <div id="pluginSettingsList" class="settings-list"></div>
             </article>
-          </div>
+          </section>
         </section>
 
         <section class="panel" id="panel-status">

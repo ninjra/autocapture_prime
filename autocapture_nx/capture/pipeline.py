@@ -338,6 +338,7 @@ class CapturePipeline:
         self,
         config: dict[str, Any],
         *,
+        plugin_id: str | None = None,
         storage_media: Any,
         storage_meta: Any,
         event_builder: Any,
@@ -355,6 +356,7 @@ class CapturePipeline:
         self._event_builder = event_builder
         self._backpressure = backpressure
         self._logger = logger
+        self._plugin_id = str(plugin_id) if plugin_id else ""
         self._window_tracker = window_tracker
         self._input_tracker = input_tracker
         self._governor = governor
@@ -932,6 +934,7 @@ class CapturePipeline:
             self._write_segment(artifact, backend)
 
     def _write_segment(self, artifact: SegmentArtifact, backend: str) -> None:
+        write_start = time.perf_counter()
         window_ref = _snapshot_window(self._window_tracker)
         input_ref = _snapshot_input(self._input_tracker)
         policy_hash = self._event_builder.policy_snapshot_hash()
@@ -991,6 +994,12 @@ class CapturePipeline:
             "encode_ms_max": int(artifact.encode_ms_max),
             "policy_snapshot_hash": policy_hash,
         }
+        try:
+            content_size = os.path.getsize(artifact.path)
+        except Exception:
+            content_size = None
+        if content_size is not None:
+            metadata["content_size"] = int(content_size)
         if artifact.container_index:
             metadata["container"]["index"] = artifact.container_index
         if artifact.container_header:
@@ -1089,6 +1098,19 @@ class CapturePipeline:
                 payload=seal_payload,
                 ts_utc=artifact.ts_end_utc,
             )
+            write_ms = int(max(0.0, (time.perf_counter() - write_start) * 1000.0))
+            telemetry_payload = {
+                "ts_utc": artifact.ts_end_utc or artifact.ts_start_utc,
+                "record_id": artifact.segment_id,
+                "record_type": "evidence.capture.segment",
+                "output_bytes": int(metadata.get("content_size") or 0),
+                "frame_count": int(metadata.get("frame_count") or 0),
+                "write_ms": write_ms,
+                "backend": backend,
+            }
+            record_telemetry("capture.output", telemetry_payload)
+            if self._plugin_id:
+                record_telemetry(f"plugin.{self._plugin_id}", telemetry_payload)
         except Exception as exc:
             failure_payload = {
                 "segment_id": artifact.segment_id,

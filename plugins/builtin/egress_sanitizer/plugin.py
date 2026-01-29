@@ -81,6 +81,8 @@ class EgressSanitizer(PluginBase):
             return self._entity_map
         try:
             store = self.context.get_capability("storage.entity_map")
+            if store is None:
+                store = EntityMap()
             self._entity_map = store
         except Exception:
             self._entity_map = EntityMap()

@@ -32,11 +32,11 @@
       }
     }
   },
-  "generated_at": "2026-01-25T19:56:33.770435+00:00",
+  "generated_at": "2026-01-29T18:42:49.678282+00:00",
   "sanitizer": {
     "cases": {
       "card_url": {
-        "hash": "9922d187813dfed16f2a65e645934c9d0a138a9b4489b42029060d4f7d935195",
+        "hash": "fcc0fc077b985a13f3a0b5ef3f261df5c66214ef611904dbe5b5efc6dd3492c5",
         "input": {
           "scope": "default",
           "text": "Charge 4111 1111 1111 1111 at https://example.com."
@@ -57,10 +57,14 @@
           "text": "Charge \u27e6ENT:CREDIT_CARD:QZN6NVVTKIMRSFKPK6M4X4D2WQ\u27e7 at \u27e6ENT:URL:W2T5HE7SHY4GC37DMUGLUJH3WA\u27e7.",
           "tokens": {
             "QZN6NVVTKIMRSFKPK6M4X4D2WQ": {
+              "key_id": "legacy",
+              "key_version": 1,
               "kind": "CREDIT_CARD",
               "value": "4111 1111 1111 1111"
             },
             "W2T5HE7SHY4GC37DMUGLUJH3WA": {
+              "key_id": "legacy",
+              "key_version": 1,
               "kind": "URL",
               "value": "https://example.com"
             }
@@ -68,7 +72,7 @@
         }
       },
       "pii_mix": {
-        "hash": "c6cc6b80701dd20b5bfc7a2c3766a1c18734608deca5429c87124b977a36c568",
+        "hash": "e87066cc6cf7ffe778121a9bcb6dc19bcc0e656ff028c4a7f17feaa2de6ca857",
         "input": {
           "scope": "default",
           "text": "Contact John Doe at john@example.com or 555-123-4567. SSN 123-45-6789."
@@ -97,18 +101,26 @@
           "text": "\u27e6ENT:NAME:5UXYLGRIUO7QKVWHKNF2PU3NTI\u27e7 at \u27e6ENT:EMAIL:I5QMF2AQRXY3XPWMZUFWNEZNFI\u27e7 or \u27e6ENT:PHONE:Y47R7BTMIFYYAHJVGAEI6UPGWE\u27e7. SSN \u27e6ENT:SSN:S62TPM6DDKEPD53YJCNVD7FS3I\u27e7.",
           "tokens": {
             "5UXYLGRIUO7QKVWHKNF2PU3NTI": {
+              "key_id": "legacy",
+              "key_version": 1,
               "kind": "NAME",
               "value": "Contact John Doe"
             },
             "I5QMF2AQRXY3XPWMZUFWNEZNFI": {
+              "key_id": "legacy",
+              "key_version": 1,
               "kind": "EMAIL",
               "value": "john@example.com"
             },
             "S62TPM6DDKEPD53YJCNVD7FS3I": {
+              "key_id": "legacy",
+              "key_version": 1,
               "kind": "SSN",
               "value": "123-45-6789"
             },
             "Y47R7BTMIFYYAHJVGAEI6UPGWE": {
+              "key_id": "legacy",
+              "key_version": 1,
               "kind": "PHONE",
               "value": "555-123-4567"
             }

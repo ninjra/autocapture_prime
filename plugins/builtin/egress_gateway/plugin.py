@@ -126,7 +126,10 @@ class EgressGateway(PluginBase):
             payload["approval_id"] = approval_id
         if reason:
             payload["reason"] = reason
-        builder.ledger_entry("egress.packet", inputs=[], outputs=[], payload=payload)
+        try:
+            builder.ledger_entry("egress.packet", inputs=[], outputs=[], payload=payload)
+        except Exception:
+            return
 
     def _approval_store(self):
         try:

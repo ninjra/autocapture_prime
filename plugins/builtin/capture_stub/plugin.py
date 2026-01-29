@@ -53,6 +53,7 @@ class CaptureStub(PluginBase):
 
         pipeline = CapturePipeline(
             self.context.config,
+            plugin_id=self.plugin_id,
             storage_media=storage_media,
             storage_meta=storage_meta,
             event_builder=event_builder,

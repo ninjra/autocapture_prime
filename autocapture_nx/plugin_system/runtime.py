@@ -135,7 +135,7 @@ def _ensure_patched() -> None:
 
 def _normalize_root(path: Path) -> Path:
     try:
-        return path.expanduser().resolve(strict=False)
+        return path.expanduser().absolute()
     except Exception:
         return path
 
@@ -165,6 +165,10 @@ class FilesystemPolicy:
         read_roots = _normalize_roots(read or [])
         write_roots = _normalize_roots(readwrite or [])
         all_read = list(read_roots)
+        for root in write_roots:
+            parent = root.parent
+            if parent not in all_read:
+                all_read.append(parent)
         for root in write_roots:
             if root not in all_read:
                 all_read.append(root)
@@ -338,14 +342,14 @@ def _patch_filesystem() -> None:
             _check_fs(path, write=True)
             return _original_os_rmdir(path, *args, **kwargs)
 
-        builtins.open = _open
+        builtins.open = cast(Any, _open)
         os.open = _os_open
         os.listdir = _os_listdir
         os.scandir = _os_scandir
         os.stat = _os_stat
         os.lstat = _os_lstat
         os.mkdir = _os_mkdir
-        os.makedirs = _os_makedirs
+        os.makedirs = cast(Any, _os_makedirs)
         os.remove = _os_remove
         os.unlink = _os_unlink
         os.rename = _os_rename
@@ -370,6 +374,17 @@ def filesystem_guard(policy: FilesystemPolicy | None):
     _patch_filesystem()
     previous = _current_fs_policy()
     _set_fs_policy(policy)
+    try:
+        yield
+    finally:
+        _set_fs_policy(previous)
+
+
+@contextlib.contextmanager
+def filesystem_guard_suspended():
+    """Temporarily disable filesystem policy for the current thread."""
+    previous = _current_fs_policy()
+    _set_fs_policy(None)
     try:
         yield
     finally:

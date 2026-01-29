@@ -8,6 +8,7 @@ import math
 import os
 import platform
 import getpass
+import time
 from importlib import metadata as importlib_metadata
 from email.message import Message
 from datetime import datetime, timezone
@@ -22,6 +23,7 @@ from autocapture_nx.kernel.hashing import sha256_directory, sha256_file, sha256_
 from autocapture_nx.kernel.canonical_json import dumps
 from autocapture_nx import __version__ as kernel_version
 from autocapture_nx.kernel.event_builder import EventBuilder
+from autocapture_nx.kernel.telemetry import record_telemetry
 from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
 from autocapture_nx.plugin_system.registry import PluginRegistry
 from autocapture_nx.plugin_system.runtime import global_network_deny, set_global_network_deny
@@ -64,6 +66,52 @@ def _canonicalize_config_for_hash(obj: Any) -> Any:
     return obj
 
 
+def _startup_profile_enabled() -> bool:
+    return os.getenv("AUTOCAPTURE_STARTUP_PROFILE", "").lower() in {"1", "true", "yes"}
+
+
+class StartupProfiler:
+    def __init__(self, *, enabled: bool) -> None:
+        self.enabled = bool(enabled)
+        self._marks: list[tuple[str, float]] = []
+        self._t0 = time.perf_counter()
+
+    def mark(self, label: str) -> None:
+        if not self.enabled:
+            return
+        self._marks.append((label, time.perf_counter()))
+
+    def summary(self) -> dict[str, Any]:
+        if not self.enabled:
+            return {}
+        marks = [("start", self._t0)] + self._marks
+        spans: list[dict[str, Any]] = []
+        for idx in range(1, len(marks)):
+            label, ts = marks[idx]
+            prev_label, prev_ts = marks[idx - 1]
+            spans.append(
+                {
+                    "label": label,
+                    "from": prev_label,
+                    "ms": round((ts - prev_ts) * 1000.0, 3),
+                }
+            )
+        total_ms = round((marks[-1][1] - marks[0][1]) * 1000.0, 3) if marks else 0.0
+        return {"total_ms": total_ms, "spans": spans}
+
+    def finish(self) -> None:
+        if not self.enabled:
+            return
+        payload = self.summary()
+        if not payload:
+            return
+        record_telemetry("startup.profile", payload)
+        try:
+            print(f"startup_profile={json.dumps(payload, sort_keys=True)}")
+        except Exception:
+            pass
+
+
 class Kernel:
     def __init__(self, args: KernelBootArgs | ConfigPaths, safe_mode: bool | None = None) -> None:
         if isinstance(args, KernelBootArgs):
@@ -77,6 +125,7 @@ class Kernel:
         else:
             self.config_paths = args
             self.safe_mode = bool(safe_mode)
+        os.environ.setdefault("AUTOCAPTURE_ROOT", str(resolve_repo_path(".")))
         self.config: dict[str, Any] = {}
         self.effective_config: EffectiveConfig | None = None
         self.system: System | None = None
@@ -86,16 +135,26 @@ class Kernel:
         self._network_deny_prev: bool | None = None
 
     def boot(self, *, start_conductor: bool = True) -> System:
+        profiler = StartupProfiler(enabled=_startup_profile_enabled())
+        profiler.mark("boot.start")
         effective = self.load_effective_config()
+        profiler.mark("load_effective_config")
         self.effective_config = effective
         self.config = effective.data
         ensure_run_id(self.config)
+        fast_boot = bool(
+            self.safe_mode and self.config.get("kernel", {}).get("safe_mode_fast_boot", False)
+        )
         self._verify_contract_lock()
+        profiler.mark("verify_contract_lock")
         allow_kernel_net = os.getenv("AUTOCAPTURE_ALLOW_KERNEL_NETWORK", "").lower() in {"1", "true", "yes"}
         self._network_deny_prev = global_network_deny()
         set_global_network_deny(not allow_kernel_net)
+        profiler.mark("network_policy")
         registry = PluginRegistry(self.config, safe_mode=self.safe_mode)
+        profiler.mark("registry_init")
         plugins, capabilities = registry.load_plugins()
+        profiler.mark("load_plugins")
 
         updated = self._apply_meta_plugins(self.config, plugins)
         if updated != self.config:
@@ -104,6 +163,7 @@ class Kernel:
             self.config = updated
             registry = PluginRegistry(self.config, safe_mode=self.safe_mode)
             plugins, capabilities = registry.load_plugins()
+            profiler.mark("load_plugins_meta")
 
         builder = EventBuilder(
             self.config,
@@ -112,6 +172,7 @@ class Kernel:
             capabilities.get("anchor.writer"),
         )
         capabilities.register("event.builder", builder, network_allowed=False)
+        profiler.mark("event_builder")
         try:
             from autocapture_nx.kernel.egress_approvals import EgressApprovalStore
 
@@ -119,11 +180,23 @@ class Kernel:
             capabilities.register("egress.approval_store", approval_store, network_allowed=False)
         except Exception:
             pass
-        self._record_storage_manifest(builder, capabilities, plugins)
+        profiler.mark("egress_store")
+        if not fast_boot:
+            self._record_storage_manifest(
+                builder,
+                capabilities,
+                plugins,
+                include_packages=True,
+                include_counts=True,
+            )
+        profiler.mark("record_storage_manifest")
         self._record_run_start(builder)
-        self._run_recovery(builder, capabilities)
+        profiler.mark("record_run_start")
+        if not fast_boot:
+            self._run_recovery(builder, capabilities)
+        profiler.mark("run_recovery")
         self.system = System(config=self.config, plugins=plugins, capabilities=capabilities)
-        if start_conductor:
+        if start_conductor and not fast_boot:
             try:
                 from autocapture.runtime.conductor import create_conductor
 
@@ -135,6 +208,8 @@ class Kernel:
                     conductor.start()
             except Exception:
                 self._conductor = None
+        profiler.mark("conductor")
+        profiler.finish()
         return self.system
 
     def reload_plugins(self, plugin_ids: list[str] | None = None) -> dict[str, Any]:
@@ -493,7 +568,15 @@ class Kernel:
             config_hash=effective.effective_hash if effective else None,
         )
 
-    def _record_storage_manifest(self, builder: EventBuilder, capabilities, plugins: list) -> None:
+    def _record_storage_manifest(
+        self,
+        builder: EventBuilder,
+        capabilities,
+        plugins: list,
+        *,
+        include_packages: bool = True,
+        include_counts: bool = True,
+    ) -> None:
         metadata = capabilities.get("storage.metadata")
         run_id = builder.run_id
         ts_utc = datetime.now(timezone.utc).isoformat()
@@ -515,8 +598,8 @@ class Kernel:
         media = capabilities.get("storage.media")
         media_backend = type(media).__name__
         storage_cfg = self.config.get("storage", {})
-        packages = self._package_versions()
-        counts = self._store_counts(metadata, media)
+        packages = self._package_versions() if include_packages else {}
+        counts = self._store_counts(metadata, media) if include_counts else None
         manifest = {
             "record_type": "system.run_manifest",
             "run_id": run_id,
@@ -959,69 +1042,90 @@ class Kernel:
                     detail=str(exc),
                 )
             )
-        dep_lock_path = resolve_repo_path("requirements.lock.json")
-        if not dep_lock_path.exists():
+        dep_config = config.get("kernel", {}).get("dependency_pinning", {})
+        if not isinstance(dep_config, dict):
+            dep_config = {}
+        dep_enforce = bool(dep_config.get("enforce", True))
+        allow_missing = dep_config.get("allow_missing", [])
+        allow_missing_set = {
+            str(name).strip().lower()
+            for name in (allow_missing if isinstance(allow_missing, list) else [])
+            if str(name).strip()
+        }
+        if not dep_enforce:
             checks.append(
                 DoctorCheck(
                     name="dependency_pinning",
-                    ok=False,
-                    detail="missing requirements.lock.json",
+                    ok=True,
+                    detail="disabled",
                 )
             )
         else:
-            try:
-                lock = json.loads(dep_lock_path.read_text(encoding="utf-8"))
-                expected_hash, actual_hash = self._dep_lock_hash()
-                hash_ok = bool(expected_hash and actual_hash and expected_hash == actual_hash)
-                versions = self._package_versions()
-                mismatches: list[str] = []
-                for req in lock.get("dependencies", []) or []:
-                    name, spec = self._parse_requirement(str(req))
-                    if not name:
-                        continue
-                    installed = versions.get(name.lower())
-                    if installed is None:
-                        mismatches.append(f"missing:{name}")
-                        continue
-                    if spec and not self._version_satisfies(installed, spec):
-                        mismatches.append(f"version:{name}")
-                optional = lock.get("optional_dependencies", {}) or {}
-                if isinstance(optional, dict):
-                    for items in optional.values():
-                        for req in items or []:
-                            name, spec = self._parse_requirement(str(req))
-                            if not name:
-                                continue
-                            installed = versions.get(name.lower())
-                            if installed is None:
-                                continue
-                            if spec and not self._version_satisfies(installed, spec):
-                                mismatches.append(f"version:{name}")
-                ok = hash_ok and not mismatches
-                detail_parts = []
-                if not hash_ok:
-                    if expected_hash is None or actual_hash is None:
-                        detail_parts.append("lock_hash_unverifiable")
-                    else:
-                        detail_parts.append("lock_hash_mismatch")
-                if mismatches:
-                    detail_parts.append(", ".join(mismatches[:5]))
-                detail = "ok" if ok else "; ".join(detail_parts) or "mismatch"
-                checks.append(
-                    DoctorCheck(
-                        name="dependency_pinning",
-                        ok=ok,
-                        detail=detail,
-                    )
-                )
-            except Exception as exc:
+            dep_lock_path = resolve_repo_path("requirements.lock.json")
+            if not dep_lock_path.exists():
                 checks.append(
                     DoctorCheck(
                         name="dependency_pinning",
                         ok=False,
-                        detail=str(exc),
+                        detail="missing requirements.lock.json",
                     )
                 )
+            else:
+                try:
+                    lock = json.loads(dep_lock_path.read_text(encoding="utf-8"))
+                    expected_hash, actual_hash = self._dep_lock_hash()
+                    hash_ok = bool(expected_hash and actual_hash and expected_hash == actual_hash)
+                    versions = self._package_versions()
+                    dep_mismatches: list[str] = []
+                    for req in lock.get("dependencies", []) or []:
+                        name, spec = self._parse_requirement(str(req))
+                        if not name:
+                            continue
+                        installed = versions.get(name.lower())
+                        if installed is None:
+                            if name.lower() in allow_missing_set:
+                                continue
+                            dep_mismatches.append(f"missing:{name}")
+                            continue
+                        if spec and not self._version_satisfies(installed, spec):
+                            dep_mismatches.append(f"version:{name}")
+                    optional = lock.get("optional_dependencies", {}) or {}
+                    if isinstance(optional, dict):
+                        for items in optional.values():
+                            for req in items or []:
+                                name, spec = self._parse_requirement(str(req))
+                                if not name:
+                                    continue
+                                installed = versions.get(name.lower())
+                                if installed is None:
+                                    continue
+                                if spec and not self._version_satisfies(installed, spec):
+                                    dep_mismatches.append(f"version:{name}")
+                    ok = hash_ok and not dep_mismatches
+                    detail_parts = []
+                    if not hash_ok:
+                        if expected_hash is None or actual_hash is None:
+                            detail_parts.append("lock_hash_unverifiable")
+                        else:
+                            detail_parts.append("lock_hash_mismatch")
+                    if dep_mismatches:
+                        detail_parts.append(", ".join(dep_mismatches[:5]))
+                    detail = "ok" if ok else "; ".join(detail_parts) or "mismatch"
+                    checks.append(
+                        DoctorCheck(
+                            name="dependency_pinning",
+                            ok=ok,
+                            detail=detail,
+                        )
+                    )
+                except Exception as exc:
+                    checks.append(
+                        DoctorCheck(
+                            name="dependency_pinning",
+                            ok=False,
+                            detail=str(exc),
+                        )
+                    )
         anchor_cfg = config.get("storage", {}).get("anchor", {})
         anchor_path = anchor_cfg.get("path")
         if anchor_path:

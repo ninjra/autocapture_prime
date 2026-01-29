@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
@@ -130,7 +131,11 @@ def main() -> int:
     base_env = os.environ.copy()
     root = Path(__file__).resolve().parents[1]
     base_env.setdefault("PYTHONPATH", str(root))
+    temp_root: Path | None = None
     test_root = root / ".dev" / "test_env"
+    if root.as_posix().startswith("/mnt/") and os.name != "nt":
+        temp_root = Path(tempfile.mkdtemp(prefix="autocapture_test_env_"))
+        test_root = temp_root
     if test_root.exists():
         import shutil
 
@@ -151,24 +156,30 @@ def main() -> int:
         _write_report(report_path, log_path, "failed", "tooling", 1, str(sys.executable))
         return 1
 
-    for idx, cmd in enumerate(_commands(sys.executable)):
-        env = base_env.copy()
-        step_dir = test_root / f"step_{idx:02d}"
-        config_dir = step_dir / "config"
-        data_dir = step_dir / "data"
-        config_dir.mkdir(parents=True, exist_ok=True)
-        data_dir.mkdir(parents=True, exist_ok=True)
-        env["AUTOCAPTURE_CONFIG_DIR"] = str(config_dir)
-        env["AUTOCAPTURE_DATA_DIR"] = str(data_dir)
-        step = " ".join(cmd[1:]) if len(cmd) > 1 else "command"
-        _write_log(log_path, f"Running: {' '.join(cmd)}")
-        code = _run(cmd, env)
-        if code != 0:
-            _write_report(report_path, log_path, "failed", step, code, str(sys.executable))
-            return code
-    _write_report(report_path, log_path, "ok", "complete", 0, str(sys.executable))
-    print("OK: all tests and invariants passed")
-    return 0
+    try:
+        for idx, cmd in enumerate(_commands(sys.executable)):
+            env = base_env.copy()
+            step_dir = test_root / f"step_{idx:02d}"
+            config_dir = step_dir / "config"
+            data_dir = step_dir / "data"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            data_dir.mkdir(parents=True, exist_ok=True)
+            env["AUTOCAPTURE_CONFIG_DIR"] = str(config_dir)
+            env["AUTOCAPTURE_DATA_DIR"] = str(data_dir)
+            step = " ".join(cmd[1:]) if len(cmd) > 1 else "command"
+            _write_log(log_path, f"Running: {' '.join(cmd)}")
+            code = _run(cmd, env)
+            if code != 0:
+                _write_report(report_path, log_path, "failed", step, code, str(sys.executable))
+                return code
+        _write_report(report_path, log_path, "ok", "complete", 0, str(sys.executable))
+        print("OK: all tests and invariants passed")
+        return 0
+    finally:
+        if temp_root is not None:
+            import shutil
+
+            shutil.rmtree(temp_root, ignore_errors=True)
 
 
 if __name__ == "__main__":

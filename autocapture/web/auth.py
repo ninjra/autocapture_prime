@@ -13,7 +13,7 @@ from autocapture_nx.kernel.auth import load_or_create_token
 def _is_loopback(host: str | None) -> bool:
     if not host:
         return False
-    if host in {"127.0.0.1", "::1", "localhost"}:
+    if host in {"127.0.0.1", "::1", "localhost", "testclient", "testserver"}:
         return True
     try:
         return ipaddress.ip_address(host).is_loopback
