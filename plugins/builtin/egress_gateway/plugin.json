@@ -29,7 +29,14 @@
   },
   "plugin_id": "builtin.egress.gateway",
   "required_capabilities": [
-    "privacy.egress_sanitizer"
+    "privacy.egress_sanitizer",
+    "event.builder",
+    "egress.approval_store"
+  ],
+  "settings_paths": [
+    "gateway",
+    "privacy",
+    "storage"
   ],
   "version": "0.1.0"
 }

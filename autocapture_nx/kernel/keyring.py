@@ -109,6 +109,17 @@ class KeyRing:
                 return record.key_bytes()
         raise KeyError(f"Unknown key id: {key_id}")
 
+    def key_version_for(self, purpose: str | None, key_id: str) -> int:
+        keyset = self._keyset(purpose)
+        for idx, record in enumerate(keyset.records, start=1):
+            if record.key_id == key_id:
+                return idx
+        raise KeyError(f"Unknown key id: {key_id}")
+
+    def active_key_version(self, purpose: str | None = None) -> int:
+        keyset = self._keyset(purpose)
+        return self.key_version_for(keyset.purpose, keyset.active_key_id)
+
     def all_keys(self, purpose: str | None = None) -> dict[str, bytes]:
         keyset = self._keyset(purpose)
         return {record.key_id: record.key_bytes() for record in keyset.records}

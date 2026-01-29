@@ -27,5 +27,9 @@
   },
   "plugin_id": "builtin.observability.basic",
   "required_capabilities": [],
+  "settings_paths": [
+    "observability",
+    "storage"
+  ],
   "version": "0.1.0"
 }

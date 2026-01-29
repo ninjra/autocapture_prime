@@ -33,5 +33,9 @@
     "storage.media",
     "storage.metadata"
   ],
+  "settings_paths": [
+    "capture",
+    "runtime"
+  ],
   "version": "0.1.0"
 }

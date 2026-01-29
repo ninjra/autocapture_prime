@@ -11,7 +11,12 @@ from typing import Any
 
 from autocapture_nx.kernel.errors import PermissionError, PluginError
 from autocapture_nx.plugin_system.api import PluginContext
-from autocapture_nx.plugin_system.runtime import network_guard, set_global_network_deny
+from autocapture_nx.plugin_system.runtime import (
+    FilesystemPolicy,
+    network_guard,
+    set_global_filesystem_policy,
+    set_global_network_deny,
+)
 
 
 def _decode(obj: Any) -> Any:
@@ -96,6 +101,7 @@ class _Bridge:
             raise PluginError(f"payload too large ({size} bytes)")
 
     def send(self, payload: dict[str, Any]) -> None:
+        payload = _encode(payload)
         self._check_size(payload)
         with self._write_lock:
             sys.stdout.write(json.dumps(payload) + "\n")
@@ -202,6 +208,16 @@ def _allowed_caps(payload: Any) -> set[str] | None:
     return None
 
 
+def _filesystem_policy(payload: Any) -> FilesystemPolicy | None:
+    if not isinstance(payload, dict):
+        return None
+    read = payload.get("read", [])
+    readwrite = payload.get("readwrite", [])
+    if not isinstance(read, list) and not isinstance(readwrite, list):
+        return None
+    return FilesystemPolicy.from_paths(read=read if isinstance(read, list) else [], readwrite=readwrite if isinstance(readwrite, list) else [])
+
+
 def main() -> None:
     if len(sys.argv) < 5:
         raise SystemExit("usage: host_runner <plugin_path> <callable> <plugin_id> <network_allowed>")
@@ -215,12 +231,18 @@ def main() -> None:
     init_payload = json.loads(init_line)
     if isinstance(init_payload, dict) and "config" in init_payload:
         config = init_payload.get("config", {})
+        host_config = init_payload.get("host_config", config)
         allowed_caps = _allowed_caps(init_payload.get("allowed_capabilities"))
+        fs_policy = _filesystem_policy(init_payload.get("filesystem_policy"))
     else:
         config = init_payload if isinstance(init_payload, dict) else {}
+        host_config = config
         allowed_caps = None
+        fs_policy = None
 
-    hosting = _hosting_cfg(config)
+    set_global_filesystem_policy(fs_policy)
+
+    hosting = _hosting_cfg(host_config)
     bridge = _Bridge(
         rpc_timeout_s=float(hosting.get("rpc_timeout_s", 10)),
         rpc_max_message_bytes=int(hosting.get("rpc_max_message_bytes", 2_000_000)),

@@ -25,7 +25,17 @@
     "network": false,
     "raw_input": false
   },
+  "provides": [
+    "storage.metadata",
+    "storage.media",
+    "storage.entity_map",
+    "storage.keyring"
+  ],
   "plugin_id": "builtin.storage.encrypted",
   "required_capabilities": [],
+  "settings_paths": [
+    "storage",
+    "runtime"
+  ],
   "version": "0.1.0"
 }

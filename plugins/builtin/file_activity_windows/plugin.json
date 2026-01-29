@@ -1,0 +1,46 @@
+{
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [
+    "builtin.journal.basic"
+  ],
+  "enabled": false,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "tracking.file_activity",
+      "path": "plugin.py"
+    }
+  ],
+  "filesystem_policy": {
+    "read": [
+      "{data_dir}"
+    ]
+  },
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "permissions": {
+    "filesystem": "read",
+    "gpu": false,
+    "network": false,
+    "raw_input": false
+  },
+  "plugin_id": "builtin.tracking.file_activity.windows",
+  "required_capabilities": [
+    "event.builder",
+    "storage.metadata"
+  ],
+  "settings_paths": [
+    "capture",
+    "runtime",
+    "storage"
+  ],
+  "version": "0.1.0"
+}

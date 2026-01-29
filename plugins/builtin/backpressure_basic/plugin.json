@@ -27,5 +27,8 @@
   },
   "plugin_id": "builtin.backpressure.basic",
   "required_capabilities": [],
+  "settings_paths": [
+    "backpressure"
+  ],
   "version": "0.1.0"
 }

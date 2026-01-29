@@ -31,5 +31,8 @@
   "required_capabilities": [
     "storage.keyring"
   ],
+  "settings_paths": [
+    "storage"
+  ],
   "version": "0.1.0"
 }

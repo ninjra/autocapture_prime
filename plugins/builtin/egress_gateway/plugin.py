@@ -14,6 +14,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 from autocapture_nx.kernel.config import SchemaLiteValidator
 from autocapture_nx.kernel.errors import ConfigError
+from autocapture_nx.kernel.hashing import sha256_canonical, sha256_text
 
 from autocapture.plugins.policy_gate import PolicyGate
 from autocapture_nx.kernel.errors import NetworkDisabledError, PermissionError
@@ -83,7 +84,57 @@ class EgressGateway(PluginBase):
             except Exception:
                 return resp.getcode(), {"text": body}
 
-    def send(self, payload: dict[str, Any], provider: str = "default") -> dict[str, Any]:
+    def _policy_id(self) -> str:
+        privacy = self.context.config.get("privacy", {}) if isinstance(self.context.config, dict) else {}
+        egress_cfg = privacy.get("egress", {}) if isinstance(privacy, dict) else {}
+        raw = str(egress_cfg.get("policy_id") or egress_cfg.get("destination_policy_id") or "").strip()
+        if raw:
+            return raw
+        base = self.context.config.get("gateway", {}).get("openai_base_url", "")
+        path = self.context.config.get("gateway", {}).get("egress_path", "/v1/egress")
+        return sha256_text(f"{base}:{path}")
+
+    def _packet_hash(self, payload: dict[str, Any]) -> str:
+        return sha256_canonical(payload)
+
+    def _ledger_packet(
+        self,
+        packet_hash: str | None,
+        schema_version: int | None,
+        *,
+        policy_id: str,
+        approval_id: str | None,
+        result: str,
+        reason: str | None = None,
+    ) -> None:
+        try:
+            builder = self.context.get_capability("event.builder")
+        except Exception:
+            builder = None
+        if builder is None:
+            return
+        payload: dict[str, Any] = {
+            "event": "egress.packet",
+            "policy_id": policy_id,
+            "result": result,
+        }
+        if packet_hash is not None:
+            payload["packet_hash"] = packet_hash
+        if schema_version is not None:
+            payload["schema_version"] = int(schema_version)
+        if approval_id:
+            payload["approval_id"] = approval_id
+        if reason:
+            payload["reason"] = reason
+        builder.ledger_entry("egress.packet", inputs=[], outputs=[], payload=payload)
+
+    def _approval_store(self):
+        try:
+            return self.context.get_capability("egress.approval_store")
+        except Exception:
+            return None
+
+    def send(self, payload: dict[str, Any], provider: str = "default", approval_token: str | None = None) -> dict[str, Any]:
         _ = provider
         privacy = self.context.config.get("privacy", {}) if isinstance(self.context.config, dict) else {}
         egress_cfg = privacy.get("egress", {})
@@ -96,6 +147,14 @@ class EgressGateway(PluginBase):
         allow_images = bool(payload.get("allow_images", False) or payload.get("images"))
         decision = gate.enforce(self.plugin_id, payload, allow_raw_egress=False, allow_images=allow_images)
         if not decision.ok:
+            self._ledger_packet(
+                packet_hash=None,
+                schema_version=None,
+                policy_id=self._policy_id(),
+                approval_id=None,
+                result="blocked",
+                reason=decision.reason,
+            )
             raise PermissionError(decision.reason)
         sanitized = decision.sanitized_payload or payload
 
@@ -105,15 +164,76 @@ class EgressGateway(PluginBase):
             try:
                 self._validator.validate(self._load_schema(), sanitized)
             except ConfigError as exc:
+                self._ledger_packet(
+                    packet_hash=None,
+                    schema_version=None,
+                    policy_id=self._policy_id(),
+                    approval_id=None,
+                    result="blocked",
+                    reason=str(exc),
+                )
                 raise PermissionError(f"Reasoning packet schema violation: {exc}") from exc
+
+        packet_hash = self._packet_hash(sanitized)
+        policy_id = self._policy_id()
+        schema_version = int(sanitized.get("schema_version", 1) or 1)
+        approval_required = bool(egress_cfg.get("approval_required", False))
+        approval_id = None
+        if approval_required:
+            token = approval_token or payload.get("approval_token") or payload.get("_approval_token")
+            store = self._approval_store()
+            if store is None:
+                self._ledger_packet(
+                    packet_hash=packet_hash,
+                    schema_version=schema_version,
+                    policy_id=policy_id,
+                    approval_id=None,
+                    result="blocked",
+                    reason="approval_store_missing",
+                )
+                raise PermissionError("approval_store_missing")
+            if token:
+                approval_id = store.verify(token, packet_hash, policy_id)
+                if not approval_id:
+                    self._ledger_packet(
+                        packet_hash=packet_hash,
+                        schema_version=schema_version,
+                        policy_id=policy_id,
+                        approval_id=None,
+                        result="blocked",
+                        reason="approval_invalid",
+                    )
+                    raise PermissionError("approval_invalid")
+            else:
+                approval = store.request(packet_hash, policy_id, schema_version)
+                approval_id = approval.get("approval_id") if isinstance(approval, dict) else None
+                self._ledger_packet(
+                    packet_hash=packet_hash,
+                    schema_version=schema_version,
+                    policy_id=policy_id,
+                    approval_id=approval_id,
+                    result="blocked",
+                    reason="approval_required",
+                )
+                raise PermissionError(f"approval_required:{approval_id}" if approval_id else "approval_required")
 
         url, headers, timeout_s = self._endpoint()
         status_code, response_payload = self._post_json(url, sanitized, headers, timeout_s)
+        self._ledger_packet(
+            packet_hash=packet_hash,
+            schema_version=schema_version,
+            policy_id=policy_id,
+            approval_id=approval_id,
+            result="sent" if 200 <= status_code < 300 else "error",
+        )
         return {
             "status": "ok" if 200 <= status_code < 300 else "error",
             "status_code": status_code,
             "payload": sanitized,
             "response": response_payload,
+            "packet_hash": packet_hash,
+            "policy_id": policy_id,
+            "approval_id": approval_id,
         }
 
     def detokenize(self, payload: dict[str, Any]) -> dict[str, Any]:

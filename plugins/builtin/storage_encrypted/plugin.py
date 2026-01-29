@@ -733,7 +733,7 @@ class EntityMapStore:
         self._fsync_policy = fsync_policy
         os.makedirs(self._root, exist_ok=True)
         self._path = os.path.join(self._root, "entity_map.json")
-        self._data: dict[str, dict[str, str]] = {}
+        self._data: dict[str, dict[str, Any]] = {}
         if self._persist and os.path.exists(self._path):
             self._data = self._load()
 
@@ -760,15 +760,31 @@ class EntityMapStore:
         blob = encrypt_bytes(key, payload, key_id=key_id)
         _atomic_write_json(self._path, blob.__dict__, fsync_policy=self._fsync_policy)
 
-    def put(self, token: str, value: str, kind: str) -> None:
-        self._data[token] = {"value": value, "kind": kind}
+    def put(
+        self,
+        token: str,
+        value: str,
+        kind: str,
+        *,
+        key_id: str | None = None,
+        key_version: int | None = None,
+        first_seen_ts: str | None = None,
+    ) -> None:
+        record: dict[str, Any] = {"value": value, "kind": kind}
+        if key_id:
+            record["key_id"] = key_id
+        if key_version is not None:
+            record["key_version"] = int(key_version)
+        if first_seen_ts:
+            record["first_seen_ts"] = first_seen_ts
+        self._data[token] = record
         if self._persist:
             self._save()
 
-    def get(self, token: str) -> dict[str, str] | None:
+    def get(self, token: str) -> dict[str, Any] | None:
         return self._data.get(token)
 
-    def items(self) -> dict[str, dict[str, str]]:
+    def items(self) -> dict[str, dict[str, Any]]:
         return dict(self._data)
 
     def rotate(self, _new_key: bytes | None = None) -> int:

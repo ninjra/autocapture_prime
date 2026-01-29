@@ -8,16 +8,10 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from autocapture_nx.kernel.config import (
-    load_config,
-    reset_user_config,
-    restore_user_config,
-)
+from autocapture_nx.kernel.config import load_config
 from autocapture_nx.kernel.errors import AutocaptureError
-from autocapture_nx.kernel.loader import Kernel, default_config_paths
-from autocapture_nx.kernel.key_rotation import rotate_keys
-from autocapture_nx.kernel.query import run_query
-from autocapture_nx.plugin_system.registry import PluginRegistry
+from autocapture_nx.kernel.loader import default_config_paths
+from autocapture_nx.ux.facade import create_facade
 
 
 def _print_json(data: object) -> None:
@@ -25,77 +19,48 @@ def _print_json(data: object) -> None:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
-    kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
-    kernel.boot(start_conductor=False)
-    checks = kernel.doctor()
-    ok = all(check.ok for check in checks)
-    for check in checks:
-        status = "OK" if check.ok else "FAIL"
-        print(f"{status} {check.name}: {check.detail}")
-    kernel.shutdown()
+    facade = create_facade(safe_mode=args.safe_mode)
+    report = facade.doctor_report()
+    ok = bool(report.get("ok"))
+    for check in report.get("checks", []):
+        ok_flag = bool(check.get("ok")) if isinstance(check, dict) else False
+        status = "OK" if ok_flag else "FAIL"
+        name = check.get("name") if isinstance(check, dict) else "unknown"
+        detail = check.get("detail") if isinstance(check, dict) else ""
+        print(f"{status} {name}: {detail}")
     return 0 if ok else 2
 
 
 def cmd_config_show(_args: argparse.Namespace) -> int:
-    paths = default_config_paths()
-    config = load_config(paths, safe_mode=False)
-    _print_json(config)
+    facade = create_facade()
+    _print_json(facade.config_get())
     return 0
 
 
 def cmd_config_reset(_args: argparse.Namespace) -> int:
-    paths = default_config_paths()
-    reset_user_config(paths)
+    facade = create_facade()
+    facade.config_reset()
     print("User config reset to defaults")
     return 0
 
 
 def cmd_config_restore(_args: argparse.Namespace) -> int:
-    paths = default_config_paths()
-    restore_user_config(paths)
+    facade = create_facade()
+    facade.config_restore()
     print("User config restored from backup")
     return 0
 
 
 def cmd_plugins_list(args: argparse.Namespace) -> int:
-    paths = default_config_paths()
-    config = load_config(paths, safe_mode=args.safe_mode)
-    registry = PluginRegistry(config, safe_mode=args.safe_mode)
-    manifests = registry.discover_manifests()
-    allowlist = set(config.get("plugins", {}).get("allowlist", []))
-    enabled = config.get("plugins", {}).get("enabled", {})
-
-    rows = []
-    for manifest in manifests:
-        pid = manifest.plugin_id
-        rows.append(
-            {
-                "plugin_id": pid,
-                "allowlisted": pid in allowlist,
-                "enabled": enabled.get(pid, manifest.enabled),
-                "path": str(manifest.path.parent),
-            }
-        )
-    from autocapture.plugins.manager import PluginManager
-
-    mx_manager = PluginManager(config, safe_mode=args.safe_mode)
-    mx_plugins = mx_manager.list_plugins()
-    plugins = {item["plugin_id"]: item for item in rows}
-    for item in mx_plugins:
-        if item["plugin_id"] not in plugins:
-            plugins[item["plugin_id"]] = item
-    payload = {
-        "plugins": sorted(plugins.values(), key=lambda r: r["plugin_id"]),
-        "extensions": mx_manager.list_extensions(),
-    }
+    facade = create_facade(safe_mode=args.safe_mode)
+    payload = facade.plugins_list()
     _print_json(payload)
     return 0
 
 
 def cmd_plugins_approve(_args: argparse.Namespace) -> int:
-    from tools.hypervisor.scripts.update_plugin_locks import update_plugin_locks
-
-    update_plugin_locks()
+    facade = create_facade()
+    facade.plugins_approve()
     print("Plugin lockfile updated")
     return 0
 
@@ -165,20 +130,15 @@ def cmd_plugins_verify_defaults(_args: argparse.Namespace) -> int:
     return 0 if ok else 2
 
 
+def cmd_tray(_args: argparse.Namespace) -> int:
+    from autocapture_nx.tray import main as tray_main
+
+    return tray_main()
+
+
 def cmd_run(args: argparse.Namespace) -> int:
-    kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
-    system = kernel.boot()
-    capture = system.get("capture.source")
-    audio = system.get("capture.audio")
-    input_tracker = system.get("tracking.input")
-    window_meta = system.get("window.metadata")
-    cursor_tracker = system.get("tracking.cursor") if system.has("tracking.cursor") else None
-    capture.start()
-    audio.start()
-    input_tracker.start()
-    window_meta.start()
-    if cursor_tracker is not None:
-        cursor_tracker.start()
+    facade = create_facade(persistent=True, safe_mode=args.safe_mode)
+    facade.run_start()
     print("Capture running. Press Ctrl+C to stop.")
     try:
         import time
@@ -187,157 +147,90 @@ def cmd_run(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         pass
     finally:
-        capture.stop()
-        audio.stop()
-        input_tracker.stop()
-        window_meta.stop()
-        if cursor_tracker is not None:
-            cursor_tracker.stop()
-        kernel.shutdown()
+        facade.run_stop()
+        facade.shutdown()
     return 0
 
 
 def cmd_devtools_diffusion(args: argparse.Namespace) -> int:
-    kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
-    system = kernel.boot()
-    harness = system.get("devtools.diffusion")
-    result = harness.run(axis=args.axis, k_variants=args.k, dry_run=args.dry_run)
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.devtools_diffusion(axis=args.axis, k_variants=args.k, dry_run=args.dry_run)
     _print_json(result)
-    kernel.shutdown()
     return 0
 
 
 def cmd_devtools_ast_ir(args: argparse.Namespace) -> int:
-    kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
-    system = kernel.boot()
-    tool = system.get("devtools.ast_ir")
-    result = tool.run(scan_root=args.scan_root)
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.devtools_ast_ir(scan_root=args.scan_root)
     _print_json(result)
-    kernel.shutdown()
     return 0
 
 
 def cmd_query(args: argparse.Namespace) -> int:
-    kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
-    system = kernel.boot()
-    result = run_query(system, args.text)
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.query(args.text)
     _print_json(result)
-    kernel.shutdown()
     return 0
 
 
 def cmd_enrich(args: argparse.Namespace) -> int:
-    kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
-    system = kernel.boot(start_conductor=False)
-    from autocapture.runtime.conductor import create_conductor
-
-    conductor = create_conductor(system)
-    result = conductor.run_once(force=True)
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.enrich(force=True)
     _print_json(result)
-    kernel.shutdown()
     return 0
 
 
 def cmd_keys_rotate(args: argparse.Namespace) -> int:
-    kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
-    system = kernel.boot()
-    result = rotate_keys(system)
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.keys_rotate()
     _print_json(result)
-    kernel.shutdown()
     return 0
 
 
 def cmd_provenance_verify(args: argparse.Namespace) -> int:
-    from pathlib import Path
-
-    from autocapture.config.defaults import default_config_paths
-    from autocapture.config.load import load_config
-    from autocapture.pillars.citable import verify_ledger
-
-    if args.path:
-        ledger_path = Path(args.path)
-    else:
-        config = load_config(default_config_paths(), safe_mode=args.safe_mode)
-        data_dir = Path(config.get("storage", {}).get("data_dir", "data"))
-        ledger_path = data_dir / "ledger.ndjson"
-
-    if not ledger_path.exists():
-        print(f"OK ledger_missing: {ledger_path}")
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.verify_ledger(args.path)
+    if result.get("missing"):
+        print(f"OK ledger_missing: {result.get('path')}")
         return 0
-
-    ok, errors = verify_ledger(ledger_path)
-    if ok:
+    if result.get("ok"):
         print("OK ledger_verified")
         return 0
-    _print_json({"ok": False, "errors": errors, "path": str(ledger_path)})
+    _print_json(result)
     return 2
 
 
 def cmd_verify_ledger(args: argparse.Namespace) -> int:
-    from pathlib import Path
-
-    from autocapture.config.defaults import default_config_paths
-    from autocapture.config.load import load_config
-    from autocapture.pillars.citable import verify_ledger
-
-    if args.path:
-        ledger_path = Path(args.path)
-    else:
-        config = load_config(default_config_paths(), safe_mode=args.safe_mode)
-        data_dir = Path(config.get("storage", {}).get("data_dir", "data"))
-        ledger_path = data_dir / "ledger.ndjson"
-
-    if not ledger_path.exists():
-        print(f"OK ledger_missing: {ledger_path}")
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.verify_ledger(args.path)
+    if result.get("missing"):
+        print(f"OK ledger_missing: {result.get('path')}")
         return 0
-
-    ok, errors = verify_ledger(ledger_path)
-    if ok:
+    if result.get("ok"):
         print("OK ledger_verified")
         return 0
-    _print_json({"ok": False, "errors": errors, "path": str(ledger_path)})
+    _print_json(result)
     return 2
 
 
 def cmd_verify_anchors(args: argparse.Namespace) -> int:
-    from pathlib import Path
-
-    from autocapture.config.defaults import default_config_paths
-    from autocapture.config.load import load_config
-    from autocapture.pillars.citable import verify_anchors
-    from autocapture.storage.keys import load_keyring
-
-    config = load_config(default_config_paths(), safe_mode=args.safe_mode)
-    if args.path:
-        anchor_path = Path(args.path)
-    else:
-        anchor_cfg = config.get("storage", {}).get("anchor", {})
-        anchor_path = Path(anchor_cfg.get("path", "data_anchor/anchors.ndjson"))
-    keyring = load_keyring(config)
-    ok, errors = verify_anchors(anchor_path, keyring)
-    if ok:
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.verify_anchors(args.path)
+    if result.get("ok"):
         print("OK anchors_verified")
         return 0
-    _print_json({"ok": False, "errors": errors, "path": str(anchor_path)})
+    _print_json(result)
     return 2
 
 
 def cmd_verify_evidence(args: argparse.Namespace) -> int:
-    from autocapture.pillars.citable import verify_evidence
-
-    kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
-    system = kernel.boot(start_conductor=False)
-    try:
-        metadata = system.get("storage.metadata")
-        media = system.get("storage.media")
-        ok, errors = verify_evidence(metadata, media)
-        if ok:
-            print("OK evidence_verified")
-            return 0
-        _print_json({"ok": False, "errors": errors})
-        return 2
-    finally:
-        kernel.shutdown()
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.verify_evidence()
+    if result.get("ok"):
+        print("OK evidence_verified")
+        return 0
+    _print_json(result)
+    return 2
 
 
 def cmd_citations_resolve(args: argparse.Namespace) -> int:
@@ -347,15 +240,10 @@ def cmd_citations_resolve(args: argparse.Namespace) -> int:
     except Exception as exc:
         _print_json({"ok": False, "error": str(exc)})
         return 1
-    kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
-    system = kernel.boot(start_conductor=False)
-    try:
-        validator = system.get("citation.validator")
-        result = validator.resolve(citations)
-        _print_json(result)
-        return 0 if result.get("ok") else 2
-    finally:
-        kernel.shutdown()
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.citations_resolve(citations)
+    _print_json(result)
+    return 0 if result.get("ok") else 2
 
 
 def cmd_citations_verify(args: argparse.Namespace) -> int:
@@ -365,18 +253,13 @@ def cmd_citations_verify(args: argparse.Namespace) -> int:
     except Exception as exc:
         _print_json({"ok": False, "error": str(exc)})
         return 1
-    kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
-    system = kernel.boot(start_conductor=False)
-    try:
-        validator = system.get("citation.validator")
-        result = validator.resolve(citations)
-        if result.get("ok"):
-            print("OK citations_verified")
-            return 0
-        _print_json(result)
-        return 2
-    finally:
-        kernel.shutdown()
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.citations_verify(citations)
+    if result.get("ok"):
+        print("OK citations_verified")
+        return 0
+    _print_json(result)
+    return 2
 
 
 def cmd_proof_export(args: argparse.Namespace) -> int:
@@ -392,38 +275,17 @@ def cmd_proof_export(args: argparse.Namespace) -> int:
     if not evidence_ids and not citations:
         _print_json({"ok": False, "error": "missing_evidence_or_citations"})
         return 1
-    from autocapture_nx.kernel.proof_bundle import export_proof_bundle
-
-    kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
-    system = kernel.boot(start_conductor=False)
-    try:
-        config = system.config if hasattr(system, "config") else {}
-        storage_cfg = config.get("storage", {}) if isinstance(config, dict) else {}
-        data_dir = storage_cfg.get("data_dir", "data")
-        ledger_path = Path(data_dir) / "ledger.ndjson"
-        anchor_path = Path(storage_cfg.get("anchor", {}).get("path", "data_anchor/anchors.ndjson"))
-        report = export_proof_bundle(
-            metadata=system.get("storage.metadata"),
-            media=system.get("storage.media"),
-            keyring=system.get("storage.keyring") if system.has("storage.keyring") else None,
-            ledger_path=ledger_path,
-            anchor_path=anchor_path,
-            output_path=args.out,
-            evidence_ids=evidence_ids,
-            citations=citations,
-        )
-        _print_json(asdict(report))
-        return 0 if report.ok else 2
-    finally:
-        kernel.shutdown()
+    facade = create_facade(safe_mode=args.safe_mode)
+    report = facade.export_proof_bundle(evidence_ids=evidence_ids, output_path=args.out, citations=citations)
+    _print_json(report)
+    return 0 if report.get("ok") else 2
 
 
 def cmd_replay(args: argparse.Namespace) -> int:
-    from autocapture_nx.kernel.replay import replay_bundle
-
-    report = replay_bundle(args.bundle)
-    _print_json(asdict(report))
-    return 0 if report.ok else 2
+    facade = create_facade(safe_mode=args.safe_mode)
+    report = facade.replay_proof_bundle(args.bundle)
+    _print_json(report)
+    return 0 if report.get("ok") else 2
 
 
 def cmd_research_run(args: argparse.Namespace) -> int:
@@ -517,32 +379,16 @@ def cmd_storage_migrate_metadata(args: argparse.Namespace) -> int:
 
 
 def cmd_storage_forecast(args: argparse.Namespace) -> int:
-    from autocapture.storage.forecast import forecast_from_journal
-
-    paths = default_config_paths()
-    config = load_config(paths, safe_mode=args.safe_mode)
-    data_dir = args.data_dir or config.get("storage", {}).get("data_dir", "data")
-    result = forecast_from_journal(str(data_dir))
-    _print_json(asdict(result))
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.storage_forecast(args.data_dir)
+    _print_json(result)
     return 0
 
 
 def cmd_storage_compact(args: argparse.Namespace) -> int:
-    from autocapture.storage.compaction import compact_derived
-
-    kernel = Kernel(default_config_paths(), safe_mode=args.safe_mode)
-    system = kernel.boot()
-    try:
-        result = compact_derived(
-            system.get("storage.metadata"),
-            system.get("storage.media"),
-            system.config,
-            dry_run=args.dry_run,
-            event_builder=system.get("event.builder"),
-        )
-        _print_json(asdict(result))
-    finally:
-        kernel.shutdown()
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.storage_compact(dry_run=args.dry_run)
+    _print_json(result)
     return 0
 
 
@@ -597,6 +443,9 @@ def build_parser() -> argparse.ArgumentParser:
     plugins_approve.set_defaults(func=cmd_plugins_approve)
     plugins_verify = plugins_sub.add_parser("verify-defaults")
     plugins_verify.set_defaults(func=cmd_plugins_verify_defaults)
+
+    tray = sub.add_parser("tray")
+    tray.set_defaults(func=cmd_tray)
 
     run_cmd = sub.add_parser("run")
     run_cmd.set_defaults(func=cmd_run)

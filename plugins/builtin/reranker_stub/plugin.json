@@ -34,5 +34,8 @@
     "builtin.reranker.stub"
   ],
   "required_capabilities": [],
+  "settings_paths": [
+    "models"
+  ],
   "version": "0.1.0"
 }

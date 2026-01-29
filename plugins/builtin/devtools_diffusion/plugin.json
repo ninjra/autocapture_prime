@@ -27,5 +27,8 @@
   },
   "plugin_id": "builtin.devtools.diffusion",
   "required_capabilities": [],
+  "settings_paths": [
+    "devtools"
+  ],
   "version": "0.1.0"
 }

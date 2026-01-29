@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import math
 import threading
 from datetime import datetime, timezone
 from typing import Any
 
 from autocapture_nx.kernel.canonical_json import dumps
+from autocapture_nx.kernel.errors import ConfigError
 from autocapture_nx.kernel.evidence import validate_evidence_record
 from autocapture_nx.kernel.hashing import sha256_text
 from autocapture_nx.kernel.ids import prefixed_id
@@ -43,7 +45,7 @@ class EventBuilder:
 
     def policy_snapshot_hash(self) -> str:
         if self._policy_hash is None:
-            self._policy_hash = sha256_text(dumps(self._config))
+            self._policy_hash = sha256_text(dumps(_canonicalize_config_for_hash(self._config)))
         return self._policy_hash
 
     def journal_event(
@@ -119,6 +121,20 @@ class EventBuilder:
                 self._last_anchor_ts = now
                 self._anchor_entry_count = 0
         return ledger_hash
+
+
+def _canonicalize_config_for_hash(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {str(k): _canonicalize_config_for_hash(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_canonicalize_config_for_hash(v) for v in obj]
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            raise ConfigError("Config contains NaN/Inf, which is not supported.")
+        if obj.is_integer():
+            return int(obj)
+        return {"__float__": format(obj, ".15g")}
+    return obj
 
     def failure_event(
         self,

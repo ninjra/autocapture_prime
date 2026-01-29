@@ -19,7 +19,13 @@
     "event_id": {"type": "string"},
     "event_count": {"type": "integer"},
     "text": {"type": "string"},
+    "content_type": {"type": "string"},
+    "content_size": {"type": "integer"},
     "source_id": {"type": "string"},
+    "path": {"type": "string"},
+    "operation": {"type": "string"},
+    "size_bytes": {"type": "integer"},
+    "mtime_utc": {"type": "string"},
     "parent_evidence_id": {"type": "string"},
     "span_ref": {"type": "object"},
     "method": {"type": "string"},
@@ -61,6 +67,16 @@
       "type": "object",
       "properties": {"record_type": {"enum": ["evidence.window.meta"]}},
       "required": ["ts_utc", "window"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["evidence.clipboard.item"]}},
+      "required": ["ts_utc", "content_type", "content_size"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["evidence.file.activity"]}},
+      "required": ["ts_utc", "path", "operation"]
     },
     {
       "type": "object",

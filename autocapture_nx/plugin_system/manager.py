@@ -8,9 +8,11 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from autocapture_nx.kernel.hashing import sha256_directory, sha256_file
+from autocapture_nx.kernel.config import SchemaLiteValidator
 
 from .manifest import PluginManifest
 from .registry import PluginRegistry
+from .settings import build_plugin_settings, deep_merge
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,7 @@ class PluginManager:
         self.config = config
         self.safe_mode = safe_mode
         self._registry = PluginRegistry(config, safe_mode=safe_mode)
+        self._validator = SchemaLiteValidator()
 
     def _user_config_path(self) -> Path:
         config_dir = self.config.get("paths", {}).get("config_dir", "config")
@@ -50,6 +53,17 @@ class PluginManager:
         path = self._user_config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    def _manifest_for(self, plugin_id: str, manifests: list[PluginManifest]) -> PluginManifest | None:
+        for manifest in manifests:
+            if manifest.plugin_id == plugin_id:
+                return manifest
+        return None
+
+    def _validate_settings(self, manifest: PluginManifest, settings: dict[str, Any]) -> None:
+        schema = manifest.settings_schema
+        if isinstance(schema, dict):
+            self._validator.validate(schema, settings)
 
     def _enabled_plugin_ids(self, manifests: list[PluginManifest]) -> set[str]:
         alias_map = self._alias_map(manifests)
@@ -215,3 +229,49 @@ class PluginManager:
         from tools.hypervisor.scripts.update_plugin_locks import update_plugin_locks
 
         return update_plugin_locks()
+
+    def settings_get(self, plugin_id: str) -> dict[str, Any]:
+        manifests = self._registry.discover_manifests()
+        alias_map = self._alias_map(manifests)
+        plugin_id = alias_map.get(plugin_id, plugin_id)
+        manifest = self._manifest_for(plugin_id, manifests)
+        if manifest is None:
+            raise KeyError(f"unknown plugin {plugin_id}")
+        overrides = self.config.get("plugins", {}).get("settings", {})
+        override_settings = overrides.get(plugin_id, {}) if isinstance(overrides, dict) else {}
+        return build_plugin_settings(
+            self.config,
+            settings_paths=manifest.settings_paths,
+            default_settings=manifest.default_settings if isinstance(manifest.default_settings, dict) else None,
+            overrides=override_settings if isinstance(override_settings, dict) else None,
+        )
+
+    def settings_set(self, plugin_id: str, patch: dict[str, Any]) -> None:
+        manifests = self._registry.discover_manifests()
+        alias_map = self._alias_map(manifests)
+        plugin_id = alias_map.get(plugin_id, plugin_id)
+        manifest = self._manifest_for(plugin_id, manifests)
+        if manifest is None:
+            raise KeyError(f"unknown plugin {plugin_id}")
+        if not isinstance(patch, dict):
+            raise ValueError("settings_patch_invalid")
+        user_cfg = self._load_user_config()
+        plugins_cfg = user_cfg.setdefault("plugins", {})
+        settings_cfg = plugins_cfg.setdefault("settings", {})
+        current = settings_cfg.get(plugin_id, {})
+        if not isinstance(current, dict):
+            current = {}
+        merged = deep_merge(current, patch)
+        self._validate_settings(manifest, merged)
+        settings_cfg[plugin_id] = merged
+        self._write_user_config(user_cfg)
+
+    def settings_schema_for(self, plugin_id: str) -> dict[str, Any] | None:
+        manifests = self._registry.discover_manifests()
+        alias_map = self._alias_map(manifests)
+        plugin_id = alias_map.get(plugin_id, plugin_id)
+        manifest = self._manifest_for(plugin_id, manifests)
+        if manifest is None:
+            raise KeyError(f"unknown plugin {plugin_id}")
+        schema = manifest.settings_schema
+        return schema if isinstance(schema, dict) else None

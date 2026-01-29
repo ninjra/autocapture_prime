@@ -9,11 +9,12 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, IO
 
-from autocapture_nx.kernel.errors import PermissionError, PluginError
+from autocapture_nx.kernel.errors import PermissionError, PluginError, PluginTimeoutError
 from autocapture_nx.windows.win_sandbox import assign_job_object
 
 
@@ -81,12 +82,71 @@ def _build_env(hosting: dict[str, Any], config: dict[str, Any]) -> dict[str, str
     env["XDG_CACHE_HOME"] = str(cache_dir)
     env["PIP_CACHE_DIR"] = str(cache_dir / "pip")
     env["AUTOCAPTURE_CACHE_DIR"] = str(cache_dir)
+    env["HF_HOME"] = str(cache_dir / "hf")
+    env["HF_DATASETS_CACHE"] = str(cache_dir / "hf" / "datasets")
+    env["TRANSFORMERS_CACHE"] = str(cache_dir / "hf" / "transformers")
+    env["TORCH_HOME"] = str(cache_dir / "torch")
+    offline = bool(hosting.get("offline_env", True))
+    if offline:
+        env["HF_HUB_OFFLINE"] = "1"
+        env["TRANSFORMERS_OFFLINE"] = "1"
+        env["HF_DATASETS_OFFLINE"] = "1"
+        env["HF_HUB_DISABLE_TELEMETRY"] = "1"
+        env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+        env["WANDB_DISABLED"] = "true"
+        env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
     return env
+
+
+def _resolve_python_exe() -> str:
+    override = os.getenv("AUTOCAPTURE_PYTHON_EXE", "").strip()
+    if override:
+        override = override.strip('"')
+        try:
+            if Path(override).exists():
+                os.environ["AUTOCAPTURE_PYTHON_EXE"] = override
+                return override
+        except Exception:
+            pass
+    try:
+        if os.name == "nt":
+            venv_candidate = Path(sys.prefix) / "Scripts" / "python.exe"
+            if venv_candidate.exists():
+                os.environ["AUTOCAPTURE_PYTHON_EXE"] = str(venv_candidate)
+                return str(venv_candidate)
+        else:
+            venv_candidate = Path(sys.prefix) / "bin" / "python"
+            if venv_candidate.exists():
+                os.environ["AUTOCAPTURE_PYTHON_EXE"] = str(venv_candidate)
+                return str(venv_candidate)
+    except Exception:
+        pass
+    os.environ.setdefault("AUTOCAPTURE_PYTHON_EXE", sys.executable)
+    return sys.executable
+
+
+def _adjust_job_limits_for_venv(python_exe: str, limits: dict[str, Any] | None) -> dict[str, Any] | None:
+    if os.name != "nt":
+        return limits
+    if not limits:
+        return limits
+    try:
+        exe_path = Path(python_exe)
+        cfg = exe_path.parents[1] / "pyvenv.cfg"
+        if not cfg.exists():
+            return limits
+    except Exception:
+        return limits
+    adjusted = dict(limits)
+    max_proc = int(adjusted.get("max_processes", 1) or 0)
+    if max_proc > 0 and max_proc < 2:
+        adjusted["max_processes"] = 2
+    return adjusted
 
 
 @dataclass
 class RemoteCapability:
-    host: "PluginProcess"
+    host: "SubprocessPlugin"
     name: str
     methods: list[str]
 
@@ -95,9 +155,12 @@ class RemoteCapability:
             raise AttributeError(item)
 
         def _call(*args, **kwargs):
-            return self.host.call(self.name, item, args, kwargs)
+            return self.host._call(self.name, item, list(args), dict(kwargs))
 
         return _call
+
+    def update_methods(self, methods: list[str]) -> None:
+        self.methods = list(methods)
 
 
 class PluginProcess:
@@ -107,12 +170,14 @@ class PluginProcess:
         callable_name: str,
         plugin_id: str,
         network_allowed: bool,
-        config: dict[str, Any],
+        host_config: dict[str, Any],
+        plugin_config: dict[str, Any],
         *,
         capabilities: Any,
         allowed_capabilities: set[str] | None,
+        filesystem_policy: dict[str, Any] | None = None,
     ) -> None:
-        hosting = _hosting_cfg(config)
+        hosting = _hosting_cfg(host_config)
         self._rpc_timeout_s = float(hosting.get("rpc_timeout_s", 10))
         self._rpc_max_message_bytes = int(hosting.get("rpc_max_message_bytes", 2_000_000))
         self._write_lock = threading.Lock()
@@ -124,10 +189,12 @@ class PluginProcess:
         self._capabilities = capabilities
         self._allowed_capabilities = set(allowed_capabilities) if allowed_capabilities else None
         self._plugin_id = plugin_id
+        self._filesystem_policy = filesystem_policy
 
+        python_exe = _resolve_python_exe()
         self._proc: subprocess.Popen[str] | None = subprocess.Popen(
             [
-                sys.executable,
+                python_exe,
                 "-m",
                 "autocapture_nx.plugin_system.host_runner",
                 str(plugin_path),
@@ -138,20 +205,22 @@ class PluginProcess:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             text=True,
-            env=_build_env(hosting, config),
+            env=_build_env(hosting, host_config),
         )
         if self._proc.stdin is None or self._proc.stdout is None:
             raise PluginError("Failed to start plugin host")
-        assign_job_object(self._proc.pid, limits=hosting.get("job_limits", {}))
+        limits = _adjust_job_limits_for_venv(python_exe, hosting.get("job_limits", {}))
+        assign_job_object(self._proc.pid, limits=limits)
         self._stdin: IO[str] = self._proc.stdin
         self._stdout: IO[str] = self._proc.stdout
         self._req_id = 0
         self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self._reader_thread.start()
-        init_payload: dict[str, Any] = {"config": config}
+        init_payload: dict[str, Any] = {"config": plugin_config, "host_config": host_config}
         init_payload["allowed_capabilities"] = (
             None if self._allowed_capabilities is None else sorted(self._allowed_capabilities)
         )
+        init_payload["filesystem_policy"] = self._filesystem_policy
         self._send_payload(init_payload)
 
     def _send_payload(self, payload: dict[str, Any]) -> None:
@@ -321,7 +390,7 @@ class PluginProcess:
             response = resp_q.get(timeout=max(0.1, float(self._rpc_timeout_s)))
         except queue.Empty as exc:
             self.close()
-            raise PluginError(f"Plugin host request timed out after {self._rpc_timeout_s:.2f}s") from exc
+            raise PluginTimeoutError(f"Plugin host request timed out after {self._rpc_timeout_s:.2f}s") from exc
         finally:
             with self._response_lock:
                 self._responses.pop(req_id, None)
@@ -357,22 +426,32 @@ class SubprocessPlugin:
         network_allowed: bool,
         config: dict[str, Any],
         *,
+        plugin_config: dict[str, Any] | None = None,
         capabilities: Any,
         allowed_capabilities: set[str] | None,
+        filesystem_policy: dict[str, Any] | None = None,
     ):
-        self._host: PluginProcess | None = PluginProcess(
-            plugin_path,
-            callable_name,
-            plugin_id,
-            network_allowed,
-            config,
-            capabilities=capabilities,
-            allowed_capabilities=allowed_capabilities,
-        )
-        atexit.register(self.close)
+        self._plugin_path = plugin_path
+        self._callable_name = callable_name
+        self._plugin_id = plugin_id
+        self._network_allowed = network_allowed
+        self._config = config
+        self._plugin_config = plugin_config if isinstance(plugin_config, dict) else config
+        self._capabilities = capabilities
+        self._allowed_capabilities = allowed_capabilities
+        self._filesystem_policy = filesystem_policy
+        hosting = _hosting_cfg(config)
+        self._timeout_limit = int(hosting.get("rpc_timeout_limit", 3))
+        self._timeout_window_s = float(hosting.get("rpc_timeout_window_s", 60))
+        self._restart_backoff_s = float(hosting.get("rpc_watchdog_backoff_s", 0.2))
+        self._restart_max = int(hosting.get("rpc_watchdog_restart_max", 3))
+        self._timeout_events: list[float] = []
+        self._restart_count = 0
+        self._host: PluginProcess | None = None
         self._caps: dict[str, RemoteCapability] = {}
-        for name, methods in self._host.capabilities().items():
-            self._caps[name] = RemoteCapability(self._host, name, methods)
+        self._cap_methods: dict[str, set[str]] = {}
+        self._start_host()
+        atexit.register(self.close)
 
     def capabilities(self) -> dict[str, Any]:
         return self._caps
@@ -385,6 +464,62 @@ class SubprocessPlugin:
             self._host.close()
         finally:
             self._host = None
+
+    def _start_host(self) -> None:
+        self._host = PluginProcess(
+            self._plugin_path,
+            self._callable_name,
+            self._plugin_id,
+            self._network_allowed,
+            self._config,
+            self._plugin_config,
+            capabilities=self._capabilities,
+            allowed_capabilities=self._allowed_capabilities,
+            filesystem_policy=self._filesystem_policy,
+        )
+        self._refresh_caps()
+
+    def _refresh_caps(self) -> None:
+        if self._host is None:
+            return
+        caps = self._host.capabilities()
+        self._cap_methods = {name: set(methods) for name, methods in caps.items()}
+        for name, methods in self._cap_methods.items():
+            if name not in self._caps:
+                self._caps[name] = RemoteCapability(self, name, sorted(methods))
+            else:
+                self._caps[name].update_methods(sorted(methods))
+
+    def _record_timeout(self) -> bool:
+        now = time.monotonic()
+        self._timeout_events.append(now)
+        window = max(1.0, self._timeout_window_s)
+        self._timeout_events = [t for t in self._timeout_events if now - t <= window]
+        return len(self._timeout_events) >= max(1, self._timeout_limit)
+
+    def _restart(self, reason: str) -> None:
+        if self._restart_count >= max(1, self._restart_max):
+            raise PluginError(f"Plugin watchdog restart limit reached ({reason})")
+        self._restart_count += 1
+        if self._restart_backoff_s:
+            time.sleep(max(0.0, float(self._restart_backoff_s)))
+        self.close()
+        self._start_host()
+
+    def _call(self, capability: str, function: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+        if self._host is None:
+            self._start_host()
+        for attempt in range(2):
+            try:
+                assert self._host is not None
+                return self._host.call(capability, function, args, kwargs)
+            except PluginTimeoutError:
+                should_restart = self._record_timeout()
+                if should_restart:
+                    self._restart("rpc_timeout")
+                    if attempt == 0:
+                        continue
+                raise
 
     def __del__(self) -> None:
         try:

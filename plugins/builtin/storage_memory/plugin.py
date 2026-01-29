@@ -52,23 +52,39 @@ class InMemoryStore:
 
 class EntityMapStore:
     def __init__(self, persist: bool, data_dir: str) -> None:
-        self._data: dict[str, dict[str, str]] = {}
+        self._data: dict[str, dict[str, Any]] = {}
         self._persist = persist
         self._path = os.path.join(data_dir, "entity_map.json")
         if self._persist and os.path.exists(self._path):
             with open(self._path, "r", encoding="utf-8") as handle:
                 self._data = json.load(handle)
 
-    def put(self, token: str, value: str, kind: str) -> None:
-        self._data[token] = {"value": value, "kind": kind}
+    def put(
+        self,
+        token: str,
+        value: str,
+        kind: str,
+        *,
+        key_id: str | None = None,
+        key_version: int | None = None,
+        first_seen_ts: str | None = None,
+    ) -> None:
+        record: dict[str, Any] = {"value": value, "kind": kind}
+        if key_id:
+            record["key_id"] = key_id
+        if key_version is not None:
+            record["key_version"] = int(key_version)
+        if first_seen_ts:
+            record["first_seen_ts"] = first_seen_ts
+        self._data[token] = record
         if self._persist:
             with open(self._path, "w", encoding="utf-8") as handle:
                 json.dump(self._data, handle, indent=2, sort_keys=True)
 
-    def get(self, token: str) -> dict[str, str] | None:
+    def get(self, token: str) -> dict[str, Any] | None:
         return self._data.get(token)
 
-    def items(self) -> dict[str, dict[str, str]]:
+    def items(self) -> dict[str, dict[str, Any]]:
         return dict(self._data)
 
 

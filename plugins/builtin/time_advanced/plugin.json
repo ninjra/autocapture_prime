@@ -27,5 +27,9 @@
   },
   "plugin_id": "builtin.time.advanced",
   "required_capabilities": [],
+  "settings_paths": [
+    "time",
+    "runtime"
+  ],
   "version": "0.1.0"
 }

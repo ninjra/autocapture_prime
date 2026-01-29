@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Autocapture NX Console</title>
+    <link rel="stylesheet" href="/ui/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="mast">
+        <div class="brand">
+          <div class="logo">AC</div>
+          <div>
+            <p class="eyebrow">Autocapture NX</p>
+            <h1>Kernel console</h1>
+          </div>
+        </div>
+        <div class="auth">
+          <label for="token">Local token</label>
+          <input id="token" type="password" placeholder="Paste API token" />
+          <button id="saveToken" class="ghost">Save</button>
+        </div>
+      </header>
+
+      <nav class="nav">
+        <button class="nav-btn active" data-panel="settings">Settings</button>
+        <button class="nav-btn" data-panel="plugins">Plugins</button>
+        <button class="nav-btn" data-panel="status">Status</button>
+        <button class="nav-btn" data-panel="ops">Ops</button>
+      </nav>
+
+      <main class="panels">
+        <section class="panel active" id="panel-settings">
+          <article class="card">
+            <div class="card-header">
+              <h2>Settings</h2>
+              <div class="actions">
+                <input id="settingsFilter" type="search" placeholder="Filter paths" />
+                <button id="settingsReload" class="ghost">Reload</button>
+                <button id="settingsApply">Apply</button>
+              </div>
+            </div>
+            <div id="settingsStatus" class="status-line"></div>
+            <div id="settingsList" class="settings-list"></div>
+          </article>
+        </section>
+
+        <section class="panel" id="panel-plugins">
+          <div class="grid">
+            <article class="card" id="pluginsCard">
+              <div class="card-header">
+                <h2>Plugin Manager</h2>
+                <div class="actions">
+                  <button id="refreshPlugins" class="ghost">Refresh</button>
+                  <button id="reloadPlugins">Reload</button>
+                </div>
+              </div>
+              <div id="pluginsList" class="table"></div>
+            </article>
+
+            <article class="card" id="pluginSettingsCard">
+              <div class="card-header">
+                <h2 id="pluginSettingsTitle">Plugin Settings</h2>
+                <div class="actions">
+                  <button id="pluginSettingsApply">Apply</button>
+                </div>
+              </div>
+              <div id="pluginSettingsStatus" class="status-line"></div>
+              <div id="pluginSettingsList" class="settings-list"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel" id="panel-status">
+          <section class="grid">
+            <article class="card" id="statusCard">
+              <div class="card-header">
+                <h2>Status</h2>
+                <div class="actions">
+                  <button id="runStart">Start</button>
+                  <button id="runStop" class="ghost">Stop</button>
+                </div>
+              </div>
+              <div class="status-body">
+                <div>
+                  <p class="label">Run</p>
+                  <p id="runId">—</p>
+                </div>
+                <div>
+                  <p class="label">Ledger head</p>
+                  <p id="ledgerHead">—</p>
+                </div>
+                <div>
+                  <p class="label">Capture</p>
+                  <p id="captureState">—</p>
+                </div>
+              </div>
+            </article>
+
+            <article class="card" id="alertsCard">
+              <div class="card-header">
+                <h2>Alerts</h2>
+                <button id="refreshAlerts" class="ghost">Refresh</button>
+              </div>
+              <ul id="alertsList" class="list"></ul>
+            </article>
+
+            <article class="card" id="telemetryCard">
+              <div class="card-header">
+                <h2>Live Telemetry</h2>
+                <span class="pill" id="telemetryState">offline</span>
+              </div>
+              <pre id="telemetryPayload"></pre>
+            </article>
+          </section>
+        </section>
+
+        <section class="panel" id="panel-ops">
+          <section class="grid">
+            <article class="card" id="queryCard">
+              <div class="card-header">
+                <h2>Query</h2>
+                <button id="runQuery">Ask</button>
+              </div>
+              <textarea id="queryInput" placeholder="Ask a question about your captured timeline..."></textarea>
+              <div id="queryOutput" class="output"></div>
+            </article>
+
+            <article class="card" id="timelineCard">
+              <div class="card-header">
+                <h2>Timeline</h2>
+                <button id="refreshTimeline" class="ghost">Refresh</button>
+              </div>
+              <ul id="timelineList" class="list"></ul>
+            </article>
+          </section>
+
+          <section class="grid">
+            <article class="card" id="keysCard">
+              <div class="card-header">
+                <h2>Keys</h2>
+                <button id="refreshKeys" class="ghost">Refresh</button>
+              </div>
+              <pre id="keysPayload"></pre>
+            </article>
+
+            <article class="card" id="egressCard">
+              <div class="card-header">
+                <h2>Egress approvals</h2>
+                <button id="refreshEgress" class="ghost">Refresh</button>
+              </div>
+              <ul id="egressList" class="list"></ul>
+            </article>
+          </section>
+
+          <section class="grid">
+            <article class="card" id="verifyCard">
+              <div class="card-header">
+                <h2>Verify</h2>
+              </div>
+              <div class="actions">
+                <button id="verifyLedger">Ledger</button>
+                <button id="verifyAnchors" class="ghost">Anchors</button>
+                <button id="verifyEvidence" class="ghost">Evidence</button>
+              </div>
+              <pre id="verifyOutput"></pre>
+            </article>
+
+            <article class="card" id="configCard">
+              <div class="card-header">
+                <h2>Config patch</h2>
+                <button id="applyConfig">Apply</button>
+              </div>
+              <textarea id="configPatch" placeholder='{"privacy": {"cloud": {"enabled": true}}}'></textarea>
+              <pre id="configOutput"></pre>
+            </article>
+          </section>
+        </section>
+      </main>
+    </div>
+    <script src="/ui/app.js"></script>
+  </body>
+</html>

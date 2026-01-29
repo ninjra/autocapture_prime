@@ -27,5 +27,8 @@
   },
   "plugin_id": "builtin.runtime.governor",
   "required_capabilities": [],
+  "settings_paths": [
+    "runtime"
+  ],
   "version": "0.1.0"
 }

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 @dataclass(frozen=True)
@@ -42,11 +42,16 @@ class PluginManifest:
     enabled: bool
     entrypoints: List[PluginEntrypoint]
     permissions: PluginPermissions
+    filesystem_policy: Optional[Dict[str, Any]]
     compat: PluginCompat
     depends_on: List[str]
     conflicts_with: List[str]
     replaces: List[str]
+    settings_paths: List[str]
+    settings_schema: Optional[Dict[str, Any]]
+    default_settings: Optional[Dict[str, Any]]
     stages: List[str]
+    provides: List[str]
     required_capabilities: List[str]
     hash_lock: PluginHashLock
     path: Path
@@ -85,11 +90,16 @@ class PluginManifest:
             enabled=bool(data.get("enabled", True)),
             entrypoints=entrypoints,
             permissions=permissions,
+            filesystem_policy=data.get("filesystem_policy"),
             compat=compat,
             depends_on=list(data.get("depends_on", []) or []),
             conflicts_with=list(data.get("conflicts_with", []) or []),
             replaces=list(data.get("replaces", []) or []),
+            settings_paths=list(data.get("settings_paths", []) or []),
+            settings_schema=data.get("settings_schema"),
+            default_settings=data.get("default_settings"),
             stages=list(data.get("stages", []) or []),
+            provides=list(data.get("provides", []) or []),
             required_capabilities=list(data.get("required_capabilities", []) or []),
             hash_lock=lock,
             path=path,

@@ -69,11 +69,23 @@ trap {
 
 $bootstrapExe = $null
 $bootstrapPrefix = @()
-if (Get-Command python -ErrorAction SilentlyContinue) {
-    $bootstrapExe = "python"
-} elseif (Get-Command py -ErrorAction SilentlyContinue) {
-    $bootstrapExe = "py"
-    $bootstrapPrefix = @("-3")
+$cmdPython = Get-Command python -ErrorAction SilentlyContinue
+if ($cmdPython) {
+    $path = $cmdPython.Path
+    $isNonWindows = $false
+    if ($path.StartsWith("/") -or $path -match "[/\\\\]usr[/\\\\]bin" -or $path -like "\\\\wsl$\\*") { $isNonWindows = $true }
+    if ($path -match "WindowsApps[/\\\\]python.exe") { $isNonWindows = $true }
+    if ($path -like "$repoRoot\\*\\.venv\\*\\python.exe" -or $path -like "$repoRoot\\*\\.venv_win\\*\\python.exe") { $isNonWindows = $true }
+    if (-not $isNonWindows) {
+        $bootstrapExe = "python"
+    }
+}
+if (-not $bootstrapExe) {
+    $cmdPy = Get-Command py -ErrorAction SilentlyContinue
+    if ($cmdPy) {
+        $bootstrapExe = "py"
+        $bootstrapPrefix = @("-3")
+    }
 }
 
 if (-not $bootstrapExe) {
@@ -82,12 +94,80 @@ if (-not $bootstrapExe) {
     exit 1
 }
 
-$venvPath = Join-Path $repoRoot ".venv"
-$venvPython = Join-Path $venvPath "Scripts\\python.exe"
-if (-not (Test-Path $venvPython)) {
-    Write-Host "Creating venv at $venvPath"
-    & $bootstrapExe @bootstrapPrefix "-m" "venv" $venvPath
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+function Test-PosixVenv {
+    param([string]$CfgPath)
+    if (Test-Path $CfgPath) {
+        try {
+            $cfgText = Get-Content $CfgPath -Raw
+            if ($cfgText -match "home\\s*=\\s*/" -or $cfgText -match "executable\\s*=\\s*/" -or $cfgText -match "command\\s*=\\s*/") {
+                return $true
+            }
+        } catch { }
+    }
+    try {
+        $root = Split-Path -Parent $CfgPath
+        $binDir = Join-Path $root "bin"
+        if (Test-Path (Join-Path $binDir "activate")) { return $true }
+        if (Test-Path (Join-Path $binDir "python")) { return $true }
+    } catch { }
+    return $false
+}
+
+function Validate-PythonExe {
+    param([string]$ExePath)
+    try {
+        $out = & $ExePath "-c" "import sys; print(sys.executable)" 2>&1
+        $exitCode = $LASTEXITCODE
+    } catch {
+        return [pscustomobject]@{ ok = $false; message = $_.Exception.Message }
+    }
+    if ($exitCode -ne 0) {
+        return [pscustomobject]@{ ok = $false; message = ($out | Out-String).Trim() }
+    }
+    $text = ($out | Out-String).Trim()
+    if ($text -match "No Python at" -or $text.StartsWith("/") -or $text -match "[/\\\\]usr[/\\\\]bin" -or $text -like "\\\\wsl$\\*") {
+        return [pscustomobject]@{ ok = $false; message = "python resolved to non-Windows path: $text" }
+    }
+    return [pscustomobject]@{ ok = $true; message = $text }
+}
+
+function Ensure-VenvPython {
+    param([string]$VenvRoot)
+    $venvPython = Join-Path $VenvRoot "Scripts\\python.exe"
+    if (-not (Test-Path $venvPython)) {
+        Write-Host "Creating venv at $VenvRoot"
+        & $bootstrapExe @bootstrapPrefix "-m" "venv" $VenvRoot
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
+    return $venvPython
+}
+
+$venvPath = Join-Path $repoRoot ".venv_win"
+if ($env:AUTOCAPTURE_WINDOWS_VENV_PATH) {
+    $venvPath = $env:AUTOCAPTURE_WINDOWS_VENV_PATH
+}
+if ($env:AUTOCAPTURE_ALLOW_REPO_VENV -eq "1") {
+    $repoVenv = Join-Path $repoRoot ".venv"
+    $repoCfg = Join-Path $repoVenv "pyvenv.cfg"
+    if (-not (Test-PosixVenv $repoCfg)) {
+        $venvPath = $repoVenv
+    } else {
+        Write-Host "WARN Repo .venv looks like WSL; staying on .venv_win."
+    }
+}
+
+$venvPython = Ensure-VenvPython -VenvRoot $venvPath
+$validation = Validate-PythonExe -ExePath $venvPython
+if (-not $validation.ok -and ($venvPath -like "*\\.venv")) {
+    Write-Host "WARN Invalid venv python ($($validation.message)). Falling back to .venv_win."
+    $venvPath = Join-Path $repoRoot ".venv_win"
+    $venvPython = Ensure-VenvPython -VenvRoot $venvPath
+    $validation = Validate-PythonExe -ExePath $venvPython
+}
+if (-not $validation.ok) {
+    Write-Log ("Python in venv is invalid: " + $validation.message)
+    Write-Report -Status "failed" -Step "python_invalid" -ExitCode 1
+    exit 1
 }
 
 $pythonExe = $venvPython
@@ -121,14 +201,30 @@ function Invoke-Python {
     param([string]$Step, [string[]]$PyArgs)
     $cmd = @($pythonExe) + $pythonPrefix + $PyArgs
     Write-Log ("Running: " + ($cmd -join " "))
-    $cmdLine = (("\"" + $pythonExe + "\"") + " " + (($pythonPrefix + $PyArgs) | ForEach-Object { if ($_ -match '[\s\"]') { '"' + ($_ -replace '"','""') + '"' } else { $_ } }) -join " ") + " 2>&1"
-    $output = cmd /c $cmdLine
+    $output = & $pythonExe @pythonPrefix @PyArgs 2>&1
+    $exitCode = $LASTEXITCODE
     $output | Tee-Object -FilePath $logPath -Append | Out-Host
-    if ($LASTEXITCODE -ne 0) {
-        Write-Report -Status "failed" -Step $Step -ExitCode $LASTEXITCODE
-        Write-Log ("FAILED: " + $Step + " (code " + $LASTEXITCODE + ")")
+    if ($exitCode -ne 0) {
+        Write-Report -Status "failed" -Step $Step -ExitCode $exitCode
+        Write-Log ("FAILED: " + $Step + " (code " + $exitCode + ")")
         Write-Log ("See " + $logPath + " and " + $reportPath)
-        exit $LASTEXITCODE
+        exit $exitCode
+    }
+}
+
+function Invoke-Launcher {
+    param([string]$Step, [string[]]$Args)
+    $launcher = Join-Path $repoRoot "ops\\dev\\launch_tray.ps1"
+    $cmd = @("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $launcher) + $Args
+    Write-Log ("Running: " + ($cmd -join " "))
+    $output = & $cmd[0] @($cmd[1..($cmd.Length - 1)]) 2>&1
+    $exitCode = $LASTEXITCODE
+    $output | Tee-Object -FilePath $logPath -Append | Out-Host
+    if ($exitCode -ne 0) {
+        Write-Report -Status "failed" -Step $Step -ExitCode $exitCode
+        Write-Log ("FAILED: " + $Step + " (code " + $exitCode + ")")
+        Write-Log ("See " + $logPath + " and " + $reportPath)
+        exit $exitCode
     }
 }
 
@@ -140,8 +236,19 @@ function Ensure-Pip {
 
 function Test-Module {
     param([string]$ModuleName)
-    & $pythonExe "-c" "import $ModuleName" 2>$null | Out-Null
-    return ($LASTEXITCODE -eq 0)
+    try {
+        $output = & $pythonExe "-c" "import $ModuleName" 2>&1
+        $exitCode = $LASTEXITCODE
+    } catch {
+        Write-Log ("Module check exception (" + $ModuleName + "): " + $_.Exception.Message)
+        return $false
+    }
+    if ($exitCode -ne 0) {
+        $text = ($output | Out-String).Trim()
+        if ($text) { Write-Log ("Module check failed (" + $ModuleName + "): " + $text) }
+        return $false
+    }
+    return $true
 }
 
 $requiredModules = @("cryptography", "tzdata")
@@ -163,6 +270,9 @@ if ($needInstall) {
         exit 1
     }
 }
+
+Invoke-Launcher -Step "tray_launcher_selftest" -Args @("-Python", $pythonExe, "-SelfTest", "-NoBootstrap")
+Invoke-Launcher -Step "tray_launcher_smoketest" -Args @("-Python", $pythonExe, "-SmokeTest", "-NoBootstrap")
 
 Invoke-Python -Step "deps_lock" -PyArgs @("tools/gate_deps_lock.py")
 Invoke-Python -Step "canon_gate" -PyArgs @("tools/gate_canon.py")

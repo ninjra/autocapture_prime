@@ -62,14 +62,20 @@ class Scheduler:
         self._governor = governor
         self._queue: list[Job] = []
         snapshot = governor.budget_snapshot()
+        def _snapshot_value(name: str, default: int = 0) -> int:
+            if hasattr(snapshot, name):
+                return int(getattr(snapshot, name))
+            if isinstance(snapshot, dict):
+                return int(snapshot.get(name, default) or 0)
+            return int(default)
         self._last_stats = SchedulerRunStats(
             mode="ACTIVE_CAPTURE_ONLY",
             heavy_allowed=False,
             reason="init",
-            budget_remaining_ms=int(snapshot.remaining_ms),
-            budget_spent_ms=int(snapshot.spent_ms),
-            budget_window_ms=int(snapshot.budget_ms),
-            inflight_heavy=int(snapshot.inflight_heavy),
+            budget_remaining_ms=_snapshot_value("remaining_ms"),
+            budget_spent_ms=_snapshot_value("spent_ms"),
+            budget_window_ms=_snapshot_value("budget_ms"),
+            inflight_heavy=_snapshot_value("inflight_heavy"),
             admitted_heavy=0,
             completed_jobs=0,
             deferred_jobs=0,

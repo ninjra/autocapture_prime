@@ -89,6 +89,42 @@ def _write_consumer_plugin(root: Path, *, required_capabilities: list[str]) -> s
     return plugin_id
 
 
+def _write_bytes_plugin(root: Path) -> str:
+    plugin_id = "test.bytes.subproc"
+    plugin_dir = root / "c_bytes"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "plugin.py").write_text(
+        "class BytesCap:\n"
+        "    def get_bytes(self):\n"
+        "        return b\"\\x00\\x01\"\n"
+        "\n"
+        "class Plugin:\n"
+        "    def __init__(self, plugin_id, context):\n"
+        "        self._cap = BytesCap()\n"
+        "    def capabilities(self):\n"
+        "        return {\"bytes.cap\": self._cap}\n"
+        "\n"
+        "def create_plugin(plugin_id, context):\n"
+        "    return Plugin(plugin_id, context)\n",
+        encoding="utf-8",
+    )
+    manifest = {
+        "plugin_id": plugin_id,
+        "version": "0.1.0",
+        "enabled": True,
+        "entrypoints": [
+            {"kind": "bytes.cap", "id": "default", "path": "plugin.py", "callable": "create_plugin"}
+        ],
+        "permissions": {"filesystem": "read", "gpu": False, "raw_input": False, "network": False},
+        "compat": {"requires_kernel": ">=0.0.0", "requires_schema_versions": [1]},
+        "depends_on": [],
+        "required_capabilities": [],
+        "hash_lock": {"manifest_sha256": "", "artifact_sha256": ""},
+    }
+    (plugin_dir / "plugin.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return plugin_id
+
+
 class SubprocessCapabilityBridgingTests(unittest.TestCase):
     def test_subprocess_plugin_can_call_allowed_capability(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -107,6 +143,7 @@ class SubprocessCapabilityBridgingTests(unittest.TestCase):
             hosting = plugins.setdefault("hosting", {})
             hosting["mode"] = "subprocess"
             hosting["inproc_allowlist"] = [storage_id]
+            hosting["inproc_justifications"] = {storage_id: "test inproc storage capability"}
             hosting["rpc_timeout_s"] = 5
             hosting["rpc_max_message_bytes"] = 2_000_000
             hosting["sanitize_env"] = True
@@ -135,6 +172,7 @@ class SubprocessCapabilityBridgingTests(unittest.TestCase):
             hosting = plugins.setdefault("hosting", {})
             hosting["mode"] = "subprocess"
             hosting["inproc_allowlist"] = [storage_id]
+            hosting["inproc_justifications"] = {storage_id: "test inproc storage capability"}
             hosting["rpc_timeout_s"] = 5
             hosting["rpc_max_message_bytes"] = 2_000_000
             hosting["sanitize_env"] = True
@@ -145,6 +183,32 @@ class SubprocessCapabilityBridgingTests(unittest.TestCase):
             consumer = caps.get("consumer.cap")
             with self.assertRaises(PluginError):
                 consumer.read_other()
+
+    def test_subprocess_plugin_returns_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bytes_id = _write_bytes_plugin(root)
+
+            config = _default_config()
+            plugins = config.setdefault("plugins", {})
+            plugins["allowlist"] = [bytes_id]
+            plugins["enabled"] = {bytes_id: True}
+            plugins["default_pack"] = [bytes_id]
+            plugins["search_paths"] = [str(root)]
+            plugins.setdefault("locks", {})["enforce"] = False
+            plugins["conflicts"] = {"enforce": True, "allow_pairs": []}
+            hosting = plugins.setdefault("hosting", {})
+            hosting["mode"] = "subprocess"
+            hosting["inproc_allowlist"] = []
+            hosting["rpc_timeout_s"] = 5
+            hosting["rpc_max_message_bytes"] = 2_000_000
+            hosting["sanitize_env"] = True
+            hosting["cache_dir"] = str(root / "cache")
+
+            registry = PluginRegistry(config, safe_mode=False)
+            _loaded, caps = registry.load_plugins()
+            bytes_cap = caps.get("bytes.cap")
+            self.assertEqual(bytes_cap.get_bytes(), b"\x00\x01")
 
 
 if __name__ == "__main__":

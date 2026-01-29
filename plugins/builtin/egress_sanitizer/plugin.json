@@ -29,5 +29,9 @@
   "required_capabilities": [
     "storage.entity_map"
   ],
+  "settings_paths": [
+    "privacy",
+    "storage"
+  ],
   "version": "0.1.0"
 }

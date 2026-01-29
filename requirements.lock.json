@@ -1,5 +1,5 @@
 {
-  "content_hash": "10756876bfc9c88fc430514ec34ff34ae4c29bd3e1d08929319e5231a387811d",
+  "content_hash": "58fae215147cc60a387a68cb85c4c0f8afd59e6c67d68dc05b70b2433cfd74ef",
   "dependencies": [
     "Pillow>=10.0.0",
     "PyPDF2>=3.0.0",
@@ -11,11 +11,13 @@
     "mypy>=1.8.0",
     "platformdirs",
     "pynput>=1.7.6",
+    "pywebview>=5.1",
     "ruff>=0.6.0",
     "sounddevice>=0.4.6",
-    "tzdata>=2024.1"
+    "tzdata>=2024.1",
+    "uvicorn>=0.27.0"
   ],
-  "generated_at": "2026-01-27T23:38:01.455696+00:00",
+  "generated_at": "2026-01-29T02:36:48.944148+00:00",
   "optional_dependencies": {
     "dev": [
       "mypy>=1.8.0",

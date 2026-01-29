@@ -17,7 +17,8 @@ from autocapture_nx.kernel.paths import plugins_dir, resolve_repo_path, load_jso
 from .api import PluginContext
 from .host import SubprocessPlugin
 from .manifest import PluginManifest
-from .runtime import network_guard
+from .runtime import FilesystemPolicy, filesystem_guard, network_guard
+from .settings import build_plugin_settings
 
 if TYPE_CHECKING:
     from autocapture_nx.kernel.system import System
@@ -96,12 +97,14 @@ class LoadedPlugin:
     manifest: dict[str, Any]
     instance: Any
     capabilities: dict[str, Any]
+    filesystem_policy: FilesystemPolicy | None = None
 
 
 class CapabilityProxy:
-    def __init__(self, target: Any, network_allowed: bool) -> None:
+    def __init__(self, target: Any, network_allowed: bool, filesystem_policy: FilesystemPolicy | None = None) -> None:
         self._target = target
         self._network_allowed = network_allowed
+        self._filesystem_policy = filesystem_policy
 
     @property
     def network_allowed(self) -> bool:
@@ -115,14 +118,16 @@ class CapabilityProxy:
         if not callable(self._target):
             raise TypeError("Capability is not callable")
         with network_guard(self._network_allowed):
-            return self._target(*args, **kwargs)
+            with filesystem_guard(self._filesystem_policy):
+                return self._target(*args, **kwargs)
 
     def __getattr__(self, name: str) -> Any:
         attr = getattr(self._target, name)
         if callable(attr):
             def wrapped(*args, **kwargs):
                 with network_guard(self._network_allowed):
-                    return attr(*args, **kwargs)
+                    with filesystem_guard(self._filesystem_policy):
+                        return attr(*args, **kwargs)
 
             return wrapped
         return attr
@@ -215,8 +220,14 @@ class CapabilityRegistry:
     def __init__(self) -> None:
         self._capabilities: dict[str, Any] = {}
 
-    def register(self, capability: str, impl: Any, network_allowed: bool) -> None:
-        self._capabilities[capability] = CapabilityProxy(impl, network_allowed)
+    def register(
+        self,
+        capability: str,
+        impl: Any,
+        network_allowed: bool,
+        filesystem_policy: FilesystemPolicy | None = None,
+    ) -> None:
+        self._capabilities[capability] = CapabilityProxy(impl, network_allowed, filesystem_policy)
 
     def get(self, capability: str) -> Any:
         if capability not in self._capabilities:
@@ -336,6 +347,188 @@ class PluginRegistry:
             inproc_allowlist = set(hosting.get("inproc_allowlist", []) or [])
             if hosting_mode != "subprocess" or manifest.get("plugin_id") in inproc_allowlist:
                 raise PluginError("Network-capable plugins must run in subprocess hosting mode")
+
+    def _validate_inproc_justifications(self, inproc_allowlist: set[str]) -> None:
+        hosting_cfg = self.config.get("plugins", {}).get("hosting", {})
+        justifications = hosting_cfg.get("inproc_justifications", {}) if isinstance(hosting_cfg, dict) else {}
+        if not inproc_allowlist:
+            return
+        missing = []
+        if isinstance(justifications, dict):
+            for plugin_id in sorted(inproc_allowlist):
+                reason = justifications.get(plugin_id)
+                if not reason or not str(reason).strip():
+                    missing.append(plugin_id)
+        else:
+            missing = sorted(inproc_allowlist)
+        if missing:
+            raise PluginError(f"Missing inproc justification for: {', '.join(missing)}")
+
+    def _plugin_load_order(
+        self,
+        manifests_by_id: dict[str, tuple[Path, dict[str, Any]]],
+        enabled_set: set[str],
+    ) -> list[str]:
+        provided_by_cap: dict[str, list[str]] = {}
+        for pid, (_path, manifest) in manifests_by_id.items():
+            if pid not in enabled_set:
+                continue
+            entrypoints = manifest.get("entrypoints", [])
+            if not isinstance(entrypoints, list):
+                continue
+            for entry in entrypoints:
+                if not isinstance(entry, dict):
+                    continue
+                kind = entry.get("kind")
+                if isinstance(kind, str) and kind.strip():
+                    provided_by_cap.setdefault(kind, []).append(pid)
+            provides = manifest.get("provides", [])
+            if isinstance(provides, list):
+                for cap in provides:
+                    capability = str(cap).strip()
+                    if capability:
+                        provided_by_cap.setdefault(capability, []).append(pid)
+
+        deps: dict[str, set[str]] = {pid: set() for pid in enabled_set}
+        for pid, (_path, manifest) in manifests_by_id.items():
+            if pid not in enabled_set:
+                continue
+            depends = manifest.get("depends_on", [])
+            if isinstance(depends, list):
+                for dep in depends:
+                    if dep in enabled_set and dep != pid:
+                        deps[pid].add(dep)
+            required_caps_raw = manifest.get("required_capabilities", [])
+            if not isinstance(required_caps_raw, list):
+                continue
+            for cap in (str(item) for item in required_caps_raw):
+                capability = cap.strip()
+                if not capability:
+                    continue
+                providers = [(provider_id, None) for provider_id in provided_by_cap.get(capability, [])]
+                if not providers:
+                    continue
+                policy = self._capability_policy(capability)
+                providers = self._filtered_providers(capability, providers, policy)
+                providers = self._ordered_providers(providers, policy.get("preferred", []))
+                if policy.get("mode") == "multi":
+                    max_providers = int(policy.get("max_providers", 0) or 0)
+                    if max_providers > 0:
+                        providers = providers[:max_providers]
+                    provider_ids = [provider_id for provider_id, _proxy in providers]
+                else:
+                    provider_id, _proxy = self._resolve_single(capability, providers, policy)
+                    provider_ids = [provider_id]
+                for provider_id in provider_ids:
+                    if provider_id != pid:
+                        deps[pid].add(provider_id)
+
+        remaining = {pid: set(items) for pid, items in deps.items()}
+        order: list[str] = []
+        ready = sorted(pid for pid, items in remaining.items() if not items)
+        while ready:
+            pid = ready.pop(0)
+            order.append(pid)
+            for other, items in remaining.items():
+                if pid in items:
+                    items.remove(pid)
+                    if not items and other not in order and other not in ready:
+                        ready.append(other)
+            ready.sort()
+        if len(order) != len(enabled_set):
+            stuck = sorted(pid for pid, items in remaining.items() if items)
+            raise PluginError(f"Plugin dependency cycle detected: {', '.join(stuck)}")
+        return order
+
+    def _plugin_overrides(self, plugin_id: str) -> dict[str, Any]:
+        plugins_cfg = self.config.get("plugins", {}) if isinstance(self.config, dict) else {}
+        settings = plugins_cfg.get("settings", {})
+        if not isinstance(settings, dict):
+            return {}
+        overrides = settings.get(plugin_id, {})
+        return overrides if isinstance(overrides, dict) else {}
+
+    def _filesystem_policy(
+        self,
+        plugin_id: str,
+        manifest: dict[str, Any],
+        plugin_root: Path,
+    ) -> FilesystemPolicy | None:
+        perms = manifest.get("permissions", {}) if isinstance(manifest.get("permissions"), dict) else {}
+        declared = manifest.get("filesystem_policy", {})
+        config_policy = (
+            self.config.get("plugins", {}).get("filesystem_policies", {}).get(plugin_id, {})
+        )
+        defaults = self.config.get("plugins", {}).get("filesystem_defaults", {})
+        if not isinstance(defaults, dict):
+            defaults = {}
+
+        def _collect(raw: Any) -> list[str]:
+            if not isinstance(raw, list):
+                return []
+            return [str(item) for item in raw if str(item).strip()]
+
+        read_roots = []
+        write_roots = []
+        for source in (defaults, config_policy, declared):
+            if isinstance(source, dict):
+                read_roots.extend(_collect(source.get("read")))
+                write_roots.extend(_collect(source.get("readwrite")))
+
+        fs_perm = str(perms.get("filesystem", "none")).lower().strip() if isinstance(perms, dict) else "none"
+        # Always allow read access to the plugin root for module resources.
+        read_roots.append(str(plugin_root))
+        if fs_perm == "none":
+            read_roots = [str(plugin_root)]
+            write_roots = []
+        elif fs_perm == "read":
+            write_roots = []
+        elif fs_perm == "readwrite":
+            pass
+        # Expand simple template variables.
+        config = self.config if isinstance(self.config, dict) else {}
+        data_dir = str(config.get("storage", {}).get("data_dir", "data"))
+        cache_dir = str(config.get("plugins", {}).get("hosting", {}).get("cache_dir", "data/cache/plugins"))
+        config_dir = str(config.get("paths", {}).get("config_dir", "config"))
+        anchor_path = ""
+        anchor_dir = ""
+        try:
+            anchor_cfg = config.get("storage", {}).get("anchor", {})
+            if isinstance(anchor_cfg, dict):
+                raw_anchor_path = anchor_cfg.get("path")
+                if isinstance(raw_anchor_path, str) and raw_anchor_path.strip():
+                    anchor_path = raw_anchor_path
+                    anchor_dir = str(Path(raw_anchor_path).expanduser().resolve().parent)
+        except Exception:
+            anchor_path = ""
+            anchor_dir = ""
+        repo_root = str(resolve_repo_path("."))
+        mapping = {
+            "data_dir": data_dir,
+            "cache_dir": cache_dir,
+            "config_dir": config_dir,
+            "plugin_dir": str(plugin_root),
+            "repo_root": repo_root,
+            "anchor_path": anchor_path,
+            "anchor_dir": anchor_dir,
+        }
+
+        def _expand(paths: list[str]) -> list[str]:
+            expanded: list[str] = []
+            for raw in paths:
+                value = raw
+                try:
+                    value = value.format(**mapping)
+                except Exception:
+                    value = raw
+                expanded.append(value)
+            return expanded
+
+        read_roots = _expand(read_roots)
+        write_roots = _expand(write_roots)
+        if not read_roots and not write_roots:
+            return None
+        return FilesystemPolicy.from_paths(read=read_roots, readwrite=write_roots)
 
     def validate_allowlist_and_hashes(self, manifests: list[PluginManifest]) -> None:
         allowlist_raw = self.config.get("plugins", {}).get("allowlist", [])
@@ -536,6 +729,95 @@ class PluginRegistry:
                 capabilities.register(capability, proxy, network_allowed=proxy.network_allowed)
         return capabilities
 
+    def _capabilities_for_plugins(self, plugins: list[LoadedPlugin]) -> CapabilityRegistry:
+        providers_by_cap: dict[str, list[tuple[str, CapabilityProxy]]] = {}
+        for plugin in plugins:
+            network_allowed = bool(plugin.manifest.get("permissions", {}).get("network", False))
+            filesystem_policy = plugin.filesystem_policy
+            for cap_name, impl in plugin.capabilities.items():
+                proxy = CapabilityProxy(impl, network_allowed, filesystem_policy)
+                providers_by_cap.setdefault(cap_name, []).append((plugin.plugin_id, proxy))
+        return self._resolve_capabilities(providers_by_cap)
+
+    def _shutdown_instance(self, instance: Any) -> None:
+        for method in ("stop", "close"):
+            target = getattr(instance, method, None)
+            if callable(target):
+                try:
+                    target()
+                except Exception:
+                    pass
+
+    def hot_reload(
+        self,
+        current_plugins: list[LoadedPlugin],
+        *,
+        plugin_ids: list[str] | None = None,
+    ) -> tuple[list[LoadedPlugin], CapabilityRegistry, dict[str, Any]]:
+        new_plugins, _caps = self.load_plugins()
+        new_by_id = {plugin.plugin_id: plugin for plugin in new_plugins}
+        current_by_id = {plugin.plugin_id: plugin for plugin in current_plugins}
+        alias_map: dict[str, str] = {}
+        for plugin in new_plugins:
+            replaces = plugin.manifest.get("replaces", [])
+            if isinstance(replaces, list):
+                for old_id in replaces:
+                    old = str(old_id).strip()
+                    if old and old not in alias_map:
+                        alias_map[old] = plugin.plugin_id
+
+        hot_cfg = self.config.get("plugins", {}).get("hot_reload", {}) if isinstance(self.config, dict) else {}
+        enabled = bool(hot_cfg.get("enabled", True)) if isinstance(hot_cfg, dict) else True
+        if not enabled:
+            raise PluginError("hot_reload_disabled")
+        allowlist = set(self._normalize_ids(hot_cfg.get("allowlist", []), alias_map)) if isinstance(hot_cfg, dict) else set()
+        blocklist = set(self._normalize_ids(hot_cfg.get("blocklist", []), alias_map)) if isinstance(hot_cfg, dict) else set()
+        default_pack = set(self._normalize_ids(self.config.get("plugins", {}).get("default_pack", []), alias_map))
+        inproc_allowlist = set(self._normalize_ids(self.config.get("plugins", {}).get("hosting", {}).get("inproc_allowlist", []), alias_map))
+        blocklist |= default_pack
+        blocklist |= inproc_allowlist
+
+        requested = set(self._normalize_ids(plugin_ids or list(new_by_id.keys()), alias_map))
+        blocked = sorted(pid for pid in requested if pid in blocklist)
+        if allowlist:
+            reload_ids = requested & allowlist
+        else:
+            reload_ids = requested - blocklist
+
+        final_plugins: list[LoadedPlugin] = []
+        reloaded: list[str] = []
+        kept: list[str] = []
+        added: list[str] = []
+        removed: list[str] = []
+
+        for plugin_id, new_plugin in new_by_id.items():
+            if plugin_id in reload_ids or plugin_id not in current_by_id:
+                if plugin_id in current_by_id and plugin_id in reload_ids:
+                    self._shutdown_instance(current_by_id[plugin_id].instance)
+                    reloaded.append(plugin_id)
+                elif plugin_id not in current_by_id:
+                    added.append(plugin_id)
+                final_plugins.append(new_plugin)
+            else:
+                final_plugins.append(current_by_id[plugin_id])
+                self._shutdown_instance(new_plugin.instance)
+                kept.append(plugin_id)
+
+        for plugin_id, plugin in current_by_id.items():
+            if plugin_id not in new_by_id:
+                self._shutdown_instance(plugin.instance)
+                removed.append(plugin_id)
+
+        capabilities = self._capabilities_for_plugins(final_plugins)
+        report = {
+            "reloaded": sorted(reloaded),
+            "kept": sorted(kept),
+            "added": sorted(added),
+            "removed": sorted(removed),
+            "blocked": blocked,
+        }
+        return final_plugins, capabilities, report
+
     def load_enabled(self, manifests: list[PluginManifest], *, safe_mode: bool) -> list[LoadedPlugin]:
         registry = self if safe_mode == self.safe_mode else PluginRegistry(self.config, safe_mode=safe_mode)
         loaded, _caps = registry.load_plugins()
@@ -552,10 +834,12 @@ class PluginRegistry:
                 plugin_id = plugin.plugin_id
                 caps = plugin.capabilities
                 network_allowed = bool(plugin.manifest.get("permissions", {}).get("network", False))
+                filesystem_policy = plugin.filesystem_policy
             elif hasattr(plugin, "capabilities"):
                 plugin_id = str(getattr(plugin, "plugin_id", "unknown.plugin"))
                 caps = plugin.capabilities()
                 network_allowed = False
+                filesystem_policy = None
             else:
                 continue
             for cap_name, impl in caps.items():
@@ -567,18 +851,18 @@ class PluginRegistry:
                     if isinstance(existing, CapabilityProxy):
                         existing = existing.target
                     if isinstance(existing, MultiCapabilityProxy):
-                        existing.add_provider(plugin_id, CapabilityProxy(impl, network_allowed))
+                        existing.add_provider(plugin_id, CapabilityProxy(impl, network_allowed, filesystem_policy))
                         continue
                     raise PluginError(f"Existing capability for {cap_name} is not multi-capable")
                 if policy.get("mode") == "multi":
                     multi = MultiCapabilityProxy(
                         cap_name,
-                        [(plugin_id, CapabilityProxy(impl, network_allowed))],
+                        [(plugin_id, CapabilityProxy(impl, network_allowed, filesystem_policy))],
                         policy,
                     )
                     system.register(cap_name, multi, network_allowed=False)
                 else:
-                    system.register(cap_name, impl, network_allowed=network_allowed)
+                    system.register(cap_name, impl, network_allowed=network_allowed, filesystem_policy=filesystem_policy)
 
     def load_plugins(self) -> tuple[list[LoadedPlugin], CapabilityRegistry]:
         manifests = self.discover_manifest_paths()
@@ -602,6 +886,7 @@ class PluginRegistry:
         enabled_map = self._normalize_enabled_map(self.config.get("plugins", {}).get("enabled", {}), alias_map)
         default_pack = set(self._normalize_ids(self.config.get("plugins", {}).get("default_pack", []), alias_map))
         inproc_allowlist = set(self._normalize_ids(hosting_cfg.get("inproc_allowlist", []), alias_map))
+        self._validate_inproc_justifications(inproc_allowlist)
 
         loaded: list[LoadedPlugin] = []
         capabilities = CapabilityRegistry()
@@ -622,7 +907,9 @@ class PluginRegistry:
 
         self._check_conflicts(manifests_by_id, enabled_set)
 
-        for plugin_id, (manifest_path, manifest) in manifests_by_id.items():
+        load_order = self._plugin_load_order(manifests_by_id, enabled_set)
+        for plugin_id in load_order:
+            manifest_path, manifest = manifests_by_id[plugin_id]
             if plugin_id not in allowlist:
                 continue
             if plugin_id not in enabled_set:
@@ -651,6 +938,17 @@ class PluginRegistry:
                 if not isinstance(required_caps_raw, list):
                     raise PluginError(f"Plugin {plugin_id} required_capabilities must be a list")
                 required_capabilities = {str(cap) for cap in required_caps_raw if str(cap).strip()}
+                filesystem_policy = self._filesystem_policy(plugin_id, manifest, manifest_path.parent)
+                settings_paths = manifest.get("settings_paths", []) or []
+                if not isinstance(settings_paths, list):
+                    settings_paths = []
+                default_settings = manifest.get("default_settings") if isinstance(manifest.get("default_settings"), dict) else None
+                plugin_settings = build_plugin_settings(
+                    self.config,
+                    settings_paths=[str(path) for path in settings_paths if str(path).strip()],
+                    default_settings=default_settings,
+                    overrides=self._plugin_overrides(plugin_id),
+                )
                 if hosting_mode == "subprocess" and plugin_id not in inproc_allowlist:
                     instance = SubprocessPlugin(
                         module_path,
@@ -658,8 +956,10 @@ class PluginRegistry:
                         plugin_id,
                         network_allowed,
                         self.config,
+                        plugin_config=plugin_settings,
                         capabilities=capabilities,
                         allowed_capabilities=required_capabilities,
+                        filesystem_policy=filesystem_policy.payload() if filesystem_policy else None,
                     )
                     caps = instance.capabilities()
                 else:
@@ -676,7 +976,7 @@ class PluginRegistry:
                         raise PluginError(f"Missing callable {entry['callable']} in {module_path}")
 
                     context = PluginContext(
-                        config=self.config,
+                        config=plugin_settings,
                         get_capability=_capability_guard(capabilities, plugin_id, required_capabilities),
                         logger=lambda msg: None,
                     )
@@ -686,9 +986,11 @@ class PluginRegistry:
                             raise PluginError(f"Plugin {plugin_id} missing capabilities()")
                         caps = instance.capabilities()
                 for cap_name, impl in caps.items():
-                    proxy = CapabilityProxy(impl, network_allowed)
+                    proxy = CapabilityProxy(impl, network_allowed, filesystem_policy)
                     providers_by_cap.setdefault(cap_name, []).append((plugin_id, proxy))
-                loaded.append(LoadedPlugin(plugin_id, manifest, instance, caps))
+                loaded.append(LoadedPlugin(plugin_id, manifest, instance, caps, filesystem_policy))
+                resolved = self._resolve_capabilities(providers_by_cap)
+                capabilities.replace_all(resolved.all())
 
         resolved = self._resolve_capabilities(providers_by_cap)
         capabilities.replace_all(resolved.all())

@@ -148,6 +148,95 @@
           ],
           "type": "object"
         },
+        "clipboard": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "max_bytes": {
+              "type": "integer"
+            },
+            "poll_interval_s": {
+              "type": "number"
+            },
+            "redact": {
+              "additionalProperties": false,
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "patterns": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "enabled",
+                "patterns",
+                "action"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "enabled",
+            "poll_interval_s",
+            "max_bytes",
+            "redact"
+          ],
+          "type": "object"
+        },
+        "file_activity": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "exclude_patterns": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "include_patterns": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "max_events_per_scan": {
+              "type": "integer"
+            },
+            "max_files": {
+              "type": "integer"
+            },
+            "poll_interval_s": {
+              "type": "number"
+            },
+            "roots": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "enabled",
+            "poll_interval_s",
+            "roots",
+            "include_patterns",
+            "exclude_patterns",
+            "max_files",
+            "max_events_per_scan"
+          ],
+          "type": "object"
+        },
         "stub": {
           "additionalProperties": false,
           "properties": {
@@ -313,7 +402,9 @@
         "stub",
         "window_metadata",
         "input_tracking",
-        "cursor"
+        "cursor",
+        "clipboard",
+        "file_activity"
       ],
       "type": "object"
     },
@@ -471,6 +562,38 @@
       ],
       "type": "object"
     },
+    "alerts": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_records": {
+          "type": "integer"
+        },
+        "rules": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "properties": {
+              "severity": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "enabled",
+        "max_records",
+        "rules"
+      ],
+      "type": "object"
+    },
     "paths": {
       "additionalProperties": false,
       "properties": {
@@ -589,6 +712,49 @@
           },
           "type": "object"
         },
+        "settings": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "filesystem_defaults": {
+          "additionalProperties": false,
+          "properties": {
+            "read": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "readwrite": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "filesystem_policies": {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "read": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "readwrite": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "type": "object"
+        },
         "hosting": {
           "additionalProperties": false,
           "properties": {
@@ -600,6 +766,12 @@
                 "type": "string"
               },
               "type": "array"
+            },
+            "inproc_justifications": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
             },
             "job_limits": {
               "additionalProperties": false,
@@ -619,11 +791,26 @@
             "mode": {
               "type": "string"
             },
+            "offline_env": {
+              "type": "boolean"
+            },
             "rpc_max_message_bytes": {
+              "type": "integer"
+            },
+            "rpc_timeout_limit": {
               "type": "integer"
             },
             "rpc_timeout_s": {
               "type": "number"
+            },
+            "rpc_timeout_window_s": {
+              "type": "number"
+            },
+            "rpc_watchdog_backoff_s": {
+              "type": "number"
+            },
+            "rpc_watchdog_restart_max": {
+              "type": "integer"
             },
             "sanitize_env": {
               "type": "boolean"
@@ -636,6 +823,32 @@
             "rpc_max_message_bytes",
             "sanitize_env",
             "cache_dir"
+          ],
+          "type": "object"
+        },
+        "hot_reload": {
+          "additionalProperties": false,
+          "properties": {
+            "allowlist": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "blocklist": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "allowlist",
+            "blocklist"
           ],
           "type": "object"
         },
@@ -709,9 +922,11 @@
         "conflicts",
         "default_pack",
         "enabled",
+        "settings",
         "search_paths",
         "locks",
         "hosting",
+        "hot_reload",
         "permissions",
         "meta"
       ],
@@ -742,11 +957,26 @@
             "allow_raw_egress": {
               "type": "boolean"
             },
+            "approval_required": {
+              "type": "boolean"
+            },
+            "approval_store_path": {
+              "type": "string"
+            },
+            "approval_ttl_s": {
+              "type": "number"
+            },
             "default_sanitize": {
               "type": "boolean"
             },
             "enabled": {
               "type": "boolean"
+            },
+            "policy_id": {
+              "type": "string"
+            },
+            "destination_policy_id": {
+              "type": "string"
             },
             "reasoning_packet_only": {
               "type": "boolean"
@@ -1751,6 +1981,34 @@
         "relative_window_max_days"
       ],
       "type": "object"
+    },
+    "web": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_remote": {
+          "type": "boolean"
+        },
+        "auth_token_path": {
+          "type": "string"
+        },
+        "bind_host": {
+          "type": "string"
+        },
+        "bind_port": {
+          "type": "integer"
+        },
+        "telemetry_interval_s": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "allow_remote",
+        "auth_token_path",
+        "bind_host",
+        "bind_port",
+        "telemetry_interval_s"
+      ],
+      "type": "object"
     }
   },
   "required": [
@@ -1770,8 +2028,10 @@
     "promptops",
     "research",
     "observability",
+    "alerts",
     "plugins",
-    "devtools"
+    "devtools",
+    "web"
   ],
   "type": "object"
 }

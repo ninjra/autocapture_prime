@@ -16,6 +16,8 @@ Commands:
   - Lists discovered plugins with allowlist and enabled status.
 - `autocapture plugins approve`
   - Updates `config/plugin_locks.json` hashes from current plugin artifacts.
+- `autocapture tray`
+  - Starts the native Windows tray host and local settings/plugin manager UI.
 - `autocapture run`
   - Starts capture, audio, input, and window metadata pipelines.
 - `autocapture query "<text>"`

@@ -62,6 +62,24 @@
       },
       "type": "array"
     },
+    "filesystem_policy": {
+      "additionalProperties": false,
+      "properties": {
+        "read": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "readwrite": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "hash_lock": {
       "additionalProperties": false,
       "properties": {
@@ -117,11 +135,29 @@
       },
       "type": "array"
     },
+    "settings_paths": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "settings_schema": {
+      "type": "object"
+    },
+    "provides": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "required_capabilities": {
       "items": {
         "type": "string"
       },
       "type": "array"
+    },
+    "default_settings": {
+      "type": "object"
     },
     "stages": {
       "items": {

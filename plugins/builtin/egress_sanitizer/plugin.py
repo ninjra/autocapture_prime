@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import os
 import re
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any
 
@@ -38,8 +39,24 @@ class EntityMap:
     def __init__(self) -> None:
         self._data: dict[str, dict[str, str]] = {}
 
-    def put(self, token: str, value: str, kind: str) -> None:
-        self._data[token] = {"value": value, "kind": kind}
+    def put(
+        self,
+        token: str,
+        value: str,
+        kind: str,
+        *,
+        key_id: str | None = None,
+        key_version: int | None = None,
+        first_seen_ts: str | None = None,
+    ) -> None:
+        record: dict[str, Any] = {"value": value, "kind": kind}
+        if key_id:
+            record["key_id"] = key_id
+        if key_version is not None:
+            record["key_version"] = int(key_version)
+        if first_seen_ts:
+            record["first_seen_ts"] = first_seen_ts
+        self._data[token] = record
 
     def get(self, token: str) -> dict[str, str] | None:
         return self._data.get(token)
@@ -53,6 +70,8 @@ class EgressSanitizer(PluginBase):
         super().__init__(plugin_id, context)
         self._entity_map = None
         self._entity_key = None
+        self._entity_key_id = None
+        self._entity_key_version = None
 
     def capabilities(self) -> dict[str, Any]:
         return {"privacy.egress_sanitizer": self}
@@ -77,9 +96,23 @@ class EgressSanitizer(PluginBase):
         encryption_required = storage_cfg.get("encryption_required", False)
         require_protection = bool(encryption_required and os.name == "nt")
         keyring = KeyRing.load(keyring_path, legacy_root_path=root_key_path, require_protection=require_protection)
-        _key_id, root = keyring.active_key("entity_tokens")
+        key_id, root = keyring.active_key("entity_tokens")
+        self._entity_key_id = key_id
+        try:
+            self._entity_key_version = keyring.key_version_for("entity_tokens", key_id)
+        except Exception:
+            self._entity_key_version = None
         self._entity_key = derive_key(root, "entity_tokens")
         return self._entity_key
+
+    def _tokenizer_meta(self, scope: str) -> dict[str, Any]:
+        _ = self._entity_key_bytes()
+        meta: dict[str, Any] = {"scope": scope}
+        if self._entity_key_id:
+            meta["key_id"] = self._entity_key_id
+        if self._entity_key_version is not None:
+            meta["key_version"] = int(self._entity_key_version)
+        return meta
 
     def _token_for(self, value: str, kind: str, scope: str) -> str:
         key = self._entity_key_bytes()
@@ -154,8 +187,28 @@ class EgressSanitizer(PluginBase):
             token_str = self._token_format(ent.kind, token)
             output.append(token_str)
             cursor = ent.end
-            entity_map.put(token, ent.value, ent.kind)
-            tokens[token] = {"value": ent.value, "kind": ent.kind}
+            token_meta = self._tokenizer_meta(scope)
+            existing = None
+            try:
+                existing = entity_map.get(token)
+            except Exception:
+                existing = None
+            first_seen_ts = None
+            if not existing or not existing.get("first_seen_ts"):
+                first_seen_ts = datetime.now(timezone.utc).isoformat()
+            entity_map.put(
+                token,
+                ent.value,
+                ent.kind,
+                key_id=token_meta.get("key_id"),
+                key_version=token_meta.get("key_version"),
+                first_seen_ts=first_seen_ts,
+            )
+            tokens[token] = {
+                "value": ent.value,
+                "kind": ent.kind,
+                **{k: v for k, v in token_meta.items() if k != "scope"},
+            }
             glossary.append({"token": token, "kind": ent.kind})
         output.append(text[cursor:])
         return {"text": "".join(output), "glossary": glossary, "tokens": tokens}
@@ -179,8 +232,14 @@ class EgressSanitizer(PluginBase):
         if isinstance(sanitized, dict):
             sanitized["_glossary"] = glossary
             sanitized["_tokens"] = tokens
+            sanitized["_tokenizer"] = self._tokenizer_meta(scope)
             return sanitized
-        return {"payload": sanitized, "_glossary": glossary, "_tokens": tokens}
+        return {
+            "payload": sanitized,
+            "_glossary": glossary,
+            "_tokens": tokens,
+            "_tokenizer": self._tokenizer_meta(scope),
+        }
 
     def _collect_strings(self, value: Any, out: list[str]) -> None:
         if isinstance(value, str):

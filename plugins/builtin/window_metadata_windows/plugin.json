@@ -32,5 +32,9 @@
     "event.builder",
     "storage.metadata"
   ],
+  "settings_paths": [
+    "capture",
+    "runtime"
+  ],
   "version": "0.1.0"
 }

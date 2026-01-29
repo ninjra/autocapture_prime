@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import math
 import os
 import platform
 import getpass
@@ -46,6 +48,20 @@ class EffectiveConfig:
     data: dict[str, Any]
     schema_hash: str
     effective_hash: str
+
+
+def _canonicalize_config_for_hash(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {str(k): _canonicalize_config_for_hash(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_canonicalize_config_for_hash(v) for v in obj]
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            raise ConfigError("Config contains NaN/Inf, which is not supported.")
+        if obj.is_integer():
+            return int(obj)
+        return {"__float__": format(obj, ".15g")}
+    return obj
 
 
 class Kernel:
@@ -96,6 +112,13 @@ class Kernel:
             capabilities.get("anchor.writer"),
         )
         capabilities.register("event.builder", builder, network_allowed=False)
+        try:
+            from autocapture_nx.kernel.egress_approvals import EgressApprovalStore
+
+            approval_store = EgressApprovalStore(self.config, builder)
+            capabilities.register("egress.approval_store", approval_store, network_allowed=False)
+        except Exception:
+            pass
         self._record_storage_manifest(builder, capabilities, plugins)
         self._record_run_start(builder)
         self._run_recovery(builder, capabilities)
@@ -114,10 +137,28 @@ class Kernel:
                 self._conductor = None
         return self.system
 
+    def reload_plugins(self, plugin_ids: list[str] | None = None) -> dict[str, Any]:
+        if self.system is None:
+            raise RuntimeError("kernel_not_running")
+        registry = PluginRegistry(self.config, safe_mode=self.safe_mode)
+        plugins, capabilities, report = registry.hot_reload(self.system.plugins, plugin_ids=plugin_ids)
+        if self.system.has("event.builder"):
+            builder = self.system.get("event.builder")
+            capabilities.register("event.builder", builder, network_allowed=False)
+        if self.system.has("egress.approval_store"):
+            store = self.system.get("egress.approval_store")
+            capabilities.register("egress.approval_store", store, network_allowed=False)
+        if self.system.has("runtime.conductor"):
+            conductor = self.system.get("runtime.conductor")
+            capabilities.register("runtime.conductor", conductor, network_allowed=False)
+        self.system.plugins = plugins
+        self.system.capabilities = capabilities
+        return {"ok": True, **report}
+
     def load_effective_config(self) -> EffectiveConfig:
         cfg = load_config(self.config_paths, safe_mode=self.safe_mode)
         schema_hash = sha256_file(self.config_paths.schema_path)
-        effective_hash = sha256_text(dumps(cfg))
+        effective_hash = sha256_text(dumps(_canonicalize_config_for_hash(cfg)))
         return EffectiveConfig(data=cfg, schema_hash=schema_hash, effective_hash=effective_hash)
 
     def validate_config(self, cfg: dict[str, Any]) -> None:
@@ -146,6 +187,84 @@ class Kernel:
             versions = {}
         self._package_versions_cache = dict(sorted(versions.items()))
         return dict(self._package_versions_cache)
+
+    def _dep_lock_hash(self) -> tuple[str | None, str | None]:
+        lock_path = resolve_repo_path("requirements.lock.json")
+        if not lock_path.exists():
+            return None, None
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        expected = lock.get("content_hash")
+        try:
+            import tomllib
+        except Exception:
+            return expected, None
+        pyproject = resolve_repo_path("pyproject.toml")
+        if not pyproject.exists():
+            return expected, None
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        project = data.get("project", {})
+        deps = sorted(project.get("dependencies", []) or [])
+        optional = project.get("optional-dependencies", {}) or {}
+        optional_sorted = {key: sorted(value or []) for key, value in sorted(optional.items())}
+        payload = {
+            "version": 1,
+            "python": project.get("requires-python"),
+            "dependencies": deps,
+            "optional_dependencies": optional_sorted,
+        }
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        actual = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        return expected, actual
+
+    def _parse_requirement(self, requirement: str) -> tuple[str, str | None]:
+        text = requirement.strip()
+        if not text:
+            return "", None
+        name = text.split(";")[0].strip()
+        if "[" in name:
+            name = name.split("[", 1)[0].strip()
+        for op in (">=", "<=", "==", ">", "<"):
+            if op in text:
+                parts = text.split(op, 1)
+                return parts[0].split("[", 1)[0].strip(), f"{op}{parts[1].strip()}"
+        return name, None
+
+    def _version_tuple(self, version: str) -> tuple[int, ...]:
+        parts = []
+        for part in version.strip().lstrip("v").split("."):
+            if part.isdigit():
+                parts.append(int(part))
+            else:
+                num = ""
+                for ch in part:
+                    if ch.isdigit():
+                        num += ch
+                    else:
+                        break
+                if num:
+                    parts.append(int(num))
+        return tuple(parts)
+
+    def _version_satisfies(self, current: str, requirement: str) -> bool:
+        ops = (">=", "<=", ">", "<", "==")
+        op = "=="
+        target = requirement.strip()
+        for candidate in ops:
+            if target.startswith(candidate):
+                op = candidate
+                target = target[len(candidate) :].strip()
+                break
+        current_v = self._version_tuple(current)
+        target_v = self._version_tuple(target)
+        if op == ">=":
+            return current_v >= target_v
+        if op == "<=":
+            return current_v <= target_v
+        if op == ">":
+            return current_v > target_v
+        if op == "<":
+            return current_v < target_v
+        return current_v == target_v
 
     def _store_counts(self, metadata: Any, media: Any) -> dict[str, int | None]:
         counts: dict[str, int | None] = {"metadata": None, "media": None}
@@ -836,6 +955,69 @@ class Kernel:
                 checks.append(
                     DoctorCheck(
                         name="plugin_locks",
+                        ok=False,
+                    detail=str(exc),
+                )
+            )
+        dep_lock_path = resolve_repo_path("requirements.lock.json")
+        if not dep_lock_path.exists():
+            checks.append(
+                DoctorCheck(
+                    name="dependency_pinning",
+                    ok=False,
+                    detail="missing requirements.lock.json",
+                )
+            )
+        else:
+            try:
+                lock = json.loads(dep_lock_path.read_text(encoding="utf-8"))
+                expected_hash, actual_hash = self._dep_lock_hash()
+                hash_ok = bool(expected_hash and actual_hash and expected_hash == actual_hash)
+                versions = self._package_versions()
+                mismatches: list[str] = []
+                for req in lock.get("dependencies", []) or []:
+                    name, spec = self._parse_requirement(str(req))
+                    if not name:
+                        continue
+                    installed = versions.get(name.lower())
+                    if installed is None:
+                        mismatches.append(f"missing:{name}")
+                        continue
+                    if spec and not self._version_satisfies(installed, spec):
+                        mismatches.append(f"version:{name}")
+                optional = lock.get("optional_dependencies", {}) or {}
+                if isinstance(optional, dict):
+                    for items in optional.values():
+                        for req in items or []:
+                            name, spec = self._parse_requirement(str(req))
+                            if not name:
+                                continue
+                            installed = versions.get(name.lower())
+                            if installed is None:
+                                continue
+                            if spec and not self._version_satisfies(installed, spec):
+                                mismatches.append(f"version:{name}")
+                ok = hash_ok and not mismatches
+                detail_parts = []
+                if not hash_ok:
+                    if expected_hash is None or actual_hash is None:
+                        detail_parts.append("lock_hash_unverifiable")
+                    else:
+                        detail_parts.append("lock_hash_mismatch")
+                if mismatches:
+                    detail_parts.append(", ".join(mismatches[:5]))
+                detail = "ok" if ok else "; ".join(detail_parts) or "mismatch"
+                checks.append(
+                    DoctorCheck(
+                        name="dependency_pinning",
+                        ok=ok,
+                        detail=detail,
+                    )
+                )
+            except Exception as exc:
+                checks.append(
+                    DoctorCheck(
+                        name="dependency_pinning",
                         ok=False,
                         detail=str(exc),
                     )

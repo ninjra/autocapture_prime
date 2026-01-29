@@ -41,7 +41,8 @@ class RuntimeGovernor(PluginBase):
         return self._core.lease(job_name, estimated_ms, heavy=heavy)
 
     def budget_snapshot(self):
-        return self._core.budget_snapshot()
+        snapshot = self._core.budget_snapshot()
+        return snapshot.__dict__ if hasattr(snapshot, "__dict__") else snapshot
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> RuntimeGovernor:

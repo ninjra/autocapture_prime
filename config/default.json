@@ -35,6 +35,28 @@
       "mode": "activity",
       "store_derived": true
     },
+    "clipboard": {
+      "enabled": false,
+      "max_bytes": 200000,
+      "poll_interval_s": 0.5,
+      "redact": {
+        "action": "mask",
+        "enabled": false,
+        "patterns": []
+      }
+    },
+    "file_activity": {
+      "enabled": false,
+      "exclude_patterns": [
+        "*.tmp",
+        "*.log"
+      ],
+      "include_patterns": [],
+      "max_events_per_scan": 200,
+      "max_files": 20000,
+      "poll_interval_s": 2.0,
+      "roots": []
+    },
     "stub": {
       "frame_height": 720,
       "frame_width": 1280,
@@ -143,6 +165,36 @@
       "message"
     ]
   },
+  "alerts": {
+    "enabled": true,
+    "max_records": 200,
+    "rules": {
+      "capture.backend_fallback": {
+        "severity": "warning",
+        "title": "Capture backend fallback"
+      },
+      "capture.degrade": {
+        "severity": "warning",
+        "title": "Capture degraded"
+      },
+      "capture.drop": {
+        "severity": "warning",
+        "title": "Capture dropped"
+      },
+      "capture.restore": {
+        "severity": "info",
+        "title": "Capture restored"
+      },
+      "disk.critical": {
+        "severity": "critical",
+        "title": "Disk critical"
+      },
+      "disk.pressure": {
+        "severity": "warning",
+        "title": "Disk pressure"
+      }
+    }
+  },
   "performance": {
     "ingestion_mb_s": 50,
     "memory_ceiling_mb": 512,
@@ -180,6 +232,8 @@
       "builtin.storage.sqlcipher",
       "builtin.time.advanced",
       "builtin.tracking.input.windows",
+      "builtin.tracking.clipboard.windows",
+      "builtin.tracking.file_activity.windows",
       "builtin.vlm.basic",
       "builtin.window.metadata.windows",
       "mx.core.capture_win",
@@ -467,6 +521,24 @@
         ],
         "provider_ids": []
       },
+      "tracking.clipboard": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.tracking.clipboard.windows"
+        ],
+        "provider_ids": []
+      },
+      "tracking.file_activity": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.tracking.file_activity.windows"
+        ],
+        "provider_ids": []
+      },
       "tracking.input": {
         "fanout": false,
         "max_providers": 1,
@@ -586,56 +658,55 @@
       "builtin.sst.track.cursor": false,
       "builtin.sst.ui.parse": false,
       "builtin.storage.encrypted": false,
-      "builtin.storage.sqlcipher": true,
-      "builtin.time.advanced": true,
-      "builtin.tracking.input.windows": true,
+    "builtin.storage.sqlcipher": true,
+    "builtin.time.advanced": true,
+    "builtin.tracking.input.windows": true,
+    "builtin.tracking.clipboard.windows": false,
+    "builtin.tracking.file_activity.windows": false,
       "builtin.vlm.basic": true,
       "builtin.window.metadata.windows": true
+    },
+    "settings": {},
+    "filesystem_defaults": {
+      "read": [
+        "{repo_root}/contracts",
+        "{repo_root}/config",
+        "{data_dir}"
+      ],
+      "readwrite": [
+        "{data_dir}",
+        "{cache_dir}"
+      ]
+    },
+    "filesystem_policies": {
+      "builtin.anchor.basic": {
+        "readwrite": [
+          "{anchor_dir}"
+        ]
+      }
     },
     "hosting": {
       "cache_dir": "data/cache/plugins",
       "inproc_allowlist": [
-        "builtin.privacy.egress_sanitizer",
-        "builtin.storage.sqlcipher",
-        "builtin.storage.encrypted",
-        "builtin.ledger.basic",
-        "builtin.journal.basic",
-        "builtin.anchor.basic",
+        "builtin.capture.basic",
         "builtin.capture.windows",
-        "builtin.cursor.windows",
         "builtin.capture.audio.windows",
-        "builtin.tracking.input.windows",
-        "builtin.window.metadata.windows",
-        "builtin.backpressure.basic",
         "builtin.runtime.governor",
         "builtin.runtime.scheduler",
-        "builtin.observability.basic",
-        "builtin.retrieval.basic",
-        "builtin.processing.sst.pipeline",
-        "builtin.time.advanced",
-        "builtin.answer.basic",
-        "builtin.citation.basic",
-        "builtin.devtools.diffusion",
-        "builtin.devtools.ast_ir",
-        "builtin.sst.preprocess.normalize",
-        "builtin.sst.preprocess.tile",
-        "builtin.sst.ocr.onnx",
-        "builtin.sst.ui.parse",
-        "builtin.sst.layout.assemble",
-        "builtin.sst.extract.table",
-        "builtin.sst.extract.spreadsheet",
-        "builtin.sst.extract.code",
-        "builtin.sst.extract.chart",
-        "builtin.sst.track.cursor",
-        "builtin.sst.build.state",
-        "builtin.sst.match.ids",
-        "builtin.sst.temporal.segment",
-        "builtin.sst.build.delta",
-        "builtin.sst.infer.action",
-        "builtin.sst.compliance.redact",
-        "builtin.sst.persist",
-        "builtin.sst.index"
+        "builtin.tracking.input.windows",
+        "builtin.window.metadata.windows",
+        "builtin.cursor.windows"
       ],
+      "inproc_justifications": {
+        "builtin.capture.audio.windows": "Real-time audio capture latency",
+        "builtin.capture.basic": "Stub capture for development",
+        "builtin.capture.windows": "Low-latency frame capture",
+        "builtin.cursor.windows": "Cursor sampling latency",
+        "builtin.runtime.governor": "Shares live budget state/leases not RPC-serializable",
+        "builtin.runtime.scheduler": "Requires in-proc governor lease objects for scheduling",
+        "builtin.tracking.input.windows": "High-frequency input tracking",
+        "builtin.window.metadata.windows": "Window metadata sampling latency"
+      },
       "job_limits": {
         "cpu_time_ms": 60000,
         "max_memory_mb": 512,
@@ -643,8 +714,18 @@
       },
       "mode": "subprocess",
       "rpc_max_message_bytes": 2000000,
+      "rpc_timeout_limit": 3,
       "rpc_timeout_s": 10,
+      "rpc_timeout_window_s": 60,
+      "rpc_watchdog_backoff_s": 0.2,
+      "rpc_watchdog_restart_max": 3,
+      "offline_env": true,
       "sanitize_env": true
+    },
+    "hot_reload": {
+      "allowlist": [],
+      "blocklist": [],
+      "enabled": true
     },
     "locks": {
       "enforce": true,
@@ -671,8 +752,12 @@
     },
     "egress": {
       "allow_raw_egress": false,
+      "approval_required": false,
+      "approval_store_path": "data/egress/approvals.json",
+      "approval_ttl_s": 300,
       "default_sanitize": true,
       "enabled": true,
+      "policy_id": "",
       "reasoning_packet_only": true,
       "recognizers": {
         "credit_card": true,
@@ -992,6 +1077,13 @@
       "enabled": true
     },
     "timezone": "America/Denver"
+  },
+  "web": {
+    "allow_remote": false,
+    "auth_token_path": "data/vault/web_token.json",
+    "bind_host": "127.0.0.1",
+    "bind_port": 8787,
+    "telemetry_interval_s": 1.0
   },
   "schema_version": 1,
   "storage": {

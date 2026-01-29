@@ -34,5 +34,8 @@
     "builtin.embedder.stub"
   ],
   "required_capabilities": [],
+  "settings_paths": [
+    "indexing"
+  ],
   "version": "0.1.0"
 }

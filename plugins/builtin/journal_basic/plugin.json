@@ -27,5 +27,9 @@
   },
   "plugin_id": "builtin.journal.basic",
   "required_capabilities": [],
+  "settings_paths": [
+    "storage",
+    "runtime"
+  ],
   "version": "0.1.0"
 }

@@ -14,16 +14,20 @@ def _write_temp_plugin(
     plugin_id: str,
     network: bool = False,
     compat: dict | None = None,
+    *,
+    settings_paths: list[str] | None = None,
 ) -> None:
     plugin_dir = root / plugin_id.replace(".", "_")
     os.makedirs(plugin_dir, exist_ok=True)
     with open(plugin_dir / "plugin.py", "w", encoding="utf-8") as handle:
         handle.write(
+            "class P:\n"
+            "    def __init__(self, context):\n"
+            "        self.settings = context.config\n"
+            "    def capabilities(self):\n"
+            "        return {}\n"
             "def create_plugin(plugin_id, context):\n"
-            "    class P:\n"
-            "        def capabilities(self):\n"
-            "            return {}\n"
-            "    return P()\n"
+            "    return P(context)\n"
         )
     manifest = {
         "plugin_id": plugin_id,
@@ -48,6 +52,8 @@ def _write_temp_plugin(
         "depends_on": [],
         "hash_lock": {"manifest_sha256": "", "artifact_sha256": ""},
     }
+    if settings_paths:
+        manifest["settings_paths"] = settings_paths
     with open(plugin_dir / "plugin.json", "w", encoding="utf-8") as handle:
         json.dump(manifest, handle, indent=2, sort_keys=True)
 
@@ -178,6 +184,37 @@ class PluginLoaderTests(unittest.TestCase):
             plugins, _caps = registry.load_plugins()
             plugin_ids = {p.plugin_id for p in plugins}
             self.assertNotIn("builtin.egress.gateway", plugin_ids)
+
+    def test_plugin_settings_filtered(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin_root = root / "plugins"
+            os.makedirs(plugin_root, exist_ok=True)
+            _write_temp_plugin(plugin_root, "local.settings.plugin", settings_paths=["runtime"])
+
+            paths = self._config_paths(root)
+            override = {
+                **_storage_override(root),
+                "runtime": {"timezone": "America/Denver"},
+                "plugins": {
+                    "allowlist": ["local.settings.plugin"],
+                    "search_paths": [str(plugin_root)],
+                    "locks": {"enforce": False, "lockfile": "config/plugin_locks.json"},
+                    "settings": {"local.settings.plugin": {"runtime": {"timezone": "UTC"}}},
+                },
+            }
+            with open(paths.user_path, "w", encoding="utf-8") as handle:
+                json.dump(override, handle)
+
+            config = load_config(paths, safe_mode=False)
+            registry = PluginRegistry(config, safe_mode=False)
+            plugins, _caps = registry.load_plugins()
+            plugin = next(p for p in plugins if p.plugin_id == "local.settings.plugin")
+            settings = getattr(plugin.instance, "settings", {})
+            self.assertIsInstance(settings, dict)
+            self.assertIn("runtime", settings)
+            self.assertEqual(settings.get("runtime", {}).get("timezone"), "UTC")
+            self.assertNotIn("storage", settings)
 
 
 if __name__ == "__main__":

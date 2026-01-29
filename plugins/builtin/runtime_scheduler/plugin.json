@@ -29,5 +29,8 @@
   "required_capabilities": [
     "runtime.governor"
   ],
+  "settings_paths": [
+    "runtime"
+  ],
   "version": "0.1.0"
 }

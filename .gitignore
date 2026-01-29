@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .venv/
+.venv_win/
 autocapture_nx.egg-info/
 .data/
 data/

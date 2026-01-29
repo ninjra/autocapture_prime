@@ -140,7 +140,7 @@ class SQLCipherStore:
             "CREATE TABLE IF NOT EXISTS metadata (id TEXT PRIMARY KEY, payload TEXT NOT NULL, record_type TEXT, ts_utc TEXT, run_id TEXT)"
         )
         self._conn.execute(
-            "CREATE TABLE IF NOT EXISTS entity_map (token TEXT PRIMARY KEY, value TEXT, kind TEXT)"
+            "CREATE TABLE IF NOT EXISTS entity_map (token TEXT PRIMARY KEY, value TEXT, kind TEXT, key_id TEXT, key_version INTEGER, first_seen_ts TEXT)"
         )
         self._ensure_columns()
         self._conn.execute(
@@ -164,6 +164,15 @@ class SQLCipherStore:
         ):
             if column not in existing:
                 self._conn.execute(f"ALTER TABLE metadata ADD COLUMN {column} {col_type}")
+        cur = self._conn.execute("PRAGMA table_info(entity_map)")
+        existing = {row[1] for row in cur.fetchall()}
+        for column, col_type in (
+            ("key_id", "TEXT"),
+            ("key_version", "INTEGER"),
+            ("first_seen_ts", "TEXT"),
+        ):
+            if column not in existing:
+                self._conn.execute(f"ALTER TABLE entity_map ADD COLUMN {column} {col_type}")
 
     def put(self, record_id: str, value: Any) -> None:
         self.put_replace(record_id, value)
@@ -260,26 +269,53 @@ class SQLCipherStore:
         self._conn.commit()
         return self._conn.total_changes > before
 
-    def entity_put(self, token: str, value: str, kind: str) -> None:
+    def entity_put(
+        self,
+        token: str,
+        value: str,
+        kind: str,
+        *,
+        key_id: str | None = None,
+        key_version: int | None = None,
+        first_seen_ts: str | None = None,
+    ) -> None:
         self._ensure()
         self._conn.execute(
-            "INSERT OR REPLACE INTO entity_map (token, value, kind) VALUES (?, ?, ?)",
-            (token, value, kind),
+            "INSERT OR REPLACE INTO entity_map (token, value, kind, key_id, key_version, first_seen_ts) VALUES (?, ?, ?, ?, ?, ?)",
+            (token, value, kind, key_id, key_version, first_seen_ts),
         )
         self._conn.commit()
 
-    def entity_get(self, token: str) -> dict[str, str] | None:
+    def entity_get(self, token: str) -> dict[str, Any] | None:
         self._ensure()
-        cur = self._conn.execute("SELECT value, kind FROM entity_map WHERE token = ?", (token,))
+        cur = self._conn.execute(
+            "SELECT value, kind, key_id, key_version, first_seen_ts FROM entity_map WHERE token = ?",
+            (token,),
+        )
         row = cur.fetchone()
         if not row:
             return None
-        return {"value": row[0], "kind": row[1]}
+        return {
+            "value": row[0],
+            "kind": row[1],
+            "key_id": row[2],
+            "key_version": row[3],
+            "first_seen_ts": row[4],
+        }
 
-    def entity_items(self) -> dict[str, dict[str, str]]:
+    def entity_items(self) -> dict[str, dict[str, Any]]:
         self._ensure()
-        cur = self._conn.execute("SELECT token, value, kind FROM entity_map")
-        return {row[0]: {"value": row[1], "kind": row[2]} for row in cur.fetchall()}
+        cur = self._conn.execute("SELECT token, value, kind, key_id, key_version, first_seen_ts FROM entity_map")
+        return {
+            row[0]: {
+                "value": row[1],
+                "kind": row[2],
+                "key_id": row[3],
+                "key_version": row[4],
+                "first_seen_ts": row[5],
+            }
+            for row in cur.fetchall()
+        }
 
     def rotate(self, new_key: bytes | None = None) -> None:
         if new_key is None:
@@ -299,13 +335,29 @@ class EntityMapAdapter:
     def __init__(self, store: SQLCipherStore) -> None:
         self._store = store
 
-    def put(self, token: str, value: str, kind: str) -> None:
-        self._store.entity_put(token, value, kind)
+    def put(
+        self,
+        token: str,
+        value: str,
+        kind: str,
+        *,
+        key_id: str | None = None,
+        key_version: int | None = None,
+        first_seen_ts: str | None = None,
+    ) -> None:
+        self._store.entity_put(
+            token,
+            value,
+            kind,
+            key_id=key_id,
+            key_version=key_version,
+            first_seen_ts=first_seen_ts,
+        )
 
-    def get(self, token: str) -> dict[str, str] | None:
+    def get(self, token: str) -> dict[str, Any] | None:
         return self._store.entity_get(token)
 
-    def items(self) -> dict[str, dict[str, str]]:
+    def items(self) -> dict[str, dict[str, Any]]:
         return self._store.entity_items()
 
 

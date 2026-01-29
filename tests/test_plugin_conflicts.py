@@ -67,6 +67,10 @@ class PluginConflictTests(unittest.TestCase):
         hosting = plugins.setdefault("hosting", {})
         hosting["mode"] = "inproc"
         hosting["inproc_allowlist"] = ["test.conflict.a", "test.conflict.b"]
+        hosting["inproc_justifications"] = {
+            "test.conflict.a": "test fixture",
+            "test.conflict.b": "test fixture",
+        }
         plugins["conflicts"] = {"enforce": True, "allow_pairs": []}
         return config
 

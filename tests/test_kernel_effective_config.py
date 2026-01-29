@@ -5,7 +5,7 @@ from pathlib import Path
 
 from autocapture_nx.kernel.canonical_json import dumps
 from autocapture_nx.kernel.hashing import sha256_file, sha256_text
-from autocapture_nx.kernel.loader import Kernel, KernelBootArgs
+from autocapture_nx.kernel.loader import Kernel, KernelBootArgs, _canonicalize_config_for_hash
 from autocapture_nx.kernel.config import ConfigPaths
 
 
@@ -29,7 +29,8 @@ class KernelEffectiveConfigTests(unittest.TestCase):
             effective = kernel.load_effective_config()
 
             self.assertEqual(effective.schema_hash, sha256_file(schema_path))
-            self.assertEqual(effective.effective_hash, sha256_text(dumps(effective.data)))
+            expected_hash = sha256_text(dumps(_canonicalize_config_for_hash(effective.data)))
+            self.assertEqual(effective.effective_hash, expected_hash)
 
     def test_kernel_boot_args_safe_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
