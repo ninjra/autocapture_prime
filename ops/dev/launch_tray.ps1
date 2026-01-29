@@ -280,12 +280,16 @@ Write-LogLine "Repo root: $Root"
 Write-LogLine "Log (latest): $logLatest"
 Write-LogLine "Log (run): $logRun"
 
-$bindHost = "127.0.0.1"
-$bindPort = 8787
+$fixedHost = "127.0.0.1"
+$fixedPort = 8787
+$bindHost = $fixedHost
+$bindPort = $fixedPort
+$cfgHost = $null
+$cfgPort = $null
 try {
   $cfg = Get-Content (Join-Path $Root "config\default.json") -Raw | ConvertFrom-Json
-  if ($cfg.web.bind_host) { $bindHost = $cfg.web.bind_host }
-  if ($cfg.web.bind_port) { $bindPort = [int]$cfg.web.bind_port }
+  if ($cfg.web.bind_host) { $cfgHost = $cfg.web.bind_host }
+  if ($cfg.web.bind_port) { $cfgPort = [int]$cfg.web.bind_port }
 } catch {
   Write-LogLine "WARN Could not parse config/default.json; using ${bindHost}:${bindPort}"
 }
@@ -293,13 +297,21 @@ try {
   $userCfgPath = Join-Path $Root "config\user.json"
   if (Test-Path $userCfgPath) {
     $userCfg = Get-Content $userCfgPath -Raw | ConvertFrom-Json
-    if ($userCfg.web.bind_host) { $bindHost = $userCfg.web.bind_host }
-    if ($userCfg.web.bind_port) { $bindPort = [int]$userCfg.web.bind_port }
+    if ($userCfg.web.bind_host) { $cfgHost = $userCfg.web.bind_host }
+    if ($userCfg.web.bind_port) { $cfgPort = [int]$userCfg.web.bind_port }
   }
 } catch {
   Write-LogLine "WARN Could not parse config/user.json; using ${bindHost}:${bindPort}"
 }
 
+$bindHost = $fixedHost
+$bindPort = $fixedPort
+if ($cfgHost -and $cfgHost -ne $fixedHost) {
+  Write-LogLine "WARN Config bind_host ignored; using ${bindHost}:${bindPort}"
+}
+if ($cfgPort -and $cfgPort -ne $fixedPort) {
+  Write-LogLine "WARN Config bind_port ignored; using ${bindHost}:${bindPort}"
+}
 $uiUrl = "http://${bindHost}:${bindPort}/ui/#settings"
 
 $env:PYTHONPATH = $Root
@@ -351,9 +363,22 @@ if ($SmokeTest) {
   $uiUrl = "http://${bindHost}:${bindPort}/ui/#settings"
 } else {
   if (Test-Port -HostName $bindHost -Port $bindPort) {
-    Write-LogLine "UI already listening on ${bindHost}:${bindPort}"
-    if ($OpenBrowser) { Start-Process $uiUrl }
-    exit 0
+    $healthy = $false
+    try {
+      $resp = Invoke-WebRequest -Uri "http://${bindHost}:${bindPort}/api/status" -UseBasicParsing -TimeoutSec 2
+      if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300) {
+        $healthy = $true
+      }
+    } catch {
+      $healthy = $false
+    }
+    if ($healthy) {
+      Write-LogLine "UI already listening on ${bindHost}:${bindPort}"
+      if ($OpenBrowser) { Start-Process $uiUrl }
+      exit 0
+    }
+    Write-LogLine -Error "Port ${bindHost}:${bindPort} in use but /api/status is unhealthy."
+    exit 1
   }
 }
 
@@ -361,6 +386,8 @@ $pidDir = Join-Path $Root ".dev\pids"
 if (-not (Test-Path $pidDir)) { New-Item -Path $pidDir -ItemType Directory | Out-Null }
 $pidFile = Join-Path $pidDir "tray.pid"
 
+$env:AUTOCAPTURE_TRAY_BIND_HOST = $bindHost
+$env:AUTOCAPTURE_TRAY_BIND_PORT = "$bindPort"
 $process = Start-Process -FilePath $pythonExe -ArgumentList "-m autocapture_nx.tray" -WorkingDirectory $Root -RedirectStandardOutput $procOut -RedirectStandardError $procErr -PassThru
 $process.Id | Out-File -FilePath $pidFile -Encoding ascii
 
