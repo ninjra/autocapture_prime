@@ -21,6 +21,24 @@
           <input id="token" type="password" placeholder="Paste API token" />
           <button id="saveToken" class="ghost">Save</button>
         </div>
+        <div class="status-banner" id="captureStatusBanner">
+          <div class="status-item">
+            <p class="label">Capture</p>
+            <p id="captureBannerState" class="badge">—</p>
+          </div>
+          <div class="status-item">
+            <p class="label">Processing</p>
+            <p id="processingBannerState">—</p>
+          </div>
+          <div class="status-item">
+            <p class="label">Last capture</p>
+            <p id="captureBannerLast">—</p>
+          </div>
+          <div class="status-item">
+            <p class="label">Disk</p>
+            <p id="captureBannerDisk" class="badge off">—</p>
+          </div>
+        </div>
       </header>
 
       <nav class="nav">
@@ -40,16 +58,16 @@
               </div>
               <div class="quick-grid">
                 <div class="control-row">
-                  <label for="quickCaptureToggle">Capture running</label>
-                  <input id="quickCaptureToggle" type="checkbox" />
+                  <label for="quickCaptureToggle">Capture status (locked)</label>
+                  <input id="quickCaptureToggle" type="checkbox" disabled />
                 </div>
                 <div id="quickPauseStatus" class="status-line"></div>
                 <div class="control-row">
-                  <label>Pause capture</label>
+                  <label>Capture pause (disabled)</label>
                   <div class="actions">
-                    <button id="quickPause10" class="ghost">10 min</button>
-                    <button id="quickPause30" class="ghost">30 min</button>
-                    <button id="quickResume">Resume</button>
+                    <button id="quickPause10" class="ghost" disabled>10 min</button>
+                    <button id="quickPause30" class="ghost" disabled>30 min</button>
+                    <button id="quickResume" disabled>Resume</button>
                   </div>
                 </div>
                 <div class="control-row">
@@ -106,6 +124,25 @@
                 </div>
               </div>
               <div id="capturePluginsList" class="table capture-table"></div>
+            </article>
+
+            <article class="card" id="metadataCard">
+              <div class="card-header">
+                <h2>Latest Metadata</h2>
+                <div class="actions">
+                  <select id="metadataType"></select>
+                  <button id="refreshMetadata" class="ghost">Refresh</button>
+                </div>
+              </div>
+              <ul id="metadataList" class="list"></ul>
+              <div class="preview-block">
+                <div class="preview-actions">
+                  <button id="previewLatestScreenshot" class="ghost">Preview latest screenshot</button>
+                  <span id="latestScreenshotStatus" class="muted"></span>
+                </div>
+                <img id="latestScreenshotPreview" class="preview-image" alt="Latest screenshot preview" />
+              </div>
+              <pre id="metadataDetail"></pre>
             </article>
 
             <article class="card" id="captureHealthCard">
@@ -291,8 +328,8 @@
               <div class="card-header">
                 <h2>Status</h2>
                 <div class="actions">
-                  <button id="runStart">Start</button>
-                  <button id="runStop" class="ghost">Stop</button>
+                  <button id="runStart" disabled>Start</button>
+                  <button id="runStop" class="ghost" disabled>Stop</button>
                 </div>
               </div>
               <div class="status-body">
@@ -307,6 +344,10 @@
                 <div>
                   <p class="label">Capture</p>
                   <p id="captureState">—</p>
+                </div>
+                <div>
+                  <p class="label">Kernel</p>
+                  <p id="kernelStatus">—</p>
                 </div>
               </div>
             </article>

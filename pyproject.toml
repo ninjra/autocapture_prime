@@ -93,3 +93,6 @@ plugins = ["builtin/**"]
 config_default_path = "config/default.json"
 config_user_path = "config/user.json"
 contracts_lock_path = "contracts/lock.json"
+
+[tool.ruff]
+extend-exclude = [".venv_win", ".venv_win311"]

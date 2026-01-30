@@ -12,6 +12,35 @@
     "min_segment_seconds": 30
   },
   "capture": {
+    "auto_start": true,
+    "mode_preset": "memory_replacement_raw",
+    "diff_epsilon": 0,
+    "duplicate_threshold": "exact_only",
+    "always_store_fullres": true,
+    "block_fullscreen": false,
+    "active_hash_check_interval_ms": 500,
+    "presets": {
+      "memory_replacement_raw": {
+        "capture": {
+          "diff_epsilon": 0,
+          "duplicate_threshold": "exact_only",
+          "always_store_fullres": true,
+          "block_fullscreen": false,
+          "active_hash_check_interval_ms": 500,
+          "screenshot": {
+            "enabled": true,
+            "fps_target": 2,
+            "resolution": "native",
+            "dedupe": {
+              "enabled": true,
+              "hash": "sha256",
+              "sample_bytes": 0,
+              "force_interval_s": 0
+            }
+          }
+        }
+      }
+    },
     "audio": {
       "blocksize": 44100,
       "channels": 2,
@@ -1142,7 +1171,13 @@
   "runtime": {
     "active_window_s": 3,
     "activity": {
-      "assume_idle_when_missing": false
+      "assume_idle_when_missing": false,
+      "display_power_enabled": true,
+      "display_poll_interval_s": 1.0,
+      "display_idle_seconds": 300
+    },
+    "capture_controls": {
+      "enabled": false
     },
     "budgets": {
       "allow_heavy_during_active": false,
@@ -1192,13 +1227,17 @@
       "root_key_path": "data/vault/root.key"
     },
     "data_dir": "data",
+    "no_deletion_mode": true,
     "disk_pressure": {
       "critical_free_gb": 50,
       "interval_s": 3600,
       "soft_free_gb": 100,
-      "warn_free_gb": 200
+      "warn_free_gb": 200,
+      "watermark_soft_mb": 102400,
+      "watermark_hard_mb": 51200
     },
     "encryption_required": true,
+    "encryption_enabled": true,
     "entity_map": {
       "persist": true
     },
@@ -1212,7 +1251,7 @@
     "metadata_require_db": true,
     "metadata_path": "data/metadata.db",
     "retention": {
-      "evidence": "60d",
+      "evidence": "infinite",
       "interval_s": 3600,
       "max_delete_per_run": 500,
       "record_batches": true

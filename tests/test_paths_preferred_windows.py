@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +8,7 @@ from autocapture_nx.kernel.paths import apply_path_defaults
 
 
 class PreferredWindowsPathTests(unittest.TestCase):
+    @unittest.skipIf(os.name != "nt", "Windows-only path behavior")
     def test_preferred_windows_data_dir_is_used(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config = {"paths": {"preferred_data_dir_windows": tmpdir}}

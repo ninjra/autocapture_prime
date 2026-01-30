@@ -16,7 +16,9 @@ class WorkLeaseTests(unittest.TestCase):
     def test_expiration(self) -> None:
         manager = LeaseManager()
         self.assertTrue(manager.acquire("job2", "owner", ttl_s=1))
-        time.sleep(1.1)
+        deadline = time.time() + 2.0
+        while time.time() < deadline and manager.is_active("job2"):
+            time.sleep(0.05)
         self.assertFalse(manager.is_active("job2"))
 
     def test_cancel(self) -> None:

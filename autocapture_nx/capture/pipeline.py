@@ -11,7 +11,10 @@ import time
 import zlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
+
+if TYPE_CHECKING:
+    from autocapture_nx.windows.win_cursor import CursorInfo, CursorShape
 
 from autocapture_nx.capture.avi import AviMjpegWriter
 from autocapture_nx.capture.queues import BoundedQueue
@@ -1644,15 +1647,16 @@ def _dxcam_frames(
         except Exception:
             mon_left = 0
             mon_top = 0
+    current_cursor: Callable[[], "CursorInfo | None"] | None = None
+    cursor_shape: Callable[[int], "CursorShape | None"] | None = None
     if include_cursor:
         try:
-            from autocapture_nx.windows.win_cursor import current_cursor, cursor_shape
+            from autocapture_nx.windows.win_cursor import current_cursor as _current_cursor, cursor_shape as _cursor_shape
         except Exception:
-            current_cursor = None
-            cursor_shape = None  # type: ignore[assignment]
-    else:
-        current_cursor = None
-        cursor_shape = None  # type: ignore[assignment]
+            pass
+        else:
+            current_cursor = _current_cursor
+            cursor_shape = _cursor_shape
     cursor_handle = None
     cursor_cached = None
 

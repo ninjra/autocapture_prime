@@ -75,6 +75,7 @@ class ScreenshotCaptureWindows(PluginBase):
         last_emit = 0.0
         seen_frames = 0
         saved_frames = 0
+        last_input_ts: float | None = None
 
         if backend != "mss":
             logger.log("screenshot.backend_fallback", {"requested": backend, "used": "mss"})
@@ -152,6 +153,15 @@ class ScreenshotCaptureWindows(PluginBase):
                 pixel_hash = hashlib.sha256(raw_bytes).hexdigest()
                 fingerprint = deduper.fingerprint(raw_bytes)
                 now = time.monotonic()
+                input_recent = False
+                if input_tracker is not None and hasattr(input_tracker, "last_event_ts"):
+                    try:
+                        current_input_ts = input_tracker.last_event_ts()
+                    except Exception:
+                        current_input_ts = None
+                    if current_input_ts is not None and current_input_ts != last_input_ts:
+                        last_input_ts = current_input_ts
+                        input_recent = True
                 should_store, duplicate = deduper.should_store(fingerprint, now=now)
                 seen_frames += 1
                 if now - last_emit >= max(0.5, 1.0 / max(1, fps_target)):
@@ -171,7 +181,7 @@ class ScreenshotCaptureWindows(PluginBase):
                     record_telemetry(f"plugin.{self.plugin_id}", telemetry)
                     last_emit = now
                 if not should_store:
-                    _sleep_interval(loop_start, fps_target)
+                    _sleep_interval(loop_start, fps_target, force_immediate=input_recent)
                     continue
                 try:
                     encode_start = time.perf_counter()
@@ -273,7 +283,7 @@ class ScreenshotCaptureWindows(PluginBase):
                         ts_utc=ts_utc,
                         retryable=False,
                     )
-                _sleep_interval(loop_start, fps_target)
+                _sleep_interval(loop_start, fps_target, force_immediate=input_recent)
 
     def _cursor_shape_cached(self, handle: int) -> CursorShape | None:
         if not handle:
@@ -344,7 +354,9 @@ def _snapshot_input(input_tracker: Any | None) -> dict[str, Any] | None:
     return None
 
 
-def _sleep_interval(start: float, fps_target: int) -> None:
+def _sleep_interval(start: float, fps_target: int, *, force_immediate: bool = False) -> None:
+    if force_immediate:
+        return
     interval = 1.0 / max(1, int(fps_target))
     elapsed = time.monotonic() - start
     if elapsed < interval:

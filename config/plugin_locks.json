@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-01-29T19:53:10.253130+00:00",
+  "generated_at": "2026-01-30T22:29:06.280928+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "76427e19f6f8901a8f7ff4074862476166d91ffc0f74840a9342cc213d7a204f",
@@ -22,7 +22,7 @@
       "manifest_sha256": "de450719fc2364c720292db489f971efbb220c249b8f369910059b09620c84c7"
     },
     "builtin.capture.screenshot.windows": {
-      "artifact_sha256": "8fc1151be0d159f754e40adac2108171f3da75f2ca52f1a1b93450c2743badf7",
+      "artifact_sha256": "570428c21b3512b4ad71714eb37105a9d71e32751c478ca65e95dd87ffb4b93f",
       "manifest_sha256": "d49d51404e94438effd28ff2f0443f9b0db8fdeee318170d7e737d3de2046fc2"
     },
     "builtin.capture.windows": {
@@ -178,7 +178,7 @@
       "manifest_sha256": "7170070dce2c18bf8006ede908b70aa4cfa8b0225d24bf2c0728aff59f2d4ace"
     },
     "builtin.storage.encrypted": {
-      "artifact_sha256": "32e7678e3e768fab5c0e0b9083b75c2bde33811ac4023b10b3a0e202b17551f7",
+      "artifact_sha256": "b68bdee0b1f257cdddc2f7db263c727a3db085cf4301b7150b35b0fdbf4b40e3",
       "manifest_sha256": "854c2285fd37510dab207e01cc6900c485b9492483d64b503f5b3e22dcf653d5"
     },
     "builtin.storage.memory": {
@@ -186,7 +186,7 @@
       "manifest_sha256": "18b472cd2bbf044efb05bd0b2d297ab93b194d336b79904a7335cb8864081bf1"
     },
     "builtin.storage.sqlcipher": {
-      "artifact_sha256": "e147f41719899f1b7062c67f018a1bc0b870c9fa0bfe4e1a81fa31787174a2ea",
+      "artifact_sha256": "6a48008857d5644fd7fdb92e9e1620bf3855d3dfe540e6f45ad9c4ce2f5fab87",
       "manifest_sha256": "8341f471c9d2909836ca67a5e3e7d281c057a77a738d5bc577e9b9499236081f"
     },
     "builtin.time.advanced": {
@@ -206,7 +206,7 @@
       "manifest_sha256": "6a9ce7133cf525a8aabca51d56c90b508d71574bdb66980cfd08e00ae7a3b3a3"
     },
     "builtin.tracking.input.windows": {
-      "artifact_sha256": "74a4769ced3e788bcb87e97315811681eeecfffe4931b43bbc08f12fc0752777",
+      "artifact_sha256": "14a476ffe4f6e9ff1caa9ef018c494f963f8c70877d54c32b4b465bcaf56695e",
       "manifest_sha256": "9d6569db49ca6c4de4245e0dfa032163dc37d6a8797afc92b9b16cde9fba2bee"
     },
     "builtin.vlm.basic": {

@@ -24,6 +24,7 @@ const state = {
 };
 
 let telemetryRenderAt = 0;
+let latestScreenshotUrl = null;
 
 const qs = (id) => document.getElementById(id);
 
@@ -34,6 +35,11 @@ const telemetryPayload = qs("telemetryPayload");
 const statusRunId = qs("runId");
 const statusLedger = qs("ledgerHead");
 const statusCapture = qs("captureState");
+const kernelStatus = qs("kernelStatus");
+const captureBannerState = qs("captureBannerState");
+const processingBannerState = qs("processingBannerState");
+const captureBannerLast = qs("captureBannerLast");
+const captureBannerDisk = qs("captureBannerDisk");
 const alertsList = qs("alertsList");
 const timelineList = qs("timelineList");
 const pluginsList = qs("pluginsList");
@@ -65,6 +71,13 @@ const storageEssentialsReload = qs("storageEssentialsReload");
 const storageEssentialsStatus = qs("storageEssentialsStatus");
 const capturePluginsList = qs("capturePluginsList");
 const refreshCapturePlugins = qs("refreshCapturePlugins");
+const metadataType = qs("metadataType");
+const refreshMetadataBtn = qs("refreshMetadata");
+const metadataList = qs("metadataList");
+const metadataDetail = qs("metadataDetail");
+const previewLatestScreenshotBtn = qs("previewLatestScreenshot");
+const latestScreenshotStatus = qs("latestScreenshotStatus");
+const latestScreenshotPreview = qs("latestScreenshotPreview");
 const pluginSettingsList = qs("pluginSettingsList");
 const pluginSettingsApply = qs("pluginSettingsApply");
 const pluginSettingsTitle = qs("pluginSettingsTitle");
@@ -183,7 +196,56 @@ async function refreshStatus() {
   statusRunId.textContent = data.run_id || "—";
   statusLedger.textContent = data.ledger_head || "—";
   statusCapture.textContent = data.capture_active ? "active" : "idle";
+  if (kernelStatus) {
+    if (data.kernel_ready === false) {
+      kernelStatus.textContent = data.kernel_error ? `error · ${data.kernel_error}` : "error";
+    } else if (data.kernel_ready === true) {
+      kernelStatus.textContent = "ready";
+    } else {
+      kernelStatus.textContent = "—";
+    }
+  }
   updateQuickControls();
+  renderStatusBanner();
+}
+
+function renderStatusBanner() {
+  const captureStatus = state.status.capture_status || {};
+  if (captureBannerState) {
+    captureBannerState.textContent = state.status.capture_active ? "RUNNING" : "STOPPED";
+    captureBannerState.classList.toggle("warn", !state.status.capture_active);
+  }
+  if (processingBannerState) {
+    const processing = state.status.processing_state || {};
+    if (processing.paused) {
+      processingBannerState.textContent = `PAUSED · ${processing.reason || "active user"}`;
+    } else if (processing.mode) {
+      processingBannerState.textContent = processing.mode;
+    } else {
+      processingBannerState.textContent = "—";
+    }
+  }
+  if (captureBannerLast) {
+    const age = captureStatus.last_capture_age_seconds;
+    if (typeof age === "number") {
+      captureBannerLast.textContent = `${Math.round(age)}s ago`;
+    } else {
+      captureBannerLast.textContent = "—";
+    }
+  }
+  if (captureBannerDisk) {
+    const disk = captureStatus.disk || {};
+    if (disk.level) {
+      const level = String(disk.level).toUpperCase();
+      captureBannerDisk.textContent = `${level} · ${formatBytes(disk.free_bytes || 0)}`;
+      captureBannerDisk.classList.toggle("warn", level !== "OK");
+      captureBannerDisk.classList.toggle("off", false);
+    } else {
+      captureBannerDisk.textContent = "—";
+      captureBannerDisk.classList.toggle("warn", false);
+      captureBannerDisk.classList.toggle("off", true);
+    }
+  }
 }
 
 async function refreshAlerts() {
@@ -250,6 +312,7 @@ const SETTINGS_GROUPS = [
       "storage.data_dir",
       "storage.encryption_required",
       "storage.fsync_policy",
+      "storage.no_deletion_mode",
       "storage.retention.evidence",
     ],
   },
@@ -331,6 +394,7 @@ const SETTINGS_GROUPS = [
 ];
 
 const CAPTURE_ESSENTIAL_FIELDS = [
+  "capture.auto_start",
   "capture.screenshot.enabled",
   "capture.screenshot.include_cursor",
   "capture.screenshot.fps_target",
@@ -350,6 +414,7 @@ const STORAGE_ESSENTIAL_FIELDS = [
   "storage.media_dir",
   "storage.metadata_path",
   "storage.metadata_require_db",
+  "storage.encryption_enabled",
   "storage.encryption_required",
   "storage.retention.evidence",
   "storage.anchor.sign",
@@ -364,6 +429,13 @@ const CAPTURE_PLUGIN_GROUPS = [
   { id: "tracking.input", title: "Input tracking", kinds: ["tracking.input"] },
   { id: "window.metadata", title: "Window metadata", kinds: ["window.metadata"] },
   { id: "storage.backends", title: "Storage backends", kinds: ["storage.metadata_store", "storage.media_backend"] },
+];
+
+const METADATA_TYPES = [
+  { id: "", label: "All records" },
+  { id: "evidence.capture.frame", label: "Screenshots" },
+  { id: "evidence.capture.segment", label: "Video segments" },
+  { id: "evidence.capture.audio", label: "Audio segments" },
 ];
 
 const PLUGIN_GROUPS = [
@@ -501,6 +573,25 @@ function formatAgo(value) {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.round(hours / 24);
   return `${days}d ago`;
+}
+
+function pickRecordTs(record) {
+  if (!record || typeof record !== "object") return "";
+  return record.ts_utc || record.ts_start_utc || record.ts_end_utc || "";
+}
+
+function summarizeMetadata(record) {
+  if (!record || typeof record !== "object") return "—";
+  const ts = pickRecordTs(record);
+  const parts = [];
+  if (record.record_type) parts.push(record.record_type);
+  if (ts) parts.push(formatTs(ts));
+  const resolution = record.resolution || (record.width && record.height ? `${record.width}x${record.height}` : "");
+  if (resolution) parts.push(resolution);
+  if (record.frame_count) parts.push(`${record.frame_count} frames`);
+  const bytes = record.content_size || record.output_bytes;
+  if (bytes) parts.push(formatBytes(bytes));
+  return parts.join(" · ") || "—";
 }
 
 function renderSparkline(container, values) {
@@ -934,6 +1025,18 @@ function renderCapturePlugins() {
   capturePluginsList.appendChild(fragment);
 }
 
+function initMetadataTypes() {
+  if (!metadataType) return;
+  metadataType.innerHTML = "";
+  METADATA_TYPES.forEach((entry) => {
+    const option = document.createElement("option");
+    option.value = entry.id;
+    option.textContent = entry.label;
+    metadataType.appendChild(option);
+  });
+  metadataType.value = "evidence.capture.frame";
+}
+
 async function refreshPlugins() {
   const resp = await apiFetch("/api/plugins");
   const data = await readJson(resp);
@@ -958,16 +1061,24 @@ async function postConfigPatch(patch) {
 }
 
 function updateQuickControls() {
+  const controlsEnabled = Boolean(state.status.capture_controls_enabled);
   if (quickCaptureToggle) {
     quickCaptureToggle.checked = Boolean(state.status.capture_active);
+    quickCaptureToggle.disabled = !controlsEnabled;
   }
   if (quickPauseStatus) {
     if (state.status.paused_until_utc) {
       quickPauseStatus.textContent = `Paused until ${formatTs(state.status.paused_until_utc)}`;
     } else {
       quickPauseStatus.textContent = state.status.capture_active ? "Capture running" : "Capture stopped";
+      if (!controlsEnabled) {
+        quickPauseStatus.textContent = "Capture locked on (no pause)";
+      }
     }
   }
+  if (quickPause10) quickPause10.disabled = !controlsEnabled;
+  if (quickPause30) quickPause30.disabled = !controlsEnabled;
+  if (quickResume) quickResume.disabled = !controlsEnabled;
   if (quickPrivacyMode) {
     const privacy = state.config.privacy || {};
     const egressEnabled = privacy.egress?.enabled !== false;
@@ -1045,6 +1156,31 @@ function updateCaptureHealth() {
 async function refreshHealth() {
   await refreshTimelineSummary();
   await refreshTelemetrySnapshot();
+  await refreshHealthFallback();
+}
+
+async function refreshHealthFallback() {
+  if (healthScreenshot && healthScreenshot.textContent === "—") {
+    const resp = await apiFetch("/api/metadata/latest?record_type=evidence.capture.frame&limit=1");
+    const data = await readJson(resp);
+    const entry = (data.records || [])[0];
+    if (entry && entry.record) {
+      const ts = pickRecordTs(entry.record);
+      const size = entry.record.content_size ? ` · ${formatBytes(entry.record.content_size)}` : "";
+      healthScreenshot.textContent = `${formatAgo(ts)}${size}`;
+    }
+  }
+  if (healthVideo && healthVideo.textContent === "—") {
+    const resp = await apiFetch("/api/metadata/latest?record_type=evidence.capture.segment&limit=1");
+    const data = await readJson(resp);
+    const entry = (data.records || [])[0];
+    if (entry && entry.record) {
+      const ts = pickRecordTs(entry.record);
+      const size = entry.record.content_size ? ` · ${formatBytes(entry.record.content_size)}` : "";
+      const frames = entry.record.frame_count ? ` · ${entry.record.frame_count} frames` : "";
+      healthVideo.textContent = `${formatAgo(ts)}${size}${frames}`;
+    }
+  }
 }
 
 async function refreshTimelineSummary() {
@@ -1088,6 +1224,75 @@ async function refreshStorage() {
     } else {
       storageHint.textContent = "Run capture to record disk pressure samples for runway forecasting.";
     }
+  }
+}
+
+async function refreshMetadata() {
+  if (!metadataList) return;
+  const recordType = metadataType?.value ?? "";
+  metadataList.innerHTML = "";
+  if (metadataDetail) metadataDetail.textContent = "";
+  const query = recordType ? `record_type=${encodeURIComponent(recordType)}` : "";
+  const resp = await apiFetch(`/api/metadata/latest?${query}&limit=10`);
+  const data = await readJson(resp);
+  const records = data.records || [];
+  if (!records.length) {
+    const li = document.createElement("li");
+    li.textContent = "No metadata records found";
+    metadataList.appendChild(li);
+    return;
+  }
+  records.forEach((entry) => {
+    const li = document.createElement("li");
+    const record = entry.record || {};
+    li.textContent = `${entry.record_id} · ${summarizeMetadata(record)}`;
+    li.addEventListener("click", async () => {
+      const detailResp = await apiFetch(`/api/metadata/${entry.record_id}`);
+      const detail = await readJson(detailResp);
+      if (metadataDetail) {
+        metadataDetail.textContent = JSON.stringify(detail, null, 2);
+      }
+    });
+    metadataList.appendChild(li);
+  });
+}
+
+async function previewLatestScreenshot() {
+  if (!latestScreenshotPreview) return;
+  if (latestScreenshotStatus) latestScreenshotStatus.textContent = "Loading latest screenshot...";
+  try {
+    const resp = await apiFetch("/api/media/latest?record_type=evidence.capture.frame");
+    if (!resp.ok) {
+      let detail = "No screenshot available yet";
+      try {
+        const data = await resp.json();
+        if (data && data.error) {
+          const extra = data.detail ? ` · ${data.detail}` : "";
+          detail = `Unavailable: ${data.error}${extra}`;
+        }
+      } catch (err) {
+        // ignore parse errors for non-json responses
+      }
+      if (latestScreenshotStatus) latestScreenshotStatus.textContent = detail;
+      return;
+    }
+    const blob = await resp.blob();
+    if (!blob || !blob.size) {
+      if (latestScreenshotStatus) latestScreenshotStatus.textContent = "Empty screenshot response";
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    if (latestScreenshotUrl) URL.revokeObjectURL(latestScreenshotUrl);
+    latestScreenshotUrl = url;
+    latestScreenshotPreview.src = url;
+    latestScreenshotPreview.classList.add("visible");
+    const recordId = resp.headers.get("x-ac-record-id");
+    const stamp = new Date().toLocaleTimeString();
+    if (latestScreenshotStatus) {
+      latestScreenshotStatus.textContent = recordId ? `Loaded ${recordId} · ${stamp}` : `Loaded ${stamp}`;
+    }
+  } catch (err) {
+    if (latestScreenshotStatus) latestScreenshotStatus.textContent = `Error: ${err}`;
   }
 }
 
@@ -1842,6 +2047,10 @@ if (pluginShowAll) {
 }
 
 quickCaptureToggle?.addEventListener("change", async () => {
+  if (!state.status.capture_controls_enabled) {
+    updateQuickControls();
+    return;
+  }
   if (quickCaptureToggle.checked) {
     await apiFetch("/api/run/start", { method: "POST" });
   } else {
@@ -1851,6 +2060,7 @@ quickCaptureToggle?.addEventListener("change", async () => {
 });
 
 quickPause10?.addEventListener("click", async () => {
+  if (!state.status.capture_controls_enabled) return;
   await apiFetch("/api/run/pause", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1860,6 +2070,7 @@ quickPause10?.addEventListener("click", async () => {
 });
 
 quickPause30?.addEventListener("click", async () => {
+  if (!state.status.capture_controls_enabled) return;
   await apiFetch("/api/run/pause", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1869,6 +2080,7 @@ quickPause30?.addEventListener("click", async () => {
 });
 
 quickResume?.addEventListener("click", async () => {
+  if (!state.status.capture_controls_enabled) return;
   await apiFetch("/api/run/resume", { method: "POST" });
   refreshStatus();
 });
@@ -1990,6 +2202,9 @@ bookmarkSave?.addEventListener("click", async () => {
 refreshHealthBtn?.addEventListener("click", refreshHealth);
 refreshStorageBtn?.addEventListener("click", refreshStorage);
 refreshConfigHistoryBtn?.addEventListener("click", refreshConfigHistory);
+refreshMetadataBtn?.addEventListener("click", refreshMetadata);
+metadataType?.addEventListener("change", refreshMetadata);
+previewLatestScreenshotBtn?.addEventListener("click", previewLatestScreenshot);
 configUndoLast?.addEventListener("click", async () => {
   if (configHistoryStatus) configHistoryStatus.textContent = "Reverting latest...";
   const resp = await apiFetch("/api/config/history?limit=1");
@@ -2011,11 +2226,13 @@ configUndoLast?.addEventListener("click", async () => {
 });
 
 qs("runStart")?.addEventListener("click", async () => {
+  if (!state.status.capture_controls_enabled) return;
   await apiFetch("/api/run/start", { method: "POST" });
   refreshStatus();
 });
 
 qs("runStop")?.addEventListener("click", async () => {
+  if (!state.status.capture_controls_enabled) return;
   await apiFetch("/api/run/stop", { method: "POST" });
   refreshStatus();
 });
@@ -2069,6 +2286,7 @@ filterBookmarks?.addEventListener("change", () => {
 });
 
 initNav();
+initMetadataTypes();
 if (filterActivity) filterActivity.checked = state.activityFilters.activity;
 if (filterChanges) filterChanges.checked = state.activityFilters.changes;
 if (filterBookmarks) filterBookmarks.checked = state.activityFilters.bookmarks;
@@ -2086,3 +2304,4 @@ refreshActivityTimeline();
 refreshKeys();
 refreshEgress();
 connectTelemetry();
+refreshMetadata();

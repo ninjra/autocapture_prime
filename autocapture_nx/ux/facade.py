@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, cast
 
 from autocapture_nx.kernel.config import ConfigPaths, load_config, reset_user_config, restore_user_config, validate_config
 from autocapture_nx.kernel.loader import Kernel, default_config_paths
@@ -92,6 +92,7 @@ class KernelManager:
         self._lock = threading.Lock()
         self._kernel: Kernel | None = None
         self._system: Any | None = None
+        self._last_error: str | None = None
 
     @contextmanager
     def session(self) -> Iterator[Any]:
@@ -104,9 +105,17 @@ class KernelManager:
                 kernel.shutdown()
             return
         with self._lock:
-            if self._kernel is None:
+            if self._kernel is None or self._system is None:
                 self._kernel = Kernel(self._paths, safe_mode=self._safe_mode)
-                self._system = self._kernel.boot(start_conductor=self._start_conductor)
+                try:
+                    self._system = self._kernel.boot(start_conductor=self._start_conductor)
+                    self._last_error = None
+                except Exception as exc:
+                    self._kernel = None
+                    self._system = None
+                    self._last_error = str(exc)
+                    yield None
+                    return
         try:
             yield self._system
         finally:
@@ -115,6 +124,9 @@ class KernelManager:
     def kernel(self) -> Kernel | None:
         return self._kernel
 
+    def last_error(self) -> str | None:
+        return self._last_error
+
     def shutdown(self) -> None:
         with self._lock:
             if self._kernel is None:
@@ -122,6 +134,7 @@ class KernelManager:
             self._kernel.shutdown()
             self._kernel = None
             self._system = None
+            self._last_error = None
 
 
 class UXFacade:
@@ -132,9 +145,11 @@ class UXFacade:
         safe_mode: bool = False,
         persistent: bool = False,
         start_conductor: bool = False,
+        auto_start_capture: bool | None = None,
     ) -> None:
         self._paths = paths or default_config_paths()
         self._safe_mode = safe_mode
+        self._persistent = persistent
         self._config = load_config(self._paths, safe_mode=safe_mode)
         self._kernel_mgr = KernelManager(
             self._paths,
@@ -147,6 +162,22 @@ class UXFacade:
         self._pause_timer: threading.Timer | None = None
         self._paused_until_utc: str | None = None
         self._history_lock = threading.Lock()
+        self._auto_start_capture(auto_start_capture)
+
+    def _auto_start_capture(self, explicit: bool | None) -> None:
+        if not self._persistent:
+            return
+        auto_start = (
+            explicit
+            if explicit is not None
+            else bool(self._config.get("capture", {}).get("auto_start", False))
+        )
+        if not auto_start:
+            return
+        try:
+            self.run_start()
+        except Exception:
+            return
 
     @property
     def config(self) -> dict[str, Any]:
@@ -417,9 +448,12 @@ class UXFacade:
 
     def status(self) -> dict[str, Any]:
         with self._kernel_mgr.session() as system:
+            kernel_error = self._kernel_mgr.last_error()
             builder = system.get("event.builder") if system and hasattr(system, "get") else None
             run_id = builder.run_id if builder is not None else ""
             ledger_head = builder.ledger_head() if builder is not None else None
+            capture_status = self._capture_status_payload()
+            processing_state = self._processing_state_payload()
             return {
                 "run_id": run_id,
                 "ledger_head": ledger_head,
@@ -428,9 +462,92 @@ class UXFacade:
                 "capture_active": bool(self._run_active),
                 "paused_until_utc": self._paused_until_utc,
                 "paused": bool(self._paused_until_utc),
+                "capture_controls_enabled": self._capture_controls_enabled(),
+                "capture_status": capture_status,
+                "processing_state": processing_state,
+                "kernel_ready": system is not None,
+                "kernel_error": kernel_error,
             }
 
+    def _capture_status_payload(self) -> dict[str, Any]:
+        from autocapture.storage.pressure import sample_disk_pressure
+
+        telemetry = telemetry_snapshot()
+        latest = telemetry.get("latest", {}) if isinstance(telemetry, dict) else {}
+        capture_payload = latest.get("capture") if isinstance(latest, dict) else None
+        screenshot_payload = latest.get("capture.screenshot") if isinstance(latest, dict) else None
+        output_payload = latest.get("capture.output") if isinstance(latest, dict) else None
+
+        def _parse_ts(payload: dict[str, Any] | None) -> datetime | None:
+            if not isinstance(payload, dict):
+                return None
+            ts = payload.get("ts_utc")
+            if not ts:
+                return None
+            value = str(ts)
+            if value.endswith("Z"):
+                value = value[:-1] + "+00:00"
+            try:
+                return datetime.fromisoformat(value)
+            except ValueError:
+                return None
+
+        candidates = [screenshot_payload, output_payload, capture_payload]
+        latest_ts = None
+        for payload in candidates:
+            ts = _parse_ts(payload)
+            if ts and (latest_ts is None or ts > latest_ts):
+                latest_ts = ts
+        last_capture_age = None
+        last_capture_ts = latest_ts.isoformat() if latest_ts else None
+        if latest_ts is not None:
+            last_capture_age = max(0.0, (datetime.now(timezone.utc) - latest_ts).total_seconds())
+
+        disk = None
+        try:
+            sample = sample_disk_pressure(self._config)
+            disk_cfg = self._config.get("storage", {}).get("disk_pressure", {}) if isinstance(self._config, dict) else {}
+            hard_mb = int(disk_cfg.get("watermark_hard_mb", 0) or 0)
+            hard_halt = False
+            if hard_mb > 0:
+                hard_halt = sample.free_bytes <= (hard_mb * 1024 * 1024)
+            disk = {
+                "level": sample.level,
+                "free_gb": sample.free_gb,
+                "free_bytes": sample.free_bytes,
+                "hard_halt": hard_halt,
+            }
+        except Exception:
+            disk = None
+
+        payload = {
+            "last_capture_ts_utc": last_capture_ts,
+            "last_capture_age_seconds": last_capture_age,
+            "queue_depth": capture_payload.get("queue_depth") if isinstance(capture_payload, dict) else None,
+            "drops_total": capture_payload.get("drops_total") if isinstance(capture_payload, dict) else None,
+            "lag_ms": capture_payload.get("lag_ms") if isinstance(capture_payload, dict) else None,
+            "disk": disk,
+        }
+        return payload
+
+    def _processing_state_payload(self) -> dict[str, Any]:
+        stats = self.scheduler_status().get("stats")
+        if stats is not None and hasattr(stats, "__dataclass_fields__"):
+            stats = asdict(cast(Any, stats))
+        if not isinstance(stats, dict):
+            return {"mode": None, "paused": None, "reason": None}
+        mode = stats.get("mode")
+        reason = stats.get("reason")
+        paused = bool(mode == "ACTIVE_CAPTURE_ONLY")
+        return {"mode": mode, "paused": paused, "reason": reason}
+
+    def _capture_controls_enabled(self) -> bool:
+        runtime_cfg = self._config.get("runtime", {}) if isinstance(self._config, dict) else {}
+        controls_cfg = runtime_cfg.get("capture_controls", {}) if isinstance(runtime_cfg, dict) else {}
+        return bool(controls_cfg.get("enabled", False))
+
     def _start_components(self) -> None:
+        started = False
         with self._kernel_mgr.session() as system:
             capture = system.get("capture.source") if system and hasattr(system, "get") else None
             screenshot = (
@@ -456,12 +573,25 @@ class UXFacade:
                 if system and hasattr(system, "has") and system.has("tracking.file_activity")
                 else None
             )
-            for component in (capture, screenshot, audio, input_tracker, window_meta, cursor_tracker, clipboard, file_activity):
+            for component in (
+                capture,
+                screenshot,
+                audio,
+                input_tracker,
+                window_meta,
+                cursor_tracker,
+                clipboard,
+                file_activity,
+            ):
                 if component is None:
                     continue
                 if hasattr(component, "start"):
-                    component.start()
-        self._run_active = True
+                    try:
+                        component.start()
+                        started = True
+                    except Exception:
+                        continue
+        self._run_active = started
 
     def _stop_components(self) -> None:
         with self._kernel_mgr.session() as system:
@@ -503,6 +633,8 @@ class UXFacade:
         return {"ok": True, "running": True}
 
     def run_stop(self, *, preserve_pause: bool = False) -> dict[str, Any]:
+        if not self._capture_controls_enabled():
+            return {"ok": False, "error": "capture_controls_disabled"}
         if not preserve_pause:
             with self._pause_lock:
                 self._clear_pause_locked()
@@ -510,6 +642,8 @@ class UXFacade:
         return {"ok": True, "running": False}
 
     def run_pause(self, minutes: float) -> dict[str, Any]:
+        if not self._capture_controls_enabled():
+            return {"ok": False, "error": "capture_controls_disabled"}
         delay_s = max(0.0, float(minutes) * 60.0)
         self._stop_components()
         paused_until = None
@@ -658,8 +792,75 @@ class UXFacade:
                 return {"record_id": record_id, "record": None, "error": "metadata_unavailable"}
             return {"record_id": record_id, "record": metadata.get(record_id, None)}
 
+    def _media_payload(self, media: Any, record_id: str, record: dict[str, Any] | None) -> dict[str, Any]:
+        if media is None or not hasattr(media, "get"):
+            return {"record_id": record_id, "error": "media_unavailable", "status": 503}
+        try:
+            data = media.get(record_id, None)
+        except Exception as exc:
+            return {
+                "record_id": record_id,
+                "error": "media_get_failed",
+                "detail": str(exc),
+                "status": 500,
+            }
+        if data is None:
+            return {"record_id": record_id, "error": "media_not_found", "status": 404}
+        content_type = "application/octet-stream"
+        if isinstance(record, dict):
+            content_type = record.get("content_type") or content_type
+        return {"record_id": record_id, "content_type": content_type, "data": data}
+
+    def media_latest(self, record_type: str | None = None) -> dict[str, Any]:
+        with self._kernel_mgr.session() as system:
+            if system is None:
+                return {
+                    "error": "kernel_unavailable",
+                    "detail": self._kernel_mgr.last_error(),
+                    "status": 503,
+                }
+            metadata = system.get("storage.metadata")
+            media = system.get("storage.media")
+            if metadata is None:
+                return {"error": "metadata_unavailable", "status": 503}
+            if not hasattr(metadata, "latest"):
+                return {"error": "metadata_backend_not_queryable", "status": 501}
+            records = metadata.latest(record_type=record_type, limit=1)
+            if not records:
+                return {"error": "no_records", "status": 404}
+            entry = records[0] if isinstance(records, list) else None
+            record = entry.get("record") if isinstance(entry, dict) else None
+            record_id = None
+            if isinstance(entry, dict):
+                record_id = entry.get("record_id") or entry.get("id")
+            if not record_id and isinstance(record, dict):
+                record_id = record.get("record_id") or record.get("id")
+            if not record_id:
+                return {"error": "record_id_missing", "status": 500}
+            if record is None or not isinstance(record, dict):
+                record = metadata.get(record_id, None) if hasattr(metadata, "get") else None
+            return self._media_payload(media, str(record_id), record if isinstance(record, dict) else None)
+
+    def media_get(self, record_id: str) -> dict[str, Any]:
+        with self._kernel_mgr.session() as system:
+            if system is None:
+                return {
+                    "record_id": record_id,
+                    "error": "kernel_unavailable",
+                    "detail": self._kernel_mgr.last_error(),
+                    "status": 503,
+                }
+            metadata = system.get("storage.metadata")
+            media = system.get("storage.media")
+            record = metadata.get(record_id, None) if metadata is not None and hasattr(metadata, "get") else None
+            return self._media_payload(media, record_id, record if isinstance(record, dict) else None)
+
     def telemetry(self) -> dict[str, Any]:
-        return telemetry_snapshot()
+        payload = telemetry_snapshot()
+        if isinstance(payload, dict):
+            payload["kernel_ready"] = self._kernel_mgr.kernel() is not None and self._kernel_mgr.last_error() is None
+            payload["kernel_error"] = self._kernel_mgr.last_error()
+        return payload
 
     def journal_tail(self, limit: int = 50) -> list[dict[str, Any]]:
         data_dir = Path(self._config.get("storage", {}).get("data_dir", "data"))
@@ -748,10 +949,12 @@ def create_facade(
     persistent: bool = False,
     safe_mode: bool = False,
     start_conductor: bool = False,
+    auto_start_capture: bool | None = None,
 ) -> UXFacade:
     return UXFacade(
         paths=default_config_paths(),
         safe_mode=safe_mode,
         persistent=persistent,
         start_conductor=start_conductor,
+        auto_start_capture=auto_start_capture,
     )

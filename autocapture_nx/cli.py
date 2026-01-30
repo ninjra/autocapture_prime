@@ -137,7 +137,7 @@ def cmd_tray(_args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    facade = create_facade(persistent=True, safe_mode=args.safe_mode)
+    facade = create_facade(persistent=True, safe_mode=args.safe_mode, auto_start_capture=False)
     facade.run_start()
     print("Capture running. Press Ctrl+C to stop.")
     try:
@@ -395,6 +395,10 @@ def cmd_storage_compact(args: argparse.Namespace) -> int:
 def cmd_storage_cleanup(args: argparse.Namespace) -> int:
     import shutil
 
+    config = load_config(default_config_paths(), safe_mode=False)
+    if bool(config.get("storage", {}).get("no_deletion_mode", False)):
+        print("Storage cleanup disabled in no-deletion mode")
+        return 2
     target = Path(args.path).resolve()
     if not args.confirm:
         print("Refusing to delete without --confirm")

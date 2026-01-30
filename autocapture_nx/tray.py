@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import queue
 import socket
@@ -9,6 +10,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from typing import Any
 
 from autocapture_nx.kernel.config import load_config
 from autocapture_nx.kernel.loader import default_config_paths
@@ -218,13 +220,51 @@ def main() -> int:
         ui.stop()
         server.stop()
 
+    def _fetch_status() -> dict[str, Any]:
+        try:
+            with urllib.request.urlopen(f"{base_url}/api/status", timeout=1.5) as resp:
+                raw = resp.read()
+            return json.loads(raw.decode("utf-8"))
+        except Exception:
+            return {}
+
+    def _status_menu() -> list[tuple]:
+        status = _fetch_status()
+        capture_active = bool(status.get("capture_active"))
+        processing = status.get("processing_state", {}) if isinstance(status, dict) else {}
+        capture_status = status.get("capture_status", {}) if isinstance(status, dict) else {}
+        disk = capture_status.get("disk", {}) if isinstance(capture_status, dict) else {}
+        capture_label = f"Capture: {'RUNNING' if capture_active else 'STOPPED'}"
+        processing_label = "Processing: —"
+        if isinstance(processing, dict) and processing.get("paused"):
+            reason = processing.get("reason") or "active user"
+            processing_label = f"Processing: PAUSED ({reason})"
+        elif isinstance(processing, dict) and processing.get("mode"):
+            processing_label = f"Processing: {processing.get('mode')}"
+        disk_label = "Disk: —"
+        if isinstance(disk, dict) and disk.get("level"):
+            level = str(disk.get("level")).upper()
+            free_gb = disk.get("free_gb")
+            if isinstance(free_gb, int):
+                disk_label = f"Disk: {level} · {free_gb} GB free"
+            else:
+                disk_label = f"Disk: {level}"
+        return [
+            (10, capture_label, None, False),
+            (11, processing_label, None, False),
+            (12, disk_label, None, False),
+            (1, "Settings", open_settings),
+            (2, "Plugin Manager", open_plugins),
+            (3, "Quit", quit_app),
+        ]
+
     menu = [
         (1, "Settings", open_settings),
         (2, "Plugin Manager", open_plugins),
         (3, "Quit", quit_app),
     ]
 
-    tray = TrayApp("Autocapture NX", menu, default_id=1)
+    tray = TrayApp("Autocapture NX", menu, default_id=1, menu_provider=_status_menu)
     tray_thread = threading.Thread(target=tray.run, daemon=True)
     tray_thread.start()
 

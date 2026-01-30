@@ -51,7 +51,7 @@ def _parse_retention_spec(spec: Any) -> int | None:
     text = str(spec).strip().lower()
     if not text or text in {"infinite", "inf", "off", "none", "disabled", "0"}:
         return None
-    match = re.match(r"^(\\d+)\\s*(d|day|days|h|hr|hour|hours|m|min|minute|minutes|s|sec|second|seconds)?$", text)
+    match = re.match(r"^(\d+)\s*(d|day|days|h|hr|hour|hours|m|min|minute|minutes|s|sec|second|seconds)?$", text)
     if not match:
         return None
     value = int(match.group(1))
@@ -71,6 +71,11 @@ def _candidate_ids(metadata: Any, cutoff_ts: str, limit: int) -> Iterable[str]:
             return metadata.query_time_window(None, cutoff_ts, limit=limit)
         except Exception:
             pass
+    cutoff_epoch = None
+    try:
+        cutoff_epoch = _parse_iso(cutoff_ts).timestamp()
+    except Exception:
+        cutoff_epoch = None
     ids: list[tuple[float, str]] = []
     for record_id in getattr(metadata, "keys", lambda: [])():
         record = metadata.get(record_id, {})
@@ -80,6 +85,8 @@ def _candidate_ids(metadata: Any, cutoff_ts: str, limit: int) -> Iterable[str]:
         try:
             ts_key = _parse_iso(ts_val).timestamp()
         except Exception:
+            continue
+        if cutoff_epoch is not None and ts_key > cutoff_epoch:
             continue
         ids.append((ts_key, record_id))
     ids.sort(key=lambda item: (item[0], item[1]))
@@ -109,6 +116,8 @@ def apply_evidence_retention(
     logger: Any | None = None,
 ) -> RetentionResult | None:
     storage_cfg = config.get("storage", {})
+    if bool(storage_cfg.get("no_deletion_mode", False)):
+        return None
     retention_cfg = storage_cfg.get("retention", {}) if isinstance(storage_cfg, dict) else {}
     spec = retention_cfg.get("evidence", "infinite")
     seconds = _parse_retention_spec(spec)
@@ -262,6 +271,8 @@ class StorageRetentionMonitor:
 
     def due(self) -> bool:
         storage_cfg = self._config.get("storage", {}) if isinstance(self._config, dict) else {}
+        if bool(storage_cfg.get("no_deletion_mode", False)):
+            return False
         retention_cfg = storage_cfg.get("retention", {}) if isinstance(storage_cfg, dict) else {}
         spec = retention_cfg.get("evidence", "infinite")
         if _parse_retention_spec(spec) is None:

@@ -52,6 +52,31 @@
     "capture": {
       "additionalProperties": false,
       "properties": {
+        "auto_start": {
+          "type": "boolean"
+        },
+        "mode_preset": {
+          "type": "string"
+        },
+        "presets": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "diff_epsilon": {
+          "type": "number"
+        },
+        "duplicate_threshold": {
+          "type": "string"
+        },
+        "always_store_fullres": {
+          "type": "boolean"
+        },
+        "block_fullscreen": {
+          "type": "boolean"
+        },
+        "active_hash_check_interval_ms": {
+          "type": "integer"
+        },
         "audio": {
           "additionalProperties": false,
           "properties": {
@@ -1797,10 +1822,31 @@
           "properties": {
             "assume_idle_when_missing": {
               "type": "boolean"
+            },
+            "display_power_enabled": {
+              "type": "boolean"
+            },
+            "display_poll_interval_s": {
+              "type": "number"
+            },
+            "display_idle_seconds": {
+              "type": "integer"
             }
           },
           "required": [
             "assume_idle_when_missing"
+          ],
+          "type": "object"
+        },
+        "capture_controls": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled"
           ],
           "type": "object"
         },
@@ -1973,6 +2019,10 @@
         "data_dir": {
           "type": "string"
         },
+        "no_deletion_mode": {
+          "const": true,
+          "type": "boolean"
+        },
         "disk_pressure": {
           "additionalProperties": false,
           "properties": {
@@ -1987,6 +2037,12 @@
             },
             "warn_free_gb": {
               "type": "integer"
+            },
+            "watermark_soft_mb": {
+              "type": "integer"
+            },
+            "watermark_hard_mb": {
+              "type": "integer"
             }
           },
           "required": [
@@ -1997,6 +2053,9 @@
           "type": "object"
         },
         "encryption_required": {
+          "type": "boolean"
+        },
+        "encryption_enabled": {
           "type": "boolean"
         },
         "entity_map": {
@@ -2077,6 +2136,7 @@
       },
       "required": [
         "data_dir",
+        "no_deletion_mode",
         "encryption_required",
         "crypto",
         "retention",

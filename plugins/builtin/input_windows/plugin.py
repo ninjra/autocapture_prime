@@ -37,6 +37,38 @@ class InputTrackerWindows(PluginBase):
         self._batch_seq = 0
         self._activity_events: deque[float] = deque(maxlen=128)
         self._mode = "raw"
+        self._display_on: bool | None = None
+        self._display_last_change_ts: float | None = None
+        self._display_last_off_ts: float | None = None
+        self._display_last_poll: float | None = None
+        self._display_poll_interval_s = 1.0
+        self._display_idle_seconds = 300.0
+        self._display_enabled = True
+
+    def _update_display_state(self, now: float) -> bool | None:
+        if not self._display_enabled:
+            return None
+        if self._display_last_poll is not None:
+            interval = max(0.2, float(self._display_poll_interval_s))
+            if now - self._display_last_poll < interval:
+                return self._display_on
+        self._display_last_poll = now
+        try:
+            from autocapture_nx.windows.power import monitor_power_state
+        except Exception:
+            return self._display_on
+        try:
+            state = monitor_power_state()
+        except Exception:
+            return self._display_on
+        if state is None:
+            return self._display_on
+        if self._display_on is None or state != self._display_on:
+            self._display_on = bool(state)
+            self._display_last_change_ts = now
+            if not self._display_on:
+                self._display_last_off_ts = now
+        return self._display_on
 
     def capabilities(self) -> dict[str, Any]:
         return {"tracking.input": self}
@@ -73,6 +105,14 @@ class InputTrackerWindows(PluginBase):
                 self._activity_events.popleft()
             events = list(self._activity_events)
             last_event_ts = self._last_event_ts
+        display_on = self._update_display_state(now)
+        display_idle_seconds = None
+        if display_on is True:
+            idle = 0.0
+        elif display_on is False:
+            if self._display_last_off_ts is not None:
+                display_idle_seconds = max(0.0, now - self._display_last_off_ts)
+            idle = max(idle, display_idle_seconds or 0.0, float(self._display_idle_seconds))
         rate_hz = (len(events) / window_s) if window_s > 0 else 0.0
         if idle == float("inf"):
             freshness = 0.0
@@ -82,6 +122,11 @@ class InputTrackerWindows(PluginBase):
         rate_score = min(1.0, rate_hz / target_rate) if target_rate > 0 else 0.0
         score = max(freshness, rate_score)
         user_active = idle < active_window_s if idle != float("inf") else False
+        if display_on is True:
+            user_active = True
+            score = 1.0
+        elif display_on is False:
+            user_active = False
         return {
             "idle_seconds": idle,
             "user_active": user_active,
@@ -89,6 +134,8 @@ class InputTrackerWindows(PluginBase):
             "event_rate_hz": rate_hz,
             "recent_activity": bool(events),
             "last_event_ts": last_event_ts,
+            "display_on": display_on,
+            "display_idle_seconds": display_idle_seconds,
         }
 
     def start(self) -> None:
@@ -106,6 +153,11 @@ class InputTrackerWindows(PluginBase):
         capture_cfg = self.context.config.get("capture", {}).get("input_tracking", {})
         mode = str(capture_cfg.get("mode", "raw") or "raw").lower()
         self._mode = mode
+        runtime_activity = self.context.config.get("runtime", {}).get("activity", {})
+        if isinstance(runtime_activity, dict):
+            self._display_enabled = bool(runtime_activity.get("display_power_enabled", True))
+            self._display_poll_interval_s = float(runtime_activity.get("display_poll_interval_s", 1.0) or 1.0)
+            self._display_idle_seconds = float(runtime_activity.get("display_idle_seconds", 300) or 300.0)
         self._batcher = _InputBatcher(store_events=(mode == "raw"))
         self._flush_interval_ms = int(capture_cfg.get("flush_interval_ms", 250))
         if mode == "off":

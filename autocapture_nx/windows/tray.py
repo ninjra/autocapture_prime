@@ -6,7 +6,7 @@ import atexit
 import ctypes
 import os
 from ctypes import wintypes
-from typing import Any, Callable, cast
+from typing import Any, Callable, TypeAlias, cast
 
 
 WM_DESTROY = 0x0002
@@ -38,9 +38,9 @@ PTR_ULONG = ctypes.c_ulonglong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctype
 LRESULT = getattr(wintypes, "LRESULT", PTR_LONG)
 WPARAM = getattr(wintypes, "WPARAM", PTR_ULONG)
 LPARAM = getattr(wintypes, "LPARAM", PTR_LONG)
-HICON = getattr(wintypes, "HICON", wintypes.HANDLE)
-HCURSOR = getattr(wintypes, "HCURSOR", wintypes.HANDLE)
-HBRUSH = getattr(wintypes, "HBRUSH", wintypes.HANDLE)
+HICON: TypeAlias = wintypes.HICON
+HCURSOR: TypeAlias = wintypes.HANDLE
+HBRUSH: TypeAlias = wintypes.HANDLE
 windll = cast(Any, getattr(ctypes, "windll", None))
 WINFUNCTYPE = cast(Any, getattr(ctypes, "WINFUNCTYPE", None))
 
@@ -59,11 +59,19 @@ class NOTIFYICONDATA(ctypes.Structure):
 
 
 class TrayApp:
-    def __init__(self, title: str, menu: list[tuple[int, str, Callable[[], None]]], default_id: int) -> None:
+    def __init__(
+        self,
+        title: str,
+        menu: list[tuple[int, str, Callable[[], None]]],
+        default_id: int,
+        *,
+        menu_provider: Callable[[], list[tuple]] | None = None,
+    ) -> None:
         self._title = title
         self._menu_items = menu
         self._default_id = default_id
         self._callbacks: dict[int, Callable[[], None]] = {item_id: cb for item_id, _label, cb in menu}
+        self._menu_provider = menu_provider
         self._instance = windll.kernel32.GetModuleHandleW(None)
         self._hwnd: wintypes.HWND | None = None
         self._notify_id = 1
@@ -96,11 +104,15 @@ class TrayApp:
         print(f"[tray] {message}", flush=True)
 
     def _last_error(self) -> str:
-        err = ctypes.get_last_error()
-        try:
-            return ctypes.FormatError(err)
-        except Exception:
-            return str(err)
+        get_last_error = getattr(ctypes, "get_last_error", None)
+        format_error = getattr(ctypes, "FormatError", None)
+        err = get_last_error() if callable(get_last_error) else 0
+        if callable(format_error):
+            try:
+                return format_error(err)
+            except Exception:
+                return str(err)
+        return str(err)
 
     def _register_window_class(self) -> None:
         WNDPROC = WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT, WPARAM, LPARAM)
@@ -230,8 +242,25 @@ class TrayApp:
 
     def _show_menu(self, hwnd: wintypes.HWND) -> None:
         menu = windll.user32.CreatePopupMenu()
-        for item_id, label, _cb in self._menu_items:
-            windll.user32.AppendMenuW(menu, 0, item_id, label)
+        items = self._menu_items
+        if self._menu_provider is not None:
+            try:
+                items = self._menu_provider()
+            except Exception:
+                items = self._menu_items
+        self._callbacks = {}
+        for item in items:
+            if len(item) == 4:
+                item_id, label, callback, enabled = item
+            else:
+                item_id, label, callback = item
+                enabled = True
+            flags = 0
+            if not enabled:
+                flags = 0x0001
+            windll.user32.AppendMenuW(menu, flags, item_id, label)
+            if callback is not None:
+                self._callbacks[item_id] = callback
         windll.user32.SetMenuDefaultItem(menu, self._default_id, False)
         point = wintypes.POINT()
         windll.user32.GetCursorPos(ctypes.byref(point))

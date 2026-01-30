@@ -5,7 +5,10 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
-from typing import Callable, Iterator
+from typing import TYPE_CHECKING, Callable, Iterator
+
+if TYPE_CHECKING:
+    from autocapture_nx.windows.win_cursor import CursorInfo, CursorShape
 
 
 @dataclass
@@ -67,15 +70,16 @@ def iter_screenshots(
                 target_size = _parse_resolution(resolution, monitor.get("width"), monitor.get("height"))
                 cursor_handle = None
                 cursor_cached = None
+                current_cursor: Callable[[], "CursorInfo | None"] | None = None
+                cursor_shape: Callable[[int], "CursorShape | None"] | None = None
                 if include_cursor:
                     try:
-                        from autocapture_nx.windows.win_cursor import current_cursor, cursor_shape
+                        from autocapture_nx.windows.win_cursor import current_cursor as _current_cursor, cursor_shape as _cursor_shape
                     except Exception:
-                        current_cursor = None
-                        cursor_shape = None  # type: ignore[assignment]
-                else:
-                    current_cursor = None
-                    cursor_shape = None  # type: ignore[assignment]
+                        pass
+                    else:
+                        current_cursor = _current_cursor
+                        cursor_shape = _cursor_shape
 
                 def _cursor_shape_cached(handle: int):
                     nonlocal cursor_handle, cursor_cached

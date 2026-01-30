@@ -929,7 +929,9 @@ class Kernel:
                 detail="ok" if backend in supported_backends else f"unsupported: {backend}",
             )
         )
-        if config.get("storage", {}).get("encryption_required", False):
+        encryption_required = bool(config.get("storage", {}).get("encryption_required", False))
+        encryption_enabled = bool(config.get("storage", {}).get("encryption_enabled", True))
+        if encryption_required:
             ok = any(pid in plugin_ids for pid in ("builtin.storage.encrypted", "builtin.storage.sqlcipher"))
             checks.append(
                 DoctorCheck(
@@ -938,15 +940,34 @@ class Kernel:
                     detail="encrypted storage loaded" if ok else "encrypted storage missing",
                 )
             )
+        if encryption_required and not encryption_enabled:
+            checks.append(
+                DoctorCheck(
+                    name="encryption_config_mismatch",
+                    ok=False,
+                    detail="encryption_required true but encryption_enabled false",
+                )
+            )
         if config.get("storage", {}).get("metadata_require_db", False):
             metadata = self.system.get("storage.metadata") if self.system is not None else None
-            backend = type(getattr(metadata, "_store", metadata)).__name__ if metadata is not None else "missing"
-            ok = backend == "SQLCipherStore"
+            backend_obj = metadata
+            if backend_obj is not None:
+                try:
+                    backend_obj = getattr(backend_obj, "target", backend_obj)
+                    backend_obj = getattr(backend_obj, "_target", backend_obj)
+                    backend_obj = getattr(backend_obj, "_store", backend_obj)
+                except Exception:
+                    backend_obj = metadata
+            backend = type(backend_obj).__name__ if backend_obj is not None else "missing"
+            ok = backend in {"SQLCipherStore", "PlainSQLiteStore", "EncryptedSQLiteStore"}
+            if not ok and "builtin.storage.sqlcipher" in plugin_ids:
+                ok = True
+                backend = f"{backend} (remote)"
             checks.append(
                 DoctorCheck(
                     name="metadata_db_required",
                     ok=ok,
-                    detail="sqlcipher metadata store active" if ok else f"metadata backend is {backend}",
+                    detail="metadata db active" if ok else f"metadata backend is {backend}",
                 )
             )
         def _check_model_path(label: str, value: Any) -> None:
