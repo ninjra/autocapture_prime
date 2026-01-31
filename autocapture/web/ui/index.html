@@ -44,6 +44,7 @@
       <nav class="nav">
         <button class="nav-btn" data-panel="settings">Settings</button>
         <button class="nav-btn active" data-panel="capture">Capture</button>
+        <button class="nav-btn" data-panel="trace">Trace</button>
         <button class="nav-btn" data-panel="plugins">Plugins</button>
         <button class="nav-btn" data-panel="status">Status</button>
         <button class="nav-btn" data-panel="ops">Ops</button>
@@ -216,6 +217,134 @@
                 </div>
               </div>
               <div id="storageHint" class="status-line"></div>
+            </article>
+          </section>
+        </section>
+
+        <section class="panel" id="panel-trace">
+          <section class="grid trace-grid">
+            <article class="card trace-span-2" id="traceControlsCard">
+              <div class="card-header">
+                <h2>Trace Console</h2>
+                <div class="actions">
+                  <button id="traceLoadLatest">Load latest</button>
+                  <button id="traceLoadRecord" class="ghost">Load record</button>
+                </div>
+              </div>
+              <p class="muted">Follow a capture artifact from media bytes to derived metadata and query results.</p>
+              <div class="trace-controls">
+                <div class="trace-row">
+                  <div class="trace-input">
+                    <label for="traceRecordType">Record type</label>
+                    <select id="traceRecordType">
+                      <option value="evidence.capture.segment">Video segment</option>
+                      <option value="evidence.capture.frame">Screenshot frame</option>
+                    </select>
+                  </div>
+                  <div class="trace-input trace-grow">
+                    <label for="traceRecordId">Record id</label>
+                    <input id="traceRecordId" type="text" placeholder="run/segment/..." />
+                  </div>
+                </div>
+                <div id="traceStatus" class="status-line"></div>
+                <div class="trace-flags">
+                  <span id="traceStaleBadge" class="badge off">Fresh</span>
+                  <span id="traceActiveRecord" class="muted">No record loaded.</span>
+                </div>
+              </div>
+              <div class="trace-processing">
+                <label class="toggle">
+                  <input id="traceAllowOcr" type="checkbox" checked />
+                  OCR
+                </label>
+                <label class="toggle">
+                  <input id="traceAllowVlm" type="checkbox" checked />
+                  VLM
+                </label>
+                <label class="toggle">
+                  <input id="traceForceProcess" type="checkbox" />
+                  Manual override
+                </label>
+                <button id="traceProcess">Run processing</button>
+                <span id="traceProcessStatus" class="status-line"></span>
+              </div>
+              <div class="stat-list trace-summary">
+                <div class="stat-item">
+                  <p class="label">Record type</p>
+                  <p id="traceRecordTypeValue">—</p>
+                </div>
+                <div class="stat-item">
+                  <p class="label">Timestamp</p>
+                  <p id="traceRecordTs">—</p>
+                </div>
+                <div class="stat-item">
+                  <p class="label">Container</p>
+                  <p id="traceRecordContainer">—</p>
+                </div>
+                <div class="stat-item">
+                  <p class="label">Size</p>
+                  <p id="traceRecordSize">—</p>
+                </div>
+                <div class="stat-item">
+                  <p class="label">Derived</p>
+                  <p id="traceDerivedCount">—</p>
+                </div>
+              </div>
+            </article>
+
+            <article class="card trace-span-2" id="tracePreviewCard">
+              <div class="card-header">
+                <h2>Preview</h2>
+                <div class="actions">
+                  <button id="traceLoadPreview" class="ghost">Refresh preview</button>
+                </div>
+              </div>
+              <div id="tracePreviewStatus" class="status-line"></div>
+              <img id="tracePreviewImage" class="preview-image" alt="Trace preview" />
+            </article>
+
+            <article class="card" id="traceMetadataCard">
+              <div class="card-header">
+                <h2>Metadata</h2>
+              </div>
+              <pre id="traceRecordJson"></pre>
+            </article>
+
+            <article class="card" id="traceDerivedCard">
+              <div class="card-header">
+                <h2>Derived outputs</h2>
+              </div>
+              <div class="trace-scroll">
+                <ul id="traceDerivedList" class="list"></ul>
+              </div>
+              <pre id="traceDerivedDetail" class="trace-detail"></pre>
+            </article>
+
+            <article class="card" id="traceJournalCard">
+              <div class="card-header">
+                <h2>Journal hits</h2>
+              </div>
+              <div class="trace-scroll">
+                <ul id="traceJournalList" class="list"></ul>
+              </div>
+            </article>
+
+            <article class="card" id="traceLedgerCard">
+              <div class="card-header">
+                <h2>Ledger hits</h2>
+              </div>
+              <div class="trace-scroll">
+                <ul id="traceLedgerList" class="list"></ul>
+              </div>
+            </article>
+
+            <article class="card trace-span-2" id="traceQueryCard">
+              <div class="card-header">
+                <h2>Query check</h2>
+                <button id="traceQueryRun">Ask</button>
+              </div>
+              <textarea id="traceQueryInput" placeholder="Ask a question to validate derived data..."></textarea>
+              <div id="traceQueryOutput" class="output"></div>
             </article>
           </section>
         </section>

@@ -25,6 +25,7 @@ const state = {
 
 let telemetryRenderAt = 0;
 let latestScreenshotUrl = null;
+let tracePreviewUrl = null;
 
 const qs = (id) => document.getElementById(id);
 
@@ -122,6 +123,34 @@ const refreshActivityTimelineBtn = qs("refreshActivityTimeline");
 const filterActivity = qs("filterActivity");
 const filterChanges = qs("filterChanges");
 const filterBookmarks = qs("filterBookmarks");
+const traceRecordType = qs("traceRecordType");
+const traceRecordId = qs("traceRecordId");
+const traceLoadLatest = qs("traceLoadLatest");
+const traceLoadRecord = qs("traceLoadRecord");
+const traceLoadPreview = qs("traceLoadPreview");
+const traceStatus = qs("traceStatus");
+const traceStaleBadge = qs("traceStaleBadge");
+const traceActiveRecord = qs("traceActiveRecord");
+const traceAllowOcr = qs("traceAllowOcr");
+const traceAllowVlm = qs("traceAllowVlm");
+const traceForceProcess = qs("traceForceProcess");
+const traceProcess = qs("traceProcess");
+const traceProcessStatus = qs("traceProcessStatus");
+const tracePreviewImage = qs("tracePreviewImage");
+const tracePreviewStatus = qs("tracePreviewStatus");
+const traceRecordJson = qs("traceRecordJson");
+const traceDerivedList = qs("traceDerivedList");
+const traceDerivedDetail = qs("traceDerivedDetail");
+const traceJournalList = qs("traceJournalList");
+const traceLedgerList = qs("traceLedgerList");
+const traceQueryInput = qs("traceQueryInput");
+const traceQueryRun = qs("traceQueryRun");
+const traceQueryOutput = qs("traceQueryOutput");
+const traceRecordTypeValue = qs("traceRecordTypeValue");
+const traceRecordTs = qs("traceRecordTs");
+const traceRecordContainer = qs("traceRecordContainer");
+const traceRecordSize = qs("traceRecordSize");
+const traceDerivedCount = qs("traceDerivedCount");
 
 if (tokenInput) {
   tokenInput.value = state.token;
@@ -1310,6 +1339,246 @@ async function previewLatestScreenshot() {
   }
 }
 
+function setTraceStatus(text) {
+  if (traceStatus) traceStatus.textContent = text || "";
+}
+
+function setTraceProcessStatus(text) {
+  if (traceProcessStatus) traceProcessStatus.textContent = text || "";
+}
+
+function renderTraceRecord(record, recordId, derivedCount) {
+  if (traceRecordJson) {
+    traceRecordJson.textContent = record ? JSON.stringify(record, null, 2) : "";
+  }
+  if (traceRecordTypeValue) {
+    traceRecordTypeValue.textContent = record?.record_type || "—";
+  }
+  const ts = pickRecordTs(record);
+  if (traceRecordTs) {
+    traceRecordTs.textContent = ts ? `${formatTs(ts)} · ${formatAgo(ts)}` : "—";
+  }
+  if (traceRecordContainer) {
+    const container = record?.container?.type || record?.content_type || "—";
+    traceRecordContainer.textContent = container;
+  }
+  if (traceRecordSize) {
+    const bytes = record?.content_size || record?.output_bytes || null;
+    traceRecordSize.textContent = bytes ? formatBytes(bytes) : "—";
+  }
+  if (traceDerivedCount) {
+    traceDerivedCount.textContent = Number.isFinite(derivedCount) ? String(derivedCount) : "—";
+  }
+  if (traceActiveRecord) {
+    traceActiveRecord.textContent = recordId ? `Active record: ${recordId}` : "No record loaded.";
+  }
+}
+
+function renderTraceList(listEl, items, emptyText, formatter) {
+  if (!listEl) return;
+  listEl.innerHTML = "";
+  if (!items || !items.length) {
+    const li = document.createElement("li");
+    li.textContent = emptyText;
+    listEl.appendChild(li);
+    return;
+  }
+  items.forEach((item) => {
+    const li = document.createElement("li");
+    li.textContent = formatter(item);
+    listEl.appendChild(li);
+  });
+}
+
+function renderTraceDerived(items) {
+  if (traceDerivedDetail) traceDerivedDetail.textContent = "";
+  renderTraceList(
+    traceDerivedList,
+    items,
+    "No derived records yet",
+    (entry) => {
+      const record = entry?.record || {};
+      const ts = pickRecordTs(record);
+      const label = `${entry.record_id} · ${record.record_type || "derived"}`;
+      return ts ? `${label} · ${formatTs(ts)}` : label;
+    },
+  );
+  if (traceDerivedList) {
+    Array.from(traceDerivedList.children).forEach((li, idx) => {
+      li.addEventListener("click", () => {
+        if (traceDerivedDetail) {
+          traceDerivedDetail.textContent = JSON.stringify(items[idx], null, 2);
+        }
+      });
+    });
+  }
+}
+
+function renderTraceJournal(items) {
+  renderTraceList(traceJournalList, items, "No journal entries found", (entry) => {
+    const label = entry.event_type || entry.event || "event";
+    const ts = entry.ts_utc || "";
+    const payload = entry.payload || {};
+    const hint = payload.record_id || payload.derived_id || payload.source_id || "";
+    return hint ? `${label} · ${ts} · ${hint}` : `${label} · ${ts}`;
+  });
+}
+
+function renderTraceLedger(items) {
+  renderTraceList(traceLedgerList, items, "No ledger entries found", (entry) => {
+    const stage = entry.stage || "ledger";
+    const ts = entry.ts_utc || "";
+    const inCount = Array.isArray(entry.inputs) ? entry.inputs.length : 0;
+    const outCount = Array.isArray(entry.outputs) ? entry.outputs.length : 0;
+    const counts = `${inCount} in · ${outCount} out`;
+    return `${stage} · ${ts} · ${counts}`;
+  });
+}
+
+async function loadTraceLatest() {
+  const recordType = traceRecordType?.value || "evidence.capture.segment";
+  setTraceStatus("Loading latest record...");
+  const resp = await apiFetch(`/api/trace/latest?record_type=${encodeURIComponent(recordType)}`);
+  const data = await readJson(resp);
+  if (!resp.ok || data.error) {
+    setTraceStatus(`Error: ${data.error || resp.statusText}`);
+    return;
+  }
+  const recordId = data.record_id || data.record?.record_id || data.record?.id || "";
+  if (!recordId) {
+    setTraceStatus("Latest record id missing");
+    return;
+  }
+  if (traceRecordId) traceRecordId.value = recordId;
+  await loadTraceRecord(recordId, { loadPreview: true });
+}
+
+async function loadTraceRecord(recordId, { loadPreview = false } = {}) {
+  if (!recordId) {
+    setTraceStatus("Record id required");
+    return;
+  }
+  setTraceStatus(`Loading ${recordId}...`);
+  const resp = await apiFetch(`/api/trace/${encodeURIComponent(recordId)}`);
+  const data = await readJson(resp);
+  if (!resp.ok || data.error) {
+    setTraceStatus(`Error: ${data.error || resp.statusText}`);
+    renderTraceRecord(null, recordId, 0);
+    renderTraceDerived([]);
+    renderTraceJournal([]);
+    renderTraceLedger([]);
+    if (traceStaleBadge) {
+      traceStaleBadge.textContent = "Unknown";
+      traceStaleBadge.classList.add("off");
+    }
+    return;
+  }
+  const derived = data.derived || [];
+  renderTraceRecord(data.record, recordId, data.derived_count ?? derived.length);
+  renderTraceDerived(derived);
+  renderTraceJournal(data.journal || []);
+  renderTraceLedger(data.ledger || []);
+  if (traceStaleBadge) {
+    const stale = Boolean(data.stale);
+    traceStaleBadge.textContent = stale ? "Stale" : "Fresh";
+    traceStaleBadge.classList.toggle("warn", stale);
+    traceStaleBadge.classList.toggle("off", !stale);
+  }
+  setTraceStatus(`Loaded ${recordId}`);
+  if (loadPreview) {
+    await loadTracePreview(recordId);
+  }
+}
+
+async function loadTracePreview(recordId) {
+  if (!tracePreviewImage) return;
+  if (!recordId) {
+    if (tracePreviewStatus) tracePreviewStatus.textContent = "Record id required";
+    return;
+  }
+  if (tracePreviewStatus) tracePreviewStatus.textContent = "Loading preview...";
+  try {
+    const resp = await apiFetch(`/api/trace/${encodeURIComponent(recordId)}/preview`);
+    if (!resp.ok) {
+      let detail = resp.statusText || "Preview unavailable";
+      try {
+        const data = await resp.json();
+        if (data && data.error) {
+          detail = data.detail ? `${data.error} · ${data.detail}` : data.error;
+        }
+      } catch (err) {
+        // ignore parse errors for non-json responses
+      }
+      if (tracePreviewStatus) tracePreviewStatus.textContent = detail;
+      tracePreviewImage.classList.remove("visible");
+      return;
+    }
+    const blob = await resp.blob();
+    if (!blob || !blob.size) {
+      if (tracePreviewStatus) tracePreviewStatus.textContent = "Empty preview response";
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    if (tracePreviewUrl) URL.revokeObjectURL(tracePreviewUrl);
+    tracePreviewUrl = url;
+    tracePreviewImage.src = url;
+    tracePreviewImage.classList.add("visible");
+    const stamp = new Date().toLocaleTimeString();
+    const headerId = resp.headers.get("x-ac-record-id");
+    if (tracePreviewStatus) {
+      tracePreviewStatus.textContent = headerId ? `Loaded ${headerId} · ${stamp}` : `Loaded ${stamp}`;
+    }
+  } catch (err) {
+    if (tracePreviewStatus) tracePreviewStatus.textContent = `Error: ${err}`;
+  }
+}
+
+async function runTraceProcessing() {
+  const recordId = (traceRecordId?.value || "").trim();
+  if (!recordId) return;
+  setTraceProcessStatus("Processing...");
+  const payload = {
+    allow_ocr: traceAllowOcr ? traceAllowOcr.checked : true,
+    allow_vlm: traceAllowVlm ? traceAllowVlm.checked : true,
+    force: traceForceProcess ? traceForceProcess.checked : false,
+  };
+  const resp = await apiFetch(`/api/trace/${encodeURIComponent(recordId)}/process`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await readJson(resp);
+  if (!resp.ok || data.ok === false || data.error) {
+    if (data.error === "user_active") {
+      const idle = Math.round(Number(data.idle_seconds || 0));
+      const window = Math.round(Number(data.idle_window_s || 0));
+      setTraceProcessStatus(`Blocked: user active (${idle}s < ${window}s)`);
+    } else {
+      setTraceProcessStatus(`Error: ${data.error || resp.statusText}`);
+    }
+    return;
+  }
+  const derivedCount = Array.isArray(data.derived_ids) ? data.derived_ids.length : 0;
+  const processed = Number.isFinite(data.processed) ? data.processed : derivedCount;
+  setTraceProcessStatus(`Processed ${processed} derived`);
+  await loadTraceRecord(recordId, { loadPreview: false });
+}
+
+async function runTraceQuery() {
+  const query = (traceQueryInput?.value || "").trim();
+  if (!query) return;
+  if (traceQueryOutput) traceQueryOutput.textContent = "";
+  const resp = await apiFetch("/api/query", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+  const data = await readJson(resp);
+  if (traceQueryOutput) {
+    traceQueryOutput.textContent = JSON.stringify(data, null, 2);
+  }
+}
+
 async function refreshConfigHistory() {
   if (!configHistoryList) return;
   const resp = await apiFetch("/api/config/history?limit=20");
@@ -2219,6 +2488,11 @@ refreshConfigHistoryBtn?.addEventListener("click", refreshConfigHistory);
 refreshMetadataBtn?.addEventListener("click", refreshMetadata);
 metadataType?.addEventListener("change", refreshMetadata);
 previewLatestScreenshotBtn?.addEventListener("click", previewLatestScreenshot);
+traceLoadLatest?.addEventListener("click", loadTraceLatest);
+traceLoadRecord?.addEventListener("click", () => loadTraceRecord((traceRecordId?.value || "").trim(), { loadPreview: true }));
+traceLoadPreview?.addEventListener("click", () => loadTracePreview((traceRecordId?.value || "").trim()));
+traceProcess?.addEventListener("click", runTraceProcessing);
+traceQueryRun?.addEventListener("click", runTraceQuery);
 configUndoLast?.addEventListener("click", async () => {
   if (configHistoryStatus) configHistoryStatus.textContent = "Reverting latest...";
   const resp = await apiFetch("/api/config/history?limit=1");
@@ -2301,6 +2575,7 @@ filterBookmarks?.addEventListener("change", () => {
 
 initNav();
 initMetadataTypes();
+if (traceRecordType && !traceRecordType.value) traceRecordType.value = "evidence.capture.segment";
 if (filterActivity) filterActivity.checked = state.activityFilters.activity;
 if (filterChanges) filterChanges.checked = state.activityFilters.changes;
 if (filterBookmarks) filterBookmarks.checked = state.activityFilters.bookmarks;

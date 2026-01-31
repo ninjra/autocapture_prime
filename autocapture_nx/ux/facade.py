@@ -11,11 +11,15 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Iterator, cast
 
+from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.config import ConfigPaths, load_config, reset_user_config, restore_user_config, validate_config
+from autocapture_nx.kernel.derived_records import build_derivation_edge, build_text_record, derivation_edge_id
+from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.kernel.loader import Kernel, default_config_paths
 from autocapture_nx.kernel.query import run_query
 from autocapture_nx.kernel.telemetry import telemetry_snapshot
 from autocapture_nx.plugin_system.manager import PluginManager
+from autocapture_nx.processing.idle import _extract_frame, _get_media_blob
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -854,6 +858,498 @@ class UXFacade:
             media = system.get("storage.media")
             record = metadata.get(record_id, None) if metadata is not None and hasattr(metadata, "get") else None
             return self._media_payload(media, record_id, record if isinstance(record, dict) else None)
+
+    def _trace_stale_map(self, system: Any) -> dict[str, str]:
+        try:
+            stale_cap = system.get("integrity.stale") if system is not None else None
+        except Exception:
+            stale_cap = None
+        if stale_cap is not None and hasattr(stale_cap, "target"):
+            stale_cap = getattr(stale_cap, "target")
+        if isinstance(stale_cap, dict):
+            return dict(stale_cap)
+        return {}
+
+    def _trace_entry_mentions(self, entry: Any, record_id: str) -> bool:
+        if not isinstance(entry, dict):
+            return False
+        if entry.get("record_id") == record_id:
+            return True
+        inputs = entry.get("inputs")
+        if isinstance(inputs, list) and record_id in inputs:
+            return True
+        outputs = entry.get("outputs")
+        if isinstance(outputs, list) and record_id in outputs:
+            return True
+        payload = entry.get("payload")
+        if isinstance(payload, dict):
+            if payload.get("record_id") == record_id:
+                return True
+            if payload.get("parent_evidence_id") == record_id:
+                return True
+            if payload.get("source_id") == record_id:
+                return True
+            if payload.get("derived_id") == record_id:
+                return True
+            if payload.get("frame_id") == record_id:
+                return True
+            payload_inputs = payload.get("inputs")
+            if isinstance(payload_inputs, list) and record_id in payload_inputs:
+                return True
+            payload_outputs = payload.get("outputs")
+            if isinstance(payload_outputs, list) and record_id in payload_outputs:
+                return True
+        return False
+
+    def _trace_scan_ndjson(self, path: Path, record_id: str, limit: int = 200) -> list[dict[str, Any]]:
+        if not path.exists():
+            return []
+        hits: list[dict[str, Any]] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except Exception:
+                continue
+            if self._trace_entry_mentions(entry, record_id):
+                hits.append(entry)
+        if limit > 0:
+            hits = hits[-limit:]
+        return hits
+
+    def _trace_record_refers(self, record: Any, record_id: str) -> bool:
+        if not isinstance(record, dict):
+            return False
+        if record.get("parent_evidence_id") == record_id:
+            return True
+        if record.get("source_id") == record_id:
+            return True
+        if record.get("parent_id") == record_id or record.get("child_id") == record_id:
+            return True
+        if record.get("frame_id") == record_id:
+            return True
+        provenance = record.get("provenance")
+        if isinstance(provenance, dict):
+            frame_ids = provenance.get("frame_ids")
+            if isinstance(frame_ids, (list, tuple)) and record_id in frame_ids:
+                return True
+        return False
+
+    def _trace_find_derived(self, metadata: Any, record_id: str, run_id: str | None) -> list[dict[str, Any]]:
+        if metadata is None or not hasattr(metadata, "keys"):
+            return []
+        derived: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        prefix = f"{run_id}/" if run_id else None
+        for key in getattr(metadata, "keys", lambda: [])():
+            if prefix and not str(key).startswith(prefix):
+                continue
+            if key in seen:
+                continue
+            record = metadata.get(key, None)
+            if not isinstance(record, dict):
+                continue
+            record_type = str(record.get("record_type", ""))
+            if not record_type.startswith("derived."):
+                continue
+            if not self._trace_record_refers(record, record_id):
+                continue
+            derived.append({"record_id": str(key), "record": record})
+            seen.add(str(key))
+        return derived
+
+    def trace_latest(self, record_type: str | None = None) -> dict[str, Any]:
+        with self._kernel_mgr.session() as system:
+            if system is None:
+                return {
+                    "error": "kernel_unavailable",
+                    "detail": self._kernel_mgr.last_error(),
+                    "status": 503,
+                }
+            metadata = system.get("storage.metadata")
+            if metadata is None:
+                return {"error": "metadata_unavailable", "status": 503}
+            if not hasattr(metadata, "latest"):
+                return {"error": "metadata_backend_not_queryable", "status": 501}
+            records = metadata.latest(record_type=record_type, limit=1)
+            if not records:
+                return {"error": "no_records", "status": 404}
+            entry = records[0] if isinstance(records, list) else None
+            record = entry.get("record") if isinstance(entry, dict) else None
+            record_id = None
+            if isinstance(entry, dict):
+                record_id = entry.get("record_id") or entry.get("id")
+            if not record_id and isinstance(record, dict):
+                record_id = record.get("record_id") or record.get("id")
+            if not record_id:
+                return {"error": "record_id_missing", "status": 500}
+            if record is None or not isinstance(record, dict):
+                record = metadata.get(record_id, None) if hasattr(metadata, "get") else None
+            stale_map = self._trace_stale_map(system)
+            stale_reason = stale_map.get(str(record_id))
+            return {
+                "record_id": str(record_id),
+                "record": record,
+                "stale": bool(stale_reason),
+                "stale_reason": stale_reason,
+            }
+
+    def trace_record(self, record_id: str) -> dict[str, Any]:
+        with self._kernel_mgr.session() as system:
+            if system is None:
+                return {
+                    "record_id": record_id,
+                    "error": "kernel_unavailable",
+                    "detail": self._kernel_mgr.last_error(),
+                    "status": 503,
+                }
+            metadata = system.get("storage.metadata")
+            if metadata is None:
+                return {"record_id": record_id, "record": None, "error": "metadata_unavailable", "status": 503}
+            record = metadata.get(record_id, None) if hasattr(metadata, "get") else None
+            if record is None:
+                return {"record_id": record_id, "record": None, "error": "record_not_found", "status": 404}
+            run_id = record.get("run_id") if isinstance(record, dict) else None
+            derived = self._trace_find_derived(metadata, record_id, str(run_id) if run_id else None)
+            data_dir = Path(self._config.get("storage", {}).get("data_dir", "data"))
+            journal_path = data_dir / "journal.ndjson"
+            ledger_path = data_dir / "ledger.ndjson"
+            journal_hits = self._trace_scan_ndjson(journal_path, record_id, limit=200)
+            ledger_hits = self._trace_scan_ndjson(ledger_path, record_id, limit=200)
+            stale_map = self._trace_stale_map(system)
+            stale_reason = stale_map.get(record_id)
+            return {
+                "record_id": record_id,
+                "record": record,
+                "record_type": record.get("record_type") if isinstance(record, dict) else None,
+                "derived": derived,
+                "derived_count": len(derived),
+                "journal": journal_hits,
+                "ledger": ledger_hits,
+                "stale": bool(stale_reason),
+                "stale_reason": stale_reason,
+            }
+
+    def trace_preview(self, record_id: str) -> dict[str, Any]:
+        def _guess_content_type(blob: bytes, fallback: str | None = None) -> str:
+            if blob.startswith(b"\x89PNG\r\n\x1a\n"):
+                return "image/png"
+            if blob.startswith(b"\xff\xd8\xff"):
+                return "image/jpeg"
+            return fallback or "application/octet-stream"
+
+        with self._kernel_mgr.session() as system:
+            if system is None:
+                return {
+                    "record_id": record_id,
+                    "error": "kernel_unavailable",
+                    "detail": self._kernel_mgr.last_error(),
+                    "status": 503,
+                }
+            metadata = system.get("storage.metadata")
+            media = system.get("storage.media")
+            if metadata is None:
+                return {"record_id": record_id, "error": "metadata_unavailable", "status": 503}
+            if media is None:
+                return {"record_id": record_id, "error": "media_unavailable", "status": 503}
+            record = metadata.get(record_id, None) if hasattr(metadata, "get") else None
+            if record is None:
+                return {"record_id": record_id, "error": "record_not_found", "status": 404}
+            blob = _get_media_blob(media, record_id)
+            if not blob:
+                return {"record_id": record_id, "error": "media_not_found", "status": 404}
+            record_type = str(record.get("record_type", "")) if isinstance(record, dict) else ""
+            if record_type == "evidence.capture.frame":
+                content_type = _guess_content_type(blob, record.get("content_type") if isinstance(record, dict) else None)
+                return {"record_id": record_id, "content_type": content_type, "data": blob}
+            container_type = None
+            if isinstance(record, dict):
+                container = record.get("container")
+                if isinstance(container, dict):
+                    container_type = container.get("type")
+            frame = _extract_frame(blob, record if isinstance(record, dict) else {})
+            if not frame:
+                detail = "frame_extract_failed"
+                if container_type:
+                    detail = f"frame_extract_failed:{container_type}"
+                return {
+                    "record_id": record_id,
+                    "error": "preview_unavailable",
+                    "detail": detail,
+                    "status": 422,
+                }
+            content_type = _guess_content_type(frame)
+            return {"record_id": record_id, "content_type": content_type, "data": frame}
+
+    def trace_process(
+        self,
+        record_id: str,
+        *,
+        allow_ocr: bool = True,
+        allow_vlm: bool = True,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        def _capability_providers(capability: Any | None, default_provider: str) -> list[tuple[str, Any]]:
+            if capability is None:
+                return []
+            target = capability
+            if hasattr(target, "target"):
+                target = getattr(target, "target")
+            if hasattr(target, "items"):
+                try:
+                    items = target.items()
+                    if items:
+                        return list(items)
+                except Exception:
+                    pass
+            return [(default_provider, capability)]
+
+        with self._kernel_mgr.session() as system:
+            if system is None:
+                return {
+                    "ok": False,
+                    "record_id": record_id,
+                    "error": "kernel_unavailable",
+                    "detail": self._kernel_mgr.last_error(),
+                }
+            metadata = system.get("storage.metadata")
+            media = system.get("storage.media")
+            if metadata is None or media is None:
+                return {
+                    "ok": False,
+                    "record_id": record_id,
+                    "error": "storage_unavailable",
+                }
+            record = metadata.get(record_id, None) if hasattr(metadata, "get") else None
+            if record is None:
+                return {"ok": False, "record_id": record_id, "error": "record_not_found"}
+            record_type = str(record.get("record_type", "")) if isinstance(record, dict) else ""
+            if not record_type.startswith("evidence.capture."):
+                return {
+                    "ok": False,
+                    "record_id": record_id,
+                    "error": "unsupported_record_type",
+                    "detail": record_type,
+                }
+
+            idle_window = float(system.config.get("runtime", {}).get("idle_window_s", 45)) if hasattr(system, "config") else 45.0
+            idle_seconds = None
+            can_run = True
+            if not force:
+                tracker = None
+                try:
+                    tracker = system.get("tracking.input")
+                except Exception:
+                    tracker = None
+                if tracker is not None:
+                    try:
+                        idle_seconds = float(tracker.idle_seconds())
+                    except Exception:
+                        idle_seconds = 0.0
+                    can_run = idle_seconds >= idle_window
+                else:
+                    assume_idle = bool(system.config.get("runtime", {}).get("activity", {}).get("assume_idle_when_missing", False))
+                    can_run = assume_idle
+            if not can_run:
+                return {
+                    "ok": False,
+                    "record_id": record_id,
+                    "error": "user_active",
+                    "idle_seconds": idle_seconds,
+                    "idle_window_s": idle_window,
+                }
+
+            blob = _get_media_blob(media, record_id)
+            if not blob:
+                return {"ok": False, "record_id": record_id, "error": "media_not_found"}
+            frame: bytes | None
+            if record_type == "evidence.capture.frame":
+                frame = blob
+            else:
+                frame = _extract_frame(blob, record)
+            if frame is None:
+                container_type = None
+                if isinstance(record, dict):
+                    container = record.get("container")
+                    if isinstance(container, dict):
+                        container_type = container.get("type")
+                return {
+                    "ok": False,
+                    "record_id": record_id,
+                    "error": "frame_extract_failed",
+                    "detail": container_type,
+                }
+
+            sst_cfg = {}
+            if hasattr(system, "config"):
+                sst_cfg = system.config.get("processing", {}).get("sst", {})
+            pipeline = None
+            if hasattr(system, "has") and system.has("processing.pipeline"):
+                try:
+                    pipeline = system.get("processing.pipeline")
+                except Exception:
+                    pipeline = None
+            pipeline_enabled = bool(sst_cfg.get("enabled", True)) and pipeline is not None
+            if pipeline is not None and pipeline_enabled and hasattr(pipeline, "process_record"):
+                try:
+                    result = pipeline.process_record(
+                        record_id=record_id,
+                        record=record,
+                        frame_bytes=frame,
+                        allow_ocr=bool(allow_ocr),
+                        allow_vlm=bool(allow_vlm),
+                        should_abort=None,
+                        deadline_ts=None,
+                    )
+                except Exception as exc:
+                    return {
+                        "ok": False,
+                        "record_id": record_id,
+                        "error": "pipeline_failed",
+                        "detail": str(exc),
+                    }
+                return {
+                    "ok": True,
+                    "record_id": record_id,
+                    "processed": int(result.derived_records),
+                    "derived_ids": list(result.derived_ids),
+                    "pipeline_used": True,
+                    "forced": bool(force),
+                }
+
+            if not allow_ocr and not allow_vlm:
+                return {
+                    "ok": False,
+                    "record_id": record_id,
+                    "error": "extractors_disabled",
+                }
+
+            ocr = system.get("ocr.engine") if allow_ocr else None
+            vlm = system.get("vision.extractor") if allow_vlm else None
+            extractors: list[tuple[str, str, Any]] = []
+            if allow_ocr and ocr is not None:
+                for provider_id, extractor in _capability_providers(ocr, "ocr.engine"):
+                    extractors.append(("ocr", provider_id, extractor))
+            if allow_vlm and vlm is not None:
+                for provider_id, extractor in _capability_providers(vlm, "vision.extractor"):
+                    extractors.append(("vlm", provider_id, extractor))
+            if not extractors:
+                return {
+                    "ok": False,
+                    "record_id": record_id,
+                    "error": "no_extractors_available",
+                }
+
+            config = system.config if hasattr(system, "config") else {}
+            lexical = None
+            vector = None
+            if isinstance(config, dict) and config:
+                try:
+                    lexical, vector = build_indexes(config)
+                except Exception:
+                    lexical = None
+                    vector = None
+            event_builder = None
+            try:
+                event_builder = system.get("event.builder") if hasattr(system, "get") else None
+            except Exception:
+                event_builder = None
+
+            run_id = record.get("run_id") if isinstance(record, dict) else None
+            run_id = run_id or record_id.split("/", 1)[0]
+            encoded_source = encode_record_id_component(record_id)
+            derived_ids: list[str] = []
+            processed = 0
+            for kind, provider_id, extractor in extractors:
+                provider_component = encode_record_id_component(str(provider_id))
+                derived_id = f"{run_id}/derived.text.{kind}/{provider_component}/{encoded_source}"
+                if metadata.get(derived_id):
+                    continue
+                try:
+                    text = extractor.extract(frame).get("text", "")
+                except Exception:
+                    continue
+                payload = build_text_record(
+                    kind=kind,
+                    text=text,
+                    source_id=record_id,
+                    source_record=record if isinstance(record, dict) else {},
+                    provider_id=str(provider_id),
+                    config=config if isinstance(config, dict) else {},
+                    ts_utc=record.get("ts_utc") if isinstance(record, dict) else None,
+                )
+                if not payload:
+                    continue
+                if hasattr(metadata, "put_new"):
+                    try:
+                        metadata.put_new(derived_id, payload)
+                    except Exception:
+                        continue
+                else:
+                    metadata.put(derived_id, payload)
+                if lexical is not None:
+                    try:
+                        lexical.index(derived_id, payload.get("text", ""))
+                    except Exception:
+                        pass
+                if vector is not None:
+                    try:
+                        vector.index(derived_id, payload.get("text", ""))
+                    except Exception:
+                        pass
+                processed += 1
+                derived_ids.append(derived_id)
+                edge_id = None
+                try:
+                    edge_id = derivation_edge_id(run_id, record_id, derived_id)
+                    edge_payload = build_derivation_edge(
+                        run_id=run_id,
+                        parent_id=record_id,
+                        child_id=derived_id,
+                        relation_type="derived_from",
+                        span_ref=payload.get("span_ref", {}),
+                        method=kind,
+                    )
+                    if hasattr(metadata, "put_new"):
+                        try:
+                            metadata.put_new(edge_id, edge_payload)
+                        except Exception:
+                            edge_id = None
+                    else:
+                        metadata.put(edge_id, edge_payload)
+                except Exception:
+                    edge_id = None
+                if event_builder is not None:
+                    event_payload = dict(payload)
+                    event_payload["derived_id"] = derived_id
+                    if edge_id:
+                        event_payload["derivation_edge_id"] = edge_id
+                    parent_hash = record.get("content_hash") if isinstance(record, dict) else None
+                    if parent_hash:
+                        event_payload["parent_content_hash"] = parent_hash
+                    ts_utc = payload.get("ts_utc")
+                    try:
+                        event_builder.journal_event("derived.extract", event_payload, event_id=derived_id, ts_utc=ts_utc)
+                        event_builder.ledger_entry(
+                            "derived.extract",
+                            inputs=[record_id],
+                            outputs=[derived_id] + ([edge_id] if edge_id else []),
+                            payload=event_payload,
+                            entry_id=derived_id,
+                            ts_utc=ts_utc,
+                        )
+                    except Exception:
+                        pass
+
+            return {
+                "ok": True,
+                "record_id": record_id,
+                "processed": processed,
+                "derived_ids": derived_ids,
+                "pipeline_used": False,
+                "forced": bool(force),
+            }
 
     def telemetry(self) -> dict[str, Any]:
         payload = telemetry_snapshot()

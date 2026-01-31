@@ -29,12 +29,18 @@ from autocapture.web.routes import (
     keys,
     egress,
     telemetry,
+    media,
+    trace,
 )
 
 
 def get_app() -> FastAPI:
     app = FastAPI()
-    app.state.facade = create_facade(persistent=True, start_conductor=False)
+    app.state.facade = create_facade(
+        persistent=True,
+        start_conductor=False,
+        auto_start_capture=True,
+    )
     ui_dir = Path(__file__).resolve().parent / "ui"
     if ui_dir.exists():
         app.mount("/ui", StaticFiles(directory=ui_dir, html=True), name="ui")
@@ -71,6 +77,8 @@ def get_app() -> FastAPI:
     app.include_router(telemetry.router)
     app.include_router(storage.router)
     app.include_router(bookmarks.router)
+    app.include_router(media.router)
+    app.include_router(trace.router)
     return app
 
 
