@@ -333,6 +333,15 @@ def run_query(system, query: str) -> dict[str, Any]:
     intent = parser.parse(query_text)
     time_window = intent.get("time_window")
     metadata = system.get("storage.metadata")
+    stale_map: dict[str, str] = {}
+    try:
+        stale_cap = system.get("integrity.stale")
+    except Exception:
+        stale_cap = None
+    if stale_cap is not None and hasattr(stale_cap, "target"):
+        stale_cap = getattr(stale_cap, "target")
+    if isinstance(stale_cap, dict):
+        stale_map = dict(stale_cap)
     results = retrieval.search(query_text, time_window=time_window)
     on_query = system.config.get("processing", {}).get("on_query", {})
     allow_extract = bool(on_query.get("allow_decode_extract", False))
@@ -413,9 +422,15 @@ def run_query(system, query: str) -> dict[str, Any]:
         anchor_ref = event_builder.last_anchor() if hasattr(event_builder, "last_anchor") else None
 
     claims = []
+    stale_hits: list[str] = []
     for result in results:
         derived_id = result.get("derived_id")
         evidence_id = result["record_id"]
+        stale_reason = stale_map.get(evidence_id)
+        if stale_reason:
+            result["stale"] = True
+            result["stale_reason"] = stale_reason
+            stale_hits.append(evidence_id)
         record = metadata.get(derived_id or evidence_id, {})
         evidence_record = metadata.get(evidence_id, {})
         text = record.get("text", "")
@@ -449,9 +464,15 @@ def run_query(system, query: str) -> dict[str, Any]:
                         "source": "local",
                         "offset_start": 0,
                         "offset_end": offset_end,
+                        "stale": bool(stale_reason),
+                        "stale_reason": stale_reason,
                     }
                 ],
             }
         )
     answer_obj = answer.build(claims)
+    if isinstance(answer_obj, dict) and stale_hits:
+        answer_obj = dict(answer_obj)
+        answer_obj["stale"] = True
+        answer_obj["stale_evidence"] = sorted(set(stale_hits))
     return {"intent": intent, "results": results, "answer": answer_obj}

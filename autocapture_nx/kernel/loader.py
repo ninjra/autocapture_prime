@@ -196,6 +196,9 @@ class Kernel:
         if not fast_boot:
             self._run_recovery(builder, capabilities)
         profiler.mark("run_recovery")
+        if not fast_boot:
+            self._run_integrity_sweep(builder, capabilities)
+        profiler.mark("integrity_sweep")
         self.system = System(config=self.config, plugins=plugins, capabilities=capabilities)
         if start_conductor and not fast_boot:
             try:
@@ -994,6 +997,130 @@ class Kernel:
                 builder.ledger_entry("capture.reconcile.summary", inputs=[], outputs=[], payload=summary, ts_utc=ts_utc)
             except Exception:
                 pass
+
+    def _run_integrity_sweep(self, builder: EventBuilder, capabilities: Any | None = None) -> None:
+        if capabilities is None:
+            return
+        try:
+            metadata = capabilities.get("storage.metadata")
+        except Exception:
+            metadata = None
+        try:
+            media = capabilities.get("storage.media")
+        except Exception:
+            media = None
+        stale: dict[str, str] = {}
+        if metadata is None or media is None:
+            try:
+                capabilities.register("integrity.stale", stale, network_allowed=False)
+            except Exception:
+                pass
+            return
+        from autocapture.pillars.citable import verify_evidence
+
+        try:
+            _ok, errors = verify_evidence(metadata, media)
+        except Exception:
+            errors = []
+        existing_unavailable: dict[str, str] = {}
+        try:
+            for key in metadata.keys():
+                record = metadata.get(key, {})
+                if not isinstance(record, dict):
+                    continue
+                if record.get("record_type") != "evidence.capture.unavailable":
+                    continue
+                parent = record.get("parent_evidence_id")
+                if parent:
+                    existing_unavailable[str(parent)] = str(record.get("reason") or "unavailable")
+        except Exception:
+            existing_unavailable = {}
+        reason_map = {
+            "evidence_missing": "missing_media",
+            "content_hash_mismatch": "content_hash_mismatch",
+            "payload_hash_mismatch": "payload_hash_mismatch",
+        }
+        now = datetime.now(timezone.utc).isoformat()
+        for error in errors:
+            if not isinstance(error, str) or ":" not in error:
+                continue
+            kind, record_id = error.split(":", 1)
+            if kind not in reason_map:
+                continue
+            record_id = str(record_id)
+            if record_id in stale:
+                continue
+            reason = reason_map[kind]
+            if record_id in existing_unavailable:
+                stale[record_id] = existing_unavailable[record_id] or reason
+                continue
+            try:
+                record = metadata.get(record_id, {})
+            except Exception:
+                record = {}
+            record_type = str(record.get("record_type") or "")
+            if not record_type.startswith("evidence.capture."):
+                continue
+            ts_utc = (
+                record.get("ts_end_utc")
+                or record.get("ts_start_utc")
+                or record.get("ts_utc")
+                or now
+            )
+            unavailable_id = None
+            try:
+                unavailable_id = persist_unavailable_record(
+                    metadata,
+                    builder.run_id,
+                    ts_utc=str(ts_utc),
+                    reason=reason,
+                    parent_evidence_id=record_id,
+                    source_record_type=record_type or None,
+                    details={"event": "integrity.sweep", "kind": kind},
+                )
+            except Exception:
+                unavailable_id = None
+            payload = {
+                "event": "integrity.sweep",
+                "record_id": record_id,
+                "record_type": record_type,
+                "reason": reason,
+                "kind": kind,
+                "unavailable_id": unavailable_id,
+            }
+            try:
+                builder.journal_event("integrity.sweep", payload, ts_utc=str(ts_utc))
+                builder.ledger_entry(
+                    "integrity.sweep",
+                    inputs=[record_id],
+                    outputs=[unavailable_id] if unavailable_id else [],
+                    payload=payload,
+                    ts_utc=str(ts_utc),
+                )
+            except Exception:
+                pass
+            stale[record_id] = reason
+        if stale:
+            summary = {
+                "event": "integrity.sweep.summary",
+                "stale_count": int(len(stale)),
+                "stale_samples": list(stale.keys())[:5],
+            }
+            try:
+                builder.journal_event("integrity.sweep.summary", summary, ts_utc=now)
+                builder.ledger_entry(
+                    "integrity.sweep.summary",
+                    inputs=list(stale.keys())[:50],
+                    outputs=[],
+                    payload=summary,
+                    ts_utc=now,
+                )
+            except Exception:
+                pass
+        try:
+            capabilities.register("integrity.stale", stale, network_allowed=False)
+        except Exception:
+            pass
 
     def _apply_meta_plugins(self, config: dict[str, Any], plugins: list) -> dict[str, Any]:
         updated = dict(config)
