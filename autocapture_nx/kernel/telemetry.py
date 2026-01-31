@@ -11,6 +11,20 @@ def _copy_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return dict(payload)
 
 
+def percentile(values: list[float], pct: float) -> float | None:
+    if not values:
+        return None
+    pct = max(0.0, min(100.0, float(pct)))
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return float(ordered[0])
+    rank = (pct / 100.0) * (len(ordered) - 1)
+    low = int(rank)
+    high = min(low + 1, len(ordered) - 1)
+    frac = rank - low
+    return float(ordered[low] + (ordered[high] - ordered[low]) * frac)
+
+
 @dataclass
 class TelemetryStore:
     max_samples: int = 120

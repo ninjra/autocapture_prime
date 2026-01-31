@@ -58,8 +58,12 @@ class EventBuilder:
         tzid: str | None = None,
         offset_minutes: int = 0,
     ) -> str:
-        if isinstance(payload, dict) and "record_type" in payload and "run_id" in payload:
-            validate_evidence_record(payload, event_id)
+        if isinstance(payload, dict):
+            payload = dict(payload)
+            if "run_id" not in payload and self._run_id:
+                payload["run_id"] = self._run_id
+            if "record_type" in payload and "run_id" in payload:
+                validate_evidence_record(payload, event_id)
         return self._journal.append_event(
             event_type,
             payload,
@@ -162,20 +166,6 @@ class EventBuilder:
                 self._anchor_entry_count = 0
         return ledger_hash
 
-
-def _canonicalize_config_for_hash(obj: Any) -> Any:
-    if isinstance(obj, dict):
-        return {str(k): _canonicalize_config_for_hash(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_canonicalize_config_for_hash(v) for v in obj]
-    if isinstance(obj, float):
-        if math.isnan(obj) or math.isinf(obj):
-            raise ConfigError("Config contains NaN/Inf, which is not supported.")
-        if obj.is_integer():
-            return int(obj)
-        return {"__float__": format(obj, ".15g")}
-    return obj
-
     def failure_event(
         self,
         event_type: str,
@@ -208,3 +198,17 @@ def _canonicalize_config_for_hash(obj: Any) -> Any:
             ts_utc=ts_utc,
         )
         return event_id
+
+
+def _canonicalize_config_for_hash(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {str(k): _canonicalize_config_for_hash(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_canonicalize_config_for_hash(v) for v in obj]
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            raise ConfigError("Config contains NaN/Inf, which is not supported.")
+        if obj.is_integer():
+            return int(obj)
+        return {"__float__": format(obj, ".15g")}
+    return obj

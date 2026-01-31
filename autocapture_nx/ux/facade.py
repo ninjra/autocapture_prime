@@ -17,7 +17,7 @@ from autocapture_nx.kernel.derived_records import build_derivation_edge, build_t
 from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.kernel.loader import Kernel, default_config_paths
 from autocapture_nx.kernel.query import run_query
-from autocapture_nx.kernel.telemetry import telemetry_snapshot
+from autocapture_nx.kernel.telemetry import telemetry_snapshot, percentile
 from autocapture_nx.plugin_system.manager import PluginManager
 from autocapture_nx.processing.idle import _extract_frame, _get_media_blob
 
@@ -78,6 +78,85 @@ def _apply_revert_patch(target: Any, patch: Any) -> None:
             _apply_revert_patch(target[key], value)
             continue
         target[key] = value
+
+
+def compute_slo_summary(
+    config: dict[str, Any],
+    telemetry: dict[str, Any],
+    capture_status: dict[str, Any] | None,
+    processing_state: dict[str, Any] | None,
+) -> dict[str, Any]:
+    perf_cfg = config.get("performance", {}) if isinstance(config, dict) else {}
+    lag_threshold = float(perf_cfg.get("capture_lag_p95_ms", 1500))
+    queue_threshold = float(perf_cfg.get("capture_queue_p95", 3))
+    age_threshold = float(perf_cfg.get("capture_age_s", 10))
+    error_budget_pct = float(perf_cfg.get("error_budget_pct", 1.0))
+
+    history = telemetry.get("history", {}) if isinstance(telemetry, dict) else {}
+    capture_hist = history.get("capture", []) if isinstance(history, dict) else []
+    lag_samples = [float(item.get("lag_ms", 0.0) or 0.0) for item in capture_hist if isinstance(item, dict)]
+    queue_samples = [float(item.get("queue_depth", 0.0) or 0.0) for item in capture_hist if isinstance(item, dict)]
+    lag_p95 = percentile(lag_samples, 95) if lag_samples else None
+    queue_p95 = percentile(queue_samples, 95) if queue_samples else None
+
+    capture_age = None
+    if isinstance(capture_status, dict):
+        age_val = capture_status.get("last_capture_age_seconds")
+        if isinstance(age_val, (int, float)):
+            capture_age = float(age_val)
+
+    capture_fail = False
+    capture_unknown = False
+    if lag_p95 is None or queue_p95 is None or capture_age is None:
+        capture_unknown = True
+    else:
+        if lag_p95 > lag_threshold or queue_p95 > queue_threshold or capture_age > age_threshold:
+            capture_fail = True
+
+    total_samples = len(capture_hist)
+    error_samples = 0
+    if total_samples > 0:
+        for item in capture_hist:
+            if not isinstance(item, dict):
+                continue
+            lag_val = float(item.get("lag_ms", 0.0) or 0.0)
+            queue_val = float(item.get("queue_depth", 0.0) or 0.0)
+            if lag_val > lag_threshold or queue_val > queue_threshold:
+                error_samples += 1
+    error_budget_used_pct = (error_samples / total_samples * 100.0) if total_samples > 0 else None
+
+    watchdog_state = None
+    processing_fail = False
+    if isinstance(processing_state, dict):
+        watchdog = processing_state.get("watchdog") or {}
+        if isinstance(watchdog, dict):
+            watchdog_state = watchdog.get("state")
+    if watchdog_state in {"stalled", "error"}:
+        processing_fail = True
+
+    capture_status_label = "unknown" if capture_unknown else ("fail" if capture_fail else "pass")
+    processing_status_label = "fail" if processing_fail else "pass"
+    overall = "fail" if (capture_fail or processing_fail) else ("unknown" if capture_unknown else "pass")
+
+    return {
+        "overall": overall,
+        "error_budget_pct": error_budget_pct,
+        "error_budget_used_pct": error_budget_used_pct,
+        "window_samples": total_samples,
+        "capture": {
+            "lag_p95_ms": lag_p95,
+            "lag_threshold_ms": lag_threshold,
+            "queue_p95": queue_p95,
+            "queue_threshold": queue_threshold,
+            "age_s": capture_age,
+            "age_threshold_s": age_threshold,
+            "status": capture_status_label,
+        },
+        "processing": {
+            "watchdog_state": watchdog_state,
+            "status": processing_status_label,
+        },
+    }
 
 
 class KernelManager:
@@ -467,6 +546,8 @@ class UXFacade:
             ledger_head = builder.ledger_head() if builder is not None else None
             capture_status = self._capture_status_payload()
             processing_state = self._processing_state_payload(system)
+            telemetry = telemetry_snapshot()
+            slo = compute_slo_summary(self._config, telemetry, capture_status, processing_state)
             return {
                 "run_id": run_id,
                 "ledger_head": ledger_head,
@@ -480,6 +561,7 @@ class UXFacade:
                 "capture_controls_enabled": self._capture_controls_enabled(),
                 "capture_status": capture_status,
                 "processing_state": processing_state,
+                "slo": slo,
                 "kernel_ready": system is not None,
                 "kernel_error": kernel_error,
             }
@@ -854,14 +936,56 @@ class UXFacade:
             media = system.get("storage.media")
             if metadata is None:
                 return {"error": "metadata_unavailable", "status": 503}
-            if not hasattr(metadata, "latest"):
+            def _parse_ts(value: Any) -> datetime | None:
+                if not value:
+                    return None
+                text = str(value)
+                if text.endswith("Z"):
+                    text = text[:-1] + "+00:00"
+                try:
+                    return datetime.fromisoformat(text)
+                except ValueError:
+                    return None
+
+            def _record_ts(record: dict[str, Any]) -> datetime | None:
+                for key in ("ts_utc", "ts_end_utc", "ts_start_utc"):
+                    ts_val = _parse_ts(record.get(key))
+                    if ts_val is not None:
+                        return ts_val
+                return None
+
+            records = None
+            if hasattr(metadata, "latest"):
+                records = metadata.latest(record_type=record_type, limit=1)
+            elif hasattr(metadata, "keys") and hasattr(metadata, "get"):
+                latest_entry: tuple[str, dict[str, Any]] | None = None
+                latest_ts: datetime | None = None
+                for key in metadata.keys():
+                    record = metadata.get(key, None)
+                    if not isinstance(record, dict):
+                        continue
+                    if record_type and str(record.get("record_type", "")) != str(record_type):
+                        continue
+                    ts_val = _record_ts(record)
+                    if latest_entry is None:
+                        latest_entry = (str(key), record)
+                        latest_ts = ts_val
+                        continue
+                    if ts_val is None:
+                        continue
+                    if latest_ts is None or ts_val > latest_ts:
+                        latest_entry = (str(key), record)
+                        latest_ts = ts_val
+                if latest_entry is not None:
+                    latest_record_id, latest_record = latest_entry
+                    records = [{"record_id": latest_record_id, "record": latest_record}]
+            if records is None:
                 return {"error": "metadata_backend_not_queryable", "status": 501}
-            records = metadata.latest(record_type=record_type, limit=1)
             if not records:
                 return {"error": "no_records", "status": 404}
             entry = records[0] if isinstance(records, list) else None
             record = entry.get("record") if isinstance(entry, dict) else None
-            record_id = None
+            record_id: str | None = None
             if isinstance(entry, dict):
                 record_id = entry.get("record_id") or entry.get("id")
             if not record_id and isinstance(record, dict):
@@ -997,14 +1121,56 @@ class UXFacade:
             metadata = system.get("storage.metadata")
             if metadata is None:
                 return {"error": "metadata_unavailable", "status": 503}
-            if not hasattr(metadata, "latest"):
+            def _parse_ts(value: Any) -> datetime | None:
+                if not value:
+                    return None
+                text = str(value)
+                if text.endswith("Z"):
+                    text = text[:-1] + "+00:00"
+                try:
+                    return datetime.fromisoformat(text)
+                except ValueError:
+                    return None
+
+            def _record_ts(record: dict[str, Any]) -> datetime | None:
+                for key in ("ts_utc", "ts_end_utc", "ts_start_utc"):
+                    ts_val = _parse_ts(record.get(key))
+                    if ts_val is not None:
+                        return ts_val
+                return None
+
+            records = None
+            if hasattr(metadata, "latest"):
+                records = metadata.latest(record_type=record_type, limit=1)
+            elif hasattr(metadata, "keys") and hasattr(metadata, "get"):
+                latest_entry: tuple[str, dict[str, Any]] | None = None
+                latest_ts: datetime | None = None
+                for key in metadata.keys():
+                    record = metadata.get(key, None)
+                    if not isinstance(record, dict):
+                        continue
+                    if record_type and str(record.get("record_type", "")) != str(record_type):
+                        continue
+                    ts_val = _record_ts(record)
+                    if latest_entry is None:
+                        latest_entry = (str(key), record)
+                        latest_ts = ts_val
+                        continue
+                    if ts_val is None:
+                        continue
+                    if latest_ts is None or ts_val > latest_ts:
+                        latest_entry = (str(key), record)
+                        latest_ts = ts_val
+                if latest_entry is not None:
+                    latest_record_id, latest_record = latest_entry
+                    records = [{"record_id": latest_record_id, "record": latest_record}]
+            if records is None:
                 return {"error": "metadata_backend_not_queryable", "status": 501}
-            records = metadata.latest(record_type=record_type, limit=1)
             if not records:
                 return {"error": "no_records", "status": 404}
             entry = records[0] if isinstance(records, list) else None
             record = entry.get("record") if isinstance(entry, dict) else None
-            record_id = None
+            record_id: str | None = None
             if isinstance(entry, dict):
                 record_id = entry.get("record_id") or entry.get("id")
             if not record_id and isinstance(record, dict):

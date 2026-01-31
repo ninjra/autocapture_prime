@@ -785,6 +785,18 @@
         "memory_ceiling_mb": {
           "type": "integer"
         },
+        "capture_lag_p95_ms": {
+          "type": "integer"
+        },
+        "capture_queue_p95": {
+          "type": "integer"
+        },
+        "capture_age_s": {
+          "type": "integer"
+        },
+        "error_budget_pct": {
+          "type": "number"
+        },
         "query_latency_ms": {
           "type": "integer"
         },
@@ -796,7 +808,11 @@
         "startup_ms",
         "query_latency_ms",
         "ingestion_mb_s",
-        "memory_ceiling_mb"
+        "memory_ceiling_mb",
+        "capture_lag_p95_ms",
+        "capture_queue_p95",
+        "capture_age_s",
+        "error_budget_pct"
       ],
       "type": "object"
     },
@@ -1962,6 +1978,35 @@
           ],
           "type": "object"
         },
+        "job_limits": {
+          "additionalProperties": false,
+          "properties": {
+            "capture": {
+              "additionalProperties": false,
+              "properties": {
+                "cpu_time_ms": {
+                  "type": "integer"
+                },
+                "max_memory_mb": {
+                  "type": "integer"
+                },
+                "max_processes": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "cpu_time_ms",
+                "max_memory_mb",
+                "max_processes"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "capture"
+          ],
+          "type": "object"
+        },
         "idle_window_s": {
           "type": "integer"
         },
@@ -2000,6 +2045,30 @@
           ],
           "type": "object"
         },
+        "silence": {
+          "additionalProperties": false,
+          "properties": {
+            "active_window_s": {
+              "type": "integer"
+            },
+            "cooldown_s": {
+              "type": "integer"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "max_capture_age_s": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "enabled",
+            "max_capture_age_s",
+            "active_window_s",
+            "cooldown_s"
+          ],
+          "type": "object"
+        },
         "timezone": {
           "type": "string"
         }
@@ -2010,8 +2079,10 @@
         "idle_window_s",
         "mode_enforcement",
         "gpu",
+        "job_limits",
         "budgets",
-        "telemetry"
+        "telemetry",
+        "silence"
       ],
       "type": "object"
     },

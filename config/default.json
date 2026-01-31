@@ -278,6 +278,10 @@
         "severity": "warning",
         "title": "Capture dropped"
       },
+      "capture.silence": {
+        "severity": "critical",
+        "title": "Capture silent while active"
+      },
       "capture.restore": {
         "severity": "info",
         "title": "Capture restored"
@@ -305,6 +309,10 @@
     }
   },
   "performance": {
+    "capture_age_s": 10,
+    "capture_lag_p95_ms": 1500,
+    "capture_queue_p95": 3,
+    "error_budget_pct": 1.0,
     "ingestion_mb_s": 50,
     "memory_ceiling_mb": 512,
     "query_latency_ms": 2000,
@@ -1235,10 +1243,23 @@
       "release_vram_deadline_ms": 250,
       "release_vram_on_active": true
     },
+    "job_limits": {
+      "capture": {
+        "cpu_time_ms": 60000,
+        "max_memory_mb": 2048,
+        "max_processes": 1
+      }
+    },
     "idle_window_s": 45,
     "mode_enforcement": {
       "suspend_deadline_ms": 100,
       "suspend_workers": true
+    },
+    "silence": {
+      "active_window_s": 3,
+      "cooldown_s": 60,
+      "enabled": true,
+      "max_capture_age_s": 15
     },
     "telemetry": {
       "emit_interval_s": 5,

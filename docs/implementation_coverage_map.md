@@ -25,3 +25,8 @@
 
 ## Sprint 7 Coverage
 - III-3, VI-5: Query responses include explicit extraction gating metadata (idle/blocked) in `autocapture_nx/kernel/query.py` with coverage in `tests/test_query_processing_status.py`.
+
+## Sprint 8 Coverage
+- VI-4, VI-5: Expanded capture telemetry (p95s, last capture age, throttle events) + correlation IDs in `autocapture_nx/capture/pipeline.py` and `autocapture_nx/kernel/event_builder.py`.
+- VIII-? (Observability): SLO summary + error budgets in `autocapture_nx/ux/facade.py`, `autocapture/web/ui/app.js`, and `autocapture/web/ui/index.html` with coverage in `tests/test_slo_summary.py`.
+- VIII-? (Silent failure): Capture silence detection + alerts in `autocapture_nx/capture/pipeline.py`, `autocapture_nx/kernel/alerts.py`, and `config/default.json` with coverage in `tests/test_silence_alerts.py`.
