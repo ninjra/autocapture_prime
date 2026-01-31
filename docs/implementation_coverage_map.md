@@ -30,3 +30,9 @@
 - VI-4, VI-5: Expanded capture telemetry (p95s, last capture age, throttle events) + correlation IDs in `autocapture_nx/capture/pipeline.py` and `autocapture_nx/kernel/event_builder.py`.
 - VIII-? (Observability): SLO summary + error budgets in `autocapture_nx/ux/facade.py`, `autocapture/web/ui/app.js`, and `autocapture/web/ui/index.html` with coverage in `tests/test_slo_summary.py`.
 - VIII-? (Silent failure): Capture silence detection + alerts in `autocapture_nx/capture/pipeline.py`, `autocapture_nx/kernel/alerts.py`, and `config/default.json` with coverage in `tests/test_silence_alerts.py`.
+- VIII-4: GPU encoder auto/fallback policy + fullscreen gating in `autocapture_nx/capture/pipeline.py` and `config/default.json`.
+- VIII-4: VRAM preemption on activity in `autocapture/runtime/conductor.py` + `autocapture/runtime/gpu.py` with coverage in `tests/test_gpu_release.py`.
+- VIII-4: Query latency telemetry + SLO tracking in `autocapture_nx/kernel/query.py`, `autocapture_nx/ux/facade.py`, and `autocapture/web/ui/app.js`.
+- VIII-4: Metadata batch inserts for SST in `autocapture_nx/processing/sst/persist.py`, `autocapture_nx/kernel/metadata_store.py`, `autocapture/storage/database.py`, and `autocapture/storage/sqlcipher.py`.
+- VIII-4: BLAKE3 hashing option for dedupe in `autocapture_nx/capture/pipeline.py` and `autocapture_nx/capture/screenshot.py`.
+- VIII-5: Plugin manifest fuzzing, resource budget, and accessibility tests in `tests/test_plugin_manifest_fuzz.py`, `tests/test_resource_budgets.py`, and `tests/test_ui_accessibility.py`.

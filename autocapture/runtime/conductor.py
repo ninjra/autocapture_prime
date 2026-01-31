@@ -12,6 +12,7 @@ from autocapture.research.runner import ResearchRunner
 from autocapture.storage.pressure import StoragePressureMonitor
 from autocapture.storage.retention import StorageRetentionMonitor
 from autocapture.runtime.governor import RuntimeGovernor
+from autocapture.runtime.gpu import release_vram
 from autocapture.runtime.scheduler import Job, JobStepResult, Scheduler
 from autocapture_nx.kernel.telemetry import record_telemetry
 
@@ -51,6 +52,7 @@ class RuntimeConductor:
         self._stats = ConductorStats()
         self._last_watchdog_state: str | None = None
         self._last_watchdog_event_ts: float | None = None
+        self._last_gpu_release_ts: float | None = None
         telemetry_cfg = self._config.get("runtime", {}).get("telemetry", {})
         self._telemetry_enabled = bool(telemetry_cfg.get("enabled", True))
         self._telemetry_interval_s = float(telemetry_cfg.get("emit_interval_s", 5))
@@ -436,6 +438,40 @@ class RuntimeConductor:
             except Exception:
                 pass
 
+    def _maybe_release_gpu(self, signals: dict[str, Any], mode: str) -> None:
+        runtime_cfg = self._config.get("runtime", {}) if isinstance(self._config, dict) else {}
+        gpu_cfg = runtime_cfg.get("gpu", {}) if isinstance(runtime_cfg, dict) else {}
+        if not isinstance(gpu_cfg, dict) or not bool(gpu_cfg.get("release_vram_on_active", True)):
+            return
+        if not bool(signals.get("user_active", False)):
+            return
+        deadline_ms = int(gpu_cfg.get("release_vram_deadline_ms", 250) or 0)
+        if deadline_ms <= 0:
+            deadline_ms = 250
+        now = time.monotonic()
+        if self._last_gpu_release_ts is not None and (now - self._last_gpu_release_ts) < (deadline_ms / 1000.0):
+            return
+        result = release_vram(reason="user_active")
+        self._last_gpu_release_ts = now
+        payload = {
+            "event": "gpu.release",
+            "ts_utc": datetime.now(timezone.utc).isoformat(),
+            "mode": str(mode),
+            "user_active": True,
+            "result": result,
+        }
+        record_telemetry("gpu.release", payload)
+        if self._events is not None:
+            try:
+                self._events.journal_event("gpu.release", payload)
+            except Exception:
+                pass
+        if self._logger is not None:
+            try:
+                self._logger.log("gpu.release", payload)
+            except Exception:
+                pass
+
     def _run_once(self, *, force: bool = False) -> list[str]:
         self._schedule_idle()
         self._schedule_research()
@@ -443,6 +479,8 @@ class RuntimeConductor:
         self._schedule_storage_retention()
         signals = self._signals(query_intent=True if force else None)
         executed = self._scheduler.run_pending(signals)
+        stats = self._scheduler.last_stats()
+        self._maybe_release_gpu(signals, stats.mode)
         watchdog = self._watchdog_payload(signals)
         self._stats.last_watchdog = watchdog
         self._maybe_emit_watchdog_event(watchdog)

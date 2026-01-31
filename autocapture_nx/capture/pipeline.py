@@ -26,6 +26,8 @@ from autocapture_nx.kernel.telemetry import record_telemetry, percentile
 from autocapture_nx.windows.win_capture import Frame, iter_screenshots, list_monitors
 
 STOP_SENTINEL = object()
+_FFMPEG_ENCODER_CACHE: dict[str, set[str]] = {}
+_FFMPEG_ENCODER_LOCK = threading.Lock()
 
 
 @dataclass
@@ -549,6 +551,49 @@ class CapturePipeline:
             except Exception:
                 pass
         self._frame_format = coerced
+        encoder_request = str(capture_cfg.get("encoder", "cpu") or "cpu").strip().lower()
+        self._encoder_request = encoder_request
+        self._encoder_auto = encoder_request in {"auto", "gpu", "cuda"}
+        self._encoder_preferred = "cpu"
+        self._encoder_gpu_available = False
+        encoder_reason = None
+        if resolved_container == "ffmpeg_mp4":
+            if not ffmpeg_path:
+                encoder_reason = "ffmpeg_missing"
+            else:
+                prefers_gpu = self._encoder_auto or encoder_request in {"nvenc", "h264_nvenc"}
+                if prefers_gpu:
+                    if _ffmpeg_supports_encoder(ffmpeg_path, "h264_nvenc"):
+                        self._encoder_preferred = "nvenc"
+                        self._encoder_gpu_available = True
+                    else:
+                        encoder_reason = "nvenc_unavailable"
+                elif encoder_request in {"cpu", "libx264", "x264"}:
+                    self._encoder_preferred = "cpu"
+                else:
+                    encoder_reason = "unknown_encoder"
+        else:
+            if encoder_request not in {"cpu", "auto", "gpu", "cuda", "nvenc", "h264_nvenc", "libx264", "x264"}:
+                encoder_reason = "unknown_encoder"
+            self._encoder_preferred = "cpu"
+        self._encoder = self._encoder_preferred
+        if encoder_reason and self._event_builder is not None:
+            payload = {
+                "requested": encoder_request,
+                "used": self._encoder,
+                "reason": encoder_reason,
+                "container": resolved_container,
+            }
+            try:
+                self._event_builder.journal_event("capture.encoder_fallback", payload)
+                self._event_builder.ledger_entry(
+                    "capture.encoder_fallback",
+                    inputs=[],
+                    outputs=[],
+                    payload={"event": "capture.encoder_fallback", **payload},
+                )
+            except Exception:
+                pass
         self._include_cursor = bool(capture_cfg.get("include_cursor", False))
         self._include_cursor_shape = bool(capture_cfg.get("include_cursor_shape", True))
         self._lossless = self._frame_format in {"rgb", "png"}
@@ -805,6 +850,42 @@ class CapturePipeline:
                 last_idle_seconds = float(idle_seconds)
                 last_activity_score = float(activity_score)
                 last_activity_reason = str(activity_reason) if activity_reason else None
+                window_fullscreen = _window_fullscreen_state(_snapshot_window(self._window_tracker))
+                if self._encoder_auto and self._encoder_preferred == "nvenc":
+                    desired_encoder = self._encoder_preferred
+                    encoder_reason = None
+                    if mode == "active":
+                        if window_fullscreen is None or window_fullscreen:
+                            desired_encoder = "cpu"
+                            encoder_reason = "active_fullscreen" if window_fullscreen else "active_unknown"
+                    if desired_encoder != self._encoder:
+                        with self._rate_lock:
+                            self._encoder = desired_encoder
+                        encoder_payload = {
+                            "requested": self._encoder_request,
+                            "used": desired_encoder,
+                            "mode": mode,
+                            "fullscreen": window_fullscreen,
+                            "reason": encoder_reason or "auto",
+                            "run_id": str(self._config.get("runtime", {}).get("run_id", "")),
+                            "plugin_id": self._plugin_id,
+                        }
+                        if self._logger is not None:
+                            try:
+                                self._logger.log("capture.encoder_change", encoder_payload)
+                            except Exception:
+                                pass
+                        if self._event_builder is not None:
+                            try:
+                                self._event_builder.journal_event("capture.encoder_change", encoder_payload)
+                                self._event_builder.ledger_entry(
+                                    "capture.encoder_change",
+                                    inputs=[],
+                                    outputs=[],
+                                    payload={"event": "capture.encoder_change", **encoder_payload},
+                                )
+                            except Exception:
+                                pass
                 if mode != activity_mode:
                     activity_mode = mode
                     if mode == "active":
@@ -1092,12 +1173,12 @@ class CapturePipeline:
         capture_cfg = self._config.get("capture", {}).get("video", {})
         segment_seconds = int(capture_cfg.get("segment_seconds", 60))
         container_type = self._container_type
-        encoder = str(capture_cfg.get("encoder", "cpu"))
         ffmpeg_path = self._ffmpeg_path
         frame_format = self._frame_format
         with self._rate_lock:
             fps_target = self._fps_target
             bitrate_kbps = self._bitrate_kbps
+            encoder = self._encoder
         spool_dir = self._config.get("storage", {}).get("spool_dir", "data/spool")
         storage_cfg = self._config.get("storage", {})
         fsync_policy = str(storage_cfg.get("fsync_policy", "none") or "none")
@@ -1152,6 +1233,7 @@ class CapturePipeline:
                 with self._rate_lock:
                     fps_target = self._fps_target
                     bitrate_kbps = self._bitrate_kbps
+                    encoder = self._encoder
                 segment_id = prefixed_id(run_id, "segment", self._segment_seq)
                 self._segment_seq += 1
                 segment = SegmentWriter(
@@ -1514,6 +1596,7 @@ class CapturePipeline:
             "fps_target": int(self._fps_target),
             "bitrate_kbps": int(self._bitrate_kbps),
             "jpeg_quality": int(self._jpeg_quality),
+            "encoder": str(self._encoder),
             "backend": str(self._backend_used),
             "last_capture_age_s": None if last_capture_age_s is None else float(round(last_capture_age_s, 3)),
             "last_segment_id": last_segment_id,
@@ -1629,6 +1712,13 @@ def _hash_frame(data: bytes, *, algo: str, sample_bytes: int) -> str:
     if name in {"adler32", "adler"}:
         checksum = zlib.adler32(payload)
         return f"adler32:{checksum:08x}:{len(payload)}"
+    if name in {"blake3"}:
+        try:
+            import blake3  # type: ignore
+        except Exception:
+            name = "sha256"
+        else:
+            return f"blake3:{blake3.blake3(payload).hexdigest()}"
     if name in {"blake2", "blake2b"}:
         return f"blake2b:{hashlib.blake2b(payload, digest_size=16).hexdigest()}"
     return f"sha256:{hashlib.sha256(payload).hexdigest()}"
@@ -1701,6 +1791,73 @@ def _snapshot_input(input_tracker: Any | None) -> dict[str, Any] | None:
     if hasattr(input_tracker, "last_event_ts"):
         return {"last_event_ts": input_tracker.last_event_ts()}
     return None
+
+
+def _ffmpeg_encoders(ffmpeg_path: str) -> set[str]:
+    if not ffmpeg_path:
+        return set()
+    with _FFMPEG_ENCODER_LOCK:
+        cached = _FFMPEG_ENCODER_CACHE.get(ffmpeg_path)
+    if cached is not None:
+        return set(cached)
+    encoders: set[str] = set()
+    try:
+        result = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except Exception:
+        result = None
+    if result and result.stdout:
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if not line or line.startswith("--"):
+                continue
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            name = parts[1].strip()
+            if name:
+                encoders.add(name)
+    with _FFMPEG_ENCODER_LOCK:
+        _FFMPEG_ENCODER_CACHE[ffmpeg_path] = set(encoders)
+    return encoders
+
+
+def _ffmpeg_supports_encoder(ffmpeg_path: str | None, encoder: str) -> bool:
+    if not ffmpeg_path or not encoder:
+        return False
+    encoders = _ffmpeg_encoders(ffmpeg_path)
+    return str(encoder).lower() in {name.lower() for name in encoders}
+
+
+def _window_fullscreen_state(window_ref: dict[str, Any] | None) -> bool | None:
+    if not window_ref or not isinstance(window_ref, dict):
+        return None
+    window = window_ref.get("window") if isinstance(window_ref.get("window"), dict) else window_ref
+    rect = window.get("rect") if isinstance(window, dict) else None
+    monitor = window.get("monitor") if isinstance(window, dict) else None
+    monitor_rect = None
+    if isinstance(monitor, dict):
+        monitor_rect = monitor.get("rect")
+    if not rect or not monitor_rect:
+        return None
+    try:
+        left, top, right, bottom = [int(v) for v in rect]
+        mleft, mtop, mright, mbottom = [int(v) for v in monitor_rect]
+    except Exception:
+        return None
+    tolerance = 2
+    covers = (
+        left <= mleft + tolerance
+        and top <= mtop + tolerance
+        and right >= mright - tolerance
+        and bottom >= mbottom - tolerance
+    )
+    return bool(covers)
 
 
 def _resolve_container(container_type: str, ffmpeg_path: str | None) -> tuple[str, str | None]:

@@ -125,6 +125,37 @@ class _SQLCipherStore:
         except Exception as exc:
             raise FileExistsError(f"Metadata record already exists: {record_id}") from exc
 
+    def put_batch(self, records: list[tuple[str, Any]]) -> list[str]:
+        if not records:
+            return []
+        self._ensure()
+        inserted: list[str] = []
+        try:
+            self._conn.execute("BEGIN")
+            for record_id, value in records:
+                existing = self.get(record_id, default=None)
+                if existing is not None:
+                    continue
+                record_type = value.get("record_type") if isinstance(value, dict) else None
+                ts_utc = _extract_ts(value)
+                run_id = value.get("run_id") if isinstance(value, dict) else None
+                if not run_id:
+                    run_id = self._run_id
+                payload = json.dumps(value, sort_keys=True)
+                try:
+                    self._conn.execute(
+                        "INSERT INTO metadata (id, payload, record_type, ts_utc, run_id) VALUES (?, ?, ?, ?, ?)",
+                        (record_id, payload, record_type, ts_utc, run_id),
+                    )
+                except Exception:
+                    continue
+                inserted.append(record_id)
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+        return inserted
+
     def get(self, record_id: str, default: Any = None) -> Any:
         self._ensure()
         cur = self._conn.execute("SELECT payload FROM metadata WHERE id = ?", (record_id,))
@@ -216,6 +247,20 @@ class SqlCipherMetadataStore:
                 return self._fallback.put_replace(record_id, payload)
             return self._fallback.put(record_id, payload)
         self._store.put_replace(record_id, payload)
+
+    def put_batch(self, records: list[tuple[str, dict[str, Any]]]) -> list[str]:
+        if self._fallback is not None:
+            if hasattr(self._fallback, "put_batch"):
+                return list(self._fallback.put_batch(records))
+            inserted: list[str] = []
+            for record_id, payload in records:
+                try:
+                    self._fallback.put_new(record_id, payload)
+                except Exception:
+                    continue
+                inserted.append(record_id)
+            return inserted
+        return self._store.put_batch(records)
 
     def get(self, record_id: str, default: Any = None) -> Any:
         if self._fallback is not None:

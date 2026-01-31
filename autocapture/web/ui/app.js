@@ -370,6 +370,14 @@ function renderSlo() {
 
   const procDetail = processing.watchdog_state ? `watchdog ${processing.watchdog_state}` : "watchdog —";
   addItem("Processing", procDetail, processing.status);
+
+  const queryDetail =
+    slo.query && slo.query.latency_p95_ms == null
+      ? "query p95 —"
+      : `query p95 ${Math.round(slo.query.latency_p95_ms || 0)}ms ≤ ${Math.round(
+          slo.query.latency_threshold_ms || 0
+        )}ms`;
+  addItem("Query latency", queryDetail, slo.query ? slo.query.status : "unknown");
 }
 
 async function refreshAlerts() {

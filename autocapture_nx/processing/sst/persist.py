@@ -140,6 +140,7 @@ class SSTPersistence:
             self._emit_event("sst.state", state_payload, inputs=(record_id,), outputs=(state_record_id,))
 
         docs = list(_state_docs(run_id, state))
+        doc_records: list[tuple[str, dict[str, Any]]] = []
         for doc_id, doc_text, meta in docs:
             doc_payload = self._envelope(
                 artifact_id=doc_id,
@@ -157,13 +158,18 @@ class SSTPersistence:
                     **meta,
                 },
             )
-            if self._put_new(doc_id, doc_payload):
+            doc_records.append((doc_id, doc_payload))
+        inserted_docs = self._put_batch(doc_records)
+        for doc_id, doc_text, _meta in docs:
+            if doc_id in inserted_docs:
                 derived_records += 1
                 derived_ids.append(doc_id)
             self._index_text(doc_id, doc_text)
             indexed_docs += 1
             indexed_ids.append(doc_id)
 
+        extra_records: list[tuple[str, dict[str, Any]]] = []
+        extra_meta: list[tuple[str, str, dict[str, Any]]] = []
         for doc in extra_docs or ():
             if not isinstance(doc, dict):
                 continue
@@ -205,7 +211,11 @@ class SSTPersistence:
                 confidence_bp=confidence_bp,
                 payload=payload,
             )
-            if self._put_new(doc_id, doc_payload):
+            extra_records.append((doc_id, doc_payload))
+            extra_meta.append((doc_id, text, doc_payload))
+        inserted_extra = self._put_batch(extra_records)
+        for doc_id, text, doc_payload in extra_meta:
+            if doc_id in inserted_extra:
                 derived_records += 1
                 derived_ids.append(doc_id)
                 self._emit_event("sst.extra_doc", doc_payload, inputs=(record_id,), outputs=(doc_id,))
@@ -329,6 +339,23 @@ class SSTPersistence:
             return True
         except Exception:
             return False
+
+    def _put_batch(self, records: list[tuple[str, dict[str, Any]]]) -> set[str]:
+        if not records:
+            return set()
+        if hasattr(self._metadata, "put_batch"):
+            try:
+                batch_result = self._metadata.put_batch(records)
+                if batch_result is None:
+                    return {record_id for record_id, _ in records}
+                return {str(record_id) for record_id in batch_result}
+            except Exception:
+                return set()
+        inserted: set[str] = set()
+        for record_id, payload in records:
+            if self._put_new(record_id, payload):
+                inserted.add(record_id)
+        return inserted
 
     def _emit_event(self, event_type: str, payload: dict[str, Any], *, inputs: tuple[str, ...], outputs: tuple[str, ...]) -> None:
         if not self._event_builder:

@@ -15,6 +15,13 @@ def hash_bytes(data: bytes, *, algo: str = "blake2b", sample_bytes: int = 0) -> 
     digest: Any
     if algo == "sha256":
         digest = hashlib.sha256()
+    elif algo == "blake3":
+        try:
+            import blake3  # type: ignore
+        except Exception:
+            digest = hashlib.blake2b(digest_size=32)
+        else:
+            return blake3.blake3(data).hexdigest()
     else:
         digest = hashlib.blake2b(digest_size=32)
     digest.update(data)

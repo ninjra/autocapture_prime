@@ -131,7 +131,7 @@
               <div class="card-header">
                 <h2>Latest Metadata</h2>
                 <div class="actions">
-                  <select id="metadataType"></select>
+                  <select id="metadataType" aria-label="Metadata type"></select>
                   <button id="refreshMetadata" class="ghost">Refresh</button>
                 </div>
               </div>
@@ -253,15 +253,15 @@
                 </div>
               </div>
               <div class="trace-processing">
-                <label class="toggle">
+                <label class="toggle" for="traceAllowOcr">
                   <input id="traceAllowOcr" type="checkbox" checked />
                   OCR
                 </label>
-                <label class="toggle">
+                <label class="toggle" for="traceAllowVlm">
                   <input id="traceAllowVlm" type="checkbox" checked />
                   VLM
                 </label>
-                <label class="toggle">
+                <label class="toggle" for="traceForceProcess">
                   <input id="traceForceProcess" type="checkbox" />
                   Manual override
                 </label>
@@ -359,15 +359,15 @@
                 </div>
               </div>
               <div class="pill-row">
-                <label class="toggle">
+                <label class="toggle" for="filterActivity">
                   <input id="filterActivity" type="checkbox" />
                   Activity
                 </label>
-                <label class="toggle">
+                <label class="toggle" for="filterChanges">
                   <input id="filterChanges" type="checkbox" />
                   Changes
                 </label>
-                <label class="toggle">
+                <label class="toggle" for="filterBookmarks">
                   <input id="filterBookmarks" type="checkbox" />
                   Bookmarks
                 </label>
@@ -437,7 +437,7 @@
                   <p id="pluginSettingsSubtitle" class="muted"></p>
                 </div>
                 <div class="actions">
-                  <label class="toggle">
+                  <label class="toggle" for="pluginShowAll">
                     <input id="pluginShowAll" type="checkbox" />
                     Show all settings
                   </label>

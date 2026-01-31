@@ -5,13 +5,14 @@ from __future__ import annotations
 import io
 import zipfile
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from autocapture.core.hashing import hash_text, normalize_text
 from autocapture_nx.kernel.derived_records import build_derivation_edge, build_text_record, derivation_edge_id
 from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.ids import encode_record_id_component
+from autocapture_nx.kernel.telemetry import record_telemetry
 
 
 def _parse_ts(ts: str | None) -> datetime | None:
@@ -302,6 +303,7 @@ def _extract_frame(blob: bytes, record: dict[str, Any]) -> bytes | None:
 
 
 def run_query(system, query: str) -> dict[str, Any]:
+    start_perf = time.perf_counter()
     parser = system.get("time.intent_parser")
     retrieval = system.get("retrieval.strategy")
     answer = system.get("answer.builder")
@@ -508,6 +510,18 @@ def run_query(system, query: str) -> dict[str, Any]:
         if stale_hits:
             answer_obj["stale"] = True
             answer_obj["stale_evidence"] = sorted(set(stale_hits))
+    elapsed_ms = (time.perf_counter() - start_perf) * 1000.0
+    record_telemetry(
+        "query",
+        {
+            "ts_utc": datetime.now(timezone.utc).isoformat(),
+            "latency_ms": float(round(elapsed_ms, 3)),
+            "result_count": int(len(results)),
+            "extraction_ran": bool(extraction_ran),
+            "extraction_blocked": bool(extraction_blocked),
+            "blocked_reason": extraction_blocked_reason or "",
+        },
+    )
     return {
         "intent": intent,
         "results": results,

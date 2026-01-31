@@ -90,14 +90,18 @@ def compute_slo_summary(
     lag_threshold = float(perf_cfg.get("capture_lag_p95_ms", 1500))
     queue_threshold = float(perf_cfg.get("capture_queue_p95", 3))
     age_threshold = float(perf_cfg.get("capture_age_s", 10))
+    query_threshold = float(perf_cfg.get("query_latency_ms", 2000))
     error_budget_pct = float(perf_cfg.get("error_budget_pct", 1.0))
 
     history = telemetry.get("history", {}) if isinstance(telemetry, dict) else {}
     capture_hist = history.get("capture", []) if isinstance(history, dict) else []
+    query_hist = history.get("query", []) if isinstance(history, dict) else []
     lag_samples = [float(item.get("lag_ms", 0.0) or 0.0) for item in capture_hist if isinstance(item, dict)]
     queue_samples = [float(item.get("queue_depth", 0.0) or 0.0) for item in capture_hist if isinstance(item, dict)]
+    query_samples = [float(item.get("latency_ms", 0.0) or 0.0) for item in query_hist if isinstance(item, dict)]
     lag_p95 = percentile(lag_samples, 95) if lag_samples else None
     queue_p95 = percentile(queue_samples, 95) if queue_samples else None
+    query_p95 = percentile(query_samples, 95) if query_samples else None
 
     capture_age = None
     if isinstance(capture_status, dict):
@@ -112,6 +116,14 @@ def compute_slo_summary(
     else:
         if lag_p95 > lag_threshold or queue_p95 > queue_threshold or capture_age > age_threshold:
             capture_fail = True
+
+    query_fail = False
+    query_unknown = False
+    if query_p95 is None:
+        query_unknown = True
+    else:
+        if query_p95 > query_threshold:
+            query_fail = True
 
     total_samples = len(capture_hist)
     error_samples = 0
@@ -136,7 +148,8 @@ def compute_slo_summary(
 
     capture_status_label = "unknown" if capture_unknown else ("fail" if capture_fail else "pass")
     processing_status_label = "fail" if processing_fail else "pass"
-    overall = "fail" if (capture_fail or processing_fail) else ("unknown" if capture_unknown else "pass")
+    query_status_label = "unknown" if query_unknown else ("fail" if query_fail else "pass")
+    overall = "fail" if (capture_fail or processing_fail or query_fail) else ("unknown" if (capture_unknown or query_unknown) else "pass")
 
     return {
         "overall": overall,
@@ -155,6 +168,11 @@ def compute_slo_summary(
         "processing": {
             "watchdog_state": watchdog_state,
             "status": processing_status_label,
+        },
+        "query": {
+            "latency_p95_ms": query_p95,
+            "latency_threshold_ms": query_threshold,
+            "status": query_status_label,
         },
     }
 

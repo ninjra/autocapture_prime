@@ -123,7 +123,7 @@
       "frame_format": "auto",
       "include_cursor": true,
       "include_cursor_shape": true,
-      "encoder": "cpu",
+      "encoder": "auto",
       "fps_target": 30,
       "jpeg_quality": 90,
       "monitor_index": 0,

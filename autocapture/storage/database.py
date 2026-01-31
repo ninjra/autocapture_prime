@@ -72,6 +72,34 @@ class EncryptedMetadataStore:
         )
         self._conn.commit()
 
+    def put_batch(self, records: list[tuple[str, dict[str, Any]]]) -> list[str]:
+        if not records:
+            return []
+        inserted: list[str] = []
+        try:
+            self._conn.execute("BEGIN")
+            for record_id, payload in records:
+                existing = self.get(record_id, default=None)
+                if existing is not None:
+                    continue
+                key_id, root = self.keyring.active_key("metadata")
+                key = derive_key(root, "metadata_store")
+                data = json.dumps(payload, sort_keys=True).encode("utf-8")
+                blob = encrypt_bytes(key, data, key_id=key_id)
+                try:
+                    self._conn.execute(
+                        "INSERT INTO records (record_id, nonce_b64, ciphertext_b64, key_id) VALUES (?, ?, ?, ?)",
+                        (record_id, blob.nonce_b64, blob.ciphertext_b64, key_id),
+                    )
+                except sqlite3.IntegrityError:
+                    continue
+                inserted.append(record_id)
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+        return inserted
+
     def get(self, record_id: str, default: Any | None = None) -> Any:
         cur = self._conn.execute(
             "SELECT nonce_b64, ciphertext_b64, key_id FROM records WHERE record_id = ?",
