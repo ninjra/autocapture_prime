@@ -49,6 +49,8 @@ class RuntimeConductor:
         self._thread: threading.Thread | None = None
         self._queued: set[str] = set()
         self._stats = ConductorStats()
+        self._last_watchdog_state: str | None = None
+        self._last_watchdog_event_ts: float | None = None
         telemetry_cfg = self._config.get("runtime", {}).get("telemetry", {})
         self._telemetry_enabled = bool(telemetry_cfg.get("enabled", True))
         self._telemetry_interval_s = float(telemetry_cfg.get("emit_interval_s", 5))
@@ -354,6 +356,39 @@ class RuntimeConductor:
             payload["state"] = "ok"
         return payload
 
+    def _maybe_emit_watchdog_event(self, watchdog: dict[str, Any]) -> None:
+        if self._events is None or not isinstance(watchdog, dict):
+            return
+        state = watchdog.get("state")
+        if not state:
+            return
+        now = time.time()
+        event_type = None
+        if state in {"stalled", "error"}:
+            throttle_s = max(60, int(watchdog.get("stall_seconds", 300) or 300))
+            if (
+                self._last_watchdog_state == state
+                and self._last_watchdog_event_ts is not None
+                and (now - self._last_watchdog_event_ts) < throttle_s
+            ):
+                return
+            event_type = f"processing.watchdog.{state}"
+        elif state == "ok" and self._last_watchdog_state in {"stalled", "error"}:
+            event_type = "processing.watchdog.restore"
+
+        self._last_watchdog_state = state
+        if not event_type:
+            return
+
+        payload = dict(watchdog)
+        payload["event"] = event_type
+        ts_utc = datetime.now(timezone.utc).isoformat()
+        try:
+            self._events.journal_event(event_type, payload, ts_utc=ts_utc)
+        except Exception:
+            pass
+        self._last_watchdog_event_ts = now
+
     def _emit_telemetry(self, signals: dict[str, Any], executed: list[str], watchdog: dict[str, Any]) -> None:
         record_telemetry("processing.watchdog", watchdog)
         if not self._telemetry_enabled:
@@ -410,6 +445,7 @@ class RuntimeConductor:
         executed = self._scheduler.run_pending(signals)
         watchdog = self._watchdog_payload(signals)
         self._stats.last_watchdog = watchdog
+        self._maybe_emit_watchdog_event(watchdog)
         self._emit_telemetry(signals, executed, watchdog)
         for name in executed:
             self._queued.discard(name)

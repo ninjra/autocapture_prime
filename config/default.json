@@ -289,6 +289,18 @@
       "disk.pressure": {
         "severity": "warning",
         "title": "Disk pressure"
+      },
+      "processing.watchdog.error": {
+        "severity": "warning",
+        "title": "Processing watchdog error"
+      },
+      "processing.watchdog.restore": {
+        "severity": "info",
+        "title": "Processing watchdog restored"
+      },
+      "processing.watchdog.stalled": {
+        "severity": "critical",
+        "title": "Processing watchdog stalled"
       }
     }
   },

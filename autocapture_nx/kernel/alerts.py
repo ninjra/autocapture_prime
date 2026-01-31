@@ -13,6 +13,9 @@ _DEFAULT_RULES = {
     "capture.restore": {"severity": "info", "title": "Capture restored"},
     "capture.halt_disk": {"severity": "critical", "title": "CAPTURE HALTED: DISK LOW"},
     "capture.backend_fallback": {"severity": "warning", "title": "Capture backend fallback"},
+    "processing.watchdog.stalled": {"severity": "critical", "title": "Processing watchdog stalled"},
+    "processing.watchdog.error": {"severity": "warning", "title": "Processing watchdog error"},
+    "processing.watchdog.restore": {"severity": "info", "title": "Processing watchdog restored"},
 }
 
 

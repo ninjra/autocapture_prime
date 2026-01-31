@@ -19,3 +19,6 @@
 - I-9: Crash-loop safe mode detection + safe-mode overrides in `autocapture_nx/kernel/loader.py`, `autocapture_nx/kernel/config.py`, `config/default.json`, and `contracts/config_schema.json` with coverage in `tests/test_crash_loop_safe_mode.py`.
 - III-5: Processing watchdog heartbeat + status surfacing in `autocapture/runtime/conductor.py`, `autocapture_nx/ux/facade.py`, and `autocapture/web/ui/app.js`.
 - SRC-044, SRC-152: Citations-required notices in `autocapture_nx/kernel/query.py` with coverage in `tests/test_query_citations_required.py`.
+
+## Sprint 6 Coverage
+- III-5: Processing watchdog alert escalation in `autocapture/runtime/conductor.py`, `autocapture_nx/kernel/alerts.py`, and `config/default.json` with coverage in `tests/test_watchdog_alerts.py`.
