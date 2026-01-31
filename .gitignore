@@ -23,3 +23,12 @@ node_modules/
 /inventory_*.csv
 /artifacts/
 /docs/AUTOCAPTURE_NX_BLUEPRINT*.md
+/.venv_win311/
+/codexia.AppImage
+/docs/1-30-26 blueprint.md
+/docs/1-30-26 updates.md
+/docs/four-pillars-optimization-plan.txt
+/docs/four-pillars-optimization-spec.txt
+/docs/implemented-ignore/
+/ops/dev/fix_codex_home.ps1
+/ops/dev/fix_codex_home_wsl.sh
