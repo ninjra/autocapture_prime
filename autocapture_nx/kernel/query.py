@@ -471,8 +471,22 @@ def run_query(system, query: str) -> dict[str, Any]:
             }
         )
     answer_obj = answer.build(claims)
-    if isinstance(answer_obj, dict) and stale_hits:
+    require_citations = bool(promptops_cfg.get("require_citations", True))
+    if isinstance(answer_obj, dict):
         answer_obj = dict(answer_obj)
-        answer_obj["stale"] = True
-        answer_obj["stale_evidence"] = sorted(set(stale_hits))
+        answer_obj["policy"] = {"require_citations": require_citations}
+        if require_citations:
+            if not answer_obj.get("claims"):
+                answer_obj.setdefault(
+                    "notice",
+                    "Citations required: no evidence available for this query yet.",
+                )
+            elif answer_obj.get("state") == "partial":
+                answer_obj.setdefault(
+                    "notice",
+                    "Some claims were omitted because citations could not be verified.",
+                )
+        if stale_hits:
+            answer_obj["stale"] = True
+            answer_obj["stale_evidence"] = sorted(set(stale_hits))
     return {"intent": intent, "results": results, "answer": answer_obj}

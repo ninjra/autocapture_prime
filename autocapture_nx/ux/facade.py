@@ -453,16 +453,27 @@ class UXFacade:
     def status(self) -> dict[str, Any]:
         with self._kernel_mgr.session() as system:
             kernel_error = self._kernel_mgr.last_error()
+            kernel = self._kernel_mgr.kernel()
+            safe_mode = bool(getattr(kernel, "safe_mode", self._safe_mode)) if kernel is not None else bool(self._safe_mode)
+            safe_mode_reason = getattr(kernel, "safe_mode_reason", None) if kernel is not None else None
+            crash_loop = None
+            if kernel is not None and hasattr(kernel, "crash_loop_status"):
+                try:
+                    crash_loop = kernel.crash_loop_status()
+                except Exception:
+                    crash_loop = None
             builder = system.get("event.builder") if system and hasattr(system, "get") else None
             run_id = builder.run_id if builder is not None else ""
             ledger_head = builder.ledger_head() if builder is not None else None
             capture_status = self._capture_status_payload()
-            processing_state = self._processing_state_payload()
+            processing_state = self._processing_state_payload(system)
             return {
                 "run_id": run_id,
                 "ledger_head": ledger_head,
                 "plugins_loaded": len(getattr(system, "plugins", []) or []),
-                "safe_mode": bool(self._safe_mode),
+                "safe_mode": safe_mode,
+                "safe_mode_reason": safe_mode_reason,
+                "crash_loop": crash_loop,
                 "capture_active": bool(self._run_active),
                 "paused_until_utc": self._paused_until_utc,
                 "paused": bool(self._paused_until_utc),
@@ -534,16 +545,32 @@ class UXFacade:
         }
         return payload
 
-    def _processing_state_payload(self) -> dict[str, Any]:
-        stats = self.scheduler_status().get("stats")
+    def _processing_state_payload(self, system: Any | None = None) -> dict[str, Any]:
+        stats = None
+        watchdog = None
+        if system is not None and hasattr(system, "get"):
+            scheduler = system.get("runtime.scheduler") if system and hasattr(system, "get") else None
+            stats = scheduler.last_stats() if scheduler is not None and hasattr(scheduler, "last_stats") else None
+            conductor = system.get("runtime.conductor") if system and hasattr(system, "get") else None
+            if conductor is not None and hasattr(conductor, "watchdog_state"):
+                try:
+                    watchdog = conductor.watchdog_state()
+                except Exception:
+                    watchdog = None
+        if stats is None:
+            stats = self.scheduler_status().get("stats")
         if stats is not None and hasattr(stats, "__dataclass_fields__"):
             stats = asdict(cast(Any, stats))
         if not isinstance(stats, dict):
-            return {"mode": None, "paused": None, "reason": None}
+            return {"mode": None, "paused": None, "reason": None, "watchdog": watchdog}
         mode = stats.get("mode")
         reason = stats.get("reason")
         paused = bool(mode == "ACTIVE_CAPTURE_ONLY")
-        return {"mode": mode, "paused": paused, "reason": reason}
+        if watchdog is None:
+            telemetry = telemetry_snapshot()
+            latest = telemetry.get("latest", {}) if isinstance(telemetry, dict) else {}
+            watchdog = latest.get("processing.watchdog") if isinstance(latest, dict) else None
+        return {"mode": mode, "paused": paused, "reason": reason, "watchdog": watchdog}
 
     def _capture_controls_enabled(self) -> bool:
         runtime_cfg = self._config.get("runtime", {}) if isinstance(self._config, dict) else {}

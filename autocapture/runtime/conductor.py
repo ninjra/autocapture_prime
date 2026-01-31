@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
 from typing import Any
 
 from autocapture.research.runner import ResearchRunner
@@ -18,6 +19,11 @@ from autocapture_nx.kernel.telemetry import record_telemetry
 @dataclass
 class ConductorStats:
     last_idle_run: float | None = None
+    last_idle_ok: float | None = None
+    last_idle_error: str | None = None
+    last_idle_error_ts: float | None = None
+    last_idle_stats: dict[str, Any] | None = None
+    last_watchdog: dict[str, Any] | None = None
     last_research_run: float | None = None
     last_storage_sample: float | None = None
     last_retention_run: float | None = None
@@ -159,24 +165,55 @@ class RuntimeConductor:
         def step_fn(should_abort, budget_ms: int) -> JobStepResult:
             self._stats.last_idle_run = time.time()
             started = time.monotonic()
-            if hasattr(processor, "process_step"):
-                result = processor.process_step(
-                    should_abort=should_abort,
-                    budget_ms=budget_ms,
-                    persist_checkpoint=True,
-                )
-                if isinstance(result, tuple):
-                    done = bool(result[0])
+            idle_stats = None
+            done = True
+            ts_utc = datetime.now(timezone.utc).isoformat()
+            try:
+                if hasattr(processor, "process_step"):
+                    result = processor.process_step(
+                        should_abort=should_abort,
+                        budget_ms=budget_ms,
+                        persist_checkpoint=True,
+                    )
+                    if isinstance(result, tuple):
+                        done = bool(result[0])
+                        idle_stats = result[1] if len(result) > 1 else None
+                    else:
+                        done = bool(result)
                 else:
-                    done = bool(result)
-            else:
-                if hasattr(processor, "process"):
-                    try:
-                        processor.process(should_abort=should_abort)
-                    except TypeError:
-                        processor.process()
-                done = True
+                    if hasattr(processor, "process"):
+                        try:
+                            processor.process(should_abort=should_abort)
+                        except TypeError:
+                            processor.process()
+                    done = True
+            except Exception as exc:
+                consumed_ms = int(max(0.0, (time.monotonic() - started) * 1000.0))
+                self._stats.last_idle_error = str(exc)
+                self._stats.last_idle_error_ts = time.time()
+                record_telemetry(
+                    "processing.idle",
+                    {"ts_utc": ts_utc, "done": False, "consumed_ms": consumed_ms, "error": str(exc)},
+                )
+                return JobStepResult(done=False, consumed_ms=consumed_ms)
             consumed_ms = int(max(0.0, (time.monotonic() - started) * 1000.0))
+            payload = {"ts_utc": ts_utc, "done": bool(done), "consumed_ms": consumed_ms}
+            stats_payload = None
+            if isinstance(idle_stats, dict):
+                stats_payload = dict(idle_stats)
+            elif idle_stats is not None and hasattr(idle_stats, "__dataclass_fields__"):
+                stats_payload = asdict(idle_stats)
+            if stats_payload is not None:
+                self._stats.last_idle_stats = dict(stats_payload)
+                processed = int(stats_payload.get("processed", 0) or 0)
+                if processed > 0:
+                    self._stats.last_idle_ok = time.time()
+                errors = int(stats_payload.get("errors", 0) or 0)
+                if errors > 0:
+                    self._stats.last_idle_error = "idle_errors"
+                    self._stats.last_idle_error_ts = time.time()
+                payload.update(stats_payload)
+            record_telemetry("processing.idle", payload)
             return JobStepResult(done=done, consumed_ms=consumed_ms)
 
         estimate_ms = int(idle_cfg.get("estimate_ms", 2000))
@@ -256,7 +293,69 @@ class RuntimeConductor:
         decision = self._governor.decide(signals)
         return decision.mode != "IDLE_DRAIN"
 
-    def _emit_telemetry(self, signals: dict[str, Any], executed: list[str]) -> None:
+    def _watchdog_payload(self, signals: dict[str, Any]) -> dict[str, Any]:
+        cfg = self._config.get("processing", {}).get("watchdog", {}) if isinstance(self._config, dict) else {}
+        idle_cfg = self._config.get("processing", {}).get("idle", {}) if isinstance(self._config, dict) else {}
+        enabled = bool(cfg.get("enabled", True))
+        idle_enabled = bool(idle_cfg.get("enabled", True))
+        stall_seconds = int(cfg.get("stall_seconds", 300))
+        min_idle_seconds = int(cfg.get("min_idle_seconds", 0))
+        stats = self._scheduler.last_stats()
+        now = time.time()
+
+        def _iso(ts: float | None) -> str | None:
+            if ts is None:
+                return None
+            return datetime.fromtimestamp(ts, timezone.utc).isoformat()
+
+        payload = {
+            "enabled": bool(enabled and idle_enabled),
+            "state": "disabled",
+            "reason": None,
+            "stall_seconds": stall_seconds,
+            "min_idle_seconds": min_idle_seconds,
+            "idle_seconds": float(signals.get("idle_seconds", 0.0)),
+            "user_active": bool(signals.get("user_active", False)),
+            "last_idle_run_ts": _iso(self._stats.last_idle_run),
+            "last_idle_ok_ts": _iso(self._stats.last_idle_ok),
+            "last_idle_error_ts": _iso(self._stats.last_idle_error_ts),
+            "last_idle_error": self._stats.last_idle_error,
+        }
+        if not enabled or not idle_enabled:
+            payload["state"] = "disabled"
+            payload["reason"] = "idle_disabled"
+            return payload
+        if payload["user_active"] or payload["idle_seconds"] < min_idle_seconds:
+            payload["state"] = "paused"
+            payload["reason"] = "active_user" if payload["user_active"] else "idle_short"
+            return payload
+        if not bool(stats.heavy_allowed) or stats.mode == "ACTIVE_CAPTURE_ONLY":
+            payload["state"] = "paused"
+            payload["reason"] = stats.reason or "governor_block"
+            return payload
+        if self._stats.last_idle_error_ts and (
+            self._stats.last_idle_ok is None or self._stats.last_idle_error_ts > self._stats.last_idle_ok
+        ):
+            age = max(0.0, now - self._stats.last_idle_error_ts)
+            payload["state"] = "error"
+            payload["reason"] = "idle_error"
+            payload["age_seconds"] = age
+            return payload
+        if self._stats.last_idle_run is None:
+            payload["state"] = "pending"
+            payload["reason"] = "no_idle_runs"
+            return payload
+        age = max(0.0, now - self._stats.last_idle_run)
+        payload["age_seconds"] = age
+        if age >= stall_seconds:
+            payload["state"] = "stalled"
+            payload["reason"] = "no_idle_heartbeat"
+        else:
+            payload["state"] = "ok"
+        return payload
+
+    def _emit_telemetry(self, signals: dict[str, Any], executed: list[str], watchdog: dict[str, Any]) -> None:
+        record_telemetry("processing.watchdog", watchdog)
         if not self._telemetry_enabled:
             return
         now = time.time()
@@ -285,6 +384,7 @@ class RuntimeConductor:
                 "ran_light": int(stats.ran_light),
             },
             "executed": list(executed),
+            "watchdog": watchdog,
         }
         self._stats.last_telemetry_emit = now
         self._stats.last_mode = stats.mode
@@ -308,7 +408,9 @@ class RuntimeConductor:
         self._schedule_storage_retention()
         signals = self._signals(query_intent=True if force else None)
         executed = self._scheduler.run_pending(signals)
-        self._emit_telemetry(signals, executed)
+        watchdog = self._watchdog_payload(signals)
+        self._stats.last_watchdog = watchdog
+        self._emit_telemetry(signals, executed, watchdog)
         for name in executed:
             self._queued.discard(name)
         return executed
@@ -333,7 +435,11 @@ class RuntimeConductor:
                 "ran_light": int(stats.ran_light),
                 "ts_monotonic": float(stats.ts_monotonic),
             },
+            "watchdog": self._stats.last_watchdog,
         }
+
+    def watchdog_state(self) -> dict[str, Any] | None:
+        return self._stats.last_watchdog
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():

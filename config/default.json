@@ -189,6 +189,31 @@
       "journal.writer",
       "anchor.writer"
     ],
+    "crash_loop": {
+      "enabled": true,
+      "max_crashes": 3,
+      "window_s": 600,
+      "min_runtime_s": 0,
+      "cooldown_s": 0,
+      "reset_on_clean_shutdown": true
+    },
+    "safe_mode_overrides": {
+      "processing": {
+        "idle": {
+          "auto_start": false,
+          "enabled": false
+        },
+        "on_query": {
+          "allow_decode_extract": false
+        },
+        "sst": {
+          "enabled": false
+        }
+      },
+      "research": {
+        "enabled": false
+      }
+    },
     "required_capabilities": [
       "egress.gateway",
       "privacy.egress_sanitizer",
@@ -916,6 +941,11 @@
       },
       "max_window_minutes": 120,
       "require_idle": true
+    },
+    "watchdog": {
+      "enabled": true,
+      "stall_seconds": 300,
+      "min_idle_seconds": 120
     },
     "sst": {
       "chart_min_ticks": 2,

@@ -11,8 +11,8 @@ import getpass
 import time
 from importlib import metadata as importlib_metadata
 from email.message import Message
-from datetime import datetime, timezone
-from dataclasses import dataclass
+from datetime import datetime, timezone, timedelta
+from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, cast
 
@@ -44,6 +44,22 @@ class KernelBootArgs:
     safe_mode: bool
     config_default_path: str = "config/default.json"
     config_user_path: str = "config/user.json"
+
+
+@dataclass
+class CrashLoopStatus:
+    enabled: bool
+    crash_detected: bool
+    crash_count: int
+    max_crashes: int
+    window_s: int
+    min_runtime_s: int
+    cooldown_s: int
+    safe_mode_until: str | None
+    force_safe_mode: bool
+    reason: str | None
+    last_crash_ts: str | None
+    previous_run_id: str | None
 
 
 @dataclass(frozen=True)
@@ -130,6 +146,8 @@ class Kernel:
         self.config: dict[str, Any] = {}
         self.effective_config: EffectiveConfig | None = None
         self.system: System | None = None
+        self.safe_mode_reason: str | None = None
+        self._crash_loop_status: CrashLoopStatus | None = None
         self._run_started_at: str | None = None
         self._conductor: Any | None = None
         self._package_versions_cache: dict[str, str] | None = None
@@ -140,6 +158,17 @@ class Kernel:
         profiler.mark("boot.start")
         effective = self.load_effective_config()
         profiler.mark("load_effective_config")
+        crash_status = self._evaluate_crash_loop(effective.data)
+        self._crash_loop_status = crash_status
+        if crash_status.force_safe_mode:
+            if not self.safe_mode:
+                self.safe_mode = True
+                effective = self.load_effective_config()
+                profiler.mark("load_effective_config_safe_mode")
+            if not self.safe_mode_reason:
+                self.safe_mode_reason = crash_status.reason or "crash_loop"
+        elif self.safe_mode and not self.safe_mode_reason:
+            self.safe_mode_reason = "manual"
         self.effective_config = effective
         self.config = effective.data
         ensure_run_id(self.config)
@@ -412,13 +441,18 @@ class Kernel:
             ledger_head=stop_hash,
             locks=self._lock_hashes(),
             config_hash=self.effective_config.effective_hash if self.effective_config else None,
+            safe_mode=self.safe_mode,
+            safe_mode_reason=self.safe_mode_reason,
         )
         if self._network_deny_prev is not None:
             set_global_network_deny(self._network_deny_prev)
             self._network_deny_prev = None
 
     def _run_state_path(self) -> Path:
-        data_dir = self.config.get("storage", {}).get("data_dir", "data")
+        return self._run_state_path_for_config(self.config)
+
+    def _run_state_path_for_config(self, config: dict[str, Any]) -> Path:
+        data_dir = config.get("storage", {}).get("data_dir", "data")
         return Path(data_dir) / "run_state.json"
 
     def _load_run_state(self) -> dict[str, Any] | None:
@@ -430,6 +464,148 @@ class Kernel:
         except Exception:
             return None
 
+    def _load_run_state_for_config(self, config: dict[str, Any]) -> dict[str, Any] | None:
+        path = self._run_state_path_for_config(config)
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def _crash_history_path(self, config: dict[str, Any]) -> Path:
+        data_dir = config.get("storage", {}).get("data_dir", "data")
+        return Path(data_dir) / "crash_history.json"
+
+    def _load_crash_history(self, path: Path) -> dict[str, Any]:
+        if not path.exists():
+            return {"events": [], "safe_mode_until": None, "last_clean_utc": None}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {"events": [], "safe_mode_until": None, "last_clean_utc": None}
+        events = payload.get("events")
+        if not isinstance(events, list):
+            events = []
+        cleaned = [event for event in events if isinstance(event, dict)]
+        safe_mode_until = payload.get("safe_mode_until") if payload.get("safe_mode_until") else None
+        last_clean = payload.get("last_clean_utc") if payload.get("last_clean_utc") else None
+        return {"events": cleaned, "safe_mode_until": safe_mode_until, "last_clean_utc": last_clean}
+
+    def _write_crash_history(self, path: Path, history: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "events": list(history.get("events", [])),
+            "safe_mode_until": history.get("safe_mode_until"),
+            "last_clean_utc": history.get("last_clean_utc"),
+        }
+        path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+    def _crash_loop_policy(self, config: dict[str, Any]) -> dict[str, Any]:
+        kernel_cfg = config.get("kernel", {}) if isinstance(config, dict) else {}
+        crash_cfg = kernel_cfg.get("crash_loop", {}) if isinstance(kernel_cfg, dict) else {}
+        return {
+            "enabled": bool(crash_cfg.get("enabled", True)),
+            "max_crashes": int(crash_cfg.get("max_crashes", 3)),
+            "window_s": int(crash_cfg.get("window_s", 600)),
+            "min_runtime_s": int(crash_cfg.get("min_runtime_s", 0)),
+            "cooldown_s": int(crash_cfg.get("cooldown_s", 0)),
+            "reset_on_clean_shutdown": bool(crash_cfg.get("reset_on_clean_shutdown", True)),
+        }
+
+    def _evaluate_crash_loop(self, config: dict[str, Any]) -> CrashLoopStatus:
+        policy = self._crash_loop_policy(config)
+        status = CrashLoopStatus(
+            enabled=bool(policy["enabled"]),
+            crash_detected=False,
+            crash_count=0,
+            max_crashes=int(policy["max_crashes"]),
+            window_s=int(policy["window_s"]),
+            min_runtime_s=int(policy["min_runtime_s"]),
+            cooldown_s=int(policy["cooldown_s"]),
+            safe_mode_until=None,
+            force_safe_mode=False,
+            reason=None,
+            last_crash_ts=None,
+            previous_run_id=None,
+        )
+        if not status.enabled:
+            return status
+        now = datetime.now(timezone.utc)
+        run_state = self._load_run_state_for_config(config)
+        history_path = self._crash_history_path(config)
+        history = self._load_crash_history(history_path)
+        events: list[dict[str, Any]] = list(history.get("events", []))
+        write_history = False
+
+        if isinstance(run_state, dict) and run_state.get("state") == "stopped" and policy["reset_on_clean_shutdown"]:
+            events = []
+            history["safe_mode_until"] = None
+            history["last_clean_utc"] = now.isoformat()
+            write_history = True
+
+        if isinstance(run_state, dict) and run_state.get("state") == "running":
+            status.crash_detected = True
+            status.previous_run_id = run_state.get("run_id")
+            started_at = run_state.get("started_at") or run_state.get("ts_utc")
+            start_dt = self._parse_ts(started_at)
+            runtime_s = 0
+            if start_dt is not None:
+                runtime_s = max(0, int((now - start_dt).total_seconds()))
+            if runtime_s >= status.min_runtime_s:
+                events.append(
+                    {
+                        "ts_utc": now.isoformat(),
+                        "run_id": run_state.get("run_id"),
+                        "runtime_s": runtime_s,
+                    }
+                )
+                write_history = True
+
+        window_start = now - timedelta(seconds=max(0, status.window_s))
+        filtered: list[dict[str, Any]] = []
+        for event in events:
+            ts = self._parse_ts(event.get("ts_utc"))
+            if ts is None or ts < window_start:
+                continue
+            filtered.append(event)
+        if filtered != events:
+            write_history = True
+        history["events"] = filtered
+        status.crash_count = len(filtered)
+        if filtered:
+            last_event = filtered[-1]
+            status.last_crash_ts = last_event.get("ts_utc")
+
+        safe_mode_until = history.get("safe_mode_until")
+        if safe_mode_until:
+            until_dt = self._parse_ts(safe_mode_until)
+            if until_dt is not None and until_dt > now:
+                status.force_safe_mode = True
+                status.reason = "crash_loop"
+            else:
+                history["safe_mode_until"] = None
+                write_history = True
+
+        if status.crash_count >= status.max_crashes:
+            status.force_safe_mode = True
+            status.reason = "crash_loop"
+            if status.cooldown_s > 0:
+                history["safe_mode_until"] = (now + timedelta(seconds=status.cooldown_s)).isoformat()
+            else:
+                history["safe_mode_until"] = None
+            write_history = True
+
+        status.safe_mode_until = history.get("safe_mode_until")
+        if write_history:
+            self._write_crash_history(history_path, history)
+        return status
+
+    def crash_loop_status(self) -> dict[str, Any] | None:
+        if self._crash_loop_status is None:
+            return None
+        return asdict(self._crash_loop_status)
+
     def _write_run_state(
         self,
         run_id: str,
@@ -440,6 +616,8 @@ class Kernel:
         ledger_head: str | None = None,
         locks: dict[str, str | None] | None = None,
         config_hash: str | None = None,
+        safe_mode: bool | None = None,
+        safe_mode_reason: str | None = None,
     ) -> None:
         path = self._run_state_path()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -458,6 +636,10 @@ class Kernel:
             payload["locks"] = locks
         if config_hash:
             payload["config_hash"] = config_hash
+        if safe_mode is not None:
+            payload["safe_mode"] = bool(safe_mode)
+        if safe_mode_reason:
+            payload["safe_mode_reason"] = safe_mode_reason
         path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 
     def _parse_ts(self, ts: str | None) -> datetime | None:
@@ -519,6 +701,9 @@ class Kernel:
                 "previous_state_ts_utc": previous.get("ts_utc"),
                 "previous_ledger_head": builder.ledger_head(),
             }
+            crash_loop = self.crash_loop_status()
+            if crash_loop is not None:
+                crash_payload["crash_loop"] = crash_loop
             builder.ledger_entry("system", inputs=[], outputs=[], payload=crash_payload)
         lock_hashes = self._lock_hashes()
         effective = self.effective_config
@@ -563,6 +748,12 @@ class Kernel:
             },
             "locks": lock_hashes,
         }
+        payload["safe_mode"] = bool(self.safe_mode)
+        if self.safe_mode_reason:
+            payload["safe_mode_reason"] = self.safe_mode_reason
+        crash_loop = self.crash_loop_status()
+        if crash_loop is not None:
+            payload["crash_loop"] = crash_loop
         builder.ledger_entry("system", inputs=[], outputs=[], payload=payload, ts_utc=start_ts)
         self._write_run_state(
             builder.run_id,
@@ -570,6 +761,8 @@ class Kernel:
             started_at=start_ts,
             locks=lock_hashes,
             config_hash=effective.effective_hash if effective else None,
+            safe_mode=self.safe_mode,
+            safe_mode_reason=self.safe_mode_reason,
         )
 
     def _record_storage_manifest(

@@ -11,3 +11,11 @@
 
 ## Sprint 3 Coverage
 - SRC-026: Startup integrity sweep + stale evidence markers in `autocapture_nx/kernel/loader.py` and `autocapture_nx/kernel/query.py` with coverage in `tests/test_integrity_sweep_stale.py`.
+
+## Sprint 4 Coverage
+- SRC-010, SRC-133, SRC-134: Trace APIs + UI for capture → derived evidence lineage in `autocapture_nx/ux/facade.py`, `autocapture/web/routes/trace.py`, `autocapture/web/routes/media.py`, `autocapture/web/ui/app.js`, and `autocapture/web/ui/index.html` with coverage in `tests/test_trace_facade.py`.
+
+## Sprint 5 Coverage
+- I-9: Crash-loop safe mode detection + safe-mode overrides in `autocapture_nx/kernel/loader.py`, `autocapture_nx/kernel/config.py`, `config/default.json`, and `contracts/config_schema.json` with coverage in `tests/test_crash_loop_safe_mode.py`.
+- III-5: Processing watchdog heartbeat + status surfacing in `autocapture/runtime/conductor.py`, `autocapture_nx/ux/facade.py`, and `autocapture/web/ui/app.js`.
+- SRC-044, SRC-152: Citations-required notices in `autocapture_nx/kernel/query.py` with coverage in `tests/test_query_citations_required.py`.

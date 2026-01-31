@@ -53,6 +53,16 @@ def _apply_capture_preset(config: dict[str, Any]) -> dict[str, Any]:
     return _deep_merge(config, preset_patch)
 
 
+def _apply_safe_mode_overrides(config: dict[str, Any]) -> dict[str, Any]:
+    kernel_cfg = config.get("kernel")
+    if not isinstance(kernel_cfg, dict):
+        return config
+    overrides = kernel_cfg.get("safe_mode_overrides")
+    if not isinstance(overrides, dict) or not overrides:
+        return config
+    return _deep_merge(config, overrides)
+
+
 class SchemaLiteValidator:
     """Minimal schema validator supporting object/array/scalar types."""
 
@@ -180,6 +190,8 @@ def load_config(paths: ConfigPaths, safe_mode: bool) -> dict[str, Any]:
         user_config = _load_json(paths.user_path) if paths.user_path.exists() else {}
         config = _deep_merge(defaults, user_config)
     config = _apply_capture_preset(config)
+    if safe_mode:
+        config = _apply_safe_mode_overrides(config)
     merged_data_dir = config.get("storage", {}).get("data_dir")
     config = apply_path_defaults(config, user_overrides=user_config)
     legacy_dirs = [value for value in (defaults_data_dir, merged_data_dir) if isinstance(value, str)]

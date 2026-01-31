@@ -229,7 +229,12 @@ async function refreshStatus() {
     if (data.kernel_ready === false) {
       kernelStatus.textContent = data.kernel_error ? `error · ${data.kernel_error}` : "error";
     } else if (data.kernel_ready === true) {
-      kernelStatus.textContent = "ready";
+      if (data.safe_mode) {
+        const reason = data.safe_mode_reason ? ` · ${data.safe_mode_reason}` : "";
+        kernelStatus.textContent = `ready · safe mode${reason}`;
+      } else {
+        kernelStatus.textContent = "ready";
+      }
     } else {
       kernelStatus.textContent = "—";
     }
@@ -253,12 +258,25 @@ function renderStatusBanner() {
   }
   if (processingBannerState) {
     const processing = state.status.processing_state || {};
-    if (processing.paused) {
+    const watchdog = processing.watchdog || {};
+    const watchdogState = watchdog.state;
+    processingBannerState.classList.toggle("warn", false);
+    processingBannerState.classList.toggle("critical", false);
+    processingBannerState.classList.toggle("off", false);
+    if (watchdogState === "stalled") {
+      processingBannerState.textContent = `STALLED · ${watchdog.reason || "idle watchdog"}`;
+      processingBannerState.classList.toggle("critical", true);
+    } else if (watchdogState === "error") {
+      processingBannerState.textContent = `ERROR · ${watchdog.reason || "idle watchdog"}`;
+      processingBannerState.classList.toggle("warn", true);
+    } else if (processing.paused) {
       processingBannerState.textContent = `PAUSED · ${processing.reason || "active user"}`;
+      processingBannerState.classList.toggle("warn", true);
     } else if (processing.mode) {
       processingBannerState.textContent = processing.mode;
     } else {
       processingBannerState.textContent = "—";
+      processingBannerState.classList.toggle("off", true);
     }
   }
   if (captureBannerLast) {

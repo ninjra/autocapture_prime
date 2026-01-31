@@ -636,6 +636,42 @@
             }
           },
           "type": "object"
+        },
+        "crash_loop": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "max_crashes": {
+              "type": "integer"
+            },
+            "window_s": {
+              "type": "integer"
+            },
+            "min_runtime_s": {
+              "type": "integer"
+            },
+            "cooldown_s": {
+              "type": "integer"
+            },
+            "reset_on_clean_shutdown": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "max_crashes",
+            "window_s",
+            "min_runtime_s",
+            "cooldown_s",
+            "reset_on_clean_shutdown"
+          ],
+          "type": "object"
+        },
+        "safe_mode_overrides": {
+          "additionalProperties": true,
+          "type": "object"
         }
       },
       "required": [
@@ -1280,6 +1316,26 @@
             "max_window_minutes",
             "require_idle",
             "extractors"
+          ],
+          "type": "object"
+        },
+        "watchdog": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "stall_seconds": {
+              "type": "integer"
+            },
+            "min_idle_seconds": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "enabled",
+            "stall_seconds",
+            "min_idle_seconds"
           ],
           "type": "object"
         },
