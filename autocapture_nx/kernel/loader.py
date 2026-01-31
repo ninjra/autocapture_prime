@@ -25,6 +25,7 @@ from autocapture_nx import __version__ as kernel_version
 from autocapture_nx.kernel.event_builder import EventBuilder
 from autocapture_nx.kernel.telemetry import record_telemetry
 from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
+from autocapture_nx.kernel.metadata_store import persist_unavailable_record
 from autocapture_nx.plugin_system.registry import PluginRegistry
 from autocapture_nx.plugin_system.runtime import global_network_deny, set_global_network_deny
 
@@ -832,6 +833,167 @@ class Kernel:
                 payload=payload,
                 ts_utc=ts_utc,
             )
+        self._reconcile_capture_journal(builder, capabilities)
+
+    def _reconcile_capture_journal(self, builder: EventBuilder, capabilities: Any | None = None) -> None:
+        if capabilities is None:
+            return
+        data_dir = self.config.get("storage", {}).get("data_dir", "data")
+        journal_path = Path(data_dir) / "journal.ndjson"
+        if not journal_path.exists():
+            return
+        try:
+            metadata = capabilities.get("storage.metadata")
+        except Exception:
+            metadata = None
+        try:
+            media = capabilities.get("storage.media")
+        except Exception:
+            media = None
+        if metadata is None or media is None:
+            return
+        stage_events: dict[str, dict[str, Any]] = {}
+        committed: set[str] = set()
+        try:
+            for line in journal_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                except Exception:
+                    continue
+                if not isinstance(entry, dict):
+                    continue
+                event_type = entry.get("event_type")
+                payload = entry.get("payload", {})
+                if not isinstance(payload, dict):
+                    continue
+                record_id = payload.get("record_id")
+                if not record_id:
+                    continue
+                if event_type == "capture.stage":
+                    stage_events[str(record_id)] = {
+                        "payload": payload,
+                        "ts_utc": entry.get("ts_utc"),
+                    }
+                elif event_type == "capture.commit":
+                    committed.add(str(record_id))
+        except Exception:
+            return
+
+        def _media_exists(store: Any, record_id: str) -> bool:
+            if store is None:
+                return False
+            if hasattr(store, "exists"):
+                try:
+                    return bool(store.exists(record_id))
+                except Exception:
+                    return False
+            if hasattr(store, "keys"):
+                try:
+                    return record_id in set(store.keys())
+                except Exception:
+                    return False
+            try:
+                return store.get(record_id) is not None
+            except Exception:
+                return False
+
+        recovered: list[str] = []
+        unavailable: list[str] = []
+        for record_id, info in stage_events.items():
+            if record_id in committed:
+                continue
+            payload = info.get("payload", {}) if isinstance(info, dict) else {}
+            record_type = str(payload.get("record_type") or "")
+            ts_utc = str(info.get("ts_utc") or datetime.now(timezone.utc).isoformat())
+            meta_record = None
+            try:
+                meta_record = metadata.get(record_id, None)
+            except Exception:
+                meta_record = None
+            meta_payload = meta_record if isinstance(meta_record, dict) else {}
+            has_meta = bool(meta_payload.get("record_type"))
+            has_media = _media_exists(media, record_id)
+            if has_meta and has_media:
+                meta_payload = cast(dict[str, Any], meta_record)
+                commit_payload = {
+                    "record_id": record_id,
+                    "record_type": record_type or meta_payload.get("record_type"),
+                    "reconciled": True,
+                    "content_hash": meta_payload.get("content_hash"),
+                    "payload_hash": meta_payload.get("payload_hash"),
+                }
+                try:
+                    commit_record_type = str(commit_payload.get("record_type") or "evidence.capture.segment")
+                    builder.capture_commit(
+                        record_id,
+                        commit_record_type,
+                        ts_utc=ts_utc,
+                        payload=commit_payload,
+                    )
+                    builder.ledger_entry(
+                        "capture.reconcile",
+                        inputs=[record_id],
+                        outputs=[],
+                        payload={"event": "capture.reconcile", **commit_payload},
+                        ts_utc=ts_utc,
+                    )
+                except Exception:
+                    pass
+                recovered.append(record_id)
+                continue
+            reason = "missing_media" if not has_media else "missing_metadata"
+            try:
+                unavailable_id = persist_unavailable_record(
+                    metadata,
+                    builder.run_id,
+                    ts_utc=ts_utc,
+                    reason=reason,
+                    parent_evidence_id=record_id,
+                    source_record_type=record_type or None,
+                    details={"event": "capture.unavailable"},
+                )
+                builder.capture_unavailable(
+                    record_id,
+                    record_type or "evidence.capture.unknown",
+                    reason,
+                    ts_utc=ts_utc,
+                    payload={"unavailable_id": unavailable_id},
+                )
+                builder.ledger_entry(
+                    "capture.unavailable",
+                    inputs=[record_id],
+                    outputs=[unavailable_id],
+                    payload={
+                        "event": "capture.unavailable",
+                        "record_id": record_id,
+                        "record_type": record_type,
+                        "reason": reason,
+                        "unavailable_id": unavailable_id,
+                    },
+                    ts_utc=ts_utc,
+                )
+            except Exception:
+                pass
+            unavailable.append(record_id)
+
+        if recovered or unavailable:
+            summary = {
+                "event": "capture.reconcile",
+                "recovered_count": int(len(recovered)),
+                "unavailable_count": int(len(unavailable)),
+            }
+            if recovered:
+                summary["recovered_samples"] = recovered[:5]
+            if unavailable:
+                summary["unavailable_samples"] = unavailable[:5]
+            ts_utc = datetime.now(timezone.utc).isoformat()
+            try:
+                builder.journal_event("capture.reconcile", summary, ts_utc=ts_utc)
+                builder.ledger_entry("capture.reconcile.summary", inputs=[], outputs=[], payload=summary, ts_utc=ts_utc)
+            except Exception:
+                pass
 
     def _apply_meta_plugins(self, config: dict[str, Any], plugins: list) -> dict[str, Any]:
         updated = dict(config)

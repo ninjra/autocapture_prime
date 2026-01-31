@@ -212,8 +212,15 @@ async function refreshStatus() {
 function renderStatusBanner() {
   const captureStatus = state.status.capture_status || {};
   if (captureBannerState) {
-    captureBannerState.textContent = state.status.capture_active ? "RUNNING" : "STOPPED";
-    captureBannerState.classList.toggle("warn", !state.status.capture_active);
+    const disk = captureStatus.disk || {};
+    const hardHalt = Boolean(disk.hard_halt);
+    let captureState = state.status.capture_active ? "RUNNING" : "STOPPED";
+    if (hardHalt) {
+      captureState = "HALTED";
+    }
+    captureBannerState.textContent = captureState;
+    captureBannerState.classList.toggle("warn", !state.status.capture_active || hardHalt);
+    captureBannerState.classList.toggle("critical", hardHalt);
   }
   if (processingBannerState) {
     const processing = state.status.processing_state || {};
@@ -237,12 +244,19 @@ function renderStatusBanner() {
     const disk = captureStatus.disk || {};
     if (disk.level) {
       const level = String(disk.level).toUpperCase();
-      captureBannerDisk.textContent = `${level} · ${formatBytes(disk.free_bytes || 0)}`;
-      captureBannerDisk.classList.toggle("warn", level !== "OK");
+      const hardHalt = Boolean(disk.hard_halt);
+      if (hardHalt) {
+        captureBannerDisk.textContent = `CAPTURE HALTED: DISK LOW · ${formatBytes(disk.free_bytes || 0)}`;
+      } else {
+        captureBannerDisk.textContent = `${level} · ${formatBytes(disk.free_bytes || 0)}`;
+      }
+      captureBannerDisk.classList.toggle("warn", !hardHalt && level !== "OK");
+      captureBannerDisk.classList.toggle("critical", hardHalt || level === "CRITICAL");
       captureBannerDisk.classList.toggle("off", false);
     } else {
       captureBannerDisk.textContent = "—";
       captureBannerDisk.classList.toggle("warn", false);
+      captureBannerDisk.classList.toggle("critical", false);
       captureBannerDisk.classList.toggle("off", true);
     }
   }

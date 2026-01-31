@@ -832,6 +832,11 @@ pre {
   color: #fdba74;
 }
 
+.badge.critical {
+  background: rgba(239, 68, 68, 0.25);
+  color: #fca5a5;
+}
+
 .badge.off {
   background: rgba(148, 163, 184, 0.2);
   color: var(--muted);

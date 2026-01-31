@@ -207,6 +207,8 @@ def main() -> int:
 
     ui = UIWindow(base_url)
     tray: TrayApp | None = None
+    stop_event = threading.Event()
+    tooltip_thread: threading.Thread | None = None
 
     def open_settings() -> None:
         ui.show_settings()
@@ -215,6 +217,9 @@ def main() -> int:
         ui.show_plugins()
 
     def quit_app() -> None:
+        stop_event.set()
+        if tooltip_thread is not None:
+            tooltip_thread.join(timeout=1)
         if tray is not None:
             tray.stop()
         ui.stop()
@@ -234,7 +239,10 @@ def main() -> int:
         processing = status.get("processing_state", {}) if isinstance(status, dict) else {}
         capture_status = status.get("capture_status", {}) if isinstance(status, dict) else {}
         disk = capture_status.get("disk", {}) if isinstance(capture_status, dict) else {}
+        hard_halt = bool(disk.get("hard_halt")) if isinstance(disk, dict) else False
         capture_label = f"Capture: {'RUNNING' if capture_active else 'STOPPED'}"
+        if hard_halt:
+            capture_label = "Capture: HALTED (DISK LOW)"
         processing_label = "Processing: —"
         if isinstance(processing, dict) and processing.get("paused"):
             reason = processing.get("reason") or "active user"
@@ -245,7 +253,9 @@ def main() -> int:
         if isinstance(disk, dict) and disk.get("level"):
             level = str(disk.get("level")).upper()
             free_gb = disk.get("free_gb")
-            if isinstance(free_gb, int):
+            if hard_halt:
+                disk_label = "Disk: CAPTURE HALTED (LOW)"
+            elif isinstance(free_gb, int):
                 disk_label = f"Disk: {level} · {free_gb} GB free"
             else:
                 disk_label = f"Disk: {level}"
@@ -258,6 +268,27 @@ def main() -> int:
             (3, "Quit", quit_app),
         ]
 
+    def _tooltip_text(status: dict[str, Any]) -> str:
+        capture_active = bool(status.get("capture_active"))
+        capture_status = status.get("capture_status", {}) if isinstance(status, dict) else {}
+        disk = capture_status.get("disk", {}) if isinstance(capture_status, dict) else {}
+        if isinstance(disk, dict) and disk.get("hard_halt"):
+            return "CAPTURE HALTED: DISK LOW"
+        return f"Autocapture NX · Capture {'RUNNING' if capture_active else 'STOPPED'}"
+
+    def _tooltip_loop() -> None:
+        last_tip: str | None = None
+        while not stop_event.is_set():
+            status = _fetch_status()
+            tip = _tooltip_text(status)
+            if tray is not None and tip != last_tip:
+                try:
+                    tray.set_tooltip(tip)
+                except Exception:
+                    pass
+                last_tip = tip
+            stop_event.wait(5.0)
+
     menu = [
         (1, "Settings", open_settings),
         (2, "Plugin Manager", open_plugins),
@@ -267,6 +298,8 @@ def main() -> int:
     tray = TrayApp("Autocapture NX", menu, default_id=1, menu_provider=_status_menu)
     tray_thread = threading.Thread(target=tray.run, daemon=True)
     tray_thread.start()
+    tooltip_thread = threading.Thread(target=_tooltip_loop, daemon=True)
+    tooltip_thread.start()
 
     ui.start()
     if ui._fallback:

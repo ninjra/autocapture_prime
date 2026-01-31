@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
+
+from autocapture_nx.kernel.hashing import sha256_canonical
+from autocapture_nx.kernel.ids import prefixed_id
 
 from autocapture_nx.kernel.evidence import validate_evidence_record, is_evidence_like
 
@@ -84,3 +88,54 @@ class ImmutableMetadataStore:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._store, name)
+
+
+def build_unavailable_record(
+    run_id: str,
+    *,
+    ts_utc: str,
+    reason: str,
+    parent_evidence_id: str | None = None,
+    source_record_type: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "record_type": "evidence.capture.unavailable",
+        "run_id": run_id,
+        "ts_utc": ts_utc,
+        "reason": reason,
+    }
+    if parent_evidence_id:
+        payload["parent_evidence_id"] = parent_evidence_id
+    if source_record_type:
+        payload["source_record_type"] = source_record_type
+    if details:
+        payload.update(details)
+    payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
+    return payload
+
+
+def persist_unavailable_record(
+    metadata: Any,
+    run_id: str,
+    *,
+    ts_utc: str,
+    reason: str,
+    parent_evidence_id: str | None = None,
+    source_record_type: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> str:
+    record_id = prefixed_id(run_id, "capture.unavailable", int(time.time() * 1000))
+    payload = build_unavailable_record(
+        run_id,
+        ts_utc=ts_utc,
+        reason=reason,
+        parent_evidence_id=parent_evidence_id,
+        source_record_type=source_record_type,
+        details=details,
+    )
+    if hasattr(metadata, "put_new"):
+        metadata.put_new(record_id, payload)
+    else:
+        metadata.put(record_id, payload)
+    return record_id

@@ -62,7 +62,7 @@ class CaptureDiskPressureTests(unittest.TestCase):
         pipeline._frame_queue = BoundedQueue(5, "drop_oldest")
 
         with patch("autocapture_nx.capture.pipeline._frame_iter", return_value=("mss", iter(frames))):
-            with patch("autocapture_nx.capture.pipeline._free_gb", return_value=120):
+            with patch("autocapture_nx.capture.pipeline._free_bytes", return_value=120 * 1024 ** 3):
                 monotonic_values = iter([0.0, 2.0, 4.0, 6.0, 8.0])
 
                 def fake_monotonic() -> float:

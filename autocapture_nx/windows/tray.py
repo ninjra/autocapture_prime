@@ -225,6 +225,17 @@ class TrayApp:
         except Exception:
             pass
 
+    def set_tooltip(self, text: str) -> None:
+        if not self._hwnd:
+            return
+        nid = NOTIFYICONDATA()
+        nid.cbSize = ctypes.sizeof(NOTIFYICONDATA)
+        nid.hWnd = self._hwnd
+        nid.uID = self._notify_id
+        nid.uFlags = NIF_TIP
+        nid.szTip = str(text)[:127]
+        windll.shell32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(nid))
+
     def _remove_icon(self) -> None:
         if not self._hwnd:
             return

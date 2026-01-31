@@ -11,6 +11,7 @@ _DEFAULT_RULES = {
     "capture.drop": {"severity": "warning", "title": "Capture dropped"},
     "capture.degrade": {"severity": "warning", "title": "Capture degraded"},
     "capture.restore": {"severity": "info", "title": "Capture restored"},
+    "capture.halt_disk": {"severity": "critical", "title": "CAPTURE HALTED: DISK LOW"},
     "capture.backend_fallback": {"severity": "warning", "title": "Capture backend fallback"},
 }
 

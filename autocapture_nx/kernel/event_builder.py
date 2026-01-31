@@ -58,7 +58,7 @@ class EventBuilder:
         tzid: str | None = None,
         offset_minutes: int = 0,
     ) -> str:
-        if isinstance(payload, dict) and "record_type" in payload:
+        if isinstance(payload, dict) and "record_type" in payload and "run_id" in payload:
             validate_evidence_record(payload, event_id)
         return self._journal.append_event(
             event_type,
@@ -68,6 +68,46 @@ class EventBuilder:
             tzid=tzid,
             offset_minutes=offset_minutes,
         )
+
+    def capture_stage(
+        self,
+        record_id: str,
+        record_type: str,
+        *,
+        ts_utc: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> str:
+        event_payload = {"record_id": record_id, "record_type": record_type, "stage": "staged"}
+        if payload:
+            event_payload.update(payload)
+        return self.journal_event("capture.stage", event_payload, ts_utc=ts_utc)
+
+    def capture_commit(
+        self,
+        record_id: str,
+        record_type: str,
+        *,
+        ts_utc: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> str:
+        event_payload = {"record_id": record_id, "record_type": record_type, "stage": "committed"}
+        if payload:
+            event_payload.update(payload)
+        return self.journal_event("capture.commit", event_payload, ts_utc=ts_utc)
+
+    def capture_unavailable(
+        self,
+        record_id: str,
+        record_type: str,
+        reason: str,
+        *,
+        ts_utc: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> str:
+        event_payload = {"record_id": record_id, "record_type": record_type, "reason": reason}
+        if payload:
+            event_payload.update(payload)
+        return self.journal_event("capture.unavailable", event_payload, ts_utc=ts_utc)
 
     def ledger_entry(
         self,
@@ -82,7 +122,7 @@ class EventBuilder:
         with self._lock:
             seq = self._ledger_seq
             self._ledger_seq += 1
-        if isinstance(payload, dict) and "record_type" in payload:
+        if isinstance(payload, dict) and "record_type" in payload and "run_id" in payload:
             validate_evidence_record(payload, entry_id)
         if not ts_utc:
             ts_utc = datetime.now(timezone.utc).isoformat()

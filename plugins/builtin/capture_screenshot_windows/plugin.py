@@ -188,6 +188,16 @@ class ScreenshotCaptureWindows(PluginBase):
                     png_bytes = encode_png(img, compress_level=png_level)
                     encode_ms = int(max(0.0, (time.perf_counter() - encode_start) * 1000.0))
                     record_id = prefixed_id(run_id, "frame", self._seq)
+                    if event_builder is not None and hasattr(event_builder, "capture_stage"):
+                        try:
+                            event_builder.capture_stage(
+                                record_id,
+                                "evidence.capture.frame",
+                                ts_utc=ts_utc,
+                                payload={"backend": "mss", "monitor_index": int(idx)},
+                            )
+                        except Exception:
+                            pass
                     write_start = time.perf_counter()
                     if hasattr(storage_media, "put_new"):
                         storage_media.put_new(record_id, png_bytes, ts_utc=ts_utc)
@@ -252,6 +262,20 @@ class ScreenshotCaptureWindows(PluginBase):
                         entry_id=record_id,
                         ts_utc=ts_utc,
                     )
+                    if hasattr(event_builder, "capture_commit"):
+                        try:
+                            event_builder.capture_commit(
+                                record_id,
+                                "evidence.capture.frame",
+                                ts_utc=ts_utc,
+                                payload={
+                                    "content_hash": content_hash,
+                                    "payload_hash": payload.get("payload_hash"),
+                                    "content_size": int(len(png_bytes)),
+                                },
+                            )
+                        except Exception:
+                            pass
                     deduper.mark_saved(fingerprint, now=now)
                     saved_frames += 1
                     telemetry = {

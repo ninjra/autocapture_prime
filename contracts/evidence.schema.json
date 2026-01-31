@@ -37,6 +37,7 @@
     "encoding": {"type": "string"},
     "sample_rate": {"type": "integer"},
     "channels": {"type": "integer"},
+    "reason": {"type": "string"},
     "parent_id": {"type": "string"},
     "child_id": {"type": "string"},
     "relation_type": {"type": "string"},
@@ -62,6 +63,11 @@
       "type": "object",
       "properties": {"record_type": {"enum": ["evidence.capture.frame"]}},
       "required": ["ts_utc"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["evidence.capture.unavailable"]}},
+      "required": ["ts_utc", "reason"]
     },
     {
       "type": "object",

@@ -508,8 +508,8 @@ class UXFacade:
             sample = sample_disk_pressure(self._config)
             disk_cfg = self._config.get("storage", {}).get("disk_pressure", {}) if isinstance(self._config, dict) else {}
             hard_mb = int(disk_cfg.get("watermark_hard_mb", 0) or 0)
-            hard_halt = False
-            if hard_mb > 0:
+            hard_halt = bool(getattr(sample, "hard_halt", False))
+            if not hard_halt and hard_mb > 0:
                 hard_halt = sample.free_bytes <= (hard_mb * 1024 * 1024)
             disk = {
                 "level": sample.level,

@@ -18,6 +18,7 @@ class DiskPressureSample:
     total_bytes: int
     used_bytes: int
     free_gb: int
+    hard_halt: bool
     evidence_bytes: int
     derived_bytes: int
     metadata_bytes: int
@@ -64,17 +65,23 @@ def _media_bytes_by_kind(media_dir: Path) -> tuple[int, int]:
     return evidence, derived
 
 
-def _pressure_level(free_gb: int, cfg: dict[str, Any]) -> str:
+def _pressure_level(free_bytes: int, free_gb: int, cfg: dict[str, Any]) -> tuple[str, bool]:
+    soft_mb = int(cfg.get("watermark_soft_mb", 0) or 0)
+    hard_mb = int(cfg.get("watermark_hard_mb", 0) or 0)
+    if hard_mb > 0 and free_bytes <= (hard_mb * 1024 * 1024):
+        return "critical", True
+    if soft_mb > 0 and free_bytes <= (soft_mb * 1024 * 1024):
+        return "soft", False
     warn_gb = int(cfg.get("warn_free_gb", 200))
     soft_gb = int(cfg.get("soft_free_gb", 100))
     critical_gb = int(cfg.get("critical_free_gb", 50))
     if free_gb <= critical_gb:
-        return "critical"
+        return "critical", False
     if free_gb <= soft_gb:
-        return "soft"
+        return "soft", False
     if free_gb <= warn_gb:
-        return "warn"
-    return "ok"
+        return "warn", False
+    return "ok", False
 
 
 def sample_disk_pressure(config: dict[str, Any]) -> DiskPressureSample:
@@ -98,7 +105,7 @@ def sample_disk_pressure(config: dict[str, Any]) -> DiskPressureSample:
     lexical_bytes = _dir_size(lexical_path)
     vector_bytes = _dir_size(vector_path)
     disk_cfg = storage_cfg.get("disk_pressure", {})
-    level = _pressure_level(free_gb, disk_cfg if isinstance(disk_cfg, dict) else {})
+    level, hard_halt = _pressure_level(free_bytes, free_gb, disk_cfg if isinstance(disk_cfg, dict) else {})
     ts_utc = datetime.now(timezone.utc).isoformat()
     return DiskPressureSample(
         ts_utc=ts_utc,
@@ -106,6 +113,7 @@ def sample_disk_pressure(config: dict[str, Any]) -> DiskPressureSample:
         total_bytes=total_bytes,
         used_bytes=used_bytes,
         free_gb=free_gb,
+        hard_halt=bool(hard_halt),
         evidence_bytes=evidence_bytes,
         derived_bytes=derived_bytes,
         metadata_bytes=metadata_bytes,
@@ -122,6 +130,7 @@ def sample_payload(sample: DiskPressureSample) -> dict[str, Any]:
         "free_bytes": sample.free_bytes,
         "total_bytes": sample.total_bytes,
         "used_bytes": sample.used_bytes,
+        "hard_halt": bool(sample.hard_halt),
         "evidence_bytes": sample.evidence_bytes,
         "derived_bytes": sample.derived_bytes,
         "metadata_bytes": sample.metadata_bytes,

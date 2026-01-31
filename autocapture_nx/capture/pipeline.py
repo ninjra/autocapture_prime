@@ -52,14 +52,22 @@ class SegmentArtifact:
 
 
 class DiskPressure:
-    def __init__(self, warn_gb: int, soft_gb: int, critical_gb: int) -> None:
+    def __init__(self, warn_gb: int, soft_gb: int, critical_gb: int, *, soft_mb: int = 0, hard_mb: int = 0) -> None:
         self.warn_gb = int(warn_gb)
         self.soft_gb = int(soft_gb)
         self.critical_gb = int(critical_gb)
+        self.soft_mb = int(soft_mb)
+        self.hard_mb = int(hard_mb)
         self.level = "ok"
 
-    def evaluate(self, free_gb: int) -> tuple[str, bool]:
-        if free_gb <= self.critical_gb:
+    def evaluate(self, free_gb: int, free_bytes: int | None = None) -> tuple[str, bool]:
+        if free_bytes is None:
+            free_bytes = int(free_gb) * (1024 ** 3)
+        if self.hard_mb > 0 and free_bytes <= (self.hard_mb * 1024 * 1024):
+            new_level = "critical"
+        elif self.soft_mb > 0 and free_bytes <= (self.soft_mb * 1024 * 1024):
+            new_level = "soft"
+        elif free_gb <= self.critical_gb:
             new_level = "critical"
         elif free_gb <= self.soft_gb:
             new_level = "soft"
@@ -588,7 +596,9 @@ class CapturePipeline:
         warn_free = int(disk_cfg.get("warn_free_gb", 200))
         soft_free = int(disk_cfg.get("soft_free_gb", warn_free))
         critical_free = int(disk_cfg.get("critical_free_gb", 50))
-        disk_pressure = DiskPressure(warn_free, soft_free, critical_free)
+        soft_mb = int(disk_cfg.get("watermark_soft_mb", 0) or 0)
+        hard_mb = int(disk_cfg.get("watermark_hard_mb", 0) or 0)
+        disk_pressure = DiskPressure(warn_free, soft_free, critical_free, soft_mb=soft_mb, hard_mb=hard_mb)
         disk_interval_s = float(disk_cfg.get("interval_s", 1.0) or 1.0)
         if disk_interval_s <= 0:
             disk_interval_s = 1.0
@@ -819,15 +829,20 @@ class CapturePipeline:
                 self._queue_depth_max = max(self._queue_depth_max, frame_queue.qsize())
 
             if now - last_disk_check >= disk_interval_s:
-                free_gb = _free_gb(self._config.get("storage", {}).get("data_dir", "."))
-                level, changed = disk_pressure.evaluate(free_gb)
+                data_dir = self._config.get("storage", {}).get("data_dir", ".")
+                free_bytes = _free_bytes(data_dir)
+                free_gb = int(free_bytes // (1024 ** 3))
+                level, changed = disk_pressure.evaluate(free_gb, free_bytes)
                 if changed:
                     pressure_payload: dict[str, Any] = {
                         "level": level,
                         "free_gb": int(free_gb),
+                        "free_bytes": int(free_bytes),
                         "warn_gb": int(warn_free),
                         "soft_gb": int(soft_free),
                         "critical_gb": int(critical_free),
+                        "soft_mb": int(soft_mb),
+                        "hard_mb": int(hard_mb),
                     }
                     self._event_builder.journal_event("disk.pressure", pressure_payload)
                     self._event_builder.ledger_entry(
@@ -860,6 +875,8 @@ class CapturePipeline:
                     critical_payload: dict[str, Any] = {
                         "free_gb": int(free_gb),
                         "threshold_gb": int(critical_free),
+                        "free_bytes": int(free_bytes),
+                        "threshold_mb": int(hard_mb) if hard_mb > 0 else None,
                     }
                     self._event_builder.journal_event("disk.critical", critical_payload)
                     self._event_builder.ledger_entry(
@@ -868,6 +885,19 @@ class CapturePipeline:
                         outputs=[],
                         payload={"event": "disk.critical", **critical_payload},
                     )
+                    if hard_mb > 0 and free_bytes <= (hard_mb * 1024 * 1024):
+                        halt_payload = {
+                            "reason": "disk_low",
+                            "free_bytes": int(free_bytes),
+                            "threshold_mb": int(hard_mb),
+                        }
+                        self._event_builder.journal_event("capture.halt_disk", halt_payload)
+                        self._event_builder.ledger_entry(
+                            "capture.halt_disk",
+                            inputs=[],
+                            outputs=[],
+                            payload={"event": "capture.halt_disk", **halt_payload},
+                        )
                     self._stop.set()
                     break
                 elif level == "ok" and degraded:
@@ -1152,6 +1182,7 @@ class CapturePipeline:
                     if int(entry.get("index", -1)) == int(monitor_index):
                         metadata["monitor"] = entry
                         break
+        cursor = None
         cursor_cfg = self._config.get("capture", {}).get("cursor", {})
         if isinstance(cursor_cfg, dict) and cursor_cfg.get("enabled", False):
             try:
@@ -1160,11 +1191,26 @@ class CapturePipeline:
                 cursor = current_cursor()
             except Exception:
                 cursor = None
-            if cursor is not None:
-                cursor_payload = {"x": int(cursor.x), "y": int(cursor.y), "visible": bool(cursor.visible)}
-                if cursor_cfg.get("include_shape", True):
-                    cursor_payload["handle"] = int(cursor.handle)
-                metadata["cursor"] = cursor_payload
+        if cursor is not None:
+            cursor_payload = {"x": int(cursor.x), "y": int(cursor.y), "visible": bool(cursor.visible)}
+            if cursor_cfg.get("include_shape", True):
+                cursor_payload["handle"] = int(cursor.handle)
+            metadata["cursor"] = cursor_payload
+
+        try:
+            self._event_builder.capture_stage(
+                artifact.segment_id,
+                metadata.get("record_type", "evidence.capture.segment"),
+                ts_utc=artifact.ts_start_utc,
+                payload={
+                    "backend": backend,
+                    "frame_count": int(artifact.frame_count),
+                    "ts_start_utc": artifact.ts_start_utc,
+                    "ts_end_utc": artifact.ts_end_utc,
+                },
+            )
+        except Exception:
+            pass
 
         content_hash = None
         try:
@@ -1218,6 +1264,19 @@ class CapturePipeline:
                 entry_id=artifact.segment_id,
                 ts_utc=artifact.ts_start_utc,
             )
+            try:
+                self._event_builder.capture_commit(
+                    artifact.segment_id,
+                    metadata.get("record_type", "evidence.capture.segment"),
+                    ts_utc=artifact.ts_end_utc or artifact.ts_start_utc,
+                    payload={
+                        "content_hash": content_hash,
+                        "payload_hash": metadata.get("payload_hash"),
+                        "content_size": metadata.get("content_size"),
+                    },
+                )
+            except Exception:
+                pass
             seal_payload = {
                 "event": "segment.sealed",
                 "segment_id": artifact.segment_id,
@@ -1397,8 +1456,13 @@ def _frame_monotonic(frame: Frame) -> float:
 
 
 def _free_gb(path: str) -> int:
-    total, used, free = shutil.disk_usage(path)
+    free = _free_bytes(path)
     return int(free // (1024 ** 3))
+
+
+def _free_bytes(path: str) -> int:
+    _total, _used, free = shutil.disk_usage(path)
+    return int(free)
 
 
 def _fsync_file(path: str) -> None:
