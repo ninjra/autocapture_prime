@@ -22,3 +22,6 @@
 
 ## Sprint 6 Coverage
 - III-5: Processing watchdog alert escalation in `autocapture/runtime/conductor.py`, `autocapture_nx/kernel/alerts.py`, and `config/default.json` with coverage in `tests/test_watchdog_alerts.py`.
+
+## Sprint 7 Coverage
+- III-3, VI-5: Query responses include explicit extraction gating metadata (idle/blocked) in `autocapture_nx/kernel/query.py` with coverage in `tests/test_query_processing_status.py`.

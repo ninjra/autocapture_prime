@@ -350,6 +350,10 @@ def run_query(system, query: str) -> dict[str, Any]:
     allow_vlm = bool(on_query.get("extractors", {}).get("vlm", False))
     extracted_ids: list[str] = []
     extraction_ran = False
+    extraction_blocked = False
+    extraction_blocked_reason: str | None = None
+    idle_seconds: float | None = None
+    idle_window = None
     candidate_limit = int(on_query.get("candidate_limit", 10))
     candidate_ids = [result.get("record_id") for result in results if result.get("record_id")]
     if not candidate_ids and metadata is not None:
@@ -373,6 +377,9 @@ def run_query(system, query: str) -> dict[str, Any]:
             else:
                 assume_idle = bool(system.config.get("runtime", {}).get("activity", {}).get("assume_idle_when_missing", False))
                 can_run = assume_idle
+                if not assume_idle:
+                    extraction_blocked = True
+                    extraction_blocked_reason = "idle_required"
         if can_run and candidate_ids:
             extract_on_demand(
                 system,
@@ -384,6 +391,18 @@ def run_query(system, query: str) -> dict[str, Any]:
             )
             extraction_ran = True
             results = retrieval.search(query_text, time_window=time_window)
+        elif not candidate_ids:
+            extraction_blocked = True
+            extraction_blocked_reason = "no_candidates"
+        elif not can_run:
+            extraction_blocked = True
+            if idle_seconds is not None and idle_window is not None and idle_seconds < idle_window:
+                extraction_blocked_reason = "user_active"
+            elif extraction_blocked_reason is None:
+                extraction_blocked_reason = "idle_required"
+    else:
+        extraction_blocked = True
+        extraction_blocked_reason = "disabled"
 
     query_ledger_hash = None
     anchor_ref = None
@@ -489,4 +508,21 @@ def run_query(system, query: str) -> dict[str, Any]:
         if stale_hits:
             answer_obj["stale"] = True
             answer_obj["stale_evidence"] = sorted(set(stale_hits))
-    return {"intent": intent, "results": results, "answer": answer_obj}
+    return {
+        "intent": intent,
+        "results": results,
+        "answer": answer_obj,
+        "processing": {
+            "extraction": {
+                "allowed": bool(allow_extract and (allow_ocr or allow_vlm)),
+                "ran": bool(extraction_ran),
+                "blocked": bool(extraction_blocked),
+                "blocked_reason": extraction_blocked_reason,
+                "require_idle": bool(require_idle),
+                "idle_seconds": idle_seconds,
+                "idle_window_s": idle_window,
+                "candidate_count": len(candidate_ids),
+                "extracted_count": len(extracted_ids),
+            }
+        },
+    }
