@@ -20,7 +20,9 @@ from autocapture_nx.capture.avi import AviMjpegWriter
 from autocapture_nx.capture.queues import BoundedQueue
 from autocapture_nx.kernel.hashing import sha256_canonical
 from autocapture_nx.kernel.ids import encode_record_id_component, prefixed_id
-from autocapture_nx.kernel.telemetry import record_telemetry
+from collections import deque
+
+from autocapture_nx.kernel.telemetry import record_telemetry, percentile
 from autocapture_nx.windows.win_capture import Frame, iter_screenshots, list_monitors
 
 STOP_SENTINEL = object()
@@ -145,7 +147,16 @@ class ZipFrameWriter:
 
 
 class FfmpegWriter:
-    def __init__(self, path: str, fps: int, encoder: str, ffmpeg_path: str, bitrate_kbps: int) -> None:
+    def __init__(
+        self,
+        path: str,
+        fps: int,
+        encoder: str,
+        ffmpeg_path: str,
+        bitrate_kbps: int,
+        *,
+        job_limits: dict[str, Any] | None = None,
+    ) -> None:
         self._path = path
         codec = "h264_nvenc" if encoder == "nvenc" else "libx264"
         cmd = [
@@ -175,7 +186,7 @@ class FfmpegWriter:
             try:
                 from autocapture_nx.windows.win_sandbox import assign_job_object
 
-                assign_job_object(self._proc.pid)
+                assign_job_object(self._proc.pid, limits=job_limits)
             except Exception:
                 pass
         self._frame_count = 0
@@ -209,7 +220,16 @@ class FfmpegWriter:
 
 
 class FfmpegRawWriter:
-    def __init__(self, path: str, fps: int, ffmpeg_path: str, width: int, height: int) -> None:
+    def __init__(
+        self,
+        path: str,
+        fps: int,
+        ffmpeg_path: str,
+        width: int,
+        height: int,
+        *,
+        job_limits: dict[str, Any] | None = None,
+    ) -> None:
         self._path = path
         cmd = [
             ffmpeg_path,
@@ -242,7 +262,7 @@ class FfmpegRawWriter:
             try:
                 from autocapture_nx.windows.win_sandbox import assign_job_object
 
-                assign_job_object(self._proc.pid)
+                assign_job_object(self._proc.pid, limits=job_limits)
             except Exception:
                 pass
         self._frame_count = 0
@@ -287,6 +307,7 @@ class SegmentWriter:
         ffmpeg_path: str | None,
         frame_format: str = "jpeg",
         fsync_policy: str = "none",
+        job_limits: dict[str, Any] | None = None,
     ) -> None:
         self.segment_id = segment_id
         self._spool_dir = spool_dir
@@ -298,6 +319,7 @@ class SegmentWriter:
         self._frame_format = str(frame_format or "jpeg").strip().lower()
         if self._frame_format not in {"jpeg", "png", "rgb"}:
             self._frame_format = "jpeg"
+        self._job_limits = job_limits if isinstance(job_limits, dict) else None
         self._writer: AviMjpegWriter | ZipFrameWriter | FfmpegWriter | FfmpegRawWriter | None = None
         self._width = 0
         self._height = 0
@@ -365,6 +387,7 @@ class SegmentWriter:
                     self._encoder,
                     self._ffmpeg_path,
                     self._bitrate_kbps,
+                    job_limits=self._job_limits,
                 )
             elif self._container_type == "ffmpeg_lossless":
                 if self._frame_format != "rgb":
@@ -377,6 +400,7 @@ class SegmentWriter:
                     self._ffmpeg_path,
                     self._width,
                     self._height,
+                    job_limits=self._job_limits,
                 )
             else:
                 raise RuntimeError(f"Unsupported container: {self._container_type}")
@@ -475,7 +499,19 @@ class CapturePipeline:
         self._queue_depth_max = 0
         self._drops_lock = threading.Lock()
         self._segment_seq = 0
+        self._start_mono = time.monotonic()
+        self._last_output_mono: float | None = None
+        self._last_output_lock = threading.Lock()
+        self._last_segment_id: str | None = None
+        self._queue_depth_samples: deque[int] = deque(maxlen=240)
+        self._lag_samples: deque[float] = deque(maxlen=240)
+        self._throttle_events = 0
+        self._last_throttle_ts = 0.0
+        self._last_silence_ts = 0.0
         capture_cfg = config.get("capture", {}).get("video", {})
+        runtime_cfg = config.get("runtime", {}) if isinstance(config, dict) else {}
+        job_limits_cfg = runtime_cfg.get("job_limits", {}) if isinstance(runtime_cfg, dict) else {}
+        self._capture_job_limits = job_limits_cfg.get("capture") if isinstance(job_limits_cfg, dict) else None
         self._backend_used = str(capture_cfg.get("backend", "mss"))
         requested_container = str(capture_cfg.get("container", "avi_mjpeg") or "avi_mjpeg")
         ffmpeg_path_cfg = str(capture_cfg.get("ffmpeg_path", "") or "").strip()
@@ -578,6 +614,13 @@ class CapturePipeline:
         idle_quality = int(activity_cfg.get("idle_jpeg_quality", jpeg_quality))
         runtime_cfg = self._config.get("runtime", {})
         suspend_workers = bool(runtime_cfg.get("mode_enforcement", {}).get("suspend_workers", True))
+        silence_cfg = runtime_cfg.get("silence", {}) if isinstance(runtime_cfg, dict) else {}
+        silence_enabled = bool(silence_cfg.get("enabled", True))
+        silence_max_age_s = float(silence_cfg.get("max_capture_age_s", 15.0))
+        silence_active_window_s = float(
+            silence_cfg.get("active_window_s", runtime_cfg.get("active_window_s", 3))
+        )
+        silence_cooldown_s = float(silence_cfg.get("cooldown_s", 60.0))
         base_fps = int(fps_target)
         base_bitrate = int(bitrate_kbps)
         base_quality = int(jpeg_quality)
@@ -802,6 +845,56 @@ class CapturePipeline:
                         payload={"event": "capture.activity", **activity_payload},
                     )
                 last_activity_check = now
+            if silence_enabled and silence_max_age_s > 0:
+                silence_idle_seconds = last_idle_seconds
+                if not activity_enabled and self._input_tracker is not None:
+                    try:
+                        silence_idle_seconds = float(self._input_tracker.idle_seconds())
+                    except Exception:
+                        silence_idle_seconds = float("inf")
+                user_active = silence_idle_seconds < silence_active_window_s
+                last_output_age_s = None
+                last_segment_id = None
+                with self._last_output_lock:
+                    last_segment_id = self._last_segment_id
+                    if self._last_output_mono is not None:
+                        last_output_age_s = max(0.0, now - self._last_output_mono)
+                    else:
+                        last_output_age_s = max(0.0, now - self._start_mono)
+                if (
+                    user_active
+                    and last_output_age_s is not None
+                    and last_output_age_s >= silence_max_age_s
+                    and (now - self._last_silence_ts) >= silence_cooldown_s
+                ):
+                    self._last_silence_ts = now
+                    silence_payload = {
+                        "event": "capture.silence",
+                        "idle_seconds": float(silence_idle_seconds),
+                        "active_window_s": float(silence_active_window_s),
+                        "last_capture_age_s": float(last_output_age_s),
+                        "threshold_s": float(silence_max_age_s),
+                        "segment_id": last_segment_id,
+                        "run_id": str(self._config.get("runtime", {}).get("run_id", "")),
+                        "plugin_id": self._plugin_id,
+                    }
+                    record_telemetry("capture.silence", silence_payload)
+                    if self._logger is not None:
+                        try:
+                            self._logger.log("capture.silence", silence_payload)
+                        except Exception:
+                            pass
+                    if self._event_builder is not None:
+                        try:
+                            self._event_builder.journal_event("capture.silence", silence_payload)
+                            self._event_builder.ledger_entry(
+                                "capture.silence",
+                                inputs=[],
+                                outputs=[],
+                                payload={"event": "capture.silence", **silence_payload},
+                            )
+                        except Exception:
+                            pass
             before_drops = frame_queue.stats.dropped
             ok = frame_queue.put(frame)
             after_drops = frame_queue.stats.dropped
@@ -957,6 +1050,26 @@ class CapturePipeline:
                         "queue_depth": int(queue_depth),
                     },
                 )
+                self._throttle_events += 1
+                throttle_payload = {
+                    "event": "capture.throttle",
+                    "fps_prev": int(fps_target),
+                    "fps_target": int(updated_fps),
+                    "bitrate_prev_kbps": int(bitrate_kbps),
+                    "bitrate_target_kbps": int(updated_bitrate),
+                    "queue_depth": int(queue_depth),
+                    "mode": str(activity_mode or ""),
+                    "idle_seconds": float(last_idle_seconds),
+                    "activity_score": float(last_activity_score),
+                    "run_id": str(self._config.get("runtime", {}).get("run_id", "")),
+                    "plugin_id": self._plugin_id,
+                }
+                record_telemetry("capture.throttle", throttle_payload)
+                if self._event_builder is not None:
+                    try:
+                        self._event_builder.journal_event("capture.throttle", throttle_payload)
+                    except Exception:
+                        pass
                 fps_target = updated_fps
                 bitrate_kbps = updated_bitrate
                 with self._rate_lock:
@@ -1051,6 +1164,7 @@ class CapturePipeline:
                     ffmpeg_path=ffmpeg_path,
                     frame_format=frame_format,
                     fsync_policy=fsync_policy,
+                    job_limits=self._capture_job_limits,
                 )
                 segment_start_mono = _frame_monotonic(frame)
                 segment_dup_frames = 0
@@ -1293,6 +1407,9 @@ class CapturePipeline:
                 payload=seal_payload,
                 ts_utc=artifact.ts_end_utc,
             )
+            with self._last_output_lock:
+                self._last_output_mono = time.monotonic()
+                self._last_segment_id = artifact.segment_id
             write_ms = int(max(0.0, (time.perf_counter() - write_start) * 1000.0))
             telemetry_payload = {
                 "ts_utc": artifact.ts_end_utc or artifact.ts_start_utc,
@@ -1367,6 +1484,16 @@ class CapturePipeline:
         with self._drops_lock:
             drops_total = int(self._drops_total)
             queue_depth_max = int(self._queue_depth_max)
+        self._queue_depth_samples.append(int(queue_depth))
+        self._lag_samples.append(float(self._last_lag_ms))
+        queue_p95 = percentile(list(self._queue_depth_samples), 95)
+        lag_p95 = percentile(list(self._lag_samples), 95)
+        last_capture_age_s = None
+        last_segment_id = None
+        with self._last_output_lock:
+            if self._last_output_mono is not None:
+                last_capture_age_s = max(0.0, now_mono - self._last_output_mono)
+            last_segment_id = self._last_segment_id
         drops_delta = drops_total - int(self._telemetry_last_drops)
         if drops_delta < 0:
             drops_delta = drops_total
@@ -1377,15 +1504,22 @@ class CapturePipeline:
             "activity_score": float(activity_score),
             "queue_depth": int(queue_depth),
             "queue_depth_max": int(queue_depth_max),
+            "queue_depth_p95": None if queue_p95 is None else float(queue_p95),
             "drops_total": int(drops_total),
             "drops_delta": int(drops_delta),
             "lag_ms": float(self._last_lag_ms),
+            "lag_p95_ms": None if lag_p95 is None else float(lag_p95),
             "frame_interval_ms": float(self._last_frame_interval_ms),
             "cpu_pct": float(round(cpu_pct, 3)),
             "fps_target": int(self._fps_target),
             "bitrate_kbps": int(self._bitrate_kbps),
             "jpeg_quality": int(self._jpeg_quality),
             "backend": str(self._backend_used),
+            "last_capture_age_s": None if last_capture_age_s is None else float(round(last_capture_age_s, 3)),
+            "last_segment_id": last_segment_id,
+            "run_id": str(self._config.get("runtime", {}).get("run_id", "")),
+            "plugin_id": self._plugin_id,
+            "throttle_events_total": int(self._throttle_events),
         }
         self._telemetry_last = now_mono
         self._telemetry_last_cpu = cpu_now

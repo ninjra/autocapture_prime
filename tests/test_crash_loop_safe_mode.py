@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from autocapture_nx.kernel.config import ConfigPaths, load_config
+from autocapture_nx.kernel.config import ConfigPaths
 from autocapture_nx.kernel.loader import Kernel
 
 

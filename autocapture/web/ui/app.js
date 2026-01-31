@@ -42,6 +42,8 @@ const processingBannerState = qs("processingBannerState");
 const captureBannerLast = qs("captureBannerLast");
 const captureBannerDisk = qs("captureBannerDisk");
 const alertsList = qs("alertsList");
+const sloSummary = qs("sloSummary");
+const sloList = qs("sloList");
 const timelineList = qs("timelineList");
 const pluginsList = qs("pluginsList");
 const pluginGroupsList = qs("pluginGroupsList");
@@ -241,6 +243,7 @@ async function refreshStatus() {
   }
   updateQuickControls();
   renderStatusBanner();
+  renderSlo();
 }
 
 function renderStatusBanner() {
@@ -307,6 +310,66 @@ function renderStatusBanner() {
       captureBannerDisk.classList.toggle("off", true);
     }
   }
+}
+
+function renderSlo() {
+  if (!sloList) return;
+  const slo = state.status.slo || {};
+  const capture = slo.capture || {};
+  const processing = slo.processing || {};
+  sloList.innerHTML = "";
+  if (sloSummary) {
+    const overall = (slo.overall || "unknown").toUpperCase();
+    const used = slo.error_budget_used_pct;
+    const budget = slo.error_budget_pct;
+    let summary = `Overall ${overall}`;
+    if (typeof used === "number" && typeof budget === "number") {
+      summary += ` · error budget ${used.toFixed(2)}% / ${budget.toFixed(2)}%`;
+    }
+    if (slo.window_samples) {
+      summary += ` · samples ${slo.window_samples}`;
+    }
+    sloSummary.textContent = summary;
+  }
+
+  function badgeClass(status) {
+    if (status === "pass") return "badge";
+    if (status === "fail") return "badge critical";
+    return "badge off";
+  }
+
+  function addItem(label, detail, status) {
+    const li = document.createElement("li");
+    const badge = document.createElement("span");
+    badge.className = badgeClass(status);
+    badge.textContent = (status || "unknown").toUpperCase();
+    const text = document.createElement("span");
+    text.textContent = `${label} · ${detail}`;
+    li.appendChild(badge);
+    li.appendChild(text);
+    sloList.appendChild(li);
+  }
+
+  const lagDetail =
+    capture.lag_p95_ms == null
+      ? "lag p95 —"
+      : `lag p95 ${Math.round(capture.lag_p95_ms)}ms ≤ ${Math.round(capture.lag_threshold_ms || 0)}ms`;
+  addItem("Capture latency", lagDetail, capture.status);
+
+  const queueDetail =
+    capture.queue_p95 == null
+      ? "queue p95 —"
+      : `queue p95 ${Math.round(capture.queue_p95)} ≤ ${Math.round(capture.queue_threshold || 0)}`;
+  addItem("Capture queue", queueDetail, capture.status);
+
+  const ageDetail =
+    capture.age_s == null
+      ? "last capture —"
+      : `last capture ${Number(capture.age_s).toFixed(1)}s ≤ ${Math.round(capture.age_threshold_s || 0)}s`;
+  addItem("Capture freshness", ageDetail, capture.status);
+
+  const procDetail = processing.watchdog_state ? `watchdog ${processing.watchdog_state}` : "watchdog —";
+  addItem("Processing", procDetail, processing.status);
 }
 
 async function refreshAlerts() {

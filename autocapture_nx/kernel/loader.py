@@ -738,7 +738,7 @@ class Kernel:
                 )
         start_ts = datetime.now(timezone.utc).isoformat()
         self._run_started_at = start_ts
-        payload = {
+        payload: dict[str, Any] = {
             "event": "system.start",
             "run_id": builder.run_id,
             "kernel_version": kernel_version,
