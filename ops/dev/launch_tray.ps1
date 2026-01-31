@@ -95,7 +95,15 @@ function Resolve-VenvRoot {
     }
     return $full
   }
-  return (Join-Path $Root ".venv_win")
+  $candidates = @(
+    (Join-Path $Root ".venv_win311"),
+    (Join-Path $Root ".venv_win310"),
+    (Join-Path $Root ".venv_win")
+  )
+  foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) { return $candidate }
+  }
+  return $candidates[-1]
 }
 
 function Resolve-BootstrapPython {
