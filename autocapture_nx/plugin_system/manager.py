@@ -9,6 +9,7 @@ from typing import Any, Dict, List
 
 from autocapture_nx.kernel.hashing import sha256_directory, sha256_file
 from autocapture_nx.kernel.config import SchemaLiteValidator
+from autocapture_nx.kernel.audit import PluginAuditLog
 
 from .manifest import PluginManifest
 from .registry import PluginRegistry
@@ -24,6 +25,7 @@ class PluginStatus:
     version: str
     kinds: List[str]
     provides: List[str]
+    capability_tags: List[str]
     permissions: Dict[str, Any]
     depends_on: List[str]
     conflicts_with: List[str]
@@ -32,6 +34,7 @@ class PluginStatus:
     conflicts_blocked: List[str]
     conflicts_enforced: bool
     conflict_ok: bool
+    failure_history: Dict[str, Any]
 
 
 class PluginManager:
@@ -127,6 +130,11 @@ class PluginManager:
         locks_cfg = self.config.get("plugins", {}).get("locks", {})
         lockfile = self._registry.load_lockfile() if locks_cfg.get("enforce", True) else {"plugins": {}}
         plugin_locks = lockfile.get("plugins", {})
+        failure_summary: dict[str, dict[str, Any]] = {}
+        try:
+            failure_summary = PluginAuditLog.from_config(self.config).failure_summary()
+        except Exception:
+            failure_summary = {}
         conflicts_cfg = self.config.get("plugins", {}).get("conflicts", {})
         conflicts_enforced = True
         allow_pairs: set[tuple[str, str]] = set()
@@ -192,6 +200,7 @@ class PluginManager:
                     version=manifest.version,
                     kinds=sorted({entry.kind for entry in manifest.entrypoints if entry.kind}),
                     provides=sorted({str(item) for item in (manifest.provides or []) if str(item).strip()}),
+                    capability_tags=sorted({str(item) for item in (getattr(manifest, "capability_tags", []) or []) if str(item).strip()}),
                     permissions={
                         "filesystem": manifest.permissions.filesystem,
                         "gpu": manifest.permissions.gpu,
@@ -205,6 +214,7 @@ class PluginManager:
                     conflicts_blocked=sorted(conflicts_blocked.get(manifest.plugin_id, set())),
                     conflicts_enforced=conflicts_enforced,
                     conflict_ok=(not conflicts_blocked.get(manifest.plugin_id) or not conflicts_enforced),
+                    failure_history=failure_summary.get(manifest.plugin_id, {}),
                 )
             )
         return sorted(rows, key=lambda r: r.plugin_id)

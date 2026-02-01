@@ -233,6 +233,21 @@ def cmd_verify_evidence(args: argparse.Namespace) -> int:
     return 2
 
 
+def cmd_verify_archive(args: argparse.Namespace) -> int:
+    from autocapture.storage.archive import verify_archive
+
+    path = str(args.path or "").strip()
+    if not path:
+        _print_json({"ok": False, "error": "missing_archive_path"})
+        return 1
+    ok, issues = verify_archive(path)
+    if ok:
+        print("OK archive_verified")
+        return 0
+    _print_json({"ok": False, "issues": issues})
+    return 2
+
+
 def cmd_citations_resolve(args: argparse.Namespace) -> int:
     try:
         payload = _load_json_payload(args.path, args.json)
@@ -393,25 +408,9 @@ def cmd_storage_compact(args: argparse.Namespace) -> int:
 
 
 def cmd_storage_cleanup(args: argparse.Namespace) -> int:
-    import shutil
-
-    config = load_config(default_config_paths(), safe_mode=False)
-    if bool(config.get("storage", {}).get("no_deletion_mode", False)):
-        print("Storage cleanup disabled in no-deletion mode")
-        return 2
-    target = Path(args.path).resolve()
-    if not args.confirm:
-        print("Refusing to delete without --confirm")
-        return 2
-    if str(target) in ("/", str(Path("/").resolve())):
-        print("Refusing to delete root path")
-        return 2
-    if not target.exists():
-        print(f"Missing path: {target}")
-        return 1
-    shutil.rmtree(target)
-    print(f"Deleted {target}")
-    return 0
+    _ = args
+    print("Storage cleanup disabled by policy (no deletion)")
+    return 2
 
 
 def cmd_codex(args: argparse.Namespace) -> int:
@@ -504,6 +503,9 @@ def build_parser() -> argparse.ArgumentParser:
     verify_anchors.set_defaults(func=cmd_verify_anchors)
     verify_evidence = verify_sub.add_parser("evidence")
     verify_evidence.set_defaults(func=cmd_verify_evidence)
+    verify_archive = verify_sub.add_parser("archive")
+    verify_archive.add_argument("--path", required=True)
+    verify_archive.set_defaults(func=cmd_verify_archive)
 
     research = sub.add_parser("research")
     research_sub = research.add_subparsers(dest="research_cmd", required=True)
@@ -530,10 +532,7 @@ def build_parser() -> argparse.ArgumentParser:
     storage_compact = storage_sub.add_parser("compact-derived")
     storage_compact.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=False)
     storage_compact.set_defaults(func=cmd_storage_compact)
-    storage_cleanup = storage_sub.add_parser("cleanup")
-    storage_cleanup.add_argument("--path", required=True)
-    storage_cleanup.add_argument("--confirm", action="store_true")
-    storage_cleanup.set_defaults(func=cmd_storage_cleanup)
+    # storage cleanup intentionally omitted: deletion is disabled by policy
 
     proof = sub.add_parser("proof")
     proof_sub = proof.add_subparsers(dest="proof_cmd", required=True)

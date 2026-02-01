@@ -187,8 +187,19 @@ class FilesystemPolicy:
                 continue
         return False
 
-    def allow_read(self, path: Path) -> bool:
-        return self._allowed(path, write=False)
+    def allow_read(self, path: Path, *, allow_ancestor: bool = False) -> bool:
+        if self._allowed(path, write=False):
+            return True
+        if not allow_ancestor:
+            return False
+        candidate = _normalize_root(path)
+        for root in self.read_roots:
+            try:
+                root.relative_to(candidate)
+                return True
+            except ValueError:
+                continue
+        return False
 
     def allow_write(self, path: Path) -> bool:
         return self._allowed(path, write=True)
@@ -234,7 +245,7 @@ def _write_mode_from_flags(flags: int) -> bool:
     return False
 
 
-def _check_fs(path: str | Path | int | None, *, write: bool) -> None:
+def _check_fs(path: str | Path | int | None, *, write: bool, allow_ancestor: bool = False) -> None:
     policy = _current_fs_policy()
     if policy is None:
         return
@@ -249,7 +260,7 @@ def _check_fs(path: str | Path | int | None, *, write: bool) -> None:
     if write:
         allowed = policy.allow_write(candidate)
     else:
-        allowed = policy.allow_read(candidate)
+        allowed = policy.allow_read(candidate, allow_ancestor=allow_ancestor)
     if not allowed:
         verb = "write" if write else "read"
         raise PermissionError(f"Filesystem access denied: {verb} {candidate}")
@@ -305,11 +316,11 @@ def _patch_filesystem() -> None:
             return _original_os_scandir(path)
 
         def _os_stat(path, *args, **kwargs):
-            _check_fs(path, write=False)
+            _check_fs(path, write=False, allow_ancestor=True)
             return _original_os_stat(path, *args, **kwargs)
 
         def _os_lstat(path, *args, **kwargs):
-            _check_fs(path, write=False)
+            _check_fs(path, write=False, allow_ancestor=True)
             return _original_os_lstat(path, *args, **kwargs)
 
         def _os_mkdir(path, *args, **kwargs):

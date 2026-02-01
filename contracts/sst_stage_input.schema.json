@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "args",
+    "kwargs"
+  ],
+  "properties": {
+    "args": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object"
+        }
+      ],
+      "items": false
+    },
+    "kwargs": {
+      "type": "object"
+    }
+  }
+}

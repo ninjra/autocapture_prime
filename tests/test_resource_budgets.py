@@ -10,6 +10,8 @@ class ResourceBudgetTests(unittest.TestCase):
         budgets = runtime_cfg.get("budgets", {})
         self.assertGreater(int(budgets.get("window_budget_ms", 0) or 0), 0)
         self.assertLessEqual(int(budgets.get("preempt_grace_ms", 0) or 0), 1000)
+        self.assertLessEqual(float(budgets.get("cpu_max_utilization", 1.0) or 1.0), 0.5)
+        self.assertLessEqual(float(budgets.get("ram_max_utilization", 1.0) or 1.0), 0.5)
         gpu_cfg = runtime_cfg.get("gpu", {})
         self.assertIn("release_vram_on_active", gpu_cfg)
         self.assertIn("release_vram_deadline_ms", gpu_cfg)

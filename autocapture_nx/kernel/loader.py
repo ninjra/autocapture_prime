@@ -23,6 +23,7 @@ from autocapture_nx.kernel.hashing import sha256_directory, sha256_file, sha256_
 from autocapture_nx.kernel.canonical_json import dumps
 from autocapture_nx import __version__ as kernel_version
 from autocapture_nx.kernel.event_builder import EventBuilder
+from autocapture_nx.kernel.determinism import apply_runtime_determinism
 from autocapture_nx.kernel.telemetry import record_telemetry
 from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
 from autocapture_nx.kernel.metadata_store import persist_unavailable_record
@@ -172,6 +173,7 @@ class Kernel:
         self.effective_config = effective
         self.config = effective.data
         ensure_run_id(self.config)
+        apply_runtime_determinism(self.config)
         fast_boot = bool(
             self.safe_mode and self.config.get("kernel", {}).get("safe_mode_fast_boot", False)
         )
@@ -189,6 +191,7 @@ class Kernel:
         updated = self._apply_meta_plugins(self.config, plugins)
         if updated != self.config:
             ensure_run_id(updated)
+            apply_runtime_determinism(updated)
             validate_config(self.config_paths.schema_path, updated)
             self.config = updated
             registry = PluginRegistry(self.config, safe_mode=self.safe_mode)
@@ -203,6 +206,27 @@ class Kernel:
         )
         capabilities.register("event.builder", builder, network_allowed=False)
         profiler.mark("event_builder")
+        try:
+            from autocapture.runtime.governor import RuntimeGovernor
+            from autocapture.runtime.scheduler import Scheduler
+
+            governor = capabilities.all().get("runtime.governor")
+            if governor is None:
+                governor = RuntimeGovernor()
+                try:
+                    governor.update_config(self.config)
+                except Exception:
+                    pass
+                capabilities.register("runtime.governor", governor, network_allowed=False)
+            scheduler = capabilities.all().get("runtime.scheduler")
+            if scheduler is None:
+                try:
+                    scheduler = Scheduler(governor)
+                except Exception:
+                    scheduler = Scheduler(RuntimeGovernor())
+                capabilities.register("runtime.scheduler", scheduler, network_allowed=False)
+        except Exception:
+            pass
         try:
             from autocapture_nx.kernel.egress_approvals import EgressApprovalStore
 
@@ -934,7 +958,7 @@ class Kernel:
             root_path = Path(root)
             if not root_path.exists():
                 continue
-            for file_path in root_path.rglob("*.tmp"):
+            for file_path in sorted(root_path.rglob("*.tmp")):
                 try:
                     file_path.unlink()
                     removed.append(str(file_path))
@@ -953,7 +977,8 @@ class Kernel:
                 media = None
             segment_records: dict[str, dict[str, Any]] = {}
             if metadata is not None and hasattr(metadata, "keys"):
-                for record_id in metadata.keys():
+                record_ids = list(metadata.keys())
+                for record_id in sorted(record_ids):
                     record = metadata.get(record_id, {})
                     if not isinstance(record, dict):
                         continue
@@ -985,7 +1010,8 @@ class Kernel:
                 except Exception:
                     sealed_ids = set()
 
-            for record_id, record in segment_records.items():
+            for record_id in sorted(segment_records):
+                record = segment_records[record_id]
                 if record_id in sealed_ids:
                     continue
                 if record_id not in media_ids:
@@ -1394,6 +1420,8 @@ class Kernel:
                 )
             )
         required_caps = config.get("kernel", {}).get("required_capabilities", [])
+        if self.safe_mode or config.get("plugins", {}).get("safe_mode", False):
+            required_caps = config.get("kernel", {}).get("safe_mode_required_capabilities", required_caps)
         missing = [cap for cap in required_caps if cap not in self.system.capabilities.all()]
         checks.append(
             DoctorCheck(

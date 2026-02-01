@@ -24,6 +24,7 @@ from collections import deque
 
 from autocapture_nx.kernel.telemetry import record_telemetry, percentile
 from autocapture_nx.windows.win_capture import Frame, iter_screenshots, list_monitors
+from autocapture_nx.windows.fullscreen import fullscreen_snapshot
 
 STOP_SENTINEL = object()
 _FFMPEG_ENCODER_CACHE: dict[str, set[str]] = {}
@@ -644,7 +645,9 @@ class CapturePipeline:
         backpressure_cfg = self._config.get("backpressure", {})
         fps_target = self._fps_target
         bitrate_kbps = self._bitrate_kbps
-        jpeg_quality = int(capture_cfg.get("jpeg_quality", self._jpeg_quality))
+        image_cfg = self._config.get("capture", {}).get("image", {})
+        mss_cfg = image_cfg.get("mss_jpeg", {}) if isinstance(image_cfg, dict) else {}
+        jpeg_quality = int(capture_cfg.get("jpeg_quality", mss_cfg.get("quality", self._jpeg_quality)))
         activity_cfg = capture_cfg.get("activity", {})
         activity_enabled = bool(activity_cfg.get("enabled", False))
         activity_window_s = float(activity_cfg.get("active_window_s", 3))
@@ -659,6 +662,13 @@ class CapturePipeline:
         idle_quality = int(activity_cfg.get("idle_jpeg_quality", jpeg_quality))
         runtime_cfg = self._config.get("runtime", {})
         suspend_workers = bool(runtime_cfg.get("mode_enforcement", {}).get("suspend_workers", True))
+        fullscreen_cfg = runtime_cfg.get("fullscreen_halt", {}) if isinstance(runtime_cfg, dict) else {}
+        fullscreen_enabled = bool(fullscreen_cfg.get("enabled", True))
+        fullscreen_poll_ms = float(fullscreen_cfg.get("poll_ms", 250) or 250)
+        fullscreen_poll_s = max(0.05, min(fullscreen_poll_ms / 1000.0, 5.0))
+        last_fullscreen_check = 0.0
+        fullscreen_active = False
+        fullscreen_last_logged: bool | None = None
         silence_cfg = runtime_cfg.get("silence", {}) if isinstance(runtime_cfg, dict) else {}
         silence_enabled = bool(silence_cfg.get("enabled", True))
         silence_max_age_s = float(silence_cfg.get("max_capture_age_s", 15.0))
@@ -679,7 +689,7 @@ class CapturePipeline:
         last_idle_seconds = 0.0
         last_activity_score = 0.0
         last_activity_reason: str | None = None
-        backend = str(capture_cfg.get("backend", "mss"))
+        backend_requested = str(capture_cfg.get("backend", "mss"))
         disk_cfg = self._config.get("storage", {}).get("disk_pressure", {})
         warn_free = int(disk_cfg.get("warn_free_gb", 200))
         soft_free = int(disk_cfg.get("soft_free_gb", warn_free))
@@ -710,6 +720,12 @@ class CapturePipeline:
         frame_format = self._frame_format
         include_cursor = self._include_cursor
         include_cursor_shape = self._include_cursor_shape
+        backend, backend_reason = _resolve_backend(
+            backend_requested,
+            capture_cfg,
+            self._ffmpeg_path,
+            monitor_index,
+        )
 
         def _apply_disk_degrade(base_fps_val: int, base_bitrate_val: int, base_quality_val: int) -> tuple[int, int, int]:
             min_fps = int(backpressure_cfg.get("min_fps", 5))
@@ -824,8 +840,14 @@ class CapturePipeline:
             include_cursor_shape=include_cursor_shape,
         )
         self._backend_used = backend_used
-        if backend_used != backend:
-            backend_payload: dict[str, Any] = {"requested": backend, "used": backend_used}
+        if backend_used != backend or backend_used != backend_requested:
+            backend_payload: dict[str, Any] = {
+                "requested": backend_requested,
+                "resolved": backend,
+                "used": backend_used,
+            }
+            if backend_reason:
+                backend_payload["reason"] = backend_reason
             self._event_builder.journal_event("capture.backend_fallback", backend_payload)
             self._event_builder.ledger_entry(
                 "capture.backend_fallback",
@@ -834,8 +856,41 @@ class CapturePipeline:
                 payload={"event": "capture.backend_fallback", **backend_payload},
             )
 
-        for frame in frame_iter:
-            if self._stop.is_set():
+        frame_iter = iter(frame_iter)
+        while not self._stop.is_set():
+            now = time.monotonic()
+            if fullscreen_enabled and (now - last_fullscreen_check) >= fullscreen_poll_s:
+                last_fullscreen_check = now
+                snapshot = fullscreen_snapshot(_snapshot_window(self._window_tracker))
+                fullscreen_active = bool(snapshot.fullscreen) if snapshot.ok else False
+                if fullscreen_active != fullscreen_last_logged:
+                    fullscreen_last_logged = fullscreen_active
+                    payload = {
+                        "event": "capture.fullscreen_halt" if fullscreen_active else "capture.fullscreen_resume",
+                        "ts_utc": snapshot.ts_utc,
+                        "fullscreen": bool(fullscreen_active),
+                        "reason": snapshot.reason,
+                        "window": snapshot.window,
+                        "run_id": str(self._config.get("runtime", {}).get("run_id", "")),
+                        "plugin_id": self._plugin_id,
+                    }
+                    record_telemetry("capture.fullscreen", payload)
+                    if self._event_builder is not None:
+                        try:
+                            self._event_builder.journal_event(payload["event"], payload, ts_utc=snapshot.ts_utc)
+                        except Exception:
+                            pass
+                    if self._logger is not None:
+                        try:
+                            self._logger.log("capture.fullscreen", payload)
+                        except Exception:
+                            pass
+            if fullscreen_enabled and fullscreen_active:
+                time.sleep(fullscreen_poll_s)
+                continue
+            try:
+                frame = next(frame_iter)
+            except StopIteration:
                 break
             now = time.monotonic()
             if self._last_frame_ts is not None:
@@ -1410,35 +1465,45 @@ class CapturePipeline:
 
         content_hash = None
         try:
-            with open(artifact.path, "rb") as handle:
-                if hasattr(self._storage_media, "put_stream"):
-                    import hashlib
+            if hasattr(self._storage_media, "put_path"):
+                import hashlib
 
-                    hasher = hashlib.sha256()
-
-                    class _HashingReader:
-                        def __init__(self, source):
-                            self._source = source
-
-                        def read(self, size: int = -1) -> bytes:
-                            data = self._source.read(size)
-                            if data:
-                                hasher.update(data)
-                            return data
-
-                    reader = _HashingReader(handle)
-                    self._storage_media.put_stream(artifact.segment_id, reader, ts_utc=artifact.ts_start_utc)
-                    content_hash = hasher.hexdigest()
-                else:
-                    data = handle.read()
-                    if data:
+                hasher = hashlib.sha256()
+                with open(artifact.path, "rb") as handle:
+                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                        hasher.update(chunk)
+                content_hash = hasher.hexdigest()
+                self._storage_media.put_path(artifact.segment_id, artifact.path, ts_utc=artifact.ts_start_utc)
+            else:
+                with open(artifact.path, "rb") as handle:
+                    if hasattr(self._storage_media, "put_stream"):
                         import hashlib
 
-                        content_hash = hashlib.sha256(data).hexdigest()
-                    if hasattr(self._storage_media, "put"):
-                        self._storage_media.put(artifact.segment_id, data, ts_utc=artifact.ts_start_utc)
+                        hasher = hashlib.sha256()
+
+                        class _HashingReader:
+                            def __init__(self, source):
+                                self._source = source
+
+                            def read(self, size: int = -1) -> bytes:
+                                data = self._source.read(size)
+                                if data:
+                                    hasher.update(data)
+                                return data
+
+                        reader = _HashingReader(handle)
+                        self._storage_media.put_stream(artifact.segment_id, reader, ts_utc=artifact.ts_start_utc)
+                        content_hash = hasher.hexdigest()
                     else:
-                        self._storage_media.put(artifact.segment_id, data)
+                        data = handle.read()
+                        if data:
+                            import hashlib
+
+                            content_hash = hashlib.sha256(data).hexdigest()
+                        if hasattr(self._storage_media, "put"):
+                            self._storage_media.put(artifact.segment_id, data, ts_utc=artifact.ts_start_utc)
+                        else:
+                            self._storage_media.put(artifact.segment_id, data)
             if content_hash:
                 metadata["content_hash"] = content_hash
             metadata["payload_hash"] = sha256_canonical({k: v for k, v in metadata.items() if k != "payload_hash"})
@@ -1861,13 +1926,19 @@ def _window_fullscreen_state(window_ref: dict[str, Any] | None) -> bool | None:
 
 
 def _resolve_container(container_type: str, ffmpeg_path: str | None) -> tuple[str, str | None]:
+    def _safe_which(binary: str) -> str | None:
+        try:
+            return shutil.which(binary)
+        except Exception:
+            return None
+
     if container_type == "ffmpeg_mp4":
-        path = ffmpeg_path or shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
+        path = ffmpeg_path or _safe_which("ffmpeg") or _safe_which("ffmpeg.exe")
         if not path:
             return "avi_mjpeg", None
         return "ffmpeg_mp4", path
     if container_type == "ffmpeg_lossless":
-        path = ffmpeg_path or shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
+        path = ffmpeg_path or _safe_which("ffmpeg") or _safe_which("ffmpeg.exe")
         if not path:
             return "zip", None
         return "ffmpeg_lossless", path
@@ -1898,6 +1969,47 @@ def _coerce_frame_format(frame_format: str, container_type: str) -> str:
     return mode
 
 
+def _normalize_backend(backend: str) -> str:
+    text = str(backend or "mss").strip().lower()
+    if text in {"mss", "mss_jpeg", "jpeg"}:
+        return "mss_jpeg"
+    if text in {"dd", "dd_nvenc", "nvenc"}:
+        return "dd_nvenc"
+    return text or "mss_jpeg"
+
+
+def _dd_nvenc_available(ffmpeg_path: str | None, monitor_index: int) -> bool:
+    if os.name != "nt":
+        return False
+    if not _ffmpeg_supports_encoder(ffmpeg_path, "h264_nvenc"):
+        return False
+    try:
+        cam = _create_dxcam(monitor_index)
+    except Exception:
+        cam = None
+    return cam is not None
+
+
+def _resolve_backend(
+    requested: str,
+    capture_cfg: dict[str, Any],
+    ffmpeg_path: str | None,
+    monitor_index: int,
+) -> tuple[str, str | None]:
+    normalized = _normalize_backend(requested)
+    dd_cfg = capture_cfg.get("dd_nvenc", {}) if isinstance(capture_cfg, dict) else {}
+    allow_fallback = bool(dd_cfg.get("allow_fallback", True))
+    if normalized in {"auto", "dd_nvenc"}:
+        if _dd_nvenc_available(ffmpeg_path, monitor_index):
+            return "dd_nvenc", None
+        if normalized == "dd_nvenc" and not allow_fallback:
+            raise RuntimeError("dd_nvenc unavailable and fallback disabled")
+        return "mss_jpeg", "nvenc_unavailable"
+    if normalized in {"mss", "mss_jpeg"}:
+        return "mss_jpeg", None
+    return normalized, None
+
+
 def _frame_iter(
     backend: str,
     fps_provider: Callable[[], int],
@@ -1910,6 +2022,7 @@ def _frame_iter(
     include_cursor: bool,
     include_cursor_shape: bool,
 ) -> tuple[str, Any]:
+    backend = _normalize_backend(backend)
     if backend == "auto":
         try:
             return "dxcam", _dxcam_frames(
@@ -1932,9 +2045,9 @@ def _frame_iter(
                 include_cursor=include_cursor,
                 include_cursor_shape=include_cursor_shape,
             )
-    if backend == "dxcam":
+    if backend in {"dd_nvenc", "dxcam"}:
         try:
-            return "dxcam", _dxcam_frames(
+            return "dd_nvenc", _dxcam_frames(
                 fps_provider,
                 jpeg_quality=jpeg_quality,
                 frame_format=frame_format,
@@ -1944,7 +2057,7 @@ def _frame_iter(
                 include_cursor_shape=include_cursor_shape,
             )
         except Exception:
-            return "mss", iter_screenshots(
+            return "mss_jpeg", iter_screenshots(
                 fps_provider,
                 frame_source=frame_source,
                 jpeg_quality=jpeg_quality,
@@ -1954,6 +2067,8 @@ def _frame_iter(
                 include_cursor=include_cursor,
                 include_cursor_shape=include_cursor_shape,
             )
+    if backend in {"mss", "mss_jpeg"}:
+        backend = "mss_jpeg"
     return backend, iter_screenshots(
         fps_provider,
         frame_source=frame_source,

@@ -28,7 +28,13 @@
   "plugin_id": "builtin.devtools.ast_ir",
   "required_capabilities": [],
   "settings_paths": [
-    "devtools"
+    "devtools",
+    "runtime",
+    "storage",
+    "schema_version",
+    "kernel.required_capabilities",
+    "plugins.enabled",
+    "plugins.permissions.network_allowed_plugin_ids"
   ],
   "version": "0.1.0"
 }

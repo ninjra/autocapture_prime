@@ -20,6 +20,15 @@ class Frame:
     ts_monotonic: float | None = None
 
 
+@dataclass(frozen=True)
+class CaptureBackend:
+    name: str
+    frames: Iterator[Frame]
+
+    def capture_once(self) -> Frame:
+        return next(self.frames)
+
+
 def _iso_utc() -> str:
     from datetime import datetime, timezone
 
@@ -157,6 +166,75 @@ def iter_screenshots(
         elapsed = now_fn() - start
         if elapsed < interval:
             sleep_fn(interval - elapsed)
+
+
+def create_capture_backend(
+    backend: str,
+    *,
+    fps: int | Callable[[], int] = 1,
+    frame_source: Iterator[Frame] | None = None,
+    jpeg_quality: int | Callable[[], int] = 90,
+    frame_format: str = "jpeg",
+    monitor_index: int = 0,
+    resolution: str | None = None,
+    include_cursor: bool = False,
+    include_cursor_shape: bool = True,
+) -> CaptureBackend:
+    name = str(backend or "mss").strip().lower()
+    if name in {"mss", "mss_jpeg"}:
+        frames = iter_screenshots(
+            fps,
+            frame_source=frame_source,
+            jpeg_quality=jpeg_quality,
+            frame_format=frame_format,
+            monitor_index=monitor_index,
+            resolution=resolution,
+            include_cursor=include_cursor,
+            include_cursor_shape=include_cursor_shape,
+        )
+        return CaptureBackend(name="mss_jpeg", frames=frames)
+    if name in {"dd_nvenc", "dxcam"}:
+        try:
+            from autocapture_nx.capture.pipeline import _dxcam_frames
+        except Exception as exc:
+            raise RuntimeError(f"DXCAM backend unavailable: {exc}")
+        frames = _dxcam_frames(
+            fps if callable(fps) else (lambda: int(fps)),
+            jpeg_quality=jpeg_quality,
+            frame_format=frame_format,
+            monitor_index=monitor_index,
+            resolution=resolution,
+            include_cursor=include_cursor,
+            include_cursor_shape=include_cursor_shape,
+        )
+        return CaptureBackend(name="dd_nvenc", frames=frames)
+    raise RuntimeError(f"Unknown capture backend: {backend}")
+
+
+def capture_once(
+    backend: str,
+    *,
+    fps: int | Callable[[], int] = 1,
+    frame_source: Iterator[Frame] | None = None,
+    jpeg_quality: int | Callable[[], int] = 90,
+    frame_format: str = "jpeg",
+    monitor_index: int = 0,
+    resolution: str | None = None,
+    include_cursor: bool = False,
+    include_cursor_shape: bool = True,
+) -> Frame:
+    backend_obj = create_capture_backend(
+        backend,
+        fps=fps,
+        frame_source=frame_source,
+        jpeg_quality=jpeg_quality,
+        frame_format=frame_format,
+        monitor_index=monitor_index,
+        resolution=resolution,
+        include_cursor=include_cursor,
+        include_cursor_shape=include_cursor_shape,
+    )
+    return backend_obj.capture_once()
 
 
 def _parse_resolution(value: str | None, width: int | None, height: int | None) -> tuple[int, int] | None:

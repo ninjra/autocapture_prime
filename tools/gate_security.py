@@ -2,25 +2,52 @@
 
 from __future__ import annotations
 
-import subprocess
+import json
+import unittest
+from pathlib import Path
 import sys
 
 
 def main() -> int:
-    cmd = [
-        sys.executable,
-        "-m",
-        "unittest",
-        "tests/test_network_guard.py",
-        "tests/test_plugin_network_block.py",
-        "tests/test_encrypted_store_fail_loud.py",
-        "tests/test_sanitizer_no_raw_pii.py",
-        "tests/test_policy_gate.py",
-        "tests/test_egress_gateway.py",
-        "-q",
+    checks = [
+        "tests.test_network_guard",
+        "tests.test_plugin_network_block",
+        "tests.test_encrypted_store_fail_loud",
+        "tests.test_sanitizer_no_raw_pii",
+        "tests.test_policy_gate",
+        "tests.test_egress_gateway",
+        "tests.test_sqlcipher_roundtrip",
+        "tests.test_plugin_sandbox",
+        "tests.test_keyring_migration_windows",
     ]
-    result = subprocess.run(cmd)
-    return result.returncode
+    summary = {"schema_version": 1, "checks": []}
+    failed = False
+    for module in checks:
+        suite = unittest.defaultTestLoader.loadTestsFromName(module)
+        runner = unittest.TextTestRunner(stream=sys.stdout, verbosity=1)
+        result = runner.run(suite)
+        status = "pass"
+        skip_reason = None
+        if result.failures or result.errors:
+            status = "fail"
+            failed = True
+        elif result.testsRun > 0 and len(result.skipped) == result.testsRun:
+            status = "skip"
+            skip_reason = "; ".join(reason for _test, reason in result.skipped)
+        summary["checks"].append(
+            {
+                "name": module,
+                "status": status,
+                "skipped": len(result.skipped),
+                "failures": len(result.failures),
+                "errors": len(result.errors),
+                "skip_reason": skip_reason,
+            }
+        )
+    out = Path("artifacts") / "security"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "gate_security.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from autocapture_nx.kernel.errors import PermissionError
+from autocapture_nx.kernel.errors import PluginError
 from autocapture_nx.plugin_system.registry import PluginRegistry
 
 
@@ -102,12 +102,12 @@ class InprocCapabilityGuardTests(unittest.TestCase):
             plugins.setdefault("locks", {})["enforce"] = False
             plugins["conflicts"] = {"enforce": True, "allow_pairs": []}
             hosting = plugins.setdefault("hosting", {})
-            hosting["mode"] = "inproc"
+            hosting["mode"] = "subprocess"
 
             registry = PluginRegistry(config, safe_mode=False)
             _loaded, caps = registry.load_plugins()
             consumer = caps.get("consumer.cap")
-            with self.assertRaises(PermissionError):
+            with self.assertRaises(PluginError):
                 consumer.value()
 
     def test_inproc_plugin_allows_declared_capability(self) -> None:
@@ -125,7 +125,7 @@ class InprocCapabilityGuardTests(unittest.TestCase):
             plugins.setdefault("locks", {})["enforce"] = False
             plugins["conflicts"] = {"enforce": True, "allow_pairs": []}
             hosting = plugins.setdefault("hosting", {})
-            hosting["mode"] = "inproc"
+            hosting["mode"] = "subprocess"
 
             registry = PluginRegistry(config, safe_mode=False)
             _loaded, caps = registry.load_plugins()

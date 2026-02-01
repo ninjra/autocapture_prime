@@ -34,6 +34,11 @@ class InMemoryStore:
             raise FileExistsError(f"Record already exists: {key}")
         self.put(key, stream.read())
 
+    def put_path(self, key: str, path: str, *, ts_utc: str | None = None) -> None:
+        _ = ts_utc
+        with open(path, "rb") as handle:
+            self.put(key, handle.read())
+
     def put_batch(self, records: list[tuple[str, Any]]) -> list[str]:
         inserted: list[str] = []
         for key, value in records:

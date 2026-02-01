@@ -90,7 +90,7 @@ class PluginDependencyOrderTests(unittest.TestCase):
             plugins["conflicts"] = {"enforce": True, "allow_pairs": []}
             plugins["filesystem_defaults"] = {"read": [], "readwrite": []}
             hosting = plugins.setdefault("hosting", {})
-            hosting["mode"] = "inproc"
+            hosting["mode"] = "subprocess"
 
             registry = PluginRegistry(config, safe_mode=False)
             loaded, _caps = registry.load_plugins()
@@ -119,7 +119,7 @@ class PluginDependencyOrderTests(unittest.TestCase):
             plugins["conflicts"] = {"enforce": True, "allow_pairs": []}
             plugins["filesystem_defaults"] = {"read": [], "readwrite": []}
             hosting = plugins.setdefault("hosting", {})
-            hosting["mode"] = "inproc"
+            hosting["mode"] = "subprocess"
 
             registry = PluginRegistry(config, safe_mode=False)
             loaded, _caps = registry.load_plugins()

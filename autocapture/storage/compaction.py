@@ -57,6 +57,8 @@ def compact_derived(
     event_builder: Any | None = None,
 ) -> CompactionResult:
     storage_cfg = config.get("storage", {})
+    if bool(storage_cfg.get("no_deletion_mode", True)):
+        dry_run = True
     data_dir = Path(storage_cfg.get("data_dir", "data"))
     metadata_path = Path(storage_cfg.get("metadata_path", data_dir / "metadata"))
     lexical_path = Path(storage_cfg.get("lexical_path", data_dir / "lexical.db"))
@@ -104,7 +106,7 @@ def compact_derived(
                 except OSError:
                     continue
     else:
-        removed_index_files = int(lexical_path.exists()) + int(vector_path.exists())
+        removed_index_files = 0
 
     after_meta_bytes = _path_size(metadata_path) if not dry_run else before_meta_bytes
     after_index_bytes = _path_size(lexical_path) + _path_size(vector_path) if not dry_run else before_index_bytes

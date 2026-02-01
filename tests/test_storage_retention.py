@@ -7,7 +7,7 @@ from plugins.builtin.storage_memory.plugin import InMemoryStore
 
 
 class StorageRetentionTests(unittest.TestCase):
-    def test_retention_deletes_old_media_only(self) -> None:
+    def test_retention_disabled_by_policy(self) -> None:
         metadata = ImmutableMetadataStore(InMemoryStore())
         media = InMemoryStore()
         now = datetime.now(timezone.utc)
@@ -44,10 +44,8 @@ class StorageRetentionTests(unittest.TestCase):
             }
         }
         result = apply_evidence_retention(metadata, media, config, dry_run=False)
-        self.assertIsNotNone(result)
-        assert result is not None
-        self.assertEqual(result.deleted, 1)
-        self.assertIsNone(media.get(old_id))
+        self.assertIsNone(result)
+        self.assertEqual(media.get(old_id), b"old")
         self.assertEqual(media.get(new_id), b"new")
         self.assertIsNotNone(metadata.get(old_id))
         self.assertIsNotNone(metadata.get(new_id))

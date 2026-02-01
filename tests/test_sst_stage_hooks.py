@@ -159,6 +159,7 @@ def _run_pipeline(
     storage["lexical_path"] = str(Path(tmpdir) / "lexical.db")
     storage["vector_path"] = str(Path(tmpdir) / "vector.db")
     storage["data_dir"] = str(tmpdir)
+    storage["raw_first_local"] = True
     sst = config.setdefault("processing", {}).setdefault("sst", {})
     sst["heavy_always"] = True
     sst["redact_enabled"] = bool(redact_enabled)
@@ -278,7 +279,7 @@ class SSTStageHookTests(unittest.TestCase):
             self.assertIn("hook.one", provider_ids)
             self.assertNotIn("hook.two", provider_ids)
 
-    def test_stage_hook_extra_docs_redacted_when_enabled(self) -> None:
+    def test_stage_hook_extra_docs_not_redacted_when_raw_first(self) -> None:
         with tempfile.TemporaryDirectory(dir=".") as tmpdir:
             metadata, _storage = _run_pipeline(
                 tmpdir,
@@ -295,9 +296,11 @@ class SSTStageHookTests(unittest.TestCase):
             )
             extra_payloads = _extra_doc_payloads(metadata)
             self.assertTrue(extra_payloads)
-            # Ensure both doc text and meta are redacted.
+            # Raw-first local store disables redaction; verify sensitive text remains.
             joined = json.dumps(extra_payloads, sort_keys=True)
-            self.assertIn("[REDACTED:email:", joined)
+            self.assertIn("one@example.com", joined)
+            self.assertIn("two@example.com", joined)
+            self.assertNotIn("[REDACTED:email:", joined)
 
 
 if __name__ == "__main__":

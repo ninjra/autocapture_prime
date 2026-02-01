@@ -4,7 +4,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from autocapture_nx.kernel.errors import PluginError
 from autocapture_nx.plugin_system.registry import PluginRegistry
 
 
@@ -71,6 +70,7 @@ class CapabilityPolicyTests(unittest.TestCase):
             config["plugins"]["enabled"] = {p1: True, p2: True}
             config["plugins"]["search_paths"] = [str(root)]
             config["plugins"]["locks"]["enforce"] = False
+            config.setdefault("storage", {})["audit_db_path"] = str(root / "audit.db")
             config["plugins"]["capabilities"][cap] = {
                 "mode": "single",
                 "preferred": [],
@@ -80,8 +80,9 @@ class CapabilityPolicyTests(unittest.TestCase):
             }
 
             registry = PluginRegistry(config, safe_mode=False)
-            with self.assertRaises(PluginError):
-                registry.load_plugins()
+            _plugins, caps = registry.load_plugins()
+            selected = caps.get(cap)
+            self.assertEqual(selected.whoami(), p1)
 
     def test_single_mode_uses_preferred_provider(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -97,6 +98,7 @@ class CapabilityPolicyTests(unittest.TestCase):
             config["plugins"]["enabled"] = {p1: True, p2: True}
             config["plugins"]["search_paths"] = [str(root)]
             config["plugins"]["locks"]["enforce"] = False
+            config.setdefault("storage", {})["audit_db_path"] = str(root / "audit.db")
             config["plugins"]["capabilities"][cap] = {
                 "mode": "single",
                 "preferred": [p2],
@@ -124,6 +126,7 @@ class CapabilityPolicyTests(unittest.TestCase):
             config["plugins"]["enabled"] = {p1: True, p2: True}
             config["plugins"]["search_paths"] = [str(root)]
             config["plugins"]["locks"]["enforce"] = False
+            config.setdefault("storage", {})["audit_db_path"] = str(root / "audit.db")
             config["plugins"]["capabilities"][cap] = {
                 "mode": "multi",
                 "preferred": [],

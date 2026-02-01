@@ -1753,6 +1753,8 @@ def _canonical_key(item: Any) -> str | None:
 def _sst_config(config: dict[str, Any]) -> dict[str, Any]:
     processing = config.get("processing", {}) if isinstance(config, dict) else {}
     sst = processing.get("sst", {}) if isinstance(processing, dict) else {}
+    storage_cfg = config.get("storage", {}) if isinstance(config, dict) else {}
+    raw_first_local = bool(storage_cfg.get("raw_first_local", True))
 
     def _int(name: str, default: int) -> int:
         try:
@@ -1792,6 +1794,10 @@ def _sst_config(config: dict[str, Any]) -> dict[str, Any]:
 
     stages = set(_STAGE_NAMES) | {str(stage) for stage in stage_cfg.keys()}
     stage_policies = {stage: _stage_policy(stage) for stage in sorted(stages)}
+    if raw_first_local:
+        compliance_policy = stage_policies.get("compliance.redact")
+        if isinstance(compliance_policy, dict):
+            compliance_policy["enabled"] = False
 
     ui_parse_cfg = sst.get("ui_parse", {}) if isinstance(sst.get("ui_parse", {}), dict) else {}
     ui_parse = {
@@ -1867,7 +1873,7 @@ def _sst_config(config: dict[str, Any]) -> dict[str, Any]:
         "chart_min_ticks": _int("chart_min_ticks", 2),
         "delta_bbox_shift_px": _int("delta_bbox_shift_px", 24),
         "delta_table_match_iou_bp": _int("delta_table_match_iou_bp", 3000),
-        "redact_enabled": _bool("redact_enabled", True),
+        "redact_enabled": _bool("redact_enabled", True) and not raw_first_local,
         "redact_denylist": tuple(str(x) for x in denylist if x),
         "stage_providers": stage_policies,
         "ui_parse": ui_parse,

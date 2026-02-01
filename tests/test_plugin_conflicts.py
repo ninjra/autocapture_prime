@@ -65,12 +65,7 @@ class PluginConflictTests(unittest.TestCase):
         plugins["search_paths"] = [str(search_path)]
         plugins.setdefault("locks", {})["enforce"] = False
         hosting = plugins.setdefault("hosting", {})
-        hosting["mode"] = "inproc"
-        hosting["inproc_allowlist"] = ["test.conflict.a", "test.conflict.b"]
-        hosting["inproc_justifications"] = {
-            "test.conflict.a": "test fixture",
-            "test.conflict.b": "test fixture",
-        }
+        hosting["mode"] = "subprocess"
         plugins["conflicts"] = {"enforce": True, "allow_pairs": []}
         return config
 

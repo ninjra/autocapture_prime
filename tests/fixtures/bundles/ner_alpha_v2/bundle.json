@@ -1,0 +1,6 @@
+{
+  "bundle_id": "ner.alpha",
+  "version": "2.0.0",
+  "kind": "ner",
+  "names_path": "names.txt"
+}

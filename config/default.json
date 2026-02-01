@@ -94,6 +94,11 @@
       "loop": false,
       "max_frames": 0
     },
+    "image": {
+      "mss_jpeg": {
+        "quality": 90
+      }
+    },
     "video": {
       "activity": {
         "active_bitrate_kbps": 2000,
@@ -109,6 +114,9 @@
         "preserve_quality": true
       },
       "backend": "mss",
+      "dd_nvenc": {
+        "allow_fallback": true
+      },
       "container": "ffmpeg_lossless",
       "dedupe": {
         "enabled": true,
@@ -152,6 +160,8 @@
     }
   },
   "paths": {
+    "config_dir": "config",
+    "data_dir": "data",
     "preferred_data_dir_windows": "D:\\autocapture"
   },
   "devtools": {
@@ -342,6 +352,8 @@
       "builtin.privacy.egress_sanitizer",
       "builtin.processing.sst.pipeline",
       "builtin.processing.sst.ui_vlm",
+      "builtin.prompt.bundle.default",
+      "builtin.research.default",
       "builtin.reranker.basic",
       "builtin.retrieval.basic",
       "builtin.runtime.governor",
@@ -694,6 +706,10 @@
         "provider_ids": []
       }
     },
+    "failure_ordering": {
+      "enabled": true,
+      "min_calls": 3
+    },
     "conflicts": {
       "allow_pairs": [],
       "enforce": true
@@ -716,10 +732,10 @@
       "builtin.ocr.basic",
       "builtin.privacy.egress_sanitizer",
       "builtin.processing.sst.pipeline",
+      "builtin.prompt.bundle.default",
+      "builtin.research.default",
       "builtin.reranker.basic",
       "builtin.retrieval.basic",
-      "builtin.runtime.governor",
-      "builtin.runtime.scheduler",
       "builtin.storage.sqlcipher",
       "builtin.time.advanced",
       "builtin.tracking.input.windows",
@@ -763,11 +779,13 @@
       "builtin.ocr.basic": true,
       "builtin.privacy.egress_sanitizer": true,
       "builtin.processing.sst.pipeline": true,
+      "builtin.prompt.bundle.default": true,
+      "builtin.research.default": true,
       "builtin.processing.sst.ui_vlm": false,
       "builtin.reranker.basic": true,
       "builtin.retrieval.basic": true,
-      "builtin.runtime.governor": true,
-      "builtin.runtime.scheduler": true,
+      "builtin.runtime.governor": false,
+      "builtin.runtime.scheduler": false,
       "builtin.sst.build.delta": false,
       "builtin.sst.build.state": false,
       "builtin.sst.compliance.redact": false,
@@ -798,13 +816,14 @@
     "settings": {},
     "filesystem_defaults": {
       "read": [
-        "{repo_root}/contracts",
-        "{repo_root}/config",
-        "{data_dir}"
+        "{run_dir}",
+        "{metadata_db_path}",
+        "{audit_db_path}",
+        "{lexical_db_path}",
+        "{vector_db_path}"
       ],
       "readwrite": [
-        "{data_dir}",
-        "{cache_dir}"
+        "{run_dir}"
       ]
     },
     "filesystem_policies": {
@@ -813,16 +832,61 @@
           "{anchor_dir}"
         ]
       },
+      "builtin.observability.basic": {
+        "readwrite": [
+          "{data_dir}"
+        ]
+      },
       "builtin.storage.encrypted": {
         "readwrite": [
+          "{data_dir}",
+          "{metadata_db_path}",
+          "{media_dir}",
+          "{blob_dir}",
+          "{spool_dir}",
+          "{lexical_db_path}",
+          "{vector_db_path}",
           "{keyring_dir}",
           "{root_key_dir}"
         ]
       },
       "builtin.storage.sqlcipher": {
         "readwrite": [
+          "{data_dir}",
+          "{metadata_db_path}",
+          "{media_dir}",
+          "{blob_dir}",
+          "{spool_dir}",
+          "{lexical_db_path}",
+          "{vector_db_path}",
           "{keyring_dir}",
           "{root_key_dir}"
+        ]
+      },
+      "builtin.storage.memory": {
+        "readwrite": [
+          "{data_dir}"
+        ]
+      },
+      "builtin.ledger.basic": {
+        "readwrite": [
+          "{data_dir}"
+        ]
+      },
+      "builtin.journal.basic": {
+        "readwrite": [
+          "{data_dir}"
+        ]
+      },
+      "builtin.citation.basic": {
+        "read": [
+          "{data_dir}",
+          "{anchor_dir}"
+        ]
+      },
+      "builtin.egress.gateway": {
+        "read": [
+          "{repo_root}/contracts"
         ]
       },
       "builtin.privacy.egress_sanitizer": {
@@ -833,10 +897,11 @@
       },
       "builtin.devtools.ast_ir": {
         "read": [
-          "{repo_root}/autocapture_nx"
+          "{repo_root}/autocapture_nx",
+          "{repo_root}/contracts/ir_pins.json"
         ],
         "readwrite": [
-          "{repo_root}/tools/hypervisor/runs"
+          "{run_dir}"
         ]
       },
       "builtin.devtools.diffusion": {
@@ -850,33 +915,18 @@
     },
     "hosting": {
       "cache_dir": "data/cache/plugins",
-      "inproc_allowlist": [
-        "builtin.capture.basic",
-        "builtin.capture.windows",
-        "builtin.capture.audio.windows",
-        "builtin.runtime.governor",
-        "builtin.runtime.scheduler",
-        "builtin.tracking.input.windows",
-        "builtin.window.metadata.windows",
-        "builtin.cursor.windows"
-      ],
-      "inproc_justifications": {
-        "builtin.capture.audio.windows": "Real-time audio capture latency",
-        "builtin.capture.basic": "Stub capture for development",
-        "builtin.capture.windows": "Low-latency frame capture",
-        "builtin.cursor.windows": "Cursor sampling latency",
-        "builtin.runtime.governor": "Shares live budget state/leases not RPC-serializable",
-        "builtin.runtime.scheduler": "Requires in-proc governor lease objects for scheduling",
-        "builtin.tracking.input.windows": "High-frequency input tracking",
-        "builtin.window.metadata.windows": "Window metadata sampling latency"
-      },
+      "inproc_allowlist": [],
+      "inproc_justifications": {},
       "job_limits": {
         "cpu_time_ms": 60000,
         "max_memory_mb": 512,
         "max_processes": 1
       },
       "mode": "subprocess",
-      "rpc_max_message_bytes": 2000000,
+      "rpc_max_message_bytes": 20000000,
+      "rpc_failure_limit": 3,
+      "rpc_failure_window_s": 60,
+      "rpc_failure_cooldown_s": 30,
       "rpc_timeout_limit": 3,
       "rpc_timeout_s": 10,
       "rpc_startup_timeout_s": 60,
@@ -1171,8 +1221,28 @@
       "subprocess"
     ],
     "bundle_name": "default",
+    "bundle_root": "data/promptops/sources",
     "enabled": true,
     "examples": {},
+    "eval": {
+      "enabled": false,
+      "cases_path": "tests/fixtures/promptops_eval_cases.json",
+      "output_path": "artifacts/promptops_eval.json",
+      "include_prompt": false,
+      "include_sources": false,
+      "overrides": {
+        "enabled": true,
+        "mode": "auto_apply",
+        "persist_prompts": false,
+        "history": {
+          "enabled": false,
+          "include_prompt": false
+        },
+        "github": {
+          "enabled": false
+        }
+      }
+    },
     "github": {
       "body": "Automated prompt update.",
       "enabled": false,
@@ -1212,6 +1282,7 @@
     "fast_threshold": 3,
     "fusion_threshold": 5,
     "limit": 25,
+    "rrf_k": 60,
     "vector_enabled": true,
     "vector_idle_seconds": 45,
     "vector_limit": 25,
@@ -1231,18 +1302,28 @@
     },
     "budgets": {
       "allow_heavy_during_active": false,
+      "cpu_max_utilization": 0.5,
       "max_heavy_concurrency": 1,
       "max_jobs_per_window": 4,
       "min_idle_seconds": 45,
       "per_job_max_ms": 2500,
       "preempt_grace_ms": 150,
+      "ram_max_utilization": 0.5,
       "window_budget_ms": 8000,
       "window_s": 120
     },
-    "gpu": {
-      "release_vram_deadline_ms": 250,
-      "release_vram_on_active": true
+  "gpu": {
+    "allow_during_active": false,
+    "device_index": 0,
+    "lag_guard": {
+      "enabled": true,
+      "max_capture_age_s": 2.0,
+      "max_capture_lag_ms": 50,
+      "max_queue_depth_p95": 12
     },
+    "release_vram_deadline_ms": 250,
+    "release_vram_on_active": true
+  },
     "job_limits": {
       "capture": {
         "cpu_time_ms": 60000,
@@ -1251,10 +1332,24 @@
       }
     },
     "idle_window_s": 45,
-    "mode_enforcement": {
-      "suspend_deadline_ms": 100,
-      "suspend_workers": true
-    },
+  "mode_enforcement": {
+    "idle_resume_budget_ms": 3000,
+    "suspend_deadline_ms": 500,
+    "suspend_workers": true
+  },
+  "fullscreen_halt": {
+    "enabled": true,
+    "poll_ms": 250
+  },
+  "routing": {
+    "gpu_heavy": {
+      "allow_fallback": true,
+      "distro": "",
+      "protocol_version": 1,
+      "shared_queue_dir": "artifacts/wsl2_queue",
+      "target": "native"
+    }
+  },
     "silence": {
       "active_window_s": 3,
       "cooldown_s": 60,
@@ -1286,11 +1381,14 @@
     "blob_dir": "data/blobs",
     "crypto": {
       "backend": "aesgcm",
+      "keyring_backend": "auto",
+      "keyring_credential_name": "autocapture.keyring",
       "keyring_path": "data/vault/keyring.json",
       "root_key_path": "data/vault/root.key"
     },
     "data_dir": "data",
     "no_deletion_mode": true,
+    "raw_first_local": true,
     "disk_pressure": {
       "critical_free_gb": 50,
       "interval_s": 3600,
@@ -1313,6 +1411,7 @@
     "media_dir": "data/media",
     "metadata_require_db": true,
     "metadata_path": "data/metadata.db",
+    "audit_db_path": "data/audit/kernel_audit.db",
     "retention": {
       "evidence": "infinite",
       "interval_s": 3600,

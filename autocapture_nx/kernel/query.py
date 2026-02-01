@@ -491,7 +491,19 @@ def run_query(system, query: str) -> dict[str, Any]:
                 ],
             }
         )
-    answer_obj = answer.build(claims)
+    try:
+        answer_obj = answer.build(claims)
+    except Exception as exc:
+        answer_obj = {
+            "state": "error",
+            "claims": [],
+            "errors": [
+                {
+                    "error": "answer_builder_failed",
+                    "detail": f"{type(exc).__name__}: {exc}",
+                }
+            ],
+        }
     require_citations = bool(promptops_cfg.get("require_citations", True))
     if isinstance(answer_obj, dict):
         answer_obj = dict(answer_obj)

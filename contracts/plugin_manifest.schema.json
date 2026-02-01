@@ -144,7 +144,40 @@
     "settings_schema": {
       "type": "object"
     },
+    "settings_schema_path": {
+      "type": "string"
+    },
+    "io_contracts": {
+      "additionalProperties": {
+        "additionalProperties": {
+          "additionalProperties": false,
+          "properties": {
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": {
+              "type": "object"
+            },
+            "input_schema_path": {
+              "type": "string"
+            },
+            "output_schema_path": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
     "provides": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "capability_tags": {
       "items": {
         "type": "string"
       },

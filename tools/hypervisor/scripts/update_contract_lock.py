@@ -22,6 +22,10 @@ CONTRACT_FILES = [
     "contracts/time_intent.schema.json",
     "contracts/evidence.schema.json",
     "contracts/citation.schema.json",
+    "contracts/sst_stage_input.schema.json",
+    "contracts/sst_stage_output.schema.json",
+    "contracts/answer_build_input.schema.json",
+    "contracts/answer_build_output.schema.json",
 ]
 
 

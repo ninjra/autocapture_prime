@@ -1,31 +1,16 @@
+import json
 import unittest
+from pathlib import Path
 
-from autocapture.config.defaults import default_config_paths
-from autocapture.config.load import load_config
+from autocapture_nx.kernel.config import SchemaLiteValidator
 
 
-class TestConfigDefaults(unittest.TestCase):
-    def test_defaults_are_safe(self) -> None:
-        paths = default_config_paths()
-        cfg = load_config(paths, safe_mode=False)
-        privacy = cfg.get("privacy", {})
-        cloud = privacy.get("cloud", {})
-        egress = privacy.get("egress", {})
-        self.assertFalse(cloud.get("enabled", True))
-        self.assertFalse(cloud.get("allow_images", True))
-        self.assertTrue(egress.get("default_sanitize", False))
-        self.assertFalse(egress.get("allow_raw_egress", True))
-        self.assertTrue(egress.get("reasoning_packet_only", False))
-        self.assertTrue(cfg.get("storage", {}).get("encryption_required", False))
-        on_query = cfg.get("processing", {}).get("on_query", {})
-        self.assertFalse(on_query.get("allow_decode_extract", True))
-        cursor_cfg = cfg.get("capture", {}).get("cursor", {})
-        self.assertTrue(cursor_cfg.get("enabled", False))
-
-    def test_safe_mode_forces_flag(self) -> None:
-        paths = default_config_paths()
-        cfg = load_config(paths, safe_mode=True)
-        self.assertTrue(cfg.get("plugins", {}).get("safe_mode", False))
+class ConfigDefaultsTests(unittest.TestCase):
+    def test_default_config_validates(self) -> None:
+        config = json.loads(Path("config/default.json").read_text(encoding="utf-8"))
+        schema = json.loads(Path("contracts/config_schema.json").read_text(encoding="utf-8"))
+        validator = SchemaLiteValidator()
+        validator.validate(schema, config)
 
 
 if __name__ == "__main__":

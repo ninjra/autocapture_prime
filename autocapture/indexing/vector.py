@@ -7,19 +7,21 @@ import math
 import sqlite3
 import urllib.request
 import hashlib
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from autocapture.indexing.manifest import bump_manifest, update_manifest_digest, manifest_path
+from autocapture.models.bundles import select_bundle, BundleInfo
 
 class HashEmbedder:
-    def __init__(self, dims: int = 64) -> None:
-        self.dims = dims
+    def __init__(self, dims: int = 384) -> None:
+        self.dims = int(dims)
 
     def embed(self, text: str) -> list[float]:
         vec = [0.0] * self.dims
-        for token in text.lower().split():
+        for token in re.findall(r"[A-Za-z0-9_]+", text.lower()):
             digest = hashlib.sha256(token.encode("utf-8")).digest()
             idx = int.from_bytes(digest[:4], "big") % self.dims
             vec[idx] += 1.0
@@ -29,27 +31,38 @@ class HashEmbedder:
 
 class LocalEmbedder:
     def __init__(self, model_name: str | None = None) -> None:
-        self._model = None
-        self._fallback = HashEmbedder()
-        self._model_name = model_name
+        self._bundle: BundleInfo | None = None
         if model_name:
+            candidate = Path(str(model_name))
             try:
-                from sentence_transformers import SentenceTransformer
-
-                self._model = SentenceTransformer(model_name)
+                if candidate.exists():
+                    self._bundle = select_bundle("embedder", [candidate])
+            except PermissionError:
+                self._bundle = None
             except Exception:
-                self._model = None
+                self._bundle = None
+        if self._bundle is None:
+            self._bundle = select_bundle("embedder")
+        dims = 384
+        if self._bundle is not None:
+            dims = int(self._bundle.config.get("dims", dims))
+        self._fallback = HashEmbedder(dims=dims)
+        self._model_name = model_name
 
     def embed(self, text: str) -> list[float]:
-        if self._model is None:
-            return self._fallback.embed(text)
-        embedding = self._model.encode([text])[0]
-        return [float(v) for v in embedding]
+        return self._fallback.embed(text)
 
     def identity(self) -> dict[str, Any]:
-        if self._model is None:
-            return {"backend": "hash", "dims": self._fallback.dims}
-        return {"backend": "sentence_transformers", "model_name": self._model_name}
+        payload: dict[str, Any] = {"backend": "hash", "dims": self._fallback.dims}
+        if self._bundle is not None:
+            payload.update(
+                {
+                    "bundle_id": self._bundle.bundle_id,
+                    "bundle_version": self._bundle.version,
+                    "bundle_path": str(self._bundle.path),
+                }
+            )
+        return payload
 
 
 class QdrantSidecar:
@@ -129,6 +142,33 @@ class VectorIndex:
             hits.append(VectorHit(doc_id=doc_id, score=score))
         hits.sort(key=lambda h: (-h.score, h.doc_id))
         return hits[:limit]
+
+    def export_json(self, path: str | Path) -> dict[str, Any]:
+        cur = self._conn.execute("SELECT doc_id, vector FROM vectors")
+        rows = [(str(doc_id), json.loads(vec_json)) for doc_id, vec_json in cur.fetchall()]
+        rows.sort(key=lambda item: item[0])
+        vectors = [vec for _doc, vec in rows]
+        doc_ids = [doc_id for doc_id, _vec in rows]
+        scale, quantized = _quantize_vectors(vectors)
+        payload = {
+            "schema_version": 1,
+            "dims": len(vectors[0]) if vectors else 0,
+            "scale": scale,
+            "doc_ids": doc_ids,
+            "vectors": quantized,
+        }
+        Path(path).write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        return payload
+
+    def import_json(self, path: str | Path) -> None:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        scale = float(payload.get("scale", 1.0) or 1.0)
+        doc_ids = payload.get("doc_ids", [])
+        vectors = payload.get("vectors", [])
+        for doc_id, quant in zip(doc_ids, vectors, strict=False):
+            vec = _dequantize_vector(quant, scale)
+            self._conn.execute("REPLACE INTO vectors (doc_id, vector) VALUES (?, ?)", (doc_id, json.dumps(vec)))
+        self._conn.commit()
 
     def identity(self) -> dict[str, Any]:
         try:
@@ -220,6 +260,32 @@ def create_vector_backend(plugin_id: str) -> VectorIndex:
         collection = qcfg.get("collection", "autocapture")
         return QdrantVectorIndex(url, collection, LocalEmbedder(model_name))
     return VectorIndex(path, LocalEmbedder(model_name))
+
+
+def _quantize_vectors(vectors: list[list[float]]) -> tuple[float, list[list[int]]]:
+    max_abs = 0.0
+    for vec in vectors:
+        for value in vec:
+            max_abs = max(max_abs, abs(float(value)))
+    scale = (max_abs / 32767.0) if max_abs > 0 else 1.0
+    if scale <= 0:
+        scale = 1.0
+    quantized: list[list[int]] = []
+    for vec in vectors:
+        row = []
+        for value in vec:
+            quant = int(round(float(value) / scale))
+            if quant > 32767:
+                quant = 32767
+            if quant < -32767:
+                quant = -32767
+            row.append(quant)
+        quantized.append(row)
+    return scale, quantized
+
+
+def _dequantize_vector(values: list[Any], scale: float) -> list[float]:
+    return [float(int(v)) * float(scale) for v in values]
 
 
 def create_embedder(plugin_id: str) -> LocalEmbedder:

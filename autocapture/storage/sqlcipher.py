@@ -19,6 +19,10 @@ def _sqlcipher_available() -> tuple[bool, str | None]:
     return True, None
 
 
+def sqlcipher_available() -> tuple[bool, str | None]:
+    return _sqlcipher_available()
+
+
 def _apply_fsync_policy(conn, policy: str) -> None:
     policy = str(policy or "").strip().lower() or "none"
     if policy == "critical":

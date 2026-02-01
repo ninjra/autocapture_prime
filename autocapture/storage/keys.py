@@ -3,16 +3,30 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
-from autocapture_nx.kernel.keyring import KeyRing, KeyRecord
+from autocapture_nx.kernel.audit import append_audit_event
+from autocapture_nx.kernel.keyring import (
+    KeyRing,
+    KeyRecord,
+    export_keyring_bundle,
+    import_keyring_bundle,
+)
 
 
 def load_keyring(config: dict) -> KeyRing:
     crypto = config.get("storage", {}).get("crypto", {})
     keyring_path = crypto.get("keyring_path", "data/vault/keyring.json")
     root_key_path = crypto.get("root_key_path", "data/vault/root.key")
-    return KeyRing.load(keyring_path, legacy_root_path=root_key_path)
+    backend = crypto.get("keyring_backend", "auto")
+    credential_name = crypto.get("keyring_credential_name", "autocapture.keyring")
+    return KeyRing.load(
+        keyring_path,
+        legacy_root_path=root_key_path,
+        backend=backend,
+        credential_name=credential_name,
+    )
 
 
 def export_keys(keyring: KeyRing, path: str | Path) -> None:
@@ -59,3 +73,42 @@ def import_keys(keyring: KeyRing, path: str | Path) -> KeyRing:
             )
     keyring.save()
     return keyring
+
+
+def export_keys_bundle(keyring: KeyRing, path: str | Path, *, passphrase: str) -> dict:
+    bundle = export_keyring_bundle(keyring, path=str(path), passphrase=passphrase)
+    append_audit_event(
+        action="keyring.export_bundle",
+        actor="storage.keys",
+        outcome="ok",
+        details={"path": str(path)},
+    )
+    return bundle
+
+
+def import_keys_bundle(
+    *,
+    path: str | Path,
+    passphrase: str,
+    config: dict,
+) -> KeyRing:
+    crypto = config.get("storage", {}).get("crypto", {})
+    keyring_path = crypto.get("keyring_path", "data/vault/keyring.json")
+    backend = crypto.get("keyring_backend", "auto")
+    credential_name = crypto.get("keyring_credential_name", "autocapture.keyring")
+    require_protection = bool(config.get("storage", {}).get("encryption_required", False) and os.name == "nt")
+    ring = import_keyring_bundle(
+        path=str(path),
+        passphrase=passphrase,
+        keyring_path=keyring_path,
+        require_protection=require_protection,
+        backend=backend,
+        credential_name=credential_name,
+    )
+    append_audit_event(
+        action="keyring.import_bundle",
+        actor="storage.keys",
+        outcome="ok",
+        details={"path": str(path), "backend": backend},
+    )
+    return ring

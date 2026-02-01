@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from autocapture_nx.kernel.crypto import derive_key
 from autocapture_nx.kernel.keyring import KeyRing
+from autocapture.models.bundles import select_bundle
 
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
@@ -107,12 +108,61 @@ def _recognizers(config: dict) -> list[tuple[str, re.Pattern[str]]]:
     return recognizers
 
 
+_NER_CACHE: dict[str, list[str]] = {}
+
+
+def _ner_config(config: dict) -> dict:
+    privacy = config.get("privacy", {}) if isinstance(config, dict) else {}
+    egress = privacy.get("egress", {}) if isinstance(privacy, dict) else {}
+    ner_cfg = egress.get("ner", {}) if isinstance(egress, dict) else {}
+    return ner_cfg if isinstance(ner_cfg, dict) else {}
+
+
+def _load_ner_names(config: dict) -> list[str]:
+    cfg = _ner_config(config)
+    if not bool(cfg.get("enabled", True)):
+        return []
+    kind = str(cfg.get("bundle_kind", "ner") or "ner")
+    cache_key = f"{kind}:{cfg.get('names_file', 'names.txt')}"
+    if cache_key in _NER_CACHE:
+        return list(_NER_CACHE[cache_key])
+    names: list[str] = []
+    bundle = select_bundle(kind)
+    if bundle is not None:
+        name_file = str(cfg.get("names_file", "names.txt") or "names.txt")
+        candidate = bundle.path / name_file
+        if candidate.exists():
+            try:
+                raw = candidate.read_text(encoding="utf-8")
+                for line in raw.splitlines():
+                    token = line.strip()
+                    if token:
+                        names.append(token)
+            except Exception:
+                names = []
+        if not names and isinstance(bundle.config.get("names"), list):
+            try:
+                for token in bundle.config.get("names", []):
+                    val = str(token).strip()
+                    if val:
+                        names.append(val)
+            except Exception:
+                names = []
+    names = sorted(set(names), key=lambda n: (len(n), n))
+    _NER_CACHE[cache_key] = list(names)
+    return names
+
+
 def _find_entities(text: str, config: dict) -> list[Entity]:
     matches: list[Entity] = []
     for kind, pattern in _recognizers(config):
         for m in pattern.finditer(text):
             matches.append(Entity(start=m.start(), end=m.end(), kind=kind, value=m.group(0)))
-    matches.sort(key=lambda e: (e.start, e.end - e.start), reverse=False)
+    for name in _load_ner_names(config):
+        pattern = re.compile(rf"\b{re.escape(name)}\b", re.IGNORECASE)
+        for m in pattern.finditer(text):
+            matches.append(Entity(start=m.start(), end=m.end(), kind="NAME", value=m.group(0)))
+    matches.sort(key=lambda e: (e.start, -(e.end - e.start), e.kind))
     selected: list[Entity] = []
     last_end = -1
     for ent in matches:
@@ -123,12 +173,24 @@ def _find_entities(text: str, config: dict) -> list[Entity]:
     return selected
 
 
+def find_entities(text: str, config: dict) -> list[Entity]:
+    """Public entity detection helper (hybrid rules + optional NER bundle)."""
+    return _find_entities(text, config)
+
+
 def build_hasher(config: dict) -> tuple[EntityHasher, EntityMap]:
     storage_cfg = config.get("storage", {})
     crypto_cfg = storage_cfg.get("crypto", {})
     root_key_path = crypto_cfg.get("root_key_path", "data/vault/root.key")
     keyring_path = crypto_cfg.get("keyring_path", "data/vault/keyring.json")
-    keyring = KeyRing.load(keyring_path, legacy_root_path=root_key_path)
+    backend = crypto_cfg.get("keyring_backend", "auto")
+    credential_name = crypto_cfg.get("keyring_credential_name", "autocapture.keyring")
+    keyring = KeyRing.load(
+        keyring_path,
+        legacy_root_path=root_key_path,
+        backend=backend,
+        credential_name=credential_name,
+    )
     _key_id, root = keyring.active_key("entity_tokens")
     key = derive_key(root, "entity_tokens")
     token_format = config.get("privacy", {}).get("egress", {}).get("token_format", "⟦ENT:{type}:{token}⟧")

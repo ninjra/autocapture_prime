@@ -20,10 +20,10 @@ class GovernorGatingTests(unittest.TestCase):
         scheduler.enqueue(Job(name="light", fn=lambda: ran.append("light"), heavy=False))
 
         scheduler.run_pending({"user_active": True, "idle_seconds": 1, "query_intent": False})
-        self.assertEqual(ran, ["light"])
+        self.assertEqual(ran, [])
 
         scheduler.run_pending({"user_active": False, "idle_seconds": 10, "query_intent": False})
-        self.assertEqual(ran, ["light", "heavy"])
+        self.assertEqual(ran, ["heavy", "light"])
 
     def test_idle_budget_exhaustion_defers_heavy(self) -> None:
         governor = RuntimeGovernor(idle_window_s=1)

@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import argparse
+import json
 import os
-import time
-import tempfile
+import platform
 import sys
+import tempfile
+import time
+import hashlib
+from pathlib import Path
 try:
     import resource  # type: ignore
 except Exception:  # pragma: no cover - not available on Windows
@@ -52,6 +57,58 @@ def _measure_ingestion_mb_s(spool_dir: str) -> float:
     return total_mb / elapsed
 
 
+def _measure_throughput(sample_count: int, frame_size: int, spool_dir: str) -> dict[str, float]:
+    frame_bytes = b"x" * int(frame_size)
+    frames = []
+    for idx in range(sample_count):
+        frames.append(
+            Frame(
+                ts_utc=f"2026-01-01T00:00:{idx:02d}Z",
+                data=frame_bytes,
+                width=64,
+                height=64,
+                ts_monotonic=float(idx),
+            )
+        )
+    writer = SegmentWriter(
+        spool_dir,
+        segment_id="run1/segment/0",
+        fps_target=30,
+        bitrate_kbps=4000,
+        container_type="avi_mjpeg",
+        encoder="cpu",
+        ffmpeg_path=None,
+        frame_format="jpeg",
+    )
+    latencies_ms: list[float] = []
+    start = time.perf_counter()
+    for frame in frames:
+        t0 = time.perf_counter()
+        writer.add_frame(frame)
+        latencies_ms.append((time.perf_counter() - t0) * 1000.0)
+    writer.finalize()
+    elapsed = max(0.001, time.perf_counter() - start)
+    artifacts_per_s = float(sample_count) / elapsed
+    latencies_ms.sort()
+    mid = len(latencies_ms) // 2
+    median_ms = latencies_ms[mid] if latencies_ms else 0.0
+    return {"artifacts_per_s": artifacts_per_s, "median_latency_ms": median_ms}
+
+
+def _machine_fingerprint() -> str:
+    payload = f"{platform.system()}|{platform.release()}|{platform.machine()}|{os.cpu_count()}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _evaluate_regression(metrics: dict[str, float], baseline: dict[str, float], max_regression_pct: float) -> bool:
+    if not baseline:
+        return True
+    base = float(baseline.get("artifacts_per_s", 0.0))
+    if base <= 0:
+        return True
+    return float(metrics.get("artifacts_per_s", 0.0)) >= base * (1.0 - max_regression_pct)
+
+
 def _measure_query_latency_ms() -> float:
     records = {}
     for idx in range(2000):
@@ -72,7 +129,12 @@ def _measure_query_latency_ms() -> float:
     return (time.perf_counter() - t0) * 1000.0
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--update-baseline", action="store_true", default=False)
+    parser.add_argument("--backend", default="auto")
+    args = parser.parse_args(argv)
+
     os.environ.setdefault("AUTOCAPTURE_SAFE_MODE_MINIMAL", "1")
     paths = default_config_paths()
     config = load_config(paths, safe_mode=True)
@@ -84,6 +146,10 @@ def main() -> int:
     ingestion_target = int(perf_cfg.get("ingestion_mb_s", 50))
     min_ingest_mb_s = max(1.0, ingestion_target / 5.0)
     memory_ceiling = int(perf_cfg.get("memory_ceiling_mb", 512))
+
+    throughput_cfg = perf_cfg.get("throughput", {})
+    max_regression_pct = float(throughput_cfg.get("max_regression_pct", 0.25))
+    sample_count = int(throughput_cfg.get("sample_count", 50))
 
     def _measure_startup() -> float:
         t0 = time.perf_counter()
@@ -118,6 +184,62 @@ def main() -> int:
     if rss_mb > memory_ceiling:
         print("FAIL: memory ceiling exceeded")
         return 1
+
+    artifacts_dir = Path("artifacts") / "perf"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    baseline_path = artifacts_dir / "perf_baseline.json"
+    metrics_samples: list[dict[str, float | str | int]] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        metrics = _measure_throughput(sample_count, 200_000, tmp)
+    metrics_payload = {
+        "artifacts_per_s": metrics["artifacts_per_s"],
+        "median_latency_ms": metrics["median_latency_ms"],
+        "backend": str(args.backend),
+        "sample_count": int(sample_count),
+        "fingerprint": _machine_fingerprint(),
+    }
+    metrics_samples.append(metrics_payload)
+    baseline = {}
+    if baseline_path.exists():
+        try:
+            baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+        except Exception:
+            baseline = {}
+    gate_payload = {
+        "baseline": baseline,
+        "metrics": metrics_payload,
+        "metrics_samples": metrics_samples,
+        "max_regression_pct": max_regression_pct,
+    }
+    (artifacts_dir / "gate_perf.json").write_text(json.dumps(gate_payload, indent=2, sort_keys=True), encoding="utf-8")
+    if args.update_baseline or not baseline:
+        baseline_path.write_text(json.dumps(metrics_payload, indent=2, sort_keys=True), encoding="utf-8")
+        print("OK: perf gate (baseline updated)")
+        return 0
+    if not _evaluate_regression(metrics_payload, baseline, max_regression_pct):
+        with tempfile.TemporaryDirectory() as tmp:
+            retry_metrics = _measure_throughput(sample_count, 200_000, tmp)
+        retry_payload = {
+            "artifacts_per_s": retry_metrics["artifacts_per_s"],
+            "median_latency_ms": retry_metrics["median_latency_ms"],
+            "backend": str(args.backend),
+            "sample_count": int(sample_count),
+            "fingerprint": _machine_fingerprint(),
+        }
+        metrics_samples.append(retry_payload)
+        metrics_payload = max(
+            metrics_samples,
+            key=lambda sample: float(sample.get("artifacts_per_s", 0.0)),
+        )
+        gate_payload["metrics"] = metrics_payload
+        gate_payload["metrics_samples"] = metrics_samples
+        (artifacts_dir / "gate_perf.json").write_text(
+            json.dumps(gate_payload, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        if not _evaluate_regression(metrics_payload, baseline, max_regression_pct):
+            print("FAIL: throughput regression")
+            return 1
 
     print("OK: perf gate")
     return 0

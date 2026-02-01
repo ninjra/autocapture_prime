@@ -8,10 +8,12 @@ import os
 import queue
 import sys
 import threading
+import random
 from pathlib import Path
 from typing import Any
 
 from autocapture_nx.kernel.errors import PermissionError, PluginError
+from autocapture_nx.kernel.rng import install_rng_guard, set_thread_seed
 from autocapture_nx.plugin_system.api import PluginContext
 from autocapture_nx.plugin_system.runtime import (
     FilesystemPolicy,
@@ -19,6 +21,7 @@ from autocapture_nx.plugin_system.runtime import (
     set_global_filesystem_policy,
     set_global_network_deny,
 )
+from autocapture_nx.plugin_system.sandbox import validate_ipc_message
 
 
 def _debug(message: str) -> None:
@@ -136,6 +139,10 @@ class _Bridge:
             except Exception as exc:
                 self._set_error(f"invalid message: {exc}")
                 return
+            ok, reason = validate_ipc_message(message, role="plugin")
+            if not ok:
+                self._set_error(f"ipc_validation_failed:{reason}")
+                return
             if message.get("response_to") == "cap_call":
                 req_id = int(message.get("id", 0))
                 with self._pending_lock:
@@ -249,14 +256,43 @@ def main() -> None:
         host_config = init_payload.get("host_config", config)
         allowed_caps = _allowed_caps(init_payload.get("allowed_capabilities"))
         fs_policy = _filesystem_policy(init_payload.get("filesystem_policy"))
+        rng_info = init_payload.get("rng", {}) if isinstance(init_payload, dict) else {}
     else:
         config = init_payload if isinstance(init_payload, dict) else {}
         host_config = config
         allowed_caps = None
         fs_policy = None
+        rng_info = {}
 
     set_global_filesystem_policy(fs_policy)
     _debug("filesystem policy installed")
+
+    rng_enabled = bool(rng_info.get("enabled", False))
+    rng_seed_value = rng_info.get("seed")
+    rng_strict = bool(rng_info.get("strict", True))
+    rng_seed_hex = rng_info.get("seed_hex")
+    rng_instance = None
+    rng_seed_int: int | None = None
+    if rng_enabled and rng_seed_value is not None:
+        try:
+            rng_seed_int = int(rng_seed_value)
+        except Exception:
+            rng_seed_int = 0
+        install_rng_guard()
+        set_thread_seed(rng_seed_int, strict=rng_strict)
+        rng_instance = random.Random(rng_seed_int)
+        try:  # optional deps
+            import numpy as np  # type: ignore
+
+            np.random.seed(rng_seed_int)
+        except Exception:
+            pass
+        try:  # optional deps
+            import torch  # type: ignore
+
+            torch.manual_seed(rng_seed_int)
+        except Exception:
+            pass
 
     if not isinstance(host_config, dict):
         host_config = {}
@@ -283,7 +319,14 @@ def main() -> None:
     factory = getattr(module, callable_name)
     _debug("plugin module loaded")
 
-    context = PluginContext(config=config, get_capability=_get_capability, logger=lambda _m: None)
+    context = PluginContext(
+        config=config,
+        get_capability=_get_capability,
+        logger=lambda _m: None,
+        rng=rng_instance,
+        rng_seed=rng_seed_int,
+        rng_seed_hex=str(rng_seed_hex) if rng_seed_hex is not None else None,
+    )
     trace_enabled = os.getenv("AUTOCAPTURE_HOST_TRACE", "")
     with network_guard(network_allowed):
         if trace_enabled:

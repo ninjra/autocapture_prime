@@ -5,7 +5,6 @@ import unittest
 from pathlib import Path
 
 from autocapture_nx.kernel.config import ConfigPaths, load_config
-from autocapture_nx.kernel.errors import PluginError
 from autocapture_nx.plugin_system.registry import PluginRegistry
 
 
@@ -16,6 +15,8 @@ def _write_temp_plugin(
     compat: dict | None = None,
     *,
     settings_paths: list[str] | None = None,
+    settings_schema: dict | None = None,
+    settings_schema_path: str | None = None,
 ) -> None:
     plugin_dir = root / plugin_id.replace(".", "_")
     os.makedirs(plugin_dir, exist_ok=True)
@@ -54,6 +55,45 @@ def _write_temp_plugin(
     }
     if settings_paths:
         manifest["settings_paths"] = settings_paths
+    if settings_schema is not None:
+        manifest["settings_schema"] = settings_schema
+    if settings_schema_path:
+        manifest["settings_schema_path"] = settings_schema_path
+    with open(plugin_dir / "plugin.json", "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle, indent=2, sort_keys=True)
+
+
+def _write_crash_plugin(root: Path, plugin_id: str) -> None:
+    plugin_dir = root / plugin_id.replace(".", "_")
+    os.makedirs(plugin_dir, exist_ok=True)
+    with open(plugin_dir / "plugin.py", "w", encoding="utf-8") as handle:
+        handle.write(
+            "def create_plugin(plugin_id, context):\n"
+            "    raise RuntimeError('boom')\n"
+        )
+    manifest = {
+        "plugin_id": plugin_id,
+        "version": "0.1.0",
+        "enabled": True,
+        "entrypoints": [
+            {
+                "kind": "test",
+                "id": "default",
+                "path": "plugin.py",
+                "callable": "create_plugin",
+            }
+        ],
+        "permissions": {
+            "filesystem": "read",
+            "gpu": False,
+            "raw_input": False,
+            "network": False,
+        },
+        "required_capabilities": [],
+        "compat": {"requires_kernel": ">=0.1.0", "requires_schema_versions": [1]},
+        "depends_on": [],
+        "hash_lock": {"manifest_sha256": "", "artifact_sha256": ""},
+    }
     with open(plugin_dir / "plugin.json", "w", encoding="utf-8") as handle:
         json.dump(manifest, handle, indent=2, sort_keys=True)
 
@@ -137,8 +177,11 @@ class PluginLoaderTests(unittest.TestCase):
 
             config = load_config(paths, safe_mode=False)
             registry = PluginRegistry(config, safe_mode=False)
-            with self.assertRaises(PluginError):
-                registry.load_plugins()
+            plugins, _caps = registry.load_plugins()
+            plugin_ids = {p.plugin_id for p in plugins}
+            self.assertNotIn("local.net.plugin", plugin_ids)
+            report = registry.load_report()
+            self.assertIn("local.net.plugin", report.get("failed", []))
 
     def test_compat_version_denied(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -165,8 +208,11 @@ class PluginLoaderTests(unittest.TestCase):
 
             config = load_config(paths, safe_mode=False)
             registry = PluginRegistry(config, safe_mode=False)
-            with self.assertRaises(PluginError):
-                registry.load_plugins()
+            plugins, _caps = registry.load_plugins()
+            plugin_ids = {p.plugin_id for p in plugins}
+            self.assertNotIn("local.compat.plugin", plugin_ids)
+            report = registry.load_report()
+            self.assertIn("local.compat.plugin", report.get("failed", []))
 
     def test_disable_plugin(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -184,6 +230,35 @@ class PluginLoaderTests(unittest.TestCase):
             plugins, _caps = registry.load_plugins()
             plugin_ids = {p.plugin_id for p in plugins}
             self.assertNotIn("builtin.egress.gateway", plugin_ids)
+
+    def test_plugin_crash_isolated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin_root = root / "plugins"
+            os.makedirs(plugin_root, exist_ok=True)
+            _write_crash_plugin(plugin_root, "local.crash.plugin")
+            _write_temp_plugin(plugin_root, "local.ok.plugin")
+
+            paths = self._config_paths(root)
+            override = {
+                **_storage_override(root),
+                "plugins": {
+                    "allowlist": ["local.crash.plugin", "local.ok.plugin"],
+                    "search_paths": [str(plugin_root)],
+                    "locks": {"enforce": False, "lockfile": "config/plugin_locks.json"},
+                },
+            }
+            with open(paths.user_path, "w", encoding="utf-8") as handle:
+                json.dump(override, handle)
+
+            config = load_config(paths, safe_mode=False)
+            registry = PluginRegistry(config, safe_mode=False)
+            plugins, _caps = registry.load_plugins()
+            plugin_ids = {p.plugin_id for p in plugins}
+            self.assertIn("local.ok.plugin", plugin_ids)
+            self.assertNotIn("local.crash.plugin", plugin_ids)
+            report = registry.load_report()
+            self.assertIn("local.crash.plugin", report.get("failed", []))
 
     def test_plugin_settings_filtered(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -215,6 +290,35 @@ class PluginLoaderTests(unittest.TestCase):
             self.assertIn("runtime", settings)
             self.assertEqual(settings.get("runtime", {}).get("timezone"), "UTC")
             self.assertNotIn("storage", settings)
+
+    def test_settings_schema_validation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin_root = root / "plugins"
+            os.makedirs(plugin_root, exist_ok=True)
+            _write_temp_plugin(plugin_root, "local.schema.plugin", settings_paths=["runtime"])
+
+            paths = self._config_paths(root)
+            override = {
+                **_storage_override(root),
+                "runtime": {"timezone": "UTC"},
+                "plugins": {
+                    "allowlist": ["local.schema.plugin"],
+                    "search_paths": [str(plugin_root)],
+                    "locks": {"enforce": False, "lockfile": "config/plugin_locks.json"},
+                    "settings": {"local.schema.plugin": {"runtime": {"timezone": 123}}},
+                },
+            }
+            with open(paths.user_path, "w", encoding="utf-8") as handle:
+                json.dump(override, handle)
+
+            config = load_config(paths, safe_mode=False)
+            registry = PluginRegistry(config, safe_mode=False)
+            plugins, _caps = registry.load_plugins()
+            plugin_ids = {p.plugin_id for p in plugins}
+            self.assertNotIn("local.schema.plugin", plugin_ids)
+            report = registry.load_report()
+            self.assertIn("local.schema.plugin", report.get("failed", []))
 
 
 if __name__ == "__main__":

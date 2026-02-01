@@ -7,7 +7,7 @@ from plugins.builtin.storage_memory.plugin import InMemoryStore
 
 
 class StorageCompactionTests(unittest.TestCase):
-    def test_compaction_removes_derived_only(self) -> None:
+    def test_compaction_disabled_by_policy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             meta = InMemoryStore()
             media = InMemoryStore()
@@ -32,12 +32,13 @@ class StorageCompactionTests(unittest.TestCase):
             result = compact_derived(meta, media, config, dry_run=False)
             self.assertEqual(result.derived_metadata, 1)
             self.assertEqual(result.derived_media, 1)
+            self.assertTrue(result.dry_run)
             self.assertTrue(meta.get("run1/segment/0"))
-            self.assertFalse(meta.get("run1/derived.text.ocr/abc"))
+            self.assertTrue(meta.get("run1/derived.text.ocr/abc"))
             self.assertTrue(media.get("run1/segment/0"))
-            self.assertFalse(media.get("run1/derived.input.log/0"))
-            self.assertFalse(lexical_path.exists())
-            self.assertFalse(vector_path.exists())
+            self.assertTrue(media.get("run1/derived.input.log/0"))
+            self.assertTrue(lexical_path.exists())
+            self.assertTrue(vector_path.exists())
 
 
 if __name__ == "__main__":

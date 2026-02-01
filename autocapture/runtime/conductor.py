@@ -12,9 +12,14 @@ from autocapture.research.runner import ResearchRunner
 from autocapture.storage.pressure import StoragePressureMonitor
 from autocapture.storage.retention import StorageRetentionMonitor
 from autocapture.runtime.governor import RuntimeGovernor
+from autocapture.runtime.resources import sample_resources
 from autocapture.runtime.gpu import release_vram
+from autocapture.runtime.gpu_guard import evaluate_gpu_lag_guard
+from autocapture.runtime.gpu_monitor import sample_gpu
 from autocapture.runtime.scheduler import Job, JobStepResult, Scheduler
+from autocapture_nx.kernel.audit import append_audit_event
 from autocapture_nx.kernel.telemetry import record_telemetry
+from autocapture_nx.windows.fullscreen import fullscreen_snapshot
 
 
 @dataclass
@@ -40,6 +45,7 @@ class RuntimeConductor:
         self._governor = self._resolve_governor(system)
         self._scheduler = self._resolve_scheduler(system, self._governor)
         self._input_tracker = self._resolve_input_tracker(system)
+        self._window_tracker = self._resolve_window_tracker(system)
         self._idle_processor = None
         self._storage_monitor = StoragePressureMonitor(system)
         self._retention_monitor = StorageRetentionMonitor(system)
@@ -53,6 +59,16 @@ class RuntimeConductor:
         self._last_watchdog_state: str | None = None
         self._last_watchdog_event_ts: float | None = None
         self._last_gpu_release_ts: float | None = None
+        self._last_fullscreen_state: bool | None = None
+        self._last_fullscreen_ts: float | None = None
+        self._last_gpu_guard_ok: bool | None = None
+        self._last_gpu_guard_ts: float | None = None
+        self._fullscreen_snapshot = None
+        self._gpu_guard_snapshot = None
+        self._suspend_requested_at: float | None = None
+        self._resume_requested_at: float | None = None
+        self._suspend_acked = False
+        self._resume_acked = False
         telemetry_cfg = self._config.get("runtime", {}).get("telemetry", {})
         self._telemetry_enabled = bool(telemetry_cfg.get("enabled", True))
         self._telemetry_interval_s = float(telemetry_cfg.get("emit_interval_s", 5))
@@ -81,6 +97,11 @@ class RuntimeConductor:
                 scheduler.set_governor(governor)
             except Exception:
                 pass
+        if hasattr(scheduler, "update_config"):
+            try:
+                scheduler.update_config(self._config)
+            except Exception:
+                pass
         return scheduler
 
     def _resolve_input_tracker(self, system: Any):
@@ -88,6 +109,13 @@ class RuntimeConductor:
             return system.get("tracking.input")
         if isinstance(system, dict):
             return system.get("tracking.input")
+        return None
+
+    def _resolve_window_tracker(self, system: Any):
+        if hasattr(system, "has") and system.has("window.metadata"):
+            return system.get("window.metadata")
+        if isinstance(system, dict):
+            return system.get("window.metadata")
         return None
 
     def _resolve_event_builder(self, system: Any):
@@ -152,9 +180,87 @@ class RuntimeConductor:
             "activity_score": activity_score,
             "activity_recent": activity_recent,
         }
+        resources = sample_resources()
+        if resources.cpu_utilization is not None:
+            signals["cpu_utilization"] = resources.cpu_utilization
+        if resources.ram_utilization is not None:
+            signals["ram_utilization"] = resources.ram_utilization
         if query_intent is not None:
             signals["query_intent"] = bool(query_intent)
+        run_id = ""
+        if isinstance(self._config, dict):
+            run_id = str(self._config.get("runtime", {}).get("run_id") or "")
+        if run_id:
+            signals["run_id"] = run_id
+        fullscreen = self._fullscreen_signal()
+        if fullscreen is not None:
+            signals["fullscreen_active"] = bool(fullscreen.get("fullscreen"))
+            signals["fullscreen_reason"] = str(fullscreen.get("reason") or "")
+        gpu_guard = self._gpu_guard_signal(user_active=bool(signals.get("user_active", False)))
+        if gpu_guard is not None:
+            signals["gpu_only_allowed"] = bool(gpu_guard.get("gpu_only_allowed", False))
+        if bool(signals.get("fullscreen_active", False)):
+            signals["gpu_only_allowed"] = False
         return signals
+
+    def _fullscreen_signal(self) -> dict[str, Any] | None:
+        runtime_cfg = self._config.get("runtime", {}) if isinstance(self._config, dict) else {}
+        fullscreen_cfg = runtime_cfg.get("fullscreen_halt", {}) if isinstance(runtime_cfg, dict) else {}
+        if not bool(fullscreen_cfg.get("enabled", True)):
+            self._fullscreen_snapshot = None
+            return {"enabled": False, "fullscreen": False, "reason": "disabled"}
+        poll_ms = float(fullscreen_cfg.get("poll_ms", 250) or 250)
+        poll_s = max(0.05, min(poll_ms / 1000.0, 5.0))
+        now = time.monotonic()
+        if (
+            self._fullscreen_snapshot is not None
+            and self._last_fullscreen_ts is not None
+            and (now - self._last_fullscreen_ts) < poll_s
+        ):
+            return self._fullscreen_snapshot
+        window_ref = None
+        if self._window_tracker is not None:
+            try:
+                if hasattr(self._window_tracker, "last_record"):
+                    window_ref = self._window_tracker.last_record()
+                elif hasattr(self._window_tracker, "current"):
+                    window_ref = self._window_tracker.current()
+            except Exception:
+                window_ref = None
+        snapshot = fullscreen_snapshot(window_ref)
+        payload = {
+            "enabled": True,
+            "fullscreen": bool(snapshot.fullscreen),
+            "reason": snapshot.reason,
+            "ok": snapshot.ok,
+            "ts_utc": snapshot.ts_utc,
+            "window": snapshot.window,
+        }
+        self._fullscreen_snapshot = payload
+        self._last_fullscreen_ts = now
+        return payload
+
+    def _gpu_guard_signal(self, *, user_active: bool) -> dict[str, Any] | None:
+        runtime_cfg = self._config.get("runtime", {}) if isinstance(self._config, dict) else {}
+        gpu_cfg = runtime_cfg.get("gpu", {}) if isinstance(runtime_cfg, dict) else {}
+        allow_active = bool(gpu_cfg.get("allow_during_active", False))
+        device_index = int(gpu_cfg.get("device_index", 0) or 0)
+        gpu_snapshot = sample_gpu(device_index)
+        decision = evaluate_gpu_lag_guard(self._config, gpu=gpu_snapshot)
+        self._gpu_guard_snapshot = {
+            "ok": bool(decision.ok),
+            "reason": decision.reason,
+            "lag_p95_ms": decision.lag_p95_ms,
+            "queue_p95": decision.queue_p95,
+            "capture_age_s": decision.capture_age_s,
+            "gpu_utilization": decision.gpu_utilization,
+            "gpu_mem_utilization": decision.gpu_mem_utilization,
+            "ts_monotonic": gpu_snapshot.ts_monotonic,
+        }
+        return {
+            "gpu_only_allowed": bool(user_active and allow_active and decision.ok),
+            "decision": self._gpu_guard_snapshot,
+        }
 
     def _schedule_idle(self) -> None:
         idle_cfg = self._config.get("processing", {}).get("idle", {})
@@ -221,7 +327,16 @@ class RuntimeConductor:
             return JobStepResult(done=done, consumed_ms=consumed_ms)
 
         estimate_ms = int(idle_cfg.get("estimate_ms", 2000))
-        self._scheduler.enqueue(Job(name="idle.extract", step_fn=step_fn, heavy=True, estimated_ms=estimate_ms))
+        self._scheduler.enqueue(
+            Job(
+                name="idle.extract",
+                step_fn=step_fn,
+                heavy=True,
+                estimated_ms=estimate_ms,
+                gpu_heavy=True,
+                payload={"task": "idle.extract"},
+            )
+        )
         self._queued.add("idle.extract")
 
     def _schedule_research(self) -> None:
@@ -250,7 +365,16 @@ class RuntimeConductor:
             return JobStepResult(done=done, consumed_ms=consumed_ms)
 
         estimate_ms = int(cfg.get("estimate_ms", 1500))
-        self._scheduler.enqueue(Job(name="idle.research", step_fn=step_fn, heavy=True, estimated_ms=estimate_ms))
+        self._scheduler.enqueue(
+            Job(
+                name="idle.research",
+                step_fn=step_fn,
+                heavy=True,
+                estimated_ms=estimate_ms,
+                gpu_heavy=True,
+                payload={"task": "idle.research"},
+            )
+        )
         self._queued.add("idle.research")
 
     def _schedule_storage_pressure(self) -> None:
@@ -407,6 +531,8 @@ class RuntimeConductor:
             "idle_seconds": float(signals.get("idle_seconds", 0.0)),
             "user_active": bool(signals.get("user_active", False)),
             "activity_score": float(signals.get("activity_score", 0.0)),
+            "fullscreen": bool(signals.get("fullscreen_active", False)),
+            "gpu_guard": self._gpu_guard_snapshot,
             "budget": {
                 "remaining_ms": int(stats.budget_remaining_ms),
                 "spent_ms": int(stats.budget_spent_ms),
@@ -419,6 +545,7 @@ class RuntimeConductor:
                 "deferred": int(stats.deferred_jobs),
                 "preempted": int(stats.preempted_jobs),
                 "ran_light": int(stats.ran_light),
+                "ran_gpu_only": int(getattr(stats, "ran_gpu_only", 0) or 0),
             },
             "executed": list(executed),
             "watchdog": watchdog,
@@ -437,6 +564,71 @@ class RuntimeConductor:
                 self._logger.log("runtime.telemetry", payload)
             except Exception:
                 pass
+
+    def _handle_mode_transitions(self, stats: Any) -> None:
+        runtime_cfg = self._config.get("runtime", {}) if isinstance(self._config, dict) else {}
+        enforcement = runtime_cfg.get("mode_enforcement", {}) if isinstance(runtime_cfg, dict) else {}
+        suspend_deadline_ms = int(enforcement.get("suspend_deadline_ms", 500) or 500)
+        resume_budget_ms = int(enforcement.get("idle_resume_budget_ms", 3000) or 3000)
+        mode = getattr(stats, "mode", None)
+        if mode is None:
+            return
+        now = time.monotonic()
+        if self._stats.last_mode != mode:
+            self._stats.last_mode = mode
+            if mode == "ACTIVE_CAPTURE_ONLY":
+                self._suspend_requested_at = now
+                self._resume_requested_at = None
+                self._suspend_acked = False
+            elif mode == "IDLE_DRAIN":
+                self._resume_requested_at = now
+                self._suspend_requested_at = None
+                self._resume_acked = False
+            append_audit_event(
+                action="runtime.mode_change",
+                actor="runtime.conductor",
+                outcome="ok",
+                details={"mode": mode, "reason": getattr(stats, "reason", None)},
+            )
+        if mode == "ACTIVE_CAPTURE_ONLY" and self._suspend_requested_at is not None:
+            elapsed_ms = int(max(0.0, (now - self._suspend_requested_at) * 1000.0))
+            inflight = int(getattr(stats, "inflight_heavy", 0) or 0)
+            if not self._suspend_acked and inflight == 0:
+                self._suspend_acked = True
+                append_audit_event(
+                    action="runtime.suspend_ack",
+                    actor="runtime.scheduler",
+                    outcome="ok",
+                    details={"elapsed_ms": elapsed_ms},
+                )
+            if suspend_deadline_ms and elapsed_ms > suspend_deadline_ms and inflight > 0:
+                removed = 0
+                if hasattr(self._scheduler, "force_stop"):
+                    removed = int(self._scheduler.force_stop("active_suspend_deadline"))
+                append_audit_event(
+                    action="runtime.force_stop",
+                    actor="runtime.scheduler",
+                    outcome="ok" if removed > 0 else "noop",
+                    details={"elapsed_ms": elapsed_ms, "removed_jobs": removed},
+                )
+        if mode == "IDLE_DRAIN" and self._resume_requested_at is not None:
+            elapsed_ms = int(max(0.0, (now - self._resume_requested_at) * 1000.0))
+            admitted = int(getattr(stats, "admitted_heavy", 0) or 0)
+            if not self._resume_acked and admitted > 0:
+                self._resume_acked = True
+                append_audit_event(
+                    action="runtime.resume_ack",
+                    actor="runtime.scheduler",
+                    outcome="ok",
+                    details={"elapsed_ms": elapsed_ms},
+                )
+            if resume_budget_ms and elapsed_ms > resume_budget_ms and not self._resume_acked:
+                append_audit_event(
+                    action="runtime.resume_late",
+                    actor="runtime.scheduler",
+                    outcome="warn",
+                    details={"elapsed_ms": elapsed_ms, "budget_ms": resume_budget_ms},
+                )
 
     def _maybe_release_gpu(self, signals: dict[str, Any], mode: str) -> None:
         runtime_cfg = self._config.get("runtime", {}) if isinstance(self._config, dict) else {}
@@ -472,14 +664,86 @@ class RuntimeConductor:
             except Exception:
                 pass
 
+    def _maybe_emit_fullscreen_event(self, signals: dict[str, Any]) -> None:
+        fullscreen = bool(signals.get("fullscreen_active", False))
+        if self._last_fullscreen_state is None:
+            self._last_fullscreen_state = fullscreen
+            return
+        if fullscreen == self._last_fullscreen_state:
+            return
+        self._last_fullscreen_state = fullscreen
+        snapshot = self._fullscreen_snapshot if isinstance(self._fullscreen_snapshot, dict) else {}
+        payload = {
+            "event": "runtime.fullscreen_halt" if fullscreen else "runtime.fullscreen_resume",
+            "ts_utc": snapshot.get("ts_utc"),
+            "fullscreen": fullscreen,
+            "reason": snapshot.get("reason"),
+            "window": snapshot.get("window"),
+        }
+        record_telemetry("runtime.fullscreen", payload)
+        append_audit_event(
+            action=payload["event"],
+            actor="runtime.conductor",
+            outcome="ok",
+            details={k: v for k, v in payload.items() if k != "event"},
+        )
+        if self._events is not None:
+            try:
+                self._events.journal_event(payload["event"], payload, ts_utc=snapshot.get("ts_utc"))
+            except Exception:
+                pass
+        if self._logger is not None:
+            try:
+                self._logger.log("runtime.fullscreen", payload)
+            except Exception:
+                pass
+
+    def _maybe_emit_gpu_guard_event(self, signals: dict[str, Any]) -> None:
+        if self._gpu_guard_snapshot is None:
+            return
+        ok = bool(self._gpu_guard_snapshot.get("ok", False))
+        if self._last_gpu_guard_ok is None:
+            self._last_gpu_guard_ok = ok
+            return
+        if ok == self._last_gpu_guard_ok:
+            return
+        self._last_gpu_guard_ok = ok
+        payload = {
+            "event": "runtime.gpu_guard_ok" if ok else "runtime.gpu_guard_blocked",
+            "decision": dict(self._gpu_guard_snapshot),
+            "gpu_only_allowed": bool(signals.get("gpu_only_allowed", False)),
+        }
+        record_telemetry("runtime.gpu_guard", payload)
+        append_audit_event(
+            action=payload["event"],
+            actor="runtime.conductor",
+            outcome="ok",
+            details=payload,
+        )
+        if self._events is not None:
+            try:
+                self._events.journal_event(payload["event"], payload)
+            except Exception:
+                pass
+
     def _run_once(self, *, force: bool = False) -> list[str]:
-        self._schedule_idle()
-        self._schedule_research()
-        self._schedule_storage_pressure()
-        self._schedule_storage_retention()
+        if hasattr(self._scheduler, "update_config"):
+            try:
+                self._scheduler.update_config(self._config)
+            except Exception:
+                pass
         signals = self._signals(query_intent=True if force else None)
+        fullscreen_active = bool(signals.get("fullscreen_active", False))
+        if not fullscreen_active:
+            self._schedule_idle()
+            self._schedule_research()
+            self._schedule_storage_pressure()
+            self._schedule_storage_retention()
         executed = self._scheduler.run_pending(signals)
         stats = self._scheduler.last_stats()
+        self._handle_mode_transitions(stats)
+        self._maybe_emit_fullscreen_event(signals)
+        self._maybe_emit_gpu_guard_event(signals)
         self._maybe_release_gpu(signals, stats.mode)
         watchdog = self._watchdog_payload(signals)
         self._stats.last_watchdog = watchdog
@@ -507,6 +771,8 @@ class RuntimeConductor:
                 "deferred_jobs": int(stats.deferred_jobs),
                 "preempted_jobs": int(stats.preempted_jobs),
                 "ran_light": int(stats.ran_light),
+                "ran_gpu_only": int(getattr(stats, "ran_gpu_only", 0) or 0),
+                "routed_jobs": int(getattr(stats, "routed_jobs", 0) or 0),
                 "ts_monotonic": float(stats.ts_monotonic),
             },
             "watchdog": self._stats.last_watchdog,

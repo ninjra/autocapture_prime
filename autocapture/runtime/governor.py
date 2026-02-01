@@ -100,7 +100,7 @@ class RuntimeGovernor:
         runtime_cfg = config.get("runtime", {}) if isinstance(config, Mapping) else {}
         idle_window_s = int(runtime_cfg.get("idle_window_s", budgets.min_idle_seconds))
         suspend_workers = bool(runtime_cfg.get("mode_enforcement", {}).get("suspend_workers", self.suspend_workers))
-        suspend_deadline_ms = int(runtime_cfg.get("mode_enforcement", {}).get("suspend_deadline_ms", 0) or 0)
+        suspend_deadline_ms = int(runtime_cfg.get("mode_enforcement", {}).get("suspend_deadline_ms", 500) or 500)
         with self._lock:
             self.idle_window_s = idle_window_s
             self.suspend_workers = suspend_workers
@@ -152,10 +152,30 @@ class RuntimeGovernor:
         activity_score = float(signals.get("activity_score", 0.0) or 0.0)
         activity_recent = bool(signals.get("activity_recent", False))
         user_active = bool(signals.get("user_active", False)) or activity_score >= 0.5 or activity_recent
+        fullscreen_active = bool(signals.get("fullscreen_active", False))
         query_intent = bool(signals.get("query_intent", False))
         suspend_workers = bool(signals.get("suspend_workers", self.suspend_workers))
         allow_active = bool(self._budgets.allow_heavy_during_active)
         min_idle = max(0, int(self._budgets.min_idle_seconds))
+        cpu_util = signals.get("cpu_utilization")
+        ram_util = signals.get("ram_utilization")
+        cpu_limit = float(self._budgets.cpu_max_utilization)
+        ram_limit = float(self._budgets.ram_max_utilization)
+
+        if fullscreen_active:
+            return "ACTIVE_CAPTURE_ONLY", "fullscreen", idle_seconds, activity_score
+        if cpu_util is not None:
+            try:
+                if float(cpu_util) >= cpu_limit > 0:
+                    return "ACTIVE_CAPTURE_ONLY", "resource_budget", idle_seconds, activity_score
+            except Exception:
+                pass
+        if ram_util is not None:
+            try:
+                if float(ram_util) >= ram_limit > 0:
+                    return "ACTIVE_CAPTURE_ONLY", "resource_budget", idle_seconds, activity_score
+            except Exception:
+                pass
 
         if query_intent:
             return "USER_QUERY", "query_intent", idle_seconds, activity_score
@@ -222,7 +242,10 @@ class RuntimeGovernor:
 
     def should_preempt(self, signals: Mapping[str, Any] | None = None) -> bool:
         with self._lock:
-            decision = self._decide_locked(signals or self._last_signals)
+            active_signals = signals or self._last_signals
+            decision = self._decide_locked(active_signals)
+            if bool(active_signals.get("fullscreen_active", False)):
+                return True
             grace_ms = max(0, int(self._budgets.preempt_grace_ms))
             suspend_deadline = max(0, int(self._suspend_deadline_ms))
             if decision.mode != "IDLE_DRAIN" and suspend_deadline:

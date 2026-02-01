@@ -7,11 +7,14 @@ import importlib.machinery
 import importlib.util
 import json
 import hashlib
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 from autocapture.plugins.manifest import ExtensionManifest, PluginManifest
+
+_DEPRECATION_WARNED = False
 
 
 @dataclass
@@ -23,6 +26,14 @@ class ExtensionInstance:
 
 class PluginManager:
     def __init__(self, config: dict[str, Any], safe_mode: bool = False) -> None:
+        global _DEPRECATION_WARNED
+        if not _DEPRECATION_WARNED:
+            warnings.warn(
+                "autocapture.plugins.PluginManager is deprecated; migrate to autocapture_nx.plugin_system.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            _DEPRECATION_WARNED = True
         self.config = config
         self.safe_mode = safe_mode
         self._manifests: list[PluginManifest] = []

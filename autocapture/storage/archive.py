@@ -14,12 +14,18 @@ class ArchiveManifest:
     files: dict[str, str]
 
 
-def _hash_file(path: Path) -> str:
+def _hash_bytes(data: bytes) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(8192), b""):
-            digest.update(chunk)
+    digest.update(data)
     return digest.hexdigest()
+
+
+def _zipinfo(name: str, *, compression: int) -> zipfile.ZipInfo:
+    info = zipfile.ZipInfo(name)
+    info.date_time = (1980, 1, 1, 0, 0, 0)
+    info.compress_type = compression
+    info.external_attr = 0o644 << 16
+    return info
 
 
 def create_archive(source_dir: str | Path, output_path: str | Path) -> Path:
@@ -31,10 +37,14 @@ def create_archive(source_dir: str | Path, output_path: str | Path) -> Path:
             if path.is_dir():
                 continue
             rel = path.relative_to(source_dir).as_posix()
-            files[rel] = _hash_file(path)
-            zf.write(path, rel)
+            data = path.read_bytes()
+            files[rel] = _hash_bytes(data)
+            zf.writestr(_zipinfo(rel, compression=zipfile.ZIP_DEFLATED), data)
         manifest = {"schema_version": 1, "files": files}
-        zf.writestr("manifest.json", json.dumps(manifest, indent=2, sort_keys=True))
+        zf.writestr(
+            _zipinfo("manifest.json", compression=zipfile.ZIP_DEFLATED),
+            json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8"),
+        )
     return output_path
 
 

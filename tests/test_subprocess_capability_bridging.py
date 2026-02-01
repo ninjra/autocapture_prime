@@ -142,8 +142,6 @@ class SubprocessCapabilityBridgingTests(unittest.TestCase):
             plugins["conflicts"] = {"enforce": True, "allow_pairs": []}
             hosting = plugins.setdefault("hosting", {})
             hosting["mode"] = "subprocess"
-            hosting["inproc_allowlist"] = [storage_id]
-            hosting["inproc_justifications"] = {storage_id: "test inproc storage capability"}
             hosting["rpc_timeout_s"] = 5
             hosting["rpc_max_message_bytes"] = 2_000_000
             hosting["sanitize_env"] = True
@@ -171,8 +169,6 @@ class SubprocessCapabilityBridgingTests(unittest.TestCase):
             plugins["conflicts"] = {"enforce": True, "allow_pairs": []}
             hosting = plugins.setdefault("hosting", {})
             hosting["mode"] = "subprocess"
-            hosting["inproc_allowlist"] = [storage_id]
-            hosting["inproc_justifications"] = {storage_id: "test inproc storage capability"}
             hosting["rpc_timeout_s"] = 5
             hosting["rpc_max_message_bytes"] = 2_000_000
             hosting["sanitize_env"] = True
@@ -199,7 +195,6 @@ class SubprocessCapabilityBridgingTests(unittest.TestCase):
             plugins["conflicts"] = {"enforce": True, "allow_pairs": []}
             hosting = plugins.setdefault("hosting", {})
             hosting["mode"] = "subprocess"
-            hosting["inproc_allowlist"] = []
             hosting["rpc_timeout_s"] = 5
             hosting["rpc_max_message_bytes"] = 2_000_000
             hosting["sanitize_env"] = True

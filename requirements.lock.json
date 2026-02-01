@@ -1,5 +1,5 @@
 {
-  "content_hash": "58fae215147cc60a387a68cb85c4c0f8afd59e6c67d68dc05b70b2433cfd74ef",
+  "content_hash": "39a0310cd1686d23f589132e983d750b45371105f568b189e529c48ae51aa407",
   "dependencies": [
     "Pillow>=10.0.0",
     "PyPDF2>=3.0.0",
@@ -7,9 +7,11 @@
     "cryptography>=41.0.0",
     "fastapi>=0.110.0",
     "httpx>=0.27.0",
+    "jsonschema>=4.19.0",
     "mss>=9.0.1",
     "mypy>=1.8.0",
     "platformdirs",
+    "psutil>=5.9.0",
     "pynput>=1.7.6",
     "pywebview>=5.1",
     "ruff>=0.6.0",
@@ -17,7 +19,7 @@
     "tzdata>=2024.1",
     "uvicorn>=0.27.0"
   ],
-  "generated_at": "2026-01-29T02:36:48.944148+00:00",
+  "generated_at": "2026-02-01T04:59:04.376728+00:00",
   "optional_dependencies": {
     "dev": [
       "mypy>=1.8.0",

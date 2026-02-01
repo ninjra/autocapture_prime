@@ -294,6 +294,27 @@
           ],
           "type": "object"
         },
+        "image": {
+          "additionalProperties": false,
+          "properties": {
+            "mss_jpeg": {
+              "additionalProperties": false,
+              "properties": {
+                "quality": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "quality"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "mss_jpeg"
+          ],
+          "type": "object"
+        },
         "video": {
           "additionalProperties": false,
           "properties": {
@@ -338,6 +359,18 @@
             },
             "backend": {
               "type": "string"
+            },
+            "dd_nvenc": {
+              "additionalProperties": false,
+              "properties": {
+                "allow_fallback": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "allow_fallback"
+              ],
+              "type": "object"
             },
             "container": {
               "type": "string"
@@ -669,6 +702,24 @@
           ],
           "type": "object"
         },
+        "rng": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "strict": {
+              "type": "boolean"
+            },
+            "seed": {
+              "type": "string"
+            },
+            "use_run_id": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
         "safe_mode_overrides": {
           "additionalProperties": true,
           "type": "object"
@@ -832,6 +883,18 @@
               "fanout": {
                 "type": "boolean"
               },
+              "failure_ordering": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "min_calls": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
               "max_providers": {
                 "type": "integer"
               },
@@ -937,6 +1000,18 @@
           },
           "type": "object"
         },
+        "failure_ordering": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "min_calls": {
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
         "hosting": {
           "additionalProperties": false,
           "properties": {
@@ -978,6 +1053,15 @@
             },
             "rpc_max_message_bytes": {
               "type": "integer"
+            },
+            "rpc_failure_limit": {
+              "type": "integer"
+            },
+            "rpc_failure_window_s": {
+              "type": "number"
+            },
+            "rpc_failure_cooldown_s": {
+              "type": "number"
             },
             "rpc_timeout_limit": {
               "type": "integer"
@@ -1673,13 +1757,48 @@
           },
           "type": "array"
         },
-        "bundle_name": {
-          "type": "string"
-        },
-        "enabled": {
-          "type": "boolean"
-        },
+      "bundle_name": {
+        "type": "string"
+      },
+      "bundle_root": {
+        "type": "string"
+      },
+      "enabled": {
+        "type": "boolean"
+      },
         "examples": {
+          "type": "object"
+        },
+        "eval": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "cases_path": {
+              "type": "string"
+            },
+            "output_path": {
+              "type": "string"
+            },
+            "include_prompt": {
+              "type": "boolean"
+            },
+            "include_sources": {
+              "type": "boolean"
+            },
+            "overrides": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "enabled",
+            "cases_path",
+            "output_path",
+            "include_prompt",
+            "include_sources",
+            "overrides"
+          ],
           "type": "object"
         },
         "github": {
@@ -1769,6 +1888,7 @@
         "persist_prompts",
         "sources",
         "examples",
+        "eval",
         "history",
         "github",
         "bundle_name",
@@ -1854,6 +1974,9 @@
         "limit": {
           "type": "integer"
         },
+        "rrf_k": {
+          "type": "integer"
+        },
         "vector_enabled": {
           "type": "boolean"
         },
@@ -1875,6 +1998,7 @@
         "vector_limit",
         "fast_threshold",
         "fusion_threshold",
+        "rrf_k",
         "vector_enabled",
         "vector_requires_idle",
         "vector_idle_seconds",
@@ -1928,6 +2052,11 @@
             "allow_heavy_during_active": {
               "type": "boolean"
             },
+            "cpu_max_utilization": {
+              "maximum": 0.5,
+              "minimum": 0,
+              "type": "number"
+            },
             "max_heavy_concurrency": {
               "type": "integer"
             },
@@ -1942,6 +2071,11 @@
             },
             "preempt_grace_ms": {
               "type": "integer"
+            },
+            "ram_max_utilization": {
+              "maximum": 0.5,
+              "minimum": 0,
+              "type": "number"
             },
             "window_budget_ms": {
               "type": "integer"
@@ -1958,13 +2092,45 @@
             "max_heavy_concurrency",
             "preempt_grace_ms",
             "min_idle_seconds",
-            "allow_heavy_during_active"
+            "allow_heavy_during_active",
+            "cpu_max_utilization",
+            "ram_max_utilization"
           ],
           "type": "object"
         },
         "gpu": {
           "additionalProperties": false,
           "properties": {
+            "allow_during_active": {
+              "type": "boolean"
+            },
+            "device_index": {
+              "type": "integer"
+            },
+            "lag_guard": {
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "max_capture_age_s": {
+                  "type": "number"
+                },
+                "max_capture_lag_ms": {
+                  "type": "number"
+                },
+                "max_queue_depth_p95": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "enabled",
+                "max_capture_lag_ms",
+                "max_queue_depth_p95",
+                "max_capture_age_s"
+              ],
+              "type": "object"
+            },
             "release_vram_deadline_ms": {
               "type": "integer"
             },
@@ -1974,7 +2140,10 @@
           },
           "required": [
             "release_vram_on_active",
-            "release_vram_deadline_ms"
+            "release_vram_deadline_ms",
+            "allow_during_active",
+            "device_index",
+            "lag_guard"
           ],
           "type": "object"
         },
@@ -2013,6 +2182,9 @@
         "mode_enforcement": {
           "additionalProperties": false,
           "properties": {
+            "idle_resume_budget_ms": {
+              "type": "integer"
+            },
             "suspend_deadline_ms": {
               "type": "integer"
             },
@@ -2022,7 +2194,65 @@
           },
           "required": [
             "suspend_workers",
-            "suspend_deadline_ms"
+            "suspend_deadline_ms",
+            "idle_resume_budget_ms"
+          ],
+          "type": "object"
+        },
+        "fullscreen_halt": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "poll_ms": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "enabled",
+            "poll_ms"
+          ],
+          "type": "object"
+        },
+        "routing": {
+          "additionalProperties": false,
+          "properties": {
+            "gpu_heavy": {
+              "additionalProperties": false,
+              "properties": {
+                "allow_fallback": {
+                  "type": "boolean"
+                },
+                "distro": {
+                  "type": "string"
+                },
+                "protocol_version": {
+                  "type": "integer"
+                },
+                "shared_queue_dir": {
+                  "type": "string"
+                },
+                "target": {
+                  "enum": [
+                    "native",
+                    "wsl2"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "target",
+                "protocol_version",
+                "shared_queue_dir",
+                "allow_fallback",
+                "distro"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "gpu_heavy"
           ],
           "type": "object"
         },
@@ -2078,9 +2308,11 @@
         "active_window_s",
         "idle_window_s",
         "mode_enforcement",
+        "fullscreen_halt",
         "gpu",
         "job_limits",
         "budgets",
+        "routing",
         "telemetry",
         "silence"
       ],
@@ -2129,6 +2361,17 @@
             "backend": {
               "type": "string"
             },
+            "keyring_backend": {
+              "enum": [
+                "auto",
+                "portable_file",
+                "windows_credential_manager"
+              ],
+              "type": "string"
+            },
+            "keyring_credential_name": {
+              "type": "string"
+            },
             "keyring_path": {
               "type": "string"
             },
@@ -2139,7 +2382,9 @@
           "required": [
             "backend",
             "root_key_path",
-            "keyring_path"
+            "keyring_path",
+            "keyring_backend",
+            "keyring_credential_name"
           ],
           "type": "object"
         },
@@ -2147,6 +2392,10 @@
           "type": "string"
         },
         "no_deletion_mode": {
+          "const": true,
+          "type": "boolean"
+        },
+        "raw_first_local": {
           "const": true,
           "type": "boolean"
         },
@@ -2233,6 +2482,9 @@
         "metadata_path": {
           "type": "string"
         },
+        "audit_db_path": {
+          "type": "string"
+        },
         "retention": {
           "additionalProperties": false,
           "properties": {
@@ -2264,6 +2516,7 @@
       "required": [
         "data_dir",
         "no_deletion_mode",
+        "raw_first_local",
         "encryption_required",
         "crypto",
         "retention",
@@ -2303,6 +2556,9 @@
           "type": "string"
         },
         "bind_host": {
+          "enum": [
+            "127.0.0.1"
+          ],
           "type": "string"
         },
         "bind_port": {

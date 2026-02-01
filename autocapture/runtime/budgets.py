@@ -18,6 +18,8 @@ class IdleBudgetConfig:
     preempt_grace_ms: int
     min_idle_seconds: int
     allow_heavy_during_active: bool
+    cpu_max_utilization: float
+    ram_max_utilization: float
 
 
 DEFAULT_IDLE_BUDGETS = IdleBudgetConfig(
@@ -29,6 +31,8 @@ DEFAULT_IDLE_BUDGETS = IdleBudgetConfig(
     preempt_grace_ms=150,
     min_idle_seconds=45,
     allow_heavy_during_active=False,
+    cpu_max_utilization=0.5,
+    ram_max_utilization=0.5,
 )
 
 # Backwards-compatible names used by existing imports/tests.
@@ -53,6 +57,17 @@ def resolve_idle_budgets(config: Mapping[str, Any]) -> IdleBudgetConfig:
         and idle_window_s != DEFAULT_IDLE_BUDGETS.min_idle_seconds
     ):
         min_idle_seconds = idle_window_s
+    def _clamp_fraction(value: Any, default: float) -> float:
+        try:
+            num = float(value)
+        except Exception:
+            num = float(default)
+        if num < 0:
+            return 0.0
+        if num > 0.5:
+            return 0.5
+        return num
+
     return IdleBudgetConfig(
         window_s=max(1, window_s),
         window_budget_ms=max(0, int(budgets_cfg.get("window_budget_ms", DEFAULT_IDLE_BUDGETS.window_budget_ms))),
@@ -62,4 +77,6 @@ def resolve_idle_budgets(config: Mapping[str, Any]) -> IdleBudgetConfig:
         preempt_grace_ms=max(0, int(budgets_cfg.get("preempt_grace_ms", DEFAULT_IDLE_BUDGETS.preempt_grace_ms))),
         min_idle_seconds=max(0, int(min_idle_seconds)),
         allow_heavy_during_active=bool(budgets_cfg.get("allow_heavy_during_active", DEFAULT_IDLE_BUDGETS.allow_heavy_during_active)),
+        cpu_max_utilization=_clamp_fraction(budgets_cfg.get("cpu_max_utilization", DEFAULT_IDLE_BUDGETS.cpu_max_utilization), DEFAULT_IDLE_BUDGETS.cpu_max_utilization),
+        ram_max_utilization=_clamp_fraction(budgets_cfg.get("ram_max_utilization", DEFAULT_IDLE_BUDGETS.ram_max_utilization), DEFAULT_IDLE_BUDGETS.ram_max_utilization),
     )

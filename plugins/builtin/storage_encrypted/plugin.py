@@ -623,6 +623,10 @@ class EncryptedBlobStore:
         if self._count_cache is not None and not existed:
             self._count_cache += 1
 
+    def put_path(self, record_id: str, path: str, *, ts_utc: str | None = None) -> None:
+        with open(path, "rb") as handle:
+            self.put_stream_replace(record_id, handle, ts_utc=ts_utc)
+
     def get(self, record_id: str, default: bytes | None = None) -> bytes | None:
         for path in self._path_candidates(record_id):
             if not os.path.exists(path):
@@ -831,7 +835,15 @@ class EncryptedStoragePlugin(PluginBase):
         root_key_path = crypto_cfg.get("root_key_path", "data/vault/root.key")
         encryption_required = storage_cfg.get("encryption_required", False)
         require_protection = bool(encryption_required and os.name == "nt")
-        keyring = KeyRing.load(keyring_path, legacy_root_path=root_key_path, require_protection=require_protection)
+        backend = crypto_cfg.get("keyring_backend", "auto")
+        credential_name = crypto_cfg.get("keyring_credential_name", "autocapture.keyring")
+        keyring = KeyRing.load(
+            keyring_path,
+            legacy_root_path=root_key_path,
+            require_protection=require_protection,
+            backend=backend,
+            credential_name=credential_name,
+        )
         self._keyring = keyring
         meta_provider = DerivedKeyProvider(keyring, "metadata")
         media_provider = DerivedKeyProvider(keyring, "media")

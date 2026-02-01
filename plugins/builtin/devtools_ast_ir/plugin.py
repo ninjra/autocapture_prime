@@ -7,11 +7,12 @@ import difflib
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from autocapture_nx.kernel.canonical_json import dumps
+from autocapture_nx.kernel.ids import ensure_run_id
+from autocapture_nx.kernel.paths import resolve_repo_path
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 
 
@@ -73,13 +74,22 @@ class ASTIRTool(PluginBase):
         return "\n".join(diff)
 
     def run(self, scan_root: str = "autocapture_nx") -> dict[str, Any]:
-        run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        run_dir = Path("tools") / "hypervisor" / "runs" / run_id
+        run_id = ensure_run_id(self.context.config)
+        data_dir = self.context.config.get("storage", {}).get("data_dir")
+        if not data_dir:
+            data_dir = os.getenv("AUTOCAPTURE_DATA_DIR", "data")
+        data_dir_path = Path(str(data_dir))
+        if not data_dir_path.is_absolute():
+            data_dir_path = resolve_repo_path(data_dir_path)
+        run_dir = data_dir_path / "runs" / run_id / "devtools_ast_ir"
         os.makedirs(run_dir, exist_ok=True)
 
         ast_summary = self._scan_python_ast(scan_root)
         design_ir = self._build_design_ir()
-        pin_path = Path(self.context.config.get("devtools", {}).get("ast_ir", {}).get("pin_path", "contracts/ir_pins.json"))
+        raw_pin = self.context.config.get("devtools", {}).get("ast_ir", {}).get("pin_path", "contracts/ir_pins.json")
+        pin_path = Path(raw_pin)
+        if not pin_path.is_absolute():
+            pin_path = resolve_repo_path(pin_path)
         with open(pin_path, "r", encoding="utf-8") as handle:
             pinned = json.load(handle)
         diff = self._diff_ir(design_ir, pinned)

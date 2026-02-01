@@ -41,7 +41,7 @@ class AudioCaptureWindows(PluginBase):
 
     def _run_loop(self) -> None:
         if os.name != "nt":
-            raise RuntimeError("Audio capture supported on Windows only")
+            return
         try:
             import sounddevice as sd
         except Exception as exc:

@@ -49,7 +49,10 @@ class PluginManifest:
     replaces: List[str]
     settings_paths: List[str]
     settings_schema: Optional[Dict[str, Any]]
+    settings_schema_path: Optional[str]
     default_settings: Optional[Dict[str, Any]]
+    io_contracts: Optional[Dict[str, Any]]
+    capability_tags: List[str]
     stages: List[str]
     provides: List[str]
     required_capabilities: List[str]
@@ -97,7 +100,10 @@ class PluginManifest:
             replaces=list(data.get("replaces", []) or []),
             settings_paths=list(data.get("settings_paths", []) or []),
             settings_schema=data.get("settings_schema"),
+            settings_schema_path=str(data.get("settings_schema_path")) if data.get("settings_schema_path") else None,
             default_settings=data.get("default_settings"),
+            io_contracts=data.get("io_contracts"),
+            capability_tags=list(data.get("capability_tags", []) or []),
             stages=list(data.get("stages", []) or []),
             provides=list(data.get("provides", []) or []),
             required_capabilities=list(data.get("required_capabilities", []) or []),

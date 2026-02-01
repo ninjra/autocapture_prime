@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import site
@@ -14,11 +13,14 @@ from typing import Any, TYPE_CHECKING, cast
 
 from autocapture_nx import __version__ as kernel_version
 from autocapture_nx.kernel.config import SchemaLiteValidator
+from autocapture_nx.kernel.audit import PluginAuditLog, hash_payload
 from autocapture_nx.kernel.errors import PermissionError, PluginError
 from autocapture_nx.kernel.hashing import sha256_directory, sha256_file
 from autocapture_nx.kernel.paths import plugins_dir, resolve_repo_path, load_json
+from autocapture_nx.kernel.schema_registry import SchemaRegistry, derive_schema_from_paths
+from autocapture_nx.kernel.rng import RNGScope, RNGService, install_rng_guard
 
-from .api import PluginContext
+from .contracts import IOContract, load_io_contracts
 from .host import SubprocessPlugin
 from .manifest import PluginManifest
 from .runtime import FilesystemPolicy, filesystem_guard, network_guard
@@ -34,6 +36,7 @@ DEFAULT_CAPABILITY_POLICY: dict[str, Any] = {
     "provider_ids": [],
     "fanout": True,
     "max_providers": 0,
+    "failure_ordering": {},
 }
 
 
@@ -41,6 +44,13 @@ def _normalize_pair(a: str, b: str) -> tuple[str, str]:
     if a <= b:
         return a, b
     return b, a
+
+
+def _normalize_tags(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    tags = [str(item).strip() for item in raw if str(item).strip()]
+    return sorted(set(tags))
 
 
 def _parse_version(version: str) -> tuple[int, ...]:
@@ -102,13 +112,32 @@ class LoadedPlugin:
     instance: Any
     capabilities: dict[str, Any]
     filesystem_policy: FilesystemPolicy | None = None
+    manifest_path: Path | None = None
 
 
 class CapabilityProxy:
-    def __init__(self, target: Any, network_allowed: bool, filesystem_policy: FilesystemPolicy | None = None) -> None:
+    def __init__(
+        self,
+        target: Any,
+        network_allowed: bool,
+        filesystem_policy: FilesystemPolicy | None = None,
+        *,
+        capability: str | None = None,
+        io_contracts: dict[str, IOContract] | None = None,
+        schema_registry: SchemaRegistry | None = None,
+        rng_seed: int | None = None,
+        rng_strict: bool = False,
+        rng_enabled: bool = False,
+    ) -> None:
         self._target = target
         self._network_allowed = network_allowed
         self._filesystem_policy = filesystem_policy
+        self._capability = capability or ""
+        self._io_contracts = io_contracts or {}
+        self._schema_registry = schema_registry
+        self._rng_seed = rng_seed
+        self._rng_strict = rng_strict
+        self._rng_enabled = rng_enabled
 
     @property
     def network_allowed(self) -> bool:
@@ -118,20 +147,48 @@ class CapabilityProxy:
     def target(self) -> Any:
         return self._target
 
+    def _validate_input(self, method: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+        contract = self._io_contracts.get(method)
+        if contract is None or contract.input_schema is None or self._schema_registry is None:
+            return
+        payload = {"args": list(args), "kwargs": dict(kwargs)}
+        issues = self._schema_registry.validate(contract.input_schema, payload)
+        if issues:
+            raise PluginError(
+                f"I/O contract input invalid for {self._capability}.{method}: "
+                f"{self._schema_registry.format_issues(issues)}"
+            )
+
+    def _validate_output(self, method: str, result: Any) -> None:
+        contract = self._io_contracts.get(method)
+        if contract is None or contract.output_schema is None or self._schema_registry is None:
+            return
+        issues = self._schema_registry.validate(contract.output_schema, result)
+        if issues:
+            raise PluginError(
+                f"I/O contract output invalid for {self._capability}.{method}: "
+                f"{self._schema_registry.format_issues(issues)}"
+            )
+
+    def _invoke(self, method: str, func, args: tuple[Any, ...], kwargs: dict[str, Any]):
+        self._validate_input(method, args, kwargs)
+        with RNGScope(self._rng_seed, strict=self._rng_strict, enabled=self._rng_enabled):
+            with network_guard(self._network_allowed):
+                with filesystem_guard(self._filesystem_policy):
+                    result = func(*args, **kwargs)
+        self._validate_output(method, result)
+        return result
+
     def __call__(self, *args, **kwargs):
         if not callable(self._target):
             raise TypeError("Capability is not callable")
-        with network_guard(self._network_allowed):
-            with filesystem_guard(self._filesystem_policy):
-                return self._target(*args, **kwargs)
+        return self._invoke("__call__", self._target, args, kwargs)
 
     def __getattr__(self, name: str) -> Any:
         attr = getattr(self._target, name)
         if callable(attr):
             def wrapped(*args, **kwargs):
-                with network_guard(self._network_allowed):
-                    with filesystem_guard(self._filesystem_policy):
-                        return attr(*args, **kwargs)
+                return self._invoke(name, attr, args, kwargs)
 
             return wrapped
         return attr
@@ -207,10 +264,14 @@ class MultiCapabilityProxy:
             if attr is None:
                 continue
             if callable(attr):
-                result = attr(*args, **kwargs)
+                try:
+                    result = attr(*args, **kwargs)
+                    results.append({"plugin_id": plugin_id, "result": result, "ok": True})
+                except Exception as exc:
+                    results.append({"plugin_id": plugin_id, "error": str(exc), "ok": False})
+                    continue
             else:
-                result = attr
-            results.append({"plugin_id": plugin_id, "result": result})
+                results.append({"plugin_id": plugin_id, "result": attr, "ok": True})
         return results
 
     def __getattr__(self, name: str) -> Any:
@@ -218,6 +279,46 @@ class MultiCapabilityProxy:
             return self.call_all(name, *args, **kwargs)
 
         return _fanout
+
+
+class FallbackCapabilityProxy:
+    """Single-capability proxy with deterministic provider fallback."""
+
+    def __init__(
+        self,
+        capability: str,
+        providers: list[tuple[str, CapabilityProxy]],
+        policy: dict[str, Any],
+    ) -> None:
+        self.capability = capability
+        self._policy = dict(policy)
+        self._providers = list(providers)
+
+    def _invoke(self, method: str, *args, **kwargs):
+        last_exc: Exception | None = None
+        for _plugin_id, proxy in self._providers:
+            attr = getattr(proxy, method, None)
+            if attr is None:
+                continue
+            try:
+                if callable(attr):
+                    return attr(*args, **kwargs)
+                return attr
+            except Exception as exc:
+                last_exc = exc
+                continue
+        if last_exc is not None:
+            raise last_exc
+        raise PluginError(f"No providers available for capability {self.capability}")
+
+    def __getattr__(self, name: str) -> Any:
+        def _call(*args, **kwargs):
+            return self._invoke(name, *args, **kwargs)
+
+        return _call
+
+    def __call__(self, *args, **kwargs):
+        return self._invoke("__call__", *args, **kwargs)
 
 
 class CapabilityRegistry:
@@ -231,6 +332,9 @@ class CapabilityRegistry:
         network_allowed: bool,
         filesystem_policy: FilesystemPolicy | None = None,
     ) -> None:
+        if isinstance(impl, (CapabilityProxy, MultiCapabilityProxy)):
+            self._capabilities[capability] = impl
+            return
         self._capabilities[capability] = CapabilityProxy(impl, network_allowed, filesystem_policy)
 
     def get(self, capability: str) -> Any:
@@ -250,8 +354,17 @@ class PluginRegistry:
         self.config = config
         self.safe_mode = safe_mode
         self._validator = SchemaLiteValidator()
+        self._schema_registry = SchemaRegistry()
+        self._config_schema = self._schema_registry.load_schema_path("contracts/config_schema.json")
+        self._rng_service = RNGService.from_config(config)
+        self._audit_log = PluginAuditLog.from_config(config)
+        self._failure_summary_cache: dict[str, dict[str, Any]] | None = None
+        self._load_report: dict[str, Any] = {"loaded": [], "failed": [], "skipped": [], "errors": []}
+        if self._rng_service.enabled:
+            install_rng_guard()
         plugins_cfg = config.get("plugins", {}) if isinstance(config, dict) else {}
         self._capability_policies = plugins_cfg.get("capabilities", {}) if isinstance(plugins_cfg, dict) else {}
+        self._failure_ordering_cfg = plugins_cfg.get("failure_ordering", {}) if isinstance(plugins_cfg, dict) else {}
         conflicts_cfg = plugins_cfg.get("conflicts", {}) if isinstance(plugins_cfg, dict) else {}
         self._conflicts_enforce = True
         self._conflicts_allow_pairs: set[tuple[str, str]] = set()
@@ -267,6 +380,34 @@ class PluginRegistry:
                     if not a or not b or a == b:
                         continue
                     self._conflicts_allow_pairs.add(_normalize_pair(a, b))
+
+    def load_report(self) -> dict[str, Any]:
+        return dict(self._load_report)
+
+    def _record_load_failure(
+        self,
+        *,
+        plugin_id: str | None,
+        entrypoint: str | None,
+        phase: str,
+        error: str,
+    ) -> None:
+        record = {
+            "plugin_id": plugin_id,
+            "entrypoint": entrypoint,
+            "phase": phase,
+            "error": error,
+        }
+        self._load_report["errors"].append(record)
+        try:
+            self._audit_log.record_load_failure(
+                plugin_id=plugin_id,
+                entrypoint=entrypoint,
+                phase=phase,
+                error=error,
+            )
+        except Exception:
+            return
 
     def discover_manifest_paths(self) -> list[Path]:
         paths = [plugins_dir() / "builtin"]
@@ -352,6 +493,78 @@ class PluginRegistry:
             if hosting_mode != "subprocess" or manifest.get("plugin_id") in inproc_allowlist:
                 raise PluginError("Network-capable plugins must run in subprocess hosting mode")
 
+    def _resolve_settings_schema(
+        self,
+        manifest: dict[str, Any],
+        *,
+        plugin_root: Path,
+        settings_paths: list[str],
+    ) -> dict[str, Any] | None:
+        schema_inline = manifest.get("settings_schema")
+        if isinstance(schema_inline, dict):
+            return schema_inline
+        schema_path = manifest.get("settings_schema_path")
+        if schema_path:
+            path = Path(str(schema_path))
+            if not path.is_absolute():
+                plugin_candidate = plugin_root / path
+                if plugin_candidate.exists():
+                    try:
+                        return self._schema_registry.load_schema_path(plugin_candidate)
+                    except FileNotFoundError as exc:
+                        raise PluginError(f"Missing settings schema: {plugin_candidate}") from exc
+            try:
+                return self._schema_registry.load_schema_path(path)
+            except FileNotFoundError as exc:
+                raise PluginError(f"Missing settings schema: {path}") from exc
+        if settings_paths:
+            return derive_schema_from_paths(self._config_schema, settings_paths)
+        return {"type": "object"}
+
+    def _validate_settings_schema(
+        self,
+        *,
+        plugin_id: str,
+        schema: dict[str, Any] | None,
+        settings: dict[str, Any],
+    ) -> None:
+        if schema is None:
+            return
+        issues = self._schema_registry.validate(schema, settings)
+        if issues:
+            raise PluginError(
+                f"Plugin {plugin_id} settings schema invalid: {self._schema_registry.format_issues(issues)}"
+            )
+
+    def _compute_code_hash(
+        self,
+        *,
+        manifest_path: Path,
+        plugin_root: Path,
+        entrypoints: list[dict[str, Any]],
+        manifest: dict[str, Any],
+    ) -> str | None:
+        manifest_hash = sha256_file(manifest_path)
+        entry_hashes: dict[str, str] = {}
+        for entry in entrypoints:
+            rel = str(entry.get("path", "")).strip()
+            if not rel:
+                continue
+            path = plugin_root / rel
+            if path.exists() and path.is_file():
+                entry_hashes[rel] = sha256_file(path)
+        artifact_hash = None
+        lock = manifest.get("hash_lock", {})
+        if isinstance(lock, dict):
+            raw = str(lock.get("artifact_sha256") or "").strip()
+            if raw:
+                artifact_hash = raw
+        payload: dict[str, Any] = {"manifest": manifest_hash, "entrypoints": entry_hashes}
+        if artifact_hash:
+            payload["artifact"] = artifact_hash
+        code_hash, _ = hash_payload(payload)
+        return code_hash
+
     def _validate_inproc_justifications(self, inproc_allowlist: set[str]) -> None:
         hosting_cfg = self.config.get("plugins", {}).get("hosting", {})
         justifications = hosting_cfg.get("inproc_justifications", {}) if isinstance(hosting_cfg, dict) else {}
@@ -392,6 +605,18 @@ class PluginRegistry:
             required_caps = safe_caps
         if not isinstance(required_caps, list) or not required_caps:
             return set()
+
+        def _add_providers(cap_name: str, selected: set[str]) -> None:
+            candidates = sorted(set(providers_by_cap.get(cap_name, [])))
+            if not candidates:
+                return
+            policy = self._capability_policy(cap_name)
+            preferred = policy.get("preferred", [])
+            preferred_ids = [pid for pid in preferred if pid in candidates]
+            if preferred_ids:
+                selected.update(preferred_ids)
+                return
+            selected.add(candidates[0])
         providers_by_cap: dict[str, list[str]] = {}
         for pid, (_path, manifest) in manifests_by_id.items():
             if pid not in allowlist:
@@ -403,19 +628,7 @@ class PluginRegistry:
             cap_name = str(cap).strip()
             if not cap_name:
                 continue
-            candidates = sorted(set(providers_by_cap.get(cap_name, [])))
-            if not candidates:
-                continue
-            policy = self._capability_policy(cap_name)
-            preferred = policy.get("preferred", [])
-            chosen = None
-            for pid in preferred:
-                if pid in candidates:
-                    chosen = pid
-                    break
-            if chosen is None:
-                chosen = candidates[0]
-            selected.add(chosen)
+            _add_providers(cap_name, selected)
         queue = list(selected)
         while queue:
             pid = queue.pop()
@@ -436,21 +649,10 @@ class PluginRegistry:
                     cap_name = str(cap).strip()
                     if not cap_name:
                         continue
-                    candidates = sorted(set(providers_by_cap.get(cap_name, [])))
-                    if not candidates:
-                        continue
-                    policy = self._capability_policy(cap_name)
-                    preferred = policy.get("preferred", [])
-                    chosen = None
-                    for pref in preferred:
-                        if pref in candidates:
-                            chosen = pref
-                            break
-                    if chosen is None:
-                        chosen = candidates[0]
-                    if chosen not in selected:
-                        selected.add(chosen)
-                        queue.append(chosen)
+                    before = set(selected)
+                    _add_providers(cap_name, selected)
+                    for new_pid in sorted(selected - before):
+                        queue.append(new_pid)
         return selected
 
     def _plugin_load_order(
@@ -499,7 +701,7 @@ class PluginRegistry:
                     continue
                 policy = self._capability_policy(capability)
                 providers = self._filtered_providers(capability, providers, policy)
-                providers = self._ordered_providers(providers, policy.get("preferred", []))
+                providers = self._ordered_providers(providers, policy)
                 if policy.get("mode") == "multi":
                     max_providers = int(policy.get("max_providers", 0) or 0)
                     if max_providers > 0:
@@ -610,6 +812,19 @@ class PluginRegistry:
         data_dir = str(config.get("storage", {}).get("data_dir", "data"))
         cache_dir = str(config.get("plugins", {}).get("hosting", {}).get("cache_dir", "data/cache/plugins"))
         config_dir = str(config.get("paths", {}).get("config_dir", "config"))
+        run_id = str(config.get("runtime", {}).get("run_id", "run"))
+        run_dir = str(Path(data_dir) / "runs" / run_id)
+        try:
+            Path(run_dir).mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        metadata_db_path = str(config.get("storage", {}).get("metadata_path", "data/metadata.db"))
+        media_dir = str(config.get("storage", {}).get("media_dir", "data/media"))
+        audit_db_path = str(config.get("storage", {}).get("audit_db_path", "data/audit/kernel_audit.db"))
+        spool_dir = str(config.get("storage", {}).get("spool_dir", "data/spool"))
+        blob_dir = str(config.get("storage", {}).get("blob_dir", "data/blobs"))
+        lexical_db_path = str(config.get("storage", {}).get("lexical_path", "data/lexical.db"))
+        vector_db_path = str(config.get("storage", {}).get("vector_path", "data/vector.db"))
         anchor_path = ""
         anchor_dir = ""
         keyring_path = ""
@@ -655,6 +870,14 @@ class PluginRegistry:
             "config_dir": config_dir,
             "plugin_dir": str(plugin_root),
             "repo_root": repo_root,
+            "run_dir": run_dir,
+            "metadata_db_path": metadata_db_path,
+            "media_dir": media_dir,
+            "audit_db_path": audit_db_path,
+            "spool_dir": spool_dir,
+            "blob_dir": blob_dir,
+            "lexical_db_path": lexical_db_path,
+            "vector_db_path": vector_db_path,
             "anchor_path": anchor_path,
             "anchor_dir": anchor_dir,
             "keyring_path": keyring_path,
@@ -805,6 +1028,10 @@ class PluginRegistry:
         policy["preferred"] = [str(pid) for pid in preferred] if isinstance(preferred, list) else []
         provider_ids = policy.get("provider_ids", [])
         policy["provider_ids"] = [str(pid) for pid in provider_ids] if isinstance(provider_ids, list) else []
+        failure_ordering = policy.get("failure_ordering", {})
+        if not isinstance(failure_ordering, (dict, bool)):
+            failure_ordering = {}
+        policy["failure_ordering"] = failure_ordering
         try:
             policy["max_providers"] = int(policy.get("max_providers", 0))
         except Exception:
@@ -812,12 +1039,52 @@ class PluginRegistry:
         policy["fanout"] = bool(policy.get("fanout", True))
         return policy
 
+    def _failure_ordering_policy(self, policy: dict[str, Any]) -> dict[str, Any]:
+        settings: dict[str, Any] = {}
+        raw_global = self._failure_ordering_cfg
+        if isinstance(raw_global, bool):
+            settings["enabled"] = raw_global
+        elif isinstance(raw_global, dict):
+            settings.update(raw_global)
+        raw_override = policy.get("failure_ordering")
+        if isinstance(raw_override, bool):
+            settings["enabled"] = raw_override
+        elif isinstance(raw_override, dict):
+            settings.update(raw_override)
+        enabled = bool(settings.get("enabled", False))
+        try:
+            min_calls = int(settings.get("min_calls", 1) or 1)
+        except Exception:
+            min_calls = 1
+        return {"enabled": enabled, "min_calls": max(1, min_calls)}
+
     def _ordered_providers(
         self,
         providers: list[tuple[str, CapabilityProxy]],
-        preferred: list[str],
+        policy: dict[str, Any],
     ) -> list[tuple[str, CapabilityProxy]]:
         base = sorted(providers, key=lambda item: item[0])
+        failure_cfg = self._failure_ordering_policy(policy)
+        if failure_cfg.get("enabled"):
+            if self._failure_summary_cache is None:
+                self._failure_summary_cache = self._audit_log.failure_summary()
+            summary = self._failure_summary_cache
+            min_calls = max(1, int(failure_cfg.get("min_calls", 1) or 1))
+
+            def _score(item: tuple[str, CapabilityProxy]) -> tuple[int, int, int, str]:
+                pid = item[0]
+                stats = summary.get(pid, {})
+                failures = int(stats.get("failures", 0) or 0)
+                successes = int(stats.get("successes", 0) or 0)
+                total = failures + successes
+                if total < min_calls:
+                    return (0, 0, 0, pid)
+                rate_bp = int(round(10000 * failures / max(1, total)))
+                return (rate_bp, failures, -successes, pid)
+
+            base = sorted(base, key=_score)
+
+        preferred = policy.get("preferred", [])
         if not preferred:
             return base
         preferred_set = set(preferred)
@@ -857,8 +1124,8 @@ class PluginRegistry:
             for candidate in providers:
                 if candidate[0] == pid:
                     return candidate
-        ids = ", ".join(sorted(pid for pid, _proxy in providers))
-        raise PluginError(f"Multiple providers for {capability}: {ids}")
+        # Deterministic fallback when multiple providers exist.
+        return providers[0]
 
     def _resolve_capabilities(
         self,
@@ -868,7 +1135,7 @@ class PluginRegistry:
         for capability, providers in sorted(providers_by_cap.items(), key=lambda item: item[0]):
             policy = self._capability_policy(capability)
             providers = self._filtered_providers(capability, providers, policy)
-            providers = self._ordered_providers(providers, policy.get("preferred", []))
+            providers = self._ordered_providers(providers, policy)
             if policy.get("mode") == "multi":
                 max_providers = int(policy.get("max_providers", 0) or 0)
                 if max_providers > 0:
@@ -876,8 +1143,12 @@ class PluginRegistry:
                 multi = MultiCapabilityProxy(capability, providers, policy)
                 capabilities.register(capability, multi, network_allowed=False)
             else:
-                plugin_id, proxy = self._resolve_single(capability, providers, policy)
-                capabilities.register(capability, proxy, network_allowed=proxy.network_allowed)
+                if len(providers) == 1:
+                    _plugin_id, proxy = providers[0]
+                    capabilities.register(capability, proxy, network_allowed=proxy.network_allowed)
+                else:
+                    fallback = FallbackCapabilityProxy(capability, providers, policy)
+                    capabilities.register(capability, fallback, network_allowed=False)
         return capabilities
 
     def _capabilities_for_plugins(self, plugins: list[LoadedPlugin]) -> CapabilityRegistry:
@@ -885,8 +1156,22 @@ class PluginRegistry:
         for plugin in plugins:
             network_allowed = bool(plugin.manifest.get("permissions", {}).get("network", False))
             filesystem_policy = plugin.filesystem_policy
+            plugin_root = plugin.manifest_path.parent if plugin.manifest_path is not None else resolve_repo_path(".")
+            io_contracts = load_io_contracts(self._schema_registry, plugin.manifest, plugin_root=plugin_root)
+            rng_seed_info = self._rng_service.seed_for_plugin(plugin.plugin_id) if self._rng_service.enabled else None
+            rng_seed = rng_seed_info.plugin_seed if rng_seed_info else None
             for cap_name, impl in plugin.capabilities.items():
-                proxy = CapabilityProxy(impl, network_allowed, filesystem_policy)
+                proxy = CapabilityProxy(
+                    impl,
+                    network_allowed,
+                    filesystem_policy,
+                    capability=cap_name,
+                    io_contracts=io_contracts.get(cap_name, {}),
+                    schema_registry=self._schema_registry,
+                    rng_seed=rng_seed,
+                    rng_strict=self._rng_service.strict,
+                    rng_enabled=self._rng_service.enabled,
+                )
                 providers_by_cap.setdefault(cap_name, []).append((plugin.plugin_id, proxy))
         return self._resolve_capabilities(providers_by_cap)
 
@@ -986,11 +1271,17 @@ class PluginRegistry:
                 caps = plugin.capabilities
                 network_allowed = bool(plugin.manifest.get("permissions", {}).get("network", False))
                 filesystem_policy = plugin.filesystem_policy
+                plugin_root = plugin.manifest_path.parent if plugin.manifest_path is not None else resolve_repo_path(".")
+                io_contracts = load_io_contracts(self._schema_registry, plugin.manifest, plugin_root=plugin_root)
+                rng_seed_info = self._rng_service.seed_for_plugin(plugin.plugin_id) if self._rng_service.enabled else None
+                rng_seed = rng_seed_info.plugin_seed if rng_seed_info else None
             elif hasattr(plugin, "capabilities"):
                 plugin_id = str(getattr(plugin, "plugin_id", "unknown.plugin"))
                 caps = plugin.capabilities()
                 network_allowed = False
                 filesystem_policy = None
+                io_contracts = {}
+                rng_seed = None
             else:
                 continue
             for cap_name, impl in caps.items():
@@ -1002,34 +1293,87 @@ class PluginRegistry:
                     if isinstance(existing, CapabilityProxy):
                         existing = existing.target
                     if isinstance(existing, MultiCapabilityProxy):
-                        existing.add_provider(plugin_id, CapabilityProxy(impl, network_allowed, filesystem_policy))
+                        existing.add_provider(
+                            plugin_id,
+                            CapabilityProxy(
+                                impl,
+                                network_allowed,
+                                filesystem_policy,
+                                capability=cap_name,
+                                io_contracts=io_contracts.get(cap_name, {}),
+                                schema_registry=self._schema_registry,
+                                rng_seed=rng_seed,
+                                rng_strict=self._rng_service.strict,
+                                rng_enabled=self._rng_service.enabled,
+                            ),
+                        )
                         continue
                     raise PluginError(f"Existing capability for {cap_name} is not multi-capable")
                 if policy.get("mode") == "multi":
                     multi = MultiCapabilityProxy(
                         cap_name,
-                        [(plugin_id, CapabilityProxy(impl, network_allowed, filesystem_policy))],
+                        [
+                            (
+                                plugin_id,
+                                CapabilityProxy(
+                                    impl,
+                                    network_allowed,
+                                    filesystem_policy,
+                                    capability=cap_name,
+                                    io_contracts=io_contracts.get(cap_name, {}),
+                                    schema_registry=self._schema_registry,
+                                    rng_seed=rng_seed,
+                                    rng_strict=self._rng_service.strict,
+                                    rng_enabled=self._rng_service.enabled,
+                                ),
+                            )
+                        ],
                         policy,
                     )
                     system.register(cap_name, multi, network_allowed=False)
                 else:
-                    system.register(cap_name, impl, network_allowed=network_allowed, filesystem_policy=filesystem_policy)
+                    system.register(
+                        cap_name,
+                        CapabilityProxy(
+                            impl,
+                            network_allowed,
+                            filesystem_policy,
+                            capability=cap_name,
+                            io_contracts=io_contracts.get(cap_name, {}),
+                            schema_registry=self._schema_registry,
+                            rng_seed=rng_seed,
+                            rng_strict=self._rng_service.strict,
+                            rng_enabled=self._rng_service.enabled,
+                        ),
+                        network_allowed=network_allowed,
+                        filesystem_policy=filesystem_policy,
+                    )
 
     def load_plugins(self) -> tuple[list[LoadedPlugin], CapabilityRegistry]:
+        self._load_report = {"loaded": [], "failed": [], "skipped": [], "errors": []}
+        self._failure_summary_cache = None
         manifests = self.discover_manifest_paths()
         lockfile = self.load_lockfile()
         hosting_cfg = self.config.get("plugins", {}).get("hosting", {})
-        hosting_mode = hosting_cfg.get("mode", "inproc")
-        if self.safe_mode or self.config.get("plugins", {}).get("safe_mode", False):
-            hosting_mode = "inproc"
+        hosting_mode = hosting_cfg.get("mode", "subprocess")
 
         manifests_by_id: dict[str, tuple[Path, dict[str, Any]]] = {}
         for manifest_path in manifests:
-            with manifest_path.open("r", encoding="utf-8") as handle:
-                manifest = json.load(handle)
-            self._validate_manifest(manifest)
-            self._check_compat(manifest)
-            plugin_id = manifest["plugin_id"]
+            manifest: dict[str, Any] | None = None
+            try:
+                with manifest_path.open("r", encoding="utf-8") as handle:
+                    manifest = json.load(handle)
+                self._validate_manifest(manifest)
+                self._check_compat(manifest)
+                plugin_id = manifest["plugin_id"]
+            except Exception as exc:
+                self._record_load_failure(
+                    plugin_id=str(manifest.get("plugin_id")) if isinstance(manifest, dict) else None,
+                    entrypoint=str(manifest_path),
+                    phase="manifest",
+                    error=str(exc),
+                )
+                continue
             manifests_by_id[plugin_id] = (manifest_path, manifest)
 
         alias_map = self._alias_map(manifests_by_id)
@@ -1038,10 +1382,17 @@ class PluginRegistry:
         default_pack = set(self._normalize_ids(self.config.get("plugins", {}).get("default_pack", []), alias_map))
         inproc_allowlist = set(self._normalize_ids(hosting_cfg.get("inproc_allowlist", []), alias_map))
         self._validate_inproc_justifications(inproc_allowlist)
+        if hosting_mode != "subprocess":
+            raise PluginError("In-process plugins are disabled; set plugins.hosting.mode to 'subprocess'")
+        if inproc_allowlist:
+            raise PluginError("In-process plugins are disabled; empty plugins.hosting.inproc_allowlist")
 
         loaded: list[LoadedPlugin] = []
         capabilities = CapabilityRegistry()
         providers_by_cap: dict[str, list[tuple[str, CapabilityProxy]]] = {}
+        failed_ids: set[str] = set()
+        skipped_ids: set[str] = set()
+        loaded_ids: set[str] = set()
 
         def is_enabled(pid: str, manifest: dict[str, Any]) -> bool:
             if self.config.get("plugins", {}).get("safe_mode", False):
@@ -1075,30 +1426,52 @@ class PluginRegistry:
             if plugin_id not in enabled_set:
                 continue
             depends = manifest.get("depends_on", [])
+            blocked = False
             for dep in depends:
+                if dep in failed_ids:
+                    self._record_load_failure(
+                        plugin_id=plugin_id,
+                        entrypoint=str(manifest_path),
+                        phase="dependency",
+                        error=f"depends on failed plugin {dep}",
+                    )
+                    blocked = True
+                    continue
                 if dep not in allowlist:
-                    raise PluginError(f"Plugin {plugin_id} depends on non-allowlisted {dep}")
+                    self._record_load_failure(
+                        plugin_id=plugin_id,
+                        entrypoint=str(manifest_path),
+                        phase="dependency",
+                        error=f"depends on non-allowlisted {dep}",
+                    )
+                    blocked = True
+                    continue
                 if dep not in enabled_set:
-                    raise PluginError(f"Plugin {plugin_id} depends on disabled {dep}")
-            self._check_permissions(manifest)
-            self._check_lock(plugin_id, manifest_path, manifest_path.parent, lockfile)
+                    self._record_load_failure(
+                        plugin_id=plugin_id,
+                        entrypoint=str(manifest_path),
+                        phase="dependency",
+                        error=f"depends on disabled {dep}",
+                    )
+                    blocked = True
+            if blocked:
+                skipped_ids.add(plugin_id)
+                continue
+            local_loaded: list[LoadedPlugin] = []
+            local_providers: dict[str, list[tuple[str, CapabilityProxy]]] = {}
+            try:
+                self._check_permissions(manifest)
+                self._check_lock(plugin_id, manifest_path, manifest_path.parent, lockfile)
 
-            entrypoints = manifest.get("entrypoints", [])
-            if not entrypoints:
-                raise PluginError(f"Plugin {plugin_id} has no entrypoints")
-            for entry in entrypoints:
-                module_path = manifest_path.parent / entry["path"]
-                if not module_path.exists():
-                    raise PluginError(f"Missing entrypoint module {module_path}")
-                module_name = f"autocapture_plugin_{plugin_id.replace('.', '_')}"
-                network_allowed = bool(manifest.get("permissions", {}).get("network", False))
+                entrypoints = manifest.get("entrypoints", [])
+                if not entrypoints:
+                    raise PluginError(f"Plugin {plugin_id} has no entrypoints")
                 if "required_capabilities" not in manifest:
                     raise PluginError(f"Plugin {plugin_id} missing required_capabilities")
                 required_caps_raw = manifest.get("required_capabilities", [])
                 if not isinstance(required_caps_raw, list):
                     raise PluginError(f"Plugin {plugin_id} required_capabilities must be a list")
                 required_capabilities = {str(cap) for cap in required_caps_raw if str(cap).strip()}
-                filesystem_policy = self._filesystem_policy(plugin_id, manifest, manifest_path.parent)
                 settings_paths = manifest.get("settings_paths", []) or []
                 if not isinstance(settings_paths, list):
                     settings_paths = []
@@ -1109,7 +1482,41 @@ class PluginRegistry:
                     default_settings=default_settings,
                     overrides=self._plugin_overrides(plugin_id),
                 )
-                if hosting_mode == "subprocess" and plugin_id not in inproc_allowlist:
+                try:
+                    settings_schema = self._resolve_settings_schema(
+                        manifest,
+                        plugin_root=manifest_path.parent,
+                        settings_paths=[str(path) for path in settings_paths if str(path).strip()],
+                    )
+                except ValueError as exc:
+                    raise PluginError(f"Plugin {plugin_id} settings schema error: {exc}") from exc
+                self._validate_settings_schema(
+                    plugin_id=plugin_id,
+                    schema=settings_schema,
+                    settings=plugin_settings,
+                )
+                settings_hash, _ = hash_payload(plugin_settings)
+                io_contracts = load_io_contracts(
+                    self._schema_registry,
+                    manifest,
+                    plugin_root=manifest_path.parent,
+                )
+                rng_seed_info = self._rng_service.seed_for_plugin(plugin_id) if self._rng_service.enabled else None
+                rng_seed = rng_seed_info.plugin_seed if rng_seed_info else None
+                rng_seed_hex = rng_seed_info.seed_hex if rng_seed_info else None
+                code_hash = self._compute_code_hash(
+                    manifest_path=manifest_path,
+                    plugin_root=manifest_path.parent,
+                    entrypoints=entrypoints,
+                    manifest=manifest,
+                )
+                network_allowed = bool(manifest.get("permissions", {}).get("network", False))
+                filesystem_policy = self._filesystem_policy(plugin_id, manifest, manifest_path.parent)
+
+                for entry in entrypoints:
+                    module_path = manifest_path.parent / entry["path"]
+                    if not module_path.exists():
+                        raise PluginError(f"Missing entrypoint module {module_path}")
                     instance = SubprocessPlugin(
                         module_path,
                         entry["callable"],
@@ -1120,47 +1527,89 @@ class PluginRegistry:
                         capabilities=capabilities,
                         allowed_capabilities=required_capabilities,
                         filesystem_policy=filesystem_policy.payload() if filesystem_policy else None,
+                        rng_seed=rng_seed,
+                        rng_seed_hex=rng_seed_hex,
+                        rng_strict=self._rng_service.strict,
+                        rng_enabled=self._rng_service.enabled,
+                        audit_log=self._audit_log,
+                        code_hash=code_hash,
+                        settings_hash=settings_hash,
                     )
-                    caps = instance.capabilities()
-                else:
-                    spec = importlib.util.spec_from_file_location(module_name, module_path)
-                    if spec is None or spec.loader is None:
-                        raise PluginError(f"Cannot load module {module_path}")
-                    module = importlib.util.module_from_spec(spec)
-                    import sys
-
-                    sys.modules[module_name] = module
-                    source = module_path.read_text(encoding="utf-8")
-                    exec(compile(source, str(module_path), "exec"), module.__dict__)
-                    factory = getattr(module, entry["callable"], None)
-                    if factory is None:
-                        raise PluginError(f"Missing callable {entry['callable']} in {module_path}")
-
-                    context = PluginContext(
-                        config=plugin_settings,
-                        get_capability=_capability_guard(capabilities, plugin_id, required_capabilities),
-                        logger=lambda msg: None,
-                    )
-                    with network_guard(network_allowed):
-                        instance = factory(plugin_id, context)
-                        if not hasattr(instance, "capabilities"):
-                            raise PluginError(f"Plugin {plugin_id} missing capabilities()")
+                    try:
                         caps = instance.capabilities()
-                if isinstance(caps, dict):
-                    manifest_provides = manifest.get("provides", [])
-                    if isinstance(manifest_provides, list) and caps:
-                        fallback_impl = next(iter(caps.values()))
-                        for cap in manifest_provides:
-                            cap_name = str(cap).strip()
-                            if cap_name and cap_name not in caps:
-                                caps[cap_name] = fallback_impl
-                for cap_name, impl in caps.items():
-                    proxy = CapabilityProxy(impl, network_allowed, filesystem_policy)
-                    providers_by_cap.setdefault(cap_name, []).append((plugin_id, proxy))
-                loaded.append(LoadedPlugin(plugin_id, manifest, instance, caps, filesystem_policy))
+                    except Exception:
+                        self._shutdown_instance(instance)
+                        raise
+                    if isinstance(caps, dict):
+                        manifest_provides = manifest.get("provides", [])
+                        if isinstance(manifest_provides, list) and caps:
+                            fallback_impl = next(iter(caps.values()))
+                            for cap in manifest_provides:
+                                cap_name = str(cap).strip()
+                                if cap_name and cap_name not in caps:
+                                    caps[cap_name] = fallback_impl
+                    for cap_name, impl in caps.items():
+                        proxy = CapabilityProxy(
+                            impl,
+                            network_allowed,
+                            filesystem_policy,
+                            capability=cap_name,
+                            io_contracts=io_contracts.get(cap_name, {}),
+                            schema_registry=self._schema_registry,
+                            rng_seed=rng_seed,
+                            rng_strict=self._rng_service.strict,
+                            rng_enabled=self._rng_service.enabled,
+                        )
+                        local_providers.setdefault(cap_name, []).append((plugin_id, proxy))
+                    local_loaded.append(LoadedPlugin(plugin_id, manifest, instance, caps, filesystem_policy, manifest_path))
+
+                for cap_name, items in local_providers.items():
+                    providers_by_cap.setdefault(cap_name, []).extend(items)
+                loaded.extend(local_loaded)
+                loaded_ids.add(plugin_id)
+                try:
+                    self._audit_log.record_plugin_metadata(
+                        plugin_id=plugin_id,
+                        version=str(manifest.get("version", "")) if manifest else None,
+                        code_hash=code_hash,
+                        settings_hash=settings_hash,
+                        capability_tags=_normalize_tags(manifest.get("capability_tags")),
+                        provides=[str(item) for item in manifest.get("provides", []) if str(item).strip()],
+                        entrypoints=[
+                            {
+                                "kind": str(entry.get("kind", "")),
+                                "id": str(entry.get("id", "")),
+                                "path": str(entry.get("path", "")),
+                                "callable": str(entry.get("callable", "")),
+                            }
+                            for entry in entrypoints
+                        ],
+                        permissions=dict(manifest.get("permissions", {})) if isinstance(manifest.get("permissions"), dict) else None,
+                        manifest_path=str(manifest_path),
+                    )
+                except Exception:
+                    pass
                 resolved = self._resolve_capabilities(providers_by_cap)
                 capabilities.replace_all(resolved.all())
+            except Exception as exc:
+                for loaded_plugin in local_loaded:
+                    self._shutdown_instance(loaded_plugin.instance)
+                failed_ids.add(plugin_id)
+                self._record_load_failure(
+                    plugin_id=plugin_id,
+                    entrypoint=str(manifest_path),
+                    phase="load",
+                    error=str(exc),
+                )
+                continue
 
         resolved = self._resolve_capabilities(providers_by_cap)
         capabilities.replace_all(resolved.all())
+        for err in self._load_report.get("errors", []):
+            plugin_id = err.get("plugin_id") if isinstance(err, dict) else None
+            if plugin_id:
+                failed_ids.add(str(plugin_id))
+        self._load_report["loaded"] = sorted(loaded_ids)
+        self._load_report["failed"] = sorted(failed_ids)
+        self._load_report["skipped"] = sorted(skipped_ids)
         return loaded, capabilities

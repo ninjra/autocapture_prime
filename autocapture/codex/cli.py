@@ -72,11 +72,14 @@ def cmd_explain(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_pillar_gates(_args: argparse.Namespace) -> int:
+def cmd_pillar_gates(args: argparse.Namespace) -> int:
     from autocapture.tools.pillar_gate import run_all_gates
 
-    ok = run_all_gates()
-    return 0 if ok else 1
+    return run_all_gates(
+        artifacts_dir=args.artifacts_dir,
+        config_dir=args.config,
+        deterministic_fixtures=bool(args.deterministic_fixtures),
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -97,6 +100,9 @@ def build_parser() -> argparse.ArgumentParser:
     explain.set_defaults(func=cmd_explain)
 
     pillar = sub.add_parser("pillar-gates")
+    pillar.add_argument("--artifacts-dir", default="artifacts")
+    pillar.add_argument("--config", default=None)
+    pillar.add_argument("--deterministic-fixtures", action="store_true", default=False)
     pillar.set_defaults(func=cmd_pillar_gates)
 
     return parser

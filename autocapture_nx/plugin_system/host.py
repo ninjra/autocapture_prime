@@ -6,18 +6,21 @@ import atexit
 import json
 import os
 import queue
-import subprocess
 import sys
 import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, IO
+from typing import Any, IO, TYPE_CHECKING
 
+from autocapture_nx.kernel.audit import PluginAuditLog, estimate_rows_read, estimate_rows_written, hash_payload
 from autocapture_nx.kernel.errors import PermissionError, PluginError, PluginTimeoutError
 from autocapture_nx.kernel.paths import resolve_repo_path
 from autocapture_nx.plugin_system.runtime import filesystem_guard_suspended
-from autocapture_nx.windows.win_sandbox import assign_job_object
+from autocapture_nx.plugin_system.sandbox import spawn_plugin_process, validate_ipc_message, write_sandbox_report
+
+if TYPE_CHECKING:
+    from subprocess import Popen
 
 
 def _encode(obj: Any) -> Any:
@@ -183,6 +186,10 @@ class PluginProcess:
         capabilities: Any,
         allowed_capabilities: set[str] | None,
         filesystem_policy: dict[str, Any] | None = None,
+        rng_seed: int | None = None,
+        rng_seed_hex: str | None = None,
+        rng_strict: bool = True,
+        rng_enabled: bool = False,
     ) -> None:
         hosting = _hosting_cfg(host_config)
         self._rpc_timeout_s = float(hosting.get("rpc_timeout_s", 10))
@@ -195,12 +202,13 @@ class PluginProcess:
         self._reader_thread: threading.Thread | None = None
         self._reader_error: str | None = None
         self._capabilities = capabilities
-        self._allowed_capabilities = set(allowed_capabilities) if allowed_capabilities else None
+        self._allowed_capabilities = set(allowed_capabilities) if allowed_capabilities is not None else None
         self._plugin_id = plugin_id
         self._filesystem_policy = filesystem_policy
+        self._proc: Popen[str] | None = None
 
         python_exe = _resolve_python_exe()
-        self._proc: subprocess.Popen[str] | None = subprocess.Popen(
+        proc, self._sandbox_report = spawn_plugin_process(
             [
                 python_exe,
                 "-m",
@@ -210,17 +218,16 @@ class PluginProcess:
                 plugin_id,
                 "true" if network_allowed else "false",
             ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            text=True,
             env=_build_env(hosting, host_config),
+            limits=_adjust_job_limits_for_venv(python_exe, hosting.get("job_limits", {})),
+            ipc_max_bytes=self._rpc_max_message_bytes,
         )
-        if self._proc.stdin is None or self._proc.stdout is None:
+        self._proc = proc
+        if proc.stdin is None or proc.stdout is None:
             raise PluginError("Failed to start plugin host")
-        limits = _adjust_job_limits_for_venv(python_exe, hosting.get("job_limits", {}))
-        assign_job_object(self._proc.pid, limits=limits)
-        self._stdin: IO[str] = self._proc.stdin
-        self._stdout: IO[str] = self._proc.stdout
+        write_sandbox_report(self._sandbox_report)
+        self._stdin: IO[str] = proc.stdin
+        self._stdout: IO[str] = proc.stdout
         self._req_id = 0
         self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self._reader_thread.start()
@@ -229,6 +236,12 @@ class PluginProcess:
             None if self._allowed_capabilities is None else sorted(self._allowed_capabilities)
         )
         init_payload["filesystem_policy"] = self._filesystem_policy
+        init_payload["rng"] = {
+            "enabled": bool(rng_enabled),
+            "strict": bool(rng_strict),
+            "seed": rng_seed,
+            "seed_hex": rng_seed_hex,
+        }
         self._send_payload(init_payload, enforce_limit=False)
 
     def _send_payload(self, payload: dict[str, Any], *, enforce_limit: bool = True) -> None:
@@ -269,6 +282,10 @@ class PluginProcess:
                 self._set_reader_error(f"invalid plugin host response: {exc}")
                 return
             if response.get("method") == "cap_call":
+                ok, reason = validate_ipc_message(response, role="host")
+                if not ok:
+                    self._set_reader_error(f"ipc_validation_failed:{reason}")
+                    return
                 cap_response = self._handle_cap_call(response)
                 try:
                     self._send_payload(cap_response)
@@ -441,6 +458,13 @@ class SubprocessPlugin:
         capabilities: Any,
         allowed_capabilities: set[str] | None,
         filesystem_policy: dict[str, Any] | None = None,
+        rng_seed: int | None = None,
+        rng_seed_hex: str | None = None,
+        rng_strict: bool = True,
+        rng_enabled: bool = False,
+        audit_log: PluginAuditLog | None = None,
+        code_hash: str | None = None,
+        settings_hash: str | None = None,
     ):
         self._plugin_path = plugin_path
         self._callable_name = callable_name
@@ -452,12 +476,24 @@ class SubprocessPlugin:
         self._capabilities = capabilities
         self._allowed_capabilities = allowed_capabilities
         self._filesystem_policy = filesystem_policy
+        self._rng_seed = rng_seed
+        self._rng_seed_hex = rng_seed_hex
+        self._rng_strict = bool(rng_strict)
+        self._rng_enabled = bool(rng_enabled)
+        self._audit_log = audit_log
+        self._code_hash = code_hash
+        self._settings_hash = settings_hash
         hosting = _hosting_cfg(config)
         self._timeout_limit = int(hosting.get("rpc_timeout_limit", 3))
         self._timeout_window_s = float(hosting.get("rpc_timeout_window_s", 60))
         self._restart_backoff_s = float(hosting.get("rpc_watchdog_backoff_s", 0.2))
         self._restart_max = int(hosting.get("rpc_watchdog_restart_max", 3))
         self._timeout_events: list[float] = []
+        self._failure_limit = int(hosting.get("rpc_failure_limit", self._timeout_limit))
+        self._failure_window_s = float(hosting.get("rpc_failure_window_s", self._timeout_window_s))
+        self._failure_cooldown_s = float(hosting.get("rpc_failure_cooldown_s", self._restart_backoff_s or 0.0))
+        self._failure_events: list[float] = []
+        self._cooldown_until = 0.0
         self._restart_count = 0
         self._host: PluginProcess | None = None
         self._caps: dict[str, RemoteCapability] = {}
@@ -489,6 +525,10 @@ class SubprocessPlugin:
                 capabilities=self._capabilities,
                 allowed_capabilities=self._allowed_capabilities,
                 filesystem_policy=self._filesystem_policy,
+                rng_seed=self._rng_seed,
+                rng_seed_hex=self._rng_seed_hex,
+                rng_strict=self._rng_strict,
+                rng_enabled=self._rng_enabled,
             )
             self._refresh_caps()
 
@@ -510,6 +550,22 @@ class SubprocessPlugin:
         self._timeout_events = [t for t in self._timeout_events if now - t <= window]
         return len(self._timeout_events) >= max(1, self._timeout_limit)
 
+    def _record_failure(self) -> bool:
+        now = time.monotonic()
+        self._failure_events.append(now)
+        window = max(1.0, self._failure_window_s)
+        self._failure_events = [t for t in self._failure_events if now - t <= window]
+        return len(self._failure_events) >= max(1, self._failure_limit)
+
+    def _open_circuit(self, now: float) -> None:
+        cooldown = max(0.0, float(self._failure_cooldown_s))
+        if cooldown <= 0:
+            return
+        self._cooldown_until = max(self._cooldown_until, now + cooldown)
+
+    def _in_cooldown(self) -> bool:
+        return time.monotonic() < self._cooldown_until
+
     def _restart(self, reason: str) -> None:
         if self._restart_count >= max(1, self._restart_max):
             raise PluginError(f"Plugin watchdog restart limit reached ({reason})")
@@ -519,23 +575,130 @@ class SubprocessPlugin:
         self.close()
         self._start_host()
 
+    def _is_host_error(self, exc: Exception) -> bool:
+        msg = str(exc).lower()
+        return "plugin host closed" in msg or "broken pipe" in msg or "host closed" in msg
+
     def _call(self, capability: str, function: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
         if self._host is None:
             self._start_host()
+        if self._in_cooldown():
+            raise PluginError(f"Plugin circuit breaker open (plugin={self._plugin_id})")
+        start = time.perf_counter()
+        mem_before = self._memory_snapshot_mb()
+        ok = False
+        result: Any = None
+        error_text: str | None = None
         for attempt in range(2):
             try:
                 assert self._host is not None
-                return self._host.call(capability, function, args, kwargs)
+                result = self._host.call(capability, function, args, kwargs)
+                self._failure_events.clear()
+                self._timeout_events.clear()
+                ok = True
+                return result
             except PluginTimeoutError:
                 should_restart = self._record_timeout()
                 if should_restart:
                     self._restart("rpc_timeout")
                     if attempt == 0:
                         continue
+                now = time.monotonic()
+                if self._record_failure():
+                    self._open_circuit(now)
+                error_text = "timeout"
                 raise
+            except PluginError as exc:
+                now = time.monotonic()
+                should_restart = self._record_failure()
+                if self._is_host_error(exc) and attempt == 0:
+                    try:
+                        self._restart("host_error")
+                        continue
+                    except Exception:
+                        pass
+                if should_restart:
+                    self._open_circuit(now)
+                error_text = str(exc)
+                raise
+            finally:
+                if attempt == 0 and self._audit_log is not None:
+                    self._record_audit(
+                        capability=capability,
+                        function=function,
+                        args=args,
+                        kwargs=kwargs,
+                        result=result if ok else None,
+                        ok=ok,
+                        error_text=error_text,
+                        start=start,
+                        mem_before=mem_before,
+                    )
 
     def __del__(self) -> None:
         try:
             self.close()
         except Exception:
             pass
+
+    def _memory_snapshot_mb(self) -> tuple[int | None, int | None]:
+        host = self._host
+        proc = getattr(host, "_proc", None) if host is not None else None
+        if proc is None or proc.pid is None:
+            return None, None
+        try:
+            import psutil  # type: ignore
+
+            info = psutil.Process(proc.pid).memory_info()
+            return int(info.rss // (1024 * 1024)), int(info.vms // (1024 * 1024))
+        except Exception:
+            return None, None
+
+    def _record_audit(
+        self,
+        *,
+        capability: str,
+        function: str,
+        args: list[Any],
+        kwargs: dict[str, Any],
+        result: Any,
+        ok: bool,
+        error_text: str | None,
+        start: float,
+        mem_before: tuple[int | None, int | None],
+    ) -> None:
+        if self._audit_log is None:
+            return
+        duration_ms = int(max(0.0, (time.perf_counter() - start) * 1000.0))
+        mem_after = self._memory_snapshot_mb()
+        rss_mb = mem_after[0] if mem_after[0] is not None else mem_before[0]
+        vms_mb = mem_after[1] if mem_after[1] is not None else mem_before[1]
+        input_hash, input_bytes = hash_payload({"args": args, "kwargs": kwargs})
+        output_hash, output_bytes = hash_payload(result) if ok else (None, None)
+        data_hash, _ = hash_payload({"input": input_hash, "output": output_hash})
+        rows_written = estimate_rows_written(function, args, kwargs)
+        rows_read = estimate_rows_read(function, result) if ok else None
+        run_id = str(self._config.get("runtime", {}).get("run_id", "")) or "run"
+        try:
+            self._audit_log.record(
+                run_id=run_id,
+                plugin_id=self._plugin_id,
+                capability=str(capability),
+                method=str(function),
+                ok=ok,
+                error=error_text,
+                duration_ms=duration_ms,
+                rows_read=rows_read,
+                rows_written=rows_written,
+                memory_rss_mb=rss_mb,
+                memory_vms_mb=vms_mb,
+                input_hash=input_hash,
+                output_hash=output_hash,
+                data_hash=data_hash,
+                code_hash=self._code_hash,
+                settings_hash=self._settings_hash,
+                input_bytes=input_bytes,
+                output_bytes=output_bytes,
+            )
+        except Exception:
+            return

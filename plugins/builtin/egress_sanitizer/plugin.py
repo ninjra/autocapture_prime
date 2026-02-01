@@ -14,6 +14,7 @@ from typing import Any
 from autocapture_nx.kernel.crypto import derive_key
 from autocapture_nx.kernel.keyring import KeyRing
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
+from autocapture.memory import entities as memory_entities
 
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
@@ -95,9 +96,17 @@ class EgressSanitizer(PluginBase):
         crypto_cfg = storage_cfg.get("crypto", {})
         root_key_path = crypto_cfg.get("root_key_path", "data/vault/root.key")
         keyring_path = crypto_cfg.get("keyring_path", "data/vault/keyring.json")
+        backend = crypto_cfg.get("keyring_backend", "auto")
+        credential_name = crypto_cfg.get("keyring_credential_name", "autocapture.keyring")
         encryption_required = storage_cfg.get("encryption_required", False)
         require_protection = bool(encryption_required and os.name == "nt")
-        keyring = KeyRing.load(keyring_path, legacy_root_path=root_key_path, require_protection=require_protection)
+        keyring = KeyRing.load(
+            keyring_path,
+            legacy_root_path=root_key_path,
+            require_protection=require_protection,
+            backend=backend,
+            credential_name=credential_name,
+        )
         key_id, root = keyring.active_key("entity_tokens")
         self._entity_key_id = key_id
         try:
@@ -160,19 +169,8 @@ class EgressSanitizer(PluginBase):
         return recognizers
 
     def _find_entities(self, text: str) -> list[Entity]:
-        matches: list[Entity] = []
-        for kind, pattern in self._recognizers():
-            for match in pattern.finditer(text):
-                matches.append(Entity(match.start(), match.end(), kind, match.group(0)))
-        matches.sort(key=lambda m: (m.start, -(m.end - m.start), m.kind))
-        selected: list[Entity] = []
-        last_end = -1
-        for ent in matches:
-            if ent.start < last_end:
-                continue
-            selected.append(ent)
-            last_end = ent.end
-        return selected
+        matches = memory_entities.find_entities(text, self.context.config)
+        return [Entity(ent.start, ent.end, ent.kind, ent.value) for ent in matches]
 
     def sanitize_text(self, text: str, scope: str = "default") -> dict[str, Any]:
         entities = self._find_entities(text)

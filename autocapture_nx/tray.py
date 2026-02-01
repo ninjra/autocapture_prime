@@ -170,6 +170,20 @@ def _validate_ui(base_url: str) -> None:
         _log(f"ui /ui returned {ui_status} for {base_url}/ui")
 
 
+def _ensure_loopback_host(host: str) -> str:
+    if host != "127.0.0.1":
+        raise RuntimeError(f"bind_host_must_be_localhost: {host}")
+    return host
+
+
+def _default_menu(open_settings, open_plugins, quit_app) -> list[tuple]:
+    return [
+        (1, "Settings", open_settings),
+        (2, "Plugin Manager", open_plugins),
+        (3, "Quit", quit_app),
+    ]
+
+
 def main() -> int:
     if os.name != "nt":
         raise RuntimeError("tray_supported_on_windows_only")
@@ -187,6 +201,7 @@ def main() -> int:
             port = int(env_port)
         except ValueError:
             _log(f"invalid AUTOCAPTURE_TRAY_BIND_PORT: {env_port}")
+    host = _ensure_loopback_host(host)
     base_url = f"http://{host}:{port}"
 
     server = UIServer(host, port)
@@ -289,12 +304,7 @@ def main() -> int:
                 last_tip = tip
             stop_event.wait(5.0)
 
-    menu = [
-        (1, "Settings", open_settings),
-        (2, "Plugin Manager", open_plugins),
-        (3, "Quit", quit_app),
-    ]
-
+    menu = _default_menu(open_settings, open_plugins, quit_app)
     tray = TrayApp("Autocapture NX", menu, default_id=1, menu_provider=_status_menu)
     tray_thread = threading.Thread(target=tray.run, daemon=True)
     tray_thread.start()

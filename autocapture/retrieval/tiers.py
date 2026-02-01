@@ -18,12 +18,14 @@ class TieredRetriever:
         reranker: Reranker,
         fast_threshold: int = 3,
         fusion_threshold: int = 5,
+        rrf_k: int = 60,
     ) -> None:
         self.lexical = lexical
         self.vector = vector
         self.reranker = reranker
         self.fast_threshold = fast_threshold
         self.fusion_threshold = fusion_threshold
+        self.rrf_k = int(rrf_k)
 
     def retrieve(self, query: str) -> dict[str, Any]:
         trace: list[dict[str, Any]] = []
@@ -32,7 +34,7 @@ class TieredRetriever:
         if len(fast_hits) >= self.fast_threshold:
             return {"results": fast_hits, "trace": trace}
         vector_hits = [{"doc_id": hit.doc_id, "score": hit.score} for hit in self.vector.query(query)]
-        fused = rrf_fusion([fast_hits, vector_hits])
+        fused = rrf_fusion([fast_hits, vector_hits], k=self.rrf_k)
         trace.append({"tier": "FUSION", "reason": "rrf", "result_count": len(fused)})
         if len(fused) >= self.fusion_threshold:
             return {"results": fused, "trace": trace}
@@ -55,4 +57,12 @@ def create_retrieval_strategy(plugin_id: str) -> TieredRetriever:
     lexical = LexicalIndex(lexical_path)
     vector = VectorIndex(vector_path, embedder)
     reranker = Reranker()
-    return TieredRetriever(lexical, vector, reranker)
+    retrieval_cfg = config.get("retrieval", {}) if isinstance(config, dict) else {}
+    return TieredRetriever(
+        lexical,
+        vector,
+        reranker,
+        fast_threshold=int(retrieval_cfg.get("fast_threshold", 3)),
+        fusion_threshold=int(retrieval_cfg.get("fusion_threshold", 5)),
+        rrf_k=int(retrieval_cfg.get("rrf_k", 60)),
+    )

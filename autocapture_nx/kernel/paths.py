@@ -299,6 +299,7 @@ def normalize_config_paths(
         "lexical_path",
         "vector_path",
         "metadata_path",
+        "audit_db_path",
     ):
         if key in storage and isinstance(storage[key], str):
             storage[key] = _normalize_storage_value(storage[key])

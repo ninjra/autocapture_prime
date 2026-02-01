@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -11,6 +12,9 @@ class PluginContext:
     config: dict[str, Any]
     get_capability: Callable[[str], Any]
     logger: Callable[[str], None]
+    rng: random.Random | None = None
+    rng_seed: int | None = None
+    rng_seed_hex: str | None = None
 
 
 class PluginBase:

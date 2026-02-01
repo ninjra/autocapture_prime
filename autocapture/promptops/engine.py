@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
 from autocapture.core.hashing import hash_text
-from autocapture.plugins.manager import PluginManager
+from autocapture_nx.plugin_system.registry import PluginRegistry
 from autocapture.promptops.evaluate import evaluate_prompt
 from autocapture.promptops.github import create_pull_request
 from autocapture.promptops.propose import propose_prompt
@@ -110,22 +111,95 @@ class PromptOpsLayer:
         cfg = self._prompt_cfg()
         return str(cfg.get("bundle_name", "default"))
 
+    def _bundle_root(self) -> Path | None:
+        cfg = self._prompt_cfg()
+        raw = cfg.get("bundle_root")
+        if not raw:
+            return None
+        return Path(str(raw))
+
+    def _bundle_plugin_id(self) -> str:
+        name = self._bundle_name().strip()
+        if not name:
+            return ""
+        if "." in name:
+            return name
+        return f"builtin.prompt.bundle.{name}"
+
+    def _scoped_plugin_config(self, plugin_ids: list[str]) -> dict[str, Any]:
+        if not isinstance(self._config, dict):
+            return {}
+        scoped = deepcopy(self._config)
+        plugins_cfg = scoped.setdefault("plugins", {})
+        plugins_cfg["allowlist"] = list(plugin_ids)
+        plugins_cfg["enabled"] = {pid: True for pid in plugin_ids}
+        plugins_cfg["default_pack"] = list(plugin_ids)
+        return scoped
+
+    def _prepare_sources(self, sources: Iterable[Any]) -> list[Any]:
+        root = self._bundle_root()
+        prepared: list[Any] = []
+        for src in sources:
+            if isinstance(src, dict):
+                entry = dict(src)
+            elif isinstance(src, str):
+                entry = {"path": src}
+            else:
+                entry = {"text": str(src)}
+            path_value = entry.get("path")
+            if path_value and root:
+                try:
+                    path_obj = Path(str(path_value))
+                    if not path_obj.is_absolute():
+                        entry["path"] = str(root / path_obj)
+                except Exception:
+                    pass
+            if "path" in entry and "text" not in entry and "bytes" not in entry and "url" not in entry:
+                path = Path(str(entry["path"]))
+                entry["bytes"] = path.read_bytes() if path.exists() else b""
+            prepared.append(entry)
+        return prepared
+
     def _load_bundle(self) -> PromptBundle | None:
         if self._bundle_instance is not None:
             return self._bundle_instance
+        plugin_id = self._bundle_plugin_id()
+        if not plugin_id:
+            return None
         try:
-            manager = PluginManager(self._config, safe_mode=bool(self._config.get("plugins", {}).get("safe_mode", False)))
-            ext = manager.get_extension("prompt.bundle", name=self._bundle_name())
-            self._bundle_instance = ext.instance
+            scoped = self._scoped_plugin_config([plugin_id])
+            registry = PluginRegistry(
+                scoped,
+                safe_mode=bool(scoped.get("plugins", {}).get("safe_mode", False)),
+            )
+            plugins, capabilities = registry.load_plugins()
+            bundle = None
+            for plugin in plugins:
+                if plugin.plugin_id != plugin_id:
+                    continue
+                if isinstance(plugin.capabilities, dict):
+                    bundle = plugin.capabilities.get("prompt.bundle")
+                if bundle is not None:
+                    break
+            if bundle is None:
+                try:
+                    bundle = capabilities.get("prompt.bundle")
+                except Exception:
+                    bundle = None
+            self._bundle_instance = bundle
         except Exception:
             self._bundle_instance = None
         return self._bundle_instance
 
     def _snapshot(self, sources: Iterable[Any]) -> dict[str, Any]:
         bundle = self._load_bundle()
+        prepared = self._prepare_sources(sources)
         if bundle is not None:
-            return bundle.snapshot(sources)
-        return snapshot_sources(sources)
+            try:
+                return bundle.snapshot(prepared)
+            except Exception:
+                pass
+        return snapshot_sources(prepared)
 
     def _examples_for(self, prompt_id: str) -> list[dict[str, Any]]:
         cfg = self._prompt_cfg()
@@ -135,6 +209,24 @@ class PromptOpsLayer:
         if isinstance(examples, list):
             return list(examples)
         return []
+
+    def _record_template_mapping(self, prompt_id: str, snapshot: dict[str, Any]) -> None:
+        sources = snapshot.get("sources", [])
+        if not isinstance(sources, list):
+            return
+        combined_hash = snapshot.get("combined_hash")
+        try:
+            from autocapture_nx.kernel.audit import PluginAuditLog
+
+            audit = PluginAuditLog.from_config(self._config)
+            audit.record_template_diff(
+                mapping_id=str(prompt_id),
+                mapping_kind="promptops.sources",
+                sources=[item for item in sources if isinstance(item, dict)],
+                combined_hash=str(combined_hash) if combined_hash is not None else None,
+            )
+        except Exception:
+            return
 
     def prepare_prompt(
         self,
@@ -164,6 +256,7 @@ class PromptOpsLayer:
         sources = list(cfg.get("sources", []) if sources is None else sources)
         snapshot = self._snapshot(sources)
         snapshot_sources_list = list(snapshot.get("sources", []))
+        self._record_template_mapping(prompt_id, snapshot)
         if strategy is None:
             strategy = str(cfg.get("strategy", "append_sources"))
         if strategy == "append_sources" and not snapshot_sources_list:

@@ -26,6 +26,7 @@ def _commands(py: str) -> Iterable[list[str]]:
         [py, "tools/gate_concurrency.py"],
         [py, "tools/gate_ledger.py"],
         [py, "tools/gate_perf.py"],
+        [py, "tools/gate_pillars.py"],
         [py, "tools/gate_security.py"],
         [py, "tools/gate_static.py"],
         [py, "tools/gate_vuln.py"],

@@ -42,6 +42,25 @@ def snapshot_sources(sources: Iterable[Any], *, allow_web: bool = False) -> dict
     for entry in _normalize_sources(sources):
         if "url" in entry and not allow_web:
             continue
+        if "bytes" in entry:
+            data = entry["bytes"]
+            if isinstance(data, bytearray):
+                data = bytes(data)
+            if isinstance(data, str):
+                data = data.encode("utf-8")
+            if not isinstance(data, (bytes, bytearray)):
+                data = str(data).encode("utf-8")
+            path = entry.get("path")
+            items.append(
+                SourceSnapshot(
+                    source_id=str(entry.get("id") or entry.get("name") or (Path(path).name if path else "inline")),
+                    kind="file",
+                    sha256=_sha256_bytes(bytes(data)),
+                    size=len(data),
+                    path=str(path) if path else None,
+                )
+            )
+            continue
         if "text" in entry:
             text = entry["text"]
             data = text.encode("utf-8")
@@ -51,7 +70,7 @@ def snapshot_sources(sources: Iterable[Any], *, allow_web: bool = False) -> dict
                     kind="text",
                     sha256=_sha256_bytes(data),
                     size=len(data),
-                    path=None,
+                    path=str(entry.get("path")) if entry.get("path") else None,
                 )
             )
         elif "path" in entry:

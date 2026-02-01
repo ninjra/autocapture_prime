@@ -116,7 +116,7 @@ def apply_evidence_retention(
     logger: Any | None = None,
 ) -> RetentionResult | None:
     storage_cfg = config.get("storage", {})
-    if bool(storage_cfg.get("no_deletion_mode", False)):
+    if bool(storage_cfg.get("no_deletion_mode", True)):
         return None
     retention_cfg = storage_cfg.get("retention", {}) if isinstance(storage_cfg, dict) else {}
     spec = retention_cfg.get("evidence", "infinite")
@@ -271,7 +271,7 @@ class StorageRetentionMonitor:
 
     def due(self) -> bool:
         storage_cfg = self._config.get("storage", {}) if isinstance(self._config, dict) else {}
-        if bool(storage_cfg.get("no_deletion_mode", False)):
+        if bool(storage_cfg.get("no_deletion_mode", True)):
             return False
         retention_cfg = storage_cfg.get("retention", {}) if isinstance(storage_cfg, dict) else {}
         spec = retention_cfg.get("evidence", "infinite")

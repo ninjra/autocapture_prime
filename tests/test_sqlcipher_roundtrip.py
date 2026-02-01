@@ -3,13 +3,20 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from autocapture.storage.sqlcipher import open_metadata_store
+import os
+
+from autocapture.storage.sqlcipher import open_metadata_store, sqlcipher_available
 from autocapture.config.load import load_config
 from autocapture.config.models import ConfigPaths
 
 
 class SqlCipherRoundtripTests(unittest.TestCase):
     def test_roundtrip_and_encryption(self) -> None:
+        ok, reason = sqlcipher_available()
+        if not ok:
+            raise unittest.SkipTest(
+                f"sqlcipher unavailable on {os.name}: {reason or 'missing dependency'}; install sqlcipher3"
+            )
         with tempfile.TemporaryDirectory() as tmp:
             paths = ConfigPaths(
                 default_path=Path("config/default.json"),
