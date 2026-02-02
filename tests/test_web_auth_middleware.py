@@ -8,8 +8,8 @@ from autocapture.web.api import get_app
 from autocapture_nx.kernel.auth import load_or_create_token
 
 
-class CitationOverlayContractTests(unittest.TestCase):
-    def test_overlay_contract(self) -> None:
+class WebAuthMiddlewareTests(unittest.TestCase):
+    def test_post_requires_token(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             original_config = os.environ.get("AUTOCAPTURE_CONFIG_DIR")
             original_data = os.environ.get("AUTOCAPTURE_DATA_DIR")
@@ -19,16 +19,14 @@ class CitationOverlayContractTests(unittest.TestCase):
                 app = get_app()
                 token = load_or_create_token(app.state.facade.config).token
                 client = TestClient(app)
-                resp = client.post(
-                    "/api/citations/overlay",
-                    json={"span_id": "s1"},
+                resp = client.post("/api/query", json={"query": "hello"})
+                self.assertEqual(resp.status_code, 401)
+                resp_ok = client.post(
+                    "/api/query",
                     headers={"Authorization": f"Bearer {token}"},
+                    json={"query": "hello"},
                 )
-                self.assertEqual(resp.status_code, 200)
-                data = resp.json()
-                self.assertIn("overlays", data)
-                overlay = data["overlays"][0]
-                self.assertIn("bbox", overlay)
+                self.assertEqual(resp_ok.status_code, 200)
             finally:
                 try:
                     app.state.facade.shutdown()

@@ -860,7 +860,13 @@ class UXFacade:
         with self._kernel_mgr.session() as system:
             scheduler = system.get("runtime.scheduler") if system and hasattr(system, "get") else None
             stats = scheduler.last_stats() if scheduler is not None and hasattr(scheduler, "last_stats") else None
-            return {"stats": stats}
+            if stats is None:
+                return {"stats": None}
+            try:
+                stats_payload: Any = asdict(stats)
+            except TypeError:
+                stats_payload = stats
+            return {"stats": stats_payload}
 
     def keyring_status(self) -> dict[str, Any]:
         with self._kernel_mgr.session() as system:

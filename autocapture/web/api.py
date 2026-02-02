@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from autocapture_nx.ux.facade import create_facade
-from autocapture.web.auth import check_request_token, local_only_allowed, require_local, token_required
+from autocapture.web.auth import check_request_token, require_local, token_required
 from autocapture.web.routes import (
     alerts,
     auth,
@@ -56,8 +56,7 @@ def get_app() -> FastAPI:
         if not require_local(request, config):
             return JSONResponse(status_code=403, content={"ok": False, "error": "remote_not_allowed"})
         if token_required(request.method) and not check_request_token(request, config):
-            if not require_local(request, config) or not local_only_allowed(config):
-                return JSONResponse(status_code=401, content={"ok": False, "error": "unauthorized"})
+            return JSONResponse(status_code=401, content={"ok": False, "error": "unauthorized"})
         return await call_next(request)
 
     app.include_router(health.router)

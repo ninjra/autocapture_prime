@@ -8,6 +8,7 @@ import os
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 
@@ -22,7 +23,18 @@ def _token_path(config: dict[str, Any]) -> str:
     web_cfg = config.get("web", {}) if isinstance(config, dict) else {}
     storage_cfg = config.get("storage", {}) if isinstance(config, dict) else {}
     data_dir = storage_cfg.get("data_dir", "data")
-    return str(web_cfg.get("auth_token_path") or os.path.join(data_dir, "vault", "web_token.json"))
+    raw = web_cfg.get("auth_token_path")
+    if isinstance(raw, str) and raw.strip():
+        path = raw.strip()
+    else:
+        path = os.path.join(str(data_dir), "vault", "web_token.json")
+    if os.path.isabs(path):
+        return path
+    base = Path(str(data_dir))
+    candidate = Path(path)
+    if candidate.parts[: len(base.parts)] == base.parts:
+        return str(candidate)
+    return str(base / candidate)
 
 
 def _protect(data: bytes) -> tuple[bytes, bool]:
@@ -49,7 +61,8 @@ def _unprotect(data: bytes, protected: bool) -> bytes:
 def load_or_create_token(config: dict[str, Any]) -> AuthToken:
     path = _token_path(config)
     if os.path.exists(path):
-        payload = json.loads(open(path, "r", encoding="utf-8").read())
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
         token_b64 = payload.get("token_b64", "")
         protected = bool(payload.get("protected", False))
         raw = base64.b64decode(token_b64) if token_b64 else b""

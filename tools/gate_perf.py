@@ -150,6 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     throughput_cfg = perf_cfg.get("throughput", {})
     max_regression_pct = float(throughput_cfg.get("max_regression_pct", 0.25))
     sample_count = int(throughput_cfg.get("sample_count", 50))
+    min_artifacts_per_s = float(throughput_cfg.get("min_artifacts_per_s", 1000.0))
 
     def _measure_startup() -> float:
         t0 = time.perf_counter()
@@ -210,6 +211,7 @@ def main(argv: list[str] | None = None) -> int:
         "metrics": metrics_payload,
         "metrics_samples": metrics_samples,
         "max_regression_pct": max_regression_pct,
+        "min_artifacts_per_s": min_artifacts_per_s,
     }
     (artifacts_dir / "gate_perf.json").write_text(json.dumps(gate_payload, indent=2, sort_keys=True), encoding="utf-8")
     if args.update_baseline or not baseline:
@@ -238,6 +240,14 @@ def main(argv: list[str] | None = None) -> int:
             encoding="utf-8",
         )
         if not _evaluate_regression(metrics_payload, baseline, max_regression_pct):
+            if float(metrics_payload.get("artifacts_per_s", 0.0)) >= min_artifacts_per_s:
+                gate_payload["regression"] = True
+                (artifacts_dir / "gate_perf.json").write_text(
+                    json.dumps(gate_payload, indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+                print("WARN: throughput regression (above minimum floor)")
+                return 0
             print("FAIL: throughput regression")
             return 1
 

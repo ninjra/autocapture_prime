@@ -1479,7 +1479,7 @@
   },
   "web": {
     "allow_remote": false,
-    "auth_token_path": "data/vault/web_token.json",
+    "auth_token_path": "vault/web_token.json",
     "bind_host": "127.0.0.1",
     "bind_port": 8787,
     "telemetry_interval_s": 1.0
