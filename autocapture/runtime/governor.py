@@ -100,7 +100,7 @@ class RuntimeGovernor:
         runtime_cfg = config.get("runtime", {}) if isinstance(config, Mapping) else {}
         idle_window_s = int(runtime_cfg.get("idle_window_s", budgets.min_idle_seconds))
         suspend_workers = bool(runtime_cfg.get("mode_enforcement", {}).get("suspend_workers", self.suspend_workers))
-        suspend_deadline_ms = int(runtime_cfg.get("mode_enforcement", {}).get("suspend_deadline_ms", 500) or 500)
+        suspend_deadline_ms = int(runtime_cfg.get("mode_enforcement", {}).get("suspend_deadline_ms", 0) or 0)
         with self._lock:
             self.idle_window_s = idle_window_s
             self.suspend_workers = suspend_workers

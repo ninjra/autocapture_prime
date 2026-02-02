@@ -221,6 +221,46 @@
     },
     {
       "enabled": false,
+      "id": "builtin.state.anomaly"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.state.evidence.compiler"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.state.jepa.training"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.state.jepa_like"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.state.policy"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.state.retrieval"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.state.vector.hnsw"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.state.vector.linear"
+    },
+    {
+      "enabled": true,
+      "id": "builtin.state.vector.sqlite_ts"
+    },
+    {
+      "enabled": false,
+      "id": "builtin.state.workflow.miner"
+    },
+    {
+      "enabled": false,
       "id": "builtin.storage.encrypted"
     },
     {

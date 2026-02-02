@@ -30,5 +30,13 @@
   "settings_paths": [
     "devtools"
   ],
-  "version": "0.1.0"
+  "version": "0.1.0",
+  "filesystem_policy": {
+    "read": [
+      "{repo_root}/autocapture_nx"
+    ],
+    "readwrite": [
+      "{repo_root}/tools/hypervisor/runs"
+    ]
+  }
 }

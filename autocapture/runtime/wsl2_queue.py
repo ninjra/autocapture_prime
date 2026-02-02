@@ -80,6 +80,7 @@ class Wsl2Queue:
             seq = self._seq
         self._dir.mkdir(parents=True, exist_ok=True)
         job_id = prefixed_id(run_id or "run", "wsl2", seq)
+        safe_id = job_id.replace("/", "_")
         record = {
             "schema_version": int(self._protocol_version),
             "job_id": job_id,
@@ -90,8 +91,9 @@ class Wsl2Queue:
             "payload": payload,
         }
         encoded = json.dumps(record, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
-        path = self._dir / f"{job_id}.json"
-        tmp = self._dir / f".{job_id}.json.tmp"
+        path = self._dir / f"{safe_id}.json"
+        tmp = self._dir / f".{safe_id}.json.tmp"
+        tmp.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_bytes(encoded)
         os.replace(tmp, path)
         return Wsl2DispatchResult(

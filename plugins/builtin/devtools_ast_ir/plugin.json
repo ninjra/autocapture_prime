@@ -36,5 +36,14 @@
     "plugins.enabled",
     "plugins.permissions.network_allowed_plugin_ids"
   ],
-  "version": "0.1.0"
+  "version": "0.1.0",
+  "filesystem_policy": {
+    "read": [
+      "{repo_root}/autocapture_nx",
+      "{repo_root}/contracts/ir_pins.json"
+    ],
+    "readwrite": [
+      "{run_dir}"
+    ]
+  }
 }

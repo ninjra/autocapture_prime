@@ -173,6 +173,67 @@ def cmd_query(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_state_jepa_approve(args: argparse.Namespace) -> int:
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.state_jepa_approve(args.model_version, args.training_run_id)
+    _print_json(result)
+    return 0
+
+
+def cmd_state_jepa_approve_latest(args: argparse.Namespace) -> int:
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.state_jepa_approve_latest(include_archived=args.archived)
+    _print_json(result)
+    return 0
+
+
+def cmd_state_jepa_promote(args: argparse.Namespace) -> int:
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.state_jepa_promote(args.model_version, args.training_run_id)
+    _print_json(result)
+    return 0
+
+
+def cmd_state_jepa_report(args: argparse.Namespace) -> int:
+    facade = create_facade(safe_mode=args.safe_mode)
+    model_version = args.model_version
+    training_run_id = args.training_run_id
+    if args.latest:
+        listing = facade.state_jepa_list(include_archived=True)
+        models = listing.get("models") if isinstance(listing, dict) else []
+        active = None
+        if isinstance(models, list):
+            for item in models:
+                if isinstance(item, dict) and item.get("active"):
+                    active = item
+                    break
+        if active is None and isinstance(models, list) and models:
+            active = models[0] if isinstance(models[0], dict) else None
+        if active:
+            model_version = str(active.get("model_version") or "")
+            training_run_id = str(active.get("training_run_id") or "")
+    if not model_version or not training_run_id:
+        _print_json({"ok": False, "error": "model_version_and_training_run_id_required"})
+        return 1
+    result = facade.state_jepa_report(model_version, training_run_id)
+    _print_json(result)
+    return 0
+
+
+def cmd_state_jepa_list(args: argparse.Namespace) -> int:
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.state_jepa_list(include_archived=args.archived)
+    _print_json(result)
+    return 0
+
+
+def cmd_state_jepa_archive(args: argparse.Namespace) -> int:
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.state_jepa_archive(dry_run=args.dry_run)
+    _print_json(result)
+    return 0
+
+
 def cmd_enrich(args: argparse.Namespace) -> int:
     facade = create_facade(safe_mode=args.safe_mode)
     result = facade.enrich(force=True)
@@ -456,6 +517,33 @@ def build_parser() -> argparse.ArgumentParser:
     query_cmd = sub.add_parser("query")
     query_cmd.add_argument("text")
     query_cmd.set_defaults(func=cmd_query)
+
+    state = sub.add_parser("state")
+    state_sub = state.add_subparsers(dest="state_cmd", required=True)
+    jepa = state_sub.add_parser("jepa")
+    jepa_sub = jepa.add_subparsers(dest="jepa_cmd", required=True)
+    jepa_approve = jepa_sub.add_parser("approve")
+    jepa_approve.add_argument("--model-version", required=True)
+    jepa_approve.add_argument("--training-run-id", required=True)
+    jepa_approve.set_defaults(func=cmd_state_jepa_approve)
+    jepa_approve_latest = jepa_sub.add_parser("approve-latest")
+    jepa_approve_latest.add_argument("--archived", action=argparse.BooleanOptionalAction, default=False)
+    jepa_approve_latest.set_defaults(func=cmd_state_jepa_approve_latest)
+    jepa_promote = jepa_sub.add_parser("promote")
+    jepa_promote.add_argument("--model-version", required=True)
+    jepa_promote.add_argument("--training-run-id", required=True)
+    jepa_promote.set_defaults(func=cmd_state_jepa_promote)
+    jepa_report = jepa_sub.add_parser("report")
+    jepa_report.add_argument("--model-version")
+    jepa_report.add_argument("--training-run-id")
+    jepa_report.add_argument("--latest", action="store_true", default=False)
+    jepa_report.set_defaults(func=cmd_state_jepa_report)
+    jepa_list = jepa_sub.add_parser("list")
+    jepa_list.add_argument("--archived", action=argparse.BooleanOptionalAction, default=True)
+    jepa_list.set_defaults(func=cmd_state_jepa_list)
+    jepa_archive = jepa_sub.add_parser("archive")
+    jepa_archive.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=False)
+    jepa_archive.set_defaults(func=cmd_state_jepa_archive)
 
     enrich_cmd = sub.add_parser("enrich")
     enrich_cmd.set_defaults(func=cmd_enrich)

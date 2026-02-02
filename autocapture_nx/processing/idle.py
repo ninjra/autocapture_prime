@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from autocapture_nx.kernel.derived_records import build_derivation_edge, build_text_record, derivation_edge_id
+from autocapture_nx.kernel.frame_evidence import ensure_frame_evidence
 from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.ids import encode_record_id_component
 
@@ -25,6 +26,11 @@ class IdleProcessStats:
     sst_tokens: int = 0
     skipped: int = 0
     errors: int = 0
+    state_runs: int = 0
+    state_spans: int = 0
+    state_edges: int = 0
+    state_evidence: int = 0
+    state_errors: int = 0
 
 
 @dataclass
@@ -113,6 +119,7 @@ class IdleProcessor:
         self._indexes_ready = False
         self._checkpoint_loaded = False
         self._checkpoint: IdleCheckpoint | None = None
+        self._state_processor = None
 
     def _cap(self, name: str) -> Any | None:
         if hasattr(self._system, "has") and self._system.has(name):
@@ -195,6 +202,16 @@ class IdleProcessor:
             if self._logger is not None:
                 self._logger.log("index.init_failed", {"error": str(exc)})
 
+    def _resolve_state_processor(self):
+        if self._state_processor is not None:
+            return self._state_processor
+        try:
+            from autocapture_nx.state_layer.processor import StateTapeProcessor
+        except Exception:
+            return None
+        self._state_processor = StateTapeProcessor(self._system)
+        return self._state_processor
+
     def _index_text(self, doc_id: str, text: str) -> None:
         if not text:
             return
@@ -271,6 +288,7 @@ class IdleProcessor:
         aborted = False
 
         for record_id in evidence_ids[start_index:]:
+            source_record_id = record_id
             if should_abort and should_abort():
                 aborted = True
                 break
@@ -280,12 +298,35 @@ class IdleProcessor:
             record_type = str(record.get("record_type", ""))
             if not record_type.startswith("evidence.capture."):
                 stats.skipped += 1
-                last_record_id = record_id
+                last_record_id = source_record_id
                 continue
             stats.scanned += 1
+
+            blob = _get_media_blob(self._media, record_id)
+            if not blob:
+                stats.errors += 1
+                last_record_id = source_record_id
+                continue
+            frame = _extract_frame(blob, record)
+            if not frame:
+                stats.errors += 1
+                last_record_id = source_record_id
+                continue
+
+            record_id, record = ensure_frame_evidence(
+                config=self._config,
+                metadata=self._metadata,
+                media=self._media,
+                record_id=record_id,
+                record=record if isinstance(record, dict) else {},
+                frame_bytes=frame,
+                event_builder=self._events,
+                logger=self._logger,
+            )
             run_id = _derive_run_id(self._config, record_id)
             ts_utc = record.get("ts_utc") or record.get("ts_start_utc")
             ts_utc = ts_utc or datetime.now(timezone.utc).isoformat()
+
             derived_items: list[tuple[str, str, str, Any]] = []
             encoded_source = encode_record_id_component(record_id)
             if allow_ocr and self._ocr is not None:
@@ -312,18 +353,7 @@ class IdleProcessor:
                     )
             if not derived_items:
                 stats.skipped += 1
-                last_record_id = record_id
-                continue
-
-            blob = _get_media_blob(self._media, record_id)
-            if not blob:
-                stats.errors += 1
-                last_record_id = record_id
-                continue
-            frame = _extract_frame(blob, record)
-            if not frame:
-                stats.errors += 1
-                last_record_id = record_id
+                last_record_id = source_record_id
                 continue
 
             pipeline = self._pipeline
@@ -342,14 +372,14 @@ class IdleProcessor:
                     stats.errors += 1
                     if self._logger is not None:
                         self._logger.log("sst.pipeline_error", {"source_id": record_id, "error": str(exc)})
-                    last_record_id = record_id
+                    last_record_id = source_record_id
                     continue
                 stats.sst_runs += 1
                 stats.sst_heavy += int(result.heavy_ran)
                 stats.sst_tokens += int(result.ocr_tokens)
                 stats.processed += int(result.derived_records)
                 processed_total += int(result.derived_records)
-                last_record_id = record_id
+                last_record_id = source_record_id
                 if stats.processed >= max_items:
                     break
                 continue
@@ -434,12 +464,43 @@ class IdleProcessor:
                     )
                 if stats.processed >= max_items:
                     break
-            last_record_id = record_id
+            last_record_id = source_record_id
             if aborted or _expired() or stats.processed >= max_items:
                 break
+
+        state_done = True
+        state_cfg = self._config.get("processing", {}).get("state_layer", {}) if isinstance(self._config, dict) else {}
+        if not aborted and not _expired() and isinstance(state_cfg, dict) and bool(state_cfg.get("enabled", False)):
+            processor = self._resolve_state_processor()
+            if processor is not None:
+                def _state_abort() -> bool:
+                    if should_abort and should_abort():
+                        return True
+                    return _expired()
+
+                try:
+                    state_done, state_stats = processor.process_step(
+                        should_abort=_state_abort,
+                        budget_ms=budget_ms,
+                    )
+                    stats.state_runs += 1
+                    stats.state_spans += int(getattr(state_stats, "spans_inserted", 0))
+                    stats.state_edges += int(getattr(state_stats, "edges_inserted", 0))
+                    stats.state_evidence += int(getattr(state_stats, "evidence_inserted", 0))
+                    stats.state_errors += int(getattr(state_stats, "errors", 0))
+                except Exception as exc:
+                    stats.state_errors += 1
+                    state_done = False
+                    if self._logger is not None:
+                        self._logger.log("state_tape.process_error", {"error": str(exc)})
 
         if persist_checkpoint and last_record_id:
             self._store_checkpoint(last_record_id, processed_total)
 
-        done = not aborted and (start_index >= len(evidence_ids) or (last_record_id == evidence_ids[-1] if evidence_ids else True)) and not _expired()
+        done = (
+            not aborted
+            and (start_index >= len(evidence_ids) or (last_record_id == evidence_ids[-1] if evidence_ids else True))
+            and not _expired()
+            and bool(state_done)
+        )
         return done, stats

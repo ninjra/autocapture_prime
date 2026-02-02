@@ -60,96 +60,97 @@ def iter_screenshots(
 
     if frame_source is None:
         if os.name != "nt":
-            raise RuntimeError("Screen capture supported on Windows only")
-        try:
-            import mss
-            from PIL import Image
-        except Exception as exc:
-            raise RuntimeError(f"Missing capture dependencies: {exc}")
+            frame_source = iter(())
+        else:
+            try:
+                import mss
+                from PIL import Image
+            except Exception as exc:
+                raise RuntimeError(f"Missing capture dependencies: {exc}")
 
-        def _frames() -> Iterator[Frame]:
-            with mss.mss() as sct:
-                monitors = sct.monitors
-                idx = int(monitor_index)
-                if idx < 0 or idx >= len(monitors):
-                    idx = 0
-                monitor = monitors[idx]
-                mon_left = int(monitor.get("left", 0))
-                mon_top = int(monitor.get("top", 0))
-                target_size = _parse_resolution(resolution, monitor.get("width"), monitor.get("height"))
-                cursor_handle = None
-                cursor_cached = None
-                current_cursor: Callable[[], "CursorInfo | None"] | None = None
-                cursor_shape: Callable[[int], "CursorShape | None"] | None = None
-                if include_cursor:
-                    try:
-                        from autocapture_nx.windows.win_cursor import current_cursor as _current_cursor, cursor_shape as _cursor_shape
-                    except Exception:
-                        pass
-                    else:
-                        current_cursor = _current_cursor
-                        cursor_shape = _cursor_shape
+            def _frames() -> Iterator[Frame]:
+                with mss.mss() as sct:
+                    monitors = sct.monitors
+                    idx = int(monitor_index)
+                    if idx < 0 or idx >= len(monitors):
+                        idx = 0
+                    monitor = monitors[idx]
+                    mon_left = int(monitor.get("left", 0))
+                    mon_top = int(monitor.get("top", 0))
+                    target_size = _parse_resolution(resolution, monitor.get("width"), monitor.get("height"))
+                    cursor_handle = None
+                    cursor_cached = None
+                    current_cursor: Callable[[], "CursorInfo | None"] | None = None
+                    cursor_shape: Callable[[int], "CursorShape | None"] | None = None
+                    if include_cursor:
+                        try:
+                            from autocapture_nx.windows.win_cursor import current_cursor as _current_cursor, cursor_shape as _cursor_shape
+                        except Exception:
+                            pass
+                        else:
+                            current_cursor = _current_cursor
+                            cursor_shape = _cursor_shape
 
-                def _cursor_shape_cached(handle: int):
-                    nonlocal cursor_handle, cursor_cached
-                    if not handle or cursor_shape is None:
-                        return None
-                    if cursor_handle != handle or cursor_cached is None:
-                        cursor_handle = handle
-                        cursor_cached = cursor_shape(handle)
-                    return cursor_cached
+                    def _cursor_shape_cached(handle: int):
+                        nonlocal cursor_handle, cursor_cached
+                        if not handle or cursor_shape is None:
+                            return None
+                        if cursor_handle != handle or cursor_cached is None:
+                            cursor_handle = handle
+                            cursor_cached = cursor_shape(handle)
+                        return cursor_cached
 
-                while True:
-                    raw = sct.grab(monitor)
-                    img = Image.frombytes("RGB", raw.size, raw.rgb)
-                    if target_size and (img.width, img.height) != target_size:
-                        img = img.resize(target_size)
-                    if include_cursor and current_cursor is not None:
-                        cursor_info = current_cursor()
-                        if cursor_info is not None and cursor_info.visible:
-                            shape = None
-                            if include_cursor_shape:
-                                shape = _cursor_shape_cached(cursor_info.handle)
-                            if shape is not None:
-                                offset_x = int(cursor_info.x) - mon_left
-                                offset_y = int(cursor_info.y) - mon_top
-                                if target_size and raw.size != target_size:
-                                    scale_x = target_size[0] / raw.size[0]
-                                    scale_y = target_size[1] / raw.size[1]
-                                    offset_x = int(offset_x * scale_x)
-                                    offset_y = int(offset_y * scale_y)
-                                    hotspot_x = int(shape.hotspot_x * scale_x)
-                                    hotspot_y = int(shape.hotspot_y * scale_y)
-                                    cursor_img = shape.image.resize(
-                                        (int(shape.width * scale_x), int(shape.height * scale_y))
-                                    )
-                                else:
-                                    hotspot_x = shape.hotspot_x
-                                    hotspot_y = shape.hotspot_y
-                                    cursor_img = shape.image
-                                pos = (offset_x - hotspot_x, offset_y - hotspot_y)
-                                img.paste(cursor_img, pos, cursor_img)
-                    from io import BytesIO
+                    while True:
+                        raw = sct.grab(monitor)
+                        img = Image.frombytes("RGB", raw.size, raw.rgb)
+                        if target_size and (img.width, img.height) != target_size:
+                            img = img.resize(target_size)
+                        if include_cursor and current_cursor is not None:
+                            cursor_info = current_cursor()
+                            if cursor_info is not None and cursor_info.visible:
+                                shape = None
+                                if include_cursor_shape:
+                                    shape = _cursor_shape_cached(cursor_info.handle)
+                                if shape is not None:
+                                    offset_x = int(cursor_info.x) - mon_left
+                                    offset_y = int(cursor_info.y) - mon_top
+                                    if target_size and raw.size != target_size:
+                                        scale_x = target_size[0] / raw.size[0]
+                                        scale_y = target_size[1] / raw.size[1]
+                                        offset_x = int(offset_x * scale_x)
+                                        offset_y = int(offset_y * scale_y)
+                                        hotspot_x = int(shape.hotspot_x * scale_x)
+                                        hotspot_y = int(shape.hotspot_y * scale_y)
+                                        cursor_img = shape.image.resize(
+                                            (int(shape.width * scale_x), int(shape.height * scale_y))
+                                        )
+                                    else:
+                                        hotspot_x = shape.hotspot_x
+                                        hotspot_y = shape.hotspot_y
+                                        cursor_img = shape.image
+                                    pos = (offset_x - hotspot_x, offset_y - hotspot_y)
+                                    img.paste(cursor_img, pos, cursor_img)
+                        from io import BytesIO
 
-                    bio = BytesIO()
-                    if frame_mode == "rgb":
-                        data = img.tobytes()
-                    elif frame_mode == "png":
-                        img.save(bio, format="PNG", compress_level=3, optimize=False)
-                        data = bio.getvalue()
-                    else:
-                        quality = jpeg_quality() if callable(jpeg_quality) else jpeg_quality
-                        img.save(bio, format="JPEG", quality=int(quality))
-                        data = bio.getvalue()
-                    yield Frame(
-                        ts_utc=_iso_utc(),
-                        data=data,
-                        width=img.width,
-                        height=img.height,
-                        ts_monotonic=time.monotonic(),
-                    )
+                        bio = BytesIO()
+                        if frame_mode == "rgb":
+                            data = img.tobytes()
+                        elif frame_mode == "png":
+                            img.save(bio, format="PNG", compress_level=3, optimize=False)
+                            data = bio.getvalue()
+                        else:
+                            quality = jpeg_quality() if callable(jpeg_quality) else jpeg_quality
+                            img.save(bio, format="JPEG", quality=int(quality))
+                            data = bio.getvalue()
+                        yield Frame(
+                            ts_utc=_iso_utc(),
+                            data=data,
+                            width=img.width,
+                            height=img.height,
+                            ts_monotonic=time.monotonic(),
+                        )
 
-        frame_source = _frames()
+            frame_source = _frames()
 
     for frame in frame_source:
         start = now_fn()

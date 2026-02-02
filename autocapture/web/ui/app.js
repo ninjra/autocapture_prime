@@ -16,6 +16,7 @@ const state = {
   telemetry: {},
   telemetryPoller: null,
   status: {},
+  jepaModels: [],
   activityFilters: {
     activity: localStorage.getItem("acFilterActivity") !== "false",
     changes: localStorage.getItem("acFilterChanges") !== "false",
@@ -52,6 +53,12 @@ const pluginGroupMeta = qs("pluginGroupMeta");
 const pluginGroupControls = qs("pluginGroupControls");
 const pluginEnableAll = qs("pluginEnableAll");
 const pluginDisableAll = qs("pluginDisableAll");
+const jepaModelsList = qs("jepaModelsList");
+const refreshJepaModels = qs("refreshJepaModels");
+const approveJepaLatest = qs("approveJepaLatest");
+const jepaModelsStatus = qs("jepaModelsStatus");
+const jepaReportOutput = qs("jepaReportOutput");
+const clearJepaReport = qs("clearJepaReport");
 const keysPayload = qs("keysPayload");
 const queryInput = qs("queryInput");
 const queryOutput = qs("queryOutput");
@@ -1181,6 +1188,191 @@ async function refreshPlugins() {
   renderPluginList();
   renderPluginDetail();
   renderCapturePlugins();
+}
+
+function setJepaStatus(text, ok = true) {
+  if (!jepaModelsStatus) return;
+  jepaModelsStatus.textContent = text || "";
+  jepaModelsStatus.classList.toggle("warn", !ok);
+}
+
+function renderJepaModels(models) {
+  if (!jepaModelsList) return;
+  jepaModelsList.innerHTML = "";
+  if (!Array.isArray(models) || !models.length) {
+    jepaModelsList.textContent = "No JEPA models found";
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  models.forEach((model) => {
+    const row = document.createElement("div");
+    row.className = "table-row";
+    if (model.active) row.classList.add("active");
+
+    const nameCell = document.createElement("div");
+    nameCell.className = "model-name";
+    const versionSpan = document.createElement("span");
+    versionSpan.textContent = model.model_version || "unknown";
+    const runSpan = document.createElement("span");
+    runSpan.textContent = model.training_run_id || "";
+    nameCell.appendChild(versionSpan);
+    nameCell.appendChild(runSpan);
+    row.appendChild(nameCell);
+
+    const statusCell = document.createElement("span");
+    let statusText = "pending";
+    let statusClass = "badge off";
+    if (model.approved) {
+      statusText = "approved";
+      statusClass = "badge";
+    }
+    if (model.archived_ts_ms) {
+      statusText = "archived";
+      statusClass = "badge warn";
+    }
+    if (model.active) {
+      statusText = "active";
+      statusClass = "badge";
+    }
+    statusCell.className = statusClass;
+    statusCell.textContent = statusText;
+    row.appendChild(statusCell);
+
+    const createdCell = document.createElement("span");
+    const createdValue = Number(model.created_ts_ms || 0);
+    createdCell.textContent = createdValue ? formatTs(createdValue) : "—";
+    row.appendChild(createdCell);
+
+    const evalCell = document.createElement("span");
+    const evalOk = model.eval && typeof model.eval === "object" ? model.eval.ok : null;
+    if (evalOk === true) {
+      evalCell.className = "badge";
+      evalCell.textContent = "eval ok";
+    } else if (evalOk === false) {
+      evalCell.className = "badge warn";
+      evalCell.textContent = "eval fail";
+    } else {
+      evalCell.className = "badge off";
+      evalCell.textContent = "eval ?";
+    }
+    row.appendChild(evalCell);
+
+    const actionsCell = document.createElement("div");
+    actionsCell.className = "actions";
+    if (!model.approved && !model.archived_ts_ms) {
+      const approveBtn = document.createElement("button");
+      approveBtn.textContent = "Approve";
+      approveBtn.addEventListener("click", () => approveJepaModel(model));
+      actionsCell.appendChild(approveBtn);
+    }
+    if (model.approved && !model.active) {
+      const promoteBtn = document.createElement("button");
+      promoteBtn.className = "ghost";
+      promoteBtn.textContent = "Promote";
+      promoteBtn.addEventListener("click", () => promoteJepaModel(model));
+      actionsCell.appendChild(promoteBtn);
+    }
+    const reportBtn = document.createElement("button");
+    reportBtn.className = "ghost";
+    reportBtn.textContent = "Report";
+    reportBtn.addEventListener("click", () => loadJepaReport(model));
+    actionsCell.appendChild(reportBtn);
+    row.appendChild(actionsCell);
+
+    fragment.appendChild(row);
+  });
+  jepaModelsList.appendChild(fragment);
+}
+
+async function refreshJepaModelsList() {
+  if (!jepaModelsList) return;
+  setJepaStatus("Loading...");
+  const resp = await apiFetch("/api/state/jepa/models?archived=true");
+  const data = await readJson(resp);
+  if (data && data.error) {
+    setJepaStatus(`Error: ${data.error}`, false);
+    jepaModelsList.textContent = "Unable to load models";
+    return;
+  }
+  const models = data.models || [];
+  state.jepaModels = models;
+  renderJepaModels(models);
+  if (!models.length) {
+    setJepaStatus("No models found");
+  } else {
+    setJepaStatus(`${models.length} models`, true);
+  }
+}
+
+async function approveJepaModel(model) {
+  if (!model) return;
+  setJepaStatus("Approving model...");
+  const resp = await apiFetch("/api/state/jepa/approve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model_version: model.model_version,
+      training_run_id: model.training_run_id,
+    }),
+  });
+  const data = await readJson(resp);
+  if (data.error) {
+    setJepaStatus(`Approve failed: ${data.error}`, false);
+  } else {
+    setJepaStatus("Approved", true);
+  }
+  refreshJepaModelsList();
+}
+
+async function approveLatestJepaModel() {
+  setJepaStatus("Approving latest...");
+  const resp = await apiFetch("/api/state/jepa/approve-latest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ include_archived: false }),
+  });
+  const data = await readJson(resp);
+  if (data.error || data.approved === false) {
+    setJepaStatus(`Approve latest: ${data.reason || data.error || "failed"}`, false);
+  } else {
+    setJepaStatus("Approved latest", true);
+  }
+  refreshJepaModelsList();
+}
+
+async function promoteJepaModel(model) {
+  if (!model) return;
+  setJepaStatus("Promoting model...");
+  const resp = await apiFetch("/api/state/jepa/promote", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model_version: model.model_version,
+      training_run_id: model.training_run_id,
+    }),
+  });
+  const data = await readJson(resp);
+  if (data.error) {
+    setJepaStatus(`Promote failed: ${data.error}`, false);
+  } else {
+    setJepaStatus("Promoted", true);
+  }
+  refreshJepaModelsList();
+}
+
+async function loadJepaReport(model) {
+  if (!model || !jepaReportOutput) return;
+  jepaReportOutput.textContent = "Loading report...";
+  const resp = await apiFetch("/api/state/jepa/report", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model_version: model.model_version,
+      training_run_id: model.training_run_id,
+    }),
+  });
+  const data = await readJson(resp);
+  jepaReportOutput.textContent = JSON.stringify(data, null, 2);
 }
 
 async function postConfigPatch(patch) {
@@ -2645,6 +2837,11 @@ qs("verifyLedger")?.addEventListener("click", () => runVerify("/api/verify/ledge
 qs("verifyAnchors")?.addEventListener("click", () => runVerify("/api/verify/anchors"));
 qs("verifyEvidence")?.addEventListener("click", () => runVerify("/api/verify/evidence"));
 qs("applyConfig")?.addEventListener("click", applyConfigPatch);
+refreshJepaModels?.addEventListener("click", refreshJepaModelsList);
+approveJepaLatest?.addEventListener("click", approveLatestJepaModel);
+clearJepaReport?.addEventListener("click", () => {
+  if (jepaReportOutput) jepaReportOutput.textContent = "";
+});
 refreshActivityTimelineBtn?.addEventListener("click", refreshActivityTimeline);
 filterActivity?.addEventListener("change", () => {
   state.activityFilters.activity = filterActivity.checked;
@@ -2681,5 +2878,6 @@ refreshBookmarks();
 refreshActivityTimeline();
 refreshKeys();
 refreshEgress();
+refreshJepaModelsList();
 connectTelemetry();
 refreshMetadata();

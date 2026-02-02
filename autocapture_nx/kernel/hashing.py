@@ -100,6 +100,14 @@ def sha256_directory(path: str | Path) -> str:
     return result
 
 
+def clear_directory_hash_cache() -> None:
+    """Clear cached directory hashes to force recomputation."""
+    if not _HASH_CACHE_ENABLED:
+        return
+    with _DIR_HASH_LOCK:
+        _DIR_HASH_CACHE.clear()
+
+
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 

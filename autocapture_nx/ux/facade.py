@@ -524,6 +524,66 @@ class UXFacade:
         with self._kernel_mgr.session() as system:
             return run_query(system, text)
 
+    def state_query(self, text: str) -> dict[str, Any]:
+        from autocapture_nx.kernel.query import run_state_query
+
+        with self._kernel_mgr.session() as system:
+            return run_state_query(system, text)
+
+    def state_jepa_approve(self, model_version: str, training_run_id: str) -> dict[str, Any]:
+        with self._kernel_mgr.session() as system:
+            if system is None or not system.has("state.training"):
+                raise RuntimeError("state_training_unavailable")
+            trainer = system.get("state.training")
+            if not hasattr(trainer, "approve_model"):
+                raise RuntimeError("state_training_missing_approve")
+            return trainer.approve_model(model_version, training_run_id)
+
+    def state_jepa_list(self, include_archived: bool = True) -> dict[str, Any]:
+        with self._kernel_mgr.session() as system:
+            if system is None or not system.has("state.training"):
+                raise RuntimeError("state_training_unavailable")
+            trainer = system.get("state.training")
+            if not hasattr(trainer, "list_models"):
+                raise RuntimeError("state_training_missing_list")
+            return {"models": trainer.list_models(include_archived=include_archived)}
+
+    def state_jepa_approve_latest(self, include_archived: bool = False) -> dict[str, Any]:
+        with self._kernel_mgr.session() as system:
+            if system is None or not system.has("state.training"):
+                raise RuntimeError("state_training_unavailable")
+            trainer = system.get("state.training")
+            if not hasattr(trainer, "approve_latest"):
+                raise RuntimeError("state_training_missing_approve_latest")
+            return trainer.approve_latest(include_archived=include_archived)
+
+    def state_jepa_promote(self, model_version: str, training_run_id: str) -> dict[str, Any]:
+        with self._kernel_mgr.session() as system:
+            if system is None or not system.has("state.training"):
+                raise RuntimeError("state_training_unavailable")
+            trainer = system.get("state.training")
+            if not hasattr(trainer, "promote_model"):
+                raise RuntimeError("state_training_missing_promote")
+            return trainer.promote_model(model_version, training_run_id)
+
+    def state_jepa_report(self, model_version: str, training_run_id: str) -> dict[str, Any]:
+        with self._kernel_mgr.session() as system:
+            if system is None or not system.has("state.training"):
+                raise RuntimeError("state_training_unavailable")
+            trainer = system.get("state.training")
+            if not hasattr(trainer, "report"):
+                raise RuntimeError("state_training_missing_report")
+            return trainer.report(model_version, training_run_id)
+
+    def state_jepa_archive(self, dry_run: bool = False) -> dict[str, Any]:
+        with self._kernel_mgr.session() as system:
+            if system is None or not system.has("state.training"):
+                raise RuntimeError("state_training_unavailable")
+            trainer = system.get("state.training")
+            if not hasattr(trainer, "archive_models"):
+                raise RuntimeError("state_training_missing_archive")
+            return trainer.archive_models(dry_run=dry_run)
+
     def devtools_diffusion(self, axis: str, k_variants: int = 1, dry_run: bool | None = None) -> dict[str, Any]:
         with self._kernel_mgr.session() as system:
             harness = system.get("devtools.diffusion")

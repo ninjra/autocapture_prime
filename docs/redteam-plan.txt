@@ -1,0 +1,638 @@
+According to a document from **2026-01-15**, this repo explicitly targets a **Windows 11 host capture** + **WSL/Linux backend** architecture on an **RTX 4090**, and is trying to land “WSL bridge endpoints” plus a dashboard storage widget as part of Phase work. It also notes that `pytest` timed out and the “doctor” command failed creating a path under `/home/ninjra/AppData/Local/Autocapture` (this is a real stability risk in your exact Windows+WSL setup).
+
+Also: the repo tooling reports that “some uploaded files expired.” I can still red-team what’s in the current repomix, but if anything important is missing (especially UI code/assets), you’ll want to re-upload the latest repomix for a truly exhaustive pass.
+
+---
+gpu:rtx 4090
+ram: 64gb
+os:windows 11
+monitor resolution: 76180 x 2160
+
+
+## What the repo already implies about your intended workflow
+
+This is the “inferred pipeline” from the code/docs you have (i.e., it’s not speculative product design; it matches repo artifacts and model names).
+
+### 1) Capture + ingest
+
+* The backend receives frame ingests that include **foreground app/window context** (`app_name`, `window_title`) and persists a `FrameRecord`-like row (or equivalent) with hashes, monitor bounds, etc.
+* Video capture is supported as “FFmpeg video recording for activity segments,” with NVENC-style preset nomenclature (e.g., `p4`) and bitrate configured in `CaptureConfig`.
+* There is explicit **disk free-space gating** based on `staging_min_free_mb` and `data_min_free_mb` (capture can stop/skip when space is low).
+
+### 2) Tracking (HID / activity context)
+
+* The config has a `TrackingConfig` with **foreground polling**, **mouse movement sampling**, and an explicit `enable_clipboard` flag (currently default `False` in the snippet).
+
+### 3) Processing via plugins (multiple “kinds”)
+
+* The plugin system already enumerates extension “kinds” that map nicely to your desired steps (OCR engine, vision extractor, embedder, retrieval strategy, reranker, compressor, verifier, agents, and UI overlays/panels).
+* There is a PolicyGate that blocks cloud use in offline mode and blocks cloud images unless explicitly allowed (good security baseline).
+
+### 4) Traceability & “citable” answers
+
+* There are explicit integrity tests around citations and stored media paths, implying your “answer must point back to frames/spans” model is foundational (P4 is intended to be first-class).
+
+---
+
+## Red-team findings (from the perspective of *you*, with severe working-memory impairment)
+
+These are the most likely failure modes that would cause you to lose trust in the system or lose critical recall capability.
+
+### RT-1: “Silent holes” in memory due to exclude/mask semantics
+
+Your repo’s pillar spec currently treats **excluded frames as “do not persist pixels.”**
+And the ingest path shows that when a frame is excluded, it creates a DB record and a ledger entry but sets `media_path=None` (i.e., the pixels are gone).
+
+For a memory disability use case, this is catastrophic: you won’t just have “privacy filtered content,” you’ll have **unrecoverable gaps** right at the moments you likely need recall (auth flows, password prompts, work portals, etc.).
+
+### RT-2: Capture can halt due to environment friction (WSL path, doctor failure)
+
+The Phase checklist shows **doctor failing to create** `/home/ninjra/AppData/Local/Autocapture` and pytest timing out.
+If setup/doctor is flaky, you will have long stretches where capture is “supposed to work” but isn’t, and you won’t be able to diagnose quickly.
+
+### RT-3: Disk-space gating risks “quiet downtime”
+
+You have hard free-space checks (staging + data).
+If the UX doesn’t scream about “capture stopped because disk low,” you will unknowingly lose time coverage.
+
+### RT-4: UI complexity is a direct accessibility hazard
+
+You described the UI as overwhelming: too many settings, no grouping/collapsing, plus per-plugin dynamic settings. For your user profile, that leads to:
+
+* accidental misconfiguration
+* configuration paralysis (you stop touching it)
+* inability to audit “what changed” when something breaks
+
+### RT-5: Single-selection routing fights your “multi-plugin per step” requirement
+
+The system conceptually supports many extension kinds, but typical routing patterns select *one* provider per kind. That blocks your desired workflow (“run OCR A + OCR B; run VLM caption + bbox analysis; etc.”).
+
+### RT-6: “Invisible” processing constraints must be enforced by design
+
+You’ve locked: **no heavy processing while you’re actively using the PC**. If even one worker type (OCR/VLM/embeddings) ignores “user active” and spikes GPU/CPU, it violates Pillar P1 and destroys trust.
+
+---
+
+# Priority plan (P0 → P2), with 4‑Pillars ratings per recommendation
+
+Rating scale: **1 (bad) → 5 (excellent)** impact/alignment on that pillar.
+
+---
+
+## P0 — Make capture complete, stable, and obviously “ON”
+
+These are the changes that prevent you from losing data *today*.
+
+### P0‑1) Change “excluded” semantics to **never drop raw pixels locally**
+
+**Current behavior:** excluded ⇒ `media_path=None` (pixels not stored). and spec explicitly says “do not persist pixels.”
+
+**Required behavior (per your locked capture policy):**
+
+* Always store raw pixels locally (preferably encrypted at rest).
+* Mark the frame as `privacy.excluded=true` (or similar).
+* Downstream: skip *derived artifacts* (OCR/VLM/embeddings) unless user explicitly opts in.
+
+**Implementation sketch (minimal refactor):**
+
+* In ingest handler:
+
+  * Always write media to a “vault” location (same store, but flagged).
+  * Store a `FrameRecord` with `excluded=True`, but keep `media_path` pointing to the vault.
+  * Only short-circuit the *enqueue* step for OCR/VLM if excluded.
+* Update pillar spec text accordingly (SPEC‑2).
+
+**Pillars:** P1 4/5 | P2 5/5 | P3 4/5 (better with encryption) | P4 5/5
+**Effort:** M (touch ingest path + tests + spec)
+
+---
+
+### P0‑2) Add a “Capture Heartbeat” invariant + UI indicator
+
+**Goal:** you can glance and know capture is happening *right now*, and when it stopped.
+
+**What to implement:**
+
+* Backend writes a lightweight `heartbeat` row every N seconds with:
+
+  * last frame timestamp
+  * last HID/event timestamp
+  * queue/backlog sizes
+  * disk free (staging/data)
+* Web UI shows a persistent banner:
+
+  * ✅ Capturing (last frame: 2s ago)
+  * ⚠️ Degraded (disk low, dropping processing)
+  * ⛔ Stopped (reason + “fix now” steps)
+
+This directly mitigates RT‑2 and RT‑3.
+
+**Pillars:** P1 5/5 | P2 4/5 | P3 3/5 | P4 4/5
+**Effort:** S–M
+
+---
+
+### P0‑3) Make “disk low” degrade **processing first**, not capture
+
+You already check free space.
+Red-team risk: capture halts when disk is low, losing memory.
+
+**Change:**
+
+* Introduce a “storage pressure state machine”:
+
+  * **Green:** normal
+  * **Yellow:** pause processing (OCR/VLM/embeddings), keep capture
+  * **Red:** lower capture rate / lower video bitrate / stop video segments, keep periodic frames
+  * **Black:** only then stop capture (last resort)
+
+**Pillars:** P1 5/5 | P2 4/5 | P3 3/5 | P4 4/5
+**Effort:** M
+
+---
+
+### P0‑4) Defaults: enable video capture (already supported) + tune bitrate for your 4090
+
+`CaptureConfig` includes `record_video`, `video_segment_seconds`, `video_bitrate`, `video_preset` (`p4`), and `multi_monitor_enabled`.
+
+**Recommended default stance for your machine:**
+
+* `record_video = True`
+* `video_segment_seconds = 60` (already default)
+* `video_preset = "p4"` (already default)
+* raise `video_bitrate` above `"8M"` if you’re capturing 4K/8K content (especially text/UI), otherwise OCR usefulness drops.
+
+**Pillars:** P1 4/5 | P2 5/5 | P3 3/5 | P4 5/5
+**Effort:** S
+
+---
+
+### P0‑5) Turn on clipboard capture (but treat it as “sensitive by default”)
+
+`TrackingConfig.enable_clipboard` exists and is currently `False` in config snippet.
+
+For memory assistance, clipboard is extremely high value.
+
+**Safe implementation:**
+
+* Capture clipboard text locally.
+* Mark it as `sensitive=true` by default.
+* Do not send clipboard-derived text to any cloud plugin.
+* Optionally skip embeddings for clipboard unless you opt in.
+
+**Pillars:** P1 4/5 | P2 5/5 | P3 4/5 | P4 4/5
+**Effort:** S–M
+
+---
+
+### P0‑6) Fix “doctor” so Windows+WSL setup is deterministic
+
+The PR checklist indicates doctor failing on `/home/ninjra/AppData/Local/Autocapture`.
+
+**Interpretation:** the code is trying to use a Windows AppData path *inside* WSL without robust translation/creation logic.
+
+**Fix requirements:**
+
+* Doctor must:
+
+  * detect WSL
+  * pick a storage root that is valid and writable in that environment
+  * validate access to the *actual* intended data directory (Windows path, WSL path, or a bridged mount)
+* Doctor should also validate: FFmpeg availability (you have FFmpeg config knobs).
+
+**Pillars:** P1 5/5 | P2 4/5 | P3 4/5 | P4 3/5
+**Effort:** M
+
+---
+
+## P1 — Make the UI usable under cognitive load (grouping, collapsing, presets, “only show changed”)
+
+### P1‑1) Replace “flat settings list” with a **two-level UI: Presets → Advanced**
+
+Your situation demands:
+
+* *Zero-config* defaults that are tuned for your hardware
+* Ability to go advanced only when needed
+
+**UI rules (hard requirements):**
+
+* Default view: **Preset cards**
+
+  * “Capture Everything (Max Recall)”
+  * “Balanced”
+  * “Low Impact”
+* Each preset is a patch applied to config (not a separate config system).
+* Advanced view: accordion groups with search and “show advanced”.
+
+**Pillars:** P1 4/5 | P2 4/5 | P3 4/5 | P4 4/5
+**Effort:** M
+
+---
+
+### P1‑2) Add “Only show settings that differ from default”
+
+This is the most important usability feature for safely managing a large config:
+
+* Default: show only overrides
+* Toggle: show all
+* Button: reset group to defaults
+
+**Pillars:** P1 3/5 | P2 4/5 | P3 4/5 | P4 5/5
+**Effort:** M
+
+---
+
+### P1‑3) Add consistent grouping metadata to Pydantic fields
+
+Do **not** refactor config into new models unless necessary. Instead:
+
+* add `json_schema_extra` metadata to fields: `{ui_group, ui_subgroup, advanced, order, sensitive}`
+
+Then:
+
+* `/api/settings/schema` returns:
+
+  * defaults
+  * current
+  * groupings
+  * descriptions
+
+This yields an auto-generated, collapsible UI without a big rewrite.
+
+**Pillars:** P1 4/5 | P2 3/5 | P3 4/5 | P4 5/5
+**Effort:** M
+
+---
+
+### P1‑4) Per-plugin settings: **always collapsed**, with “defaults are fine” UX
+
+You already have a `PluginSettings` structure with `configs` dict keyed by plugin id, plus lock metadata.
+
+Implement:
+
+* Plugin card shows:
+
+  * Enabled toggle
+  * “Using defaults” (no overrides)
+  * “Overrides: N”
+* Clicking expands a nested accordion for that plugin’s settings.
+* Per-plugin “Reset to defaults” button.
+
+**Pillars:** P1 4/5 | P2 3/5 | P3 4/5 | P4 4/5
+**Effort:** M
+
+---
+
+### P1‑5) Add plugin-provided **settings schema** to plugin manifests
+
+Your plugin kinds list is rich already.
+
+Extend plugin manifest schema to optionally include:
+
+* `settings_schema` (JSON Schema)
+* `settings_defaults`
+* `ui_groups`
+
+This allows the UI to render correct controls and tooltips without bespoke coding.
+
+**Pillars:** P1 4/5 | P2 4/5 | P3 4/5 | P4 4/5
+**Effort:** M–L
+
+---
+
+### P1‑6) A “Cognitive Safe Mode” UI layout
+
+For your use case, default landing page should be:
+
+* **Now**
+* **Rewind**
+* **Search**
+* **Status**
+
+Settings and plugins should be secondary tabs.
+
+**Pillars:** P1 5/5 | P2 4/5 | P3 3/5 | P4 3/5
+**Effort:** M
+
+---
+
+## P1 — Multi-plugin orchestration per step (your core modularity requirement)
+
+### P1‑7) Convert routing entries from scalar → list (backward compatible)
+
+Today routing patterns tend to be single-selection. Your requirement is multi-run per step.
+
+Implement: accept either:
+
+* `"vision.extractor": "pluginA"`
+* or `"vision.extractor": ["pluginA", "pluginB"]`
+
+Then pipeline loops over selected plugin ids.
+
+This matches existing plugin “kinds” (OCR engine, vision extractor, etc.).
+
+**Pillars:** P1 4/5 | P2 5/5 | P3 4/5 | P4 5/5
+**Effort:** M
+
+---
+
+### P1‑8) Enforce plugin isolation via artifact contracts (no shared state)
+
+Rule: plugin can only:
+
+* read input artifacts (immutable)
+* write output artifacts (new ids)
+* emit logs/metrics
+
+It must never mutate other plugin outputs or global config.
+
+Store outputs as `ArtifactRecord` rows keyed by `(frame_id, artifact_type, engine, engine_version)` and upstream artifact ids (integrity already exists around artifacts).
+
+**Pillars:** P1 4/5 | P2 5/5 | P3 4/5 | P4 5/5
+**Effort:** M
+
+---
+
+### P1‑9) Step-level UI: “select plugins for this step” + “zoom into plugin runs”
+
+UX:
+
+* Top-level pipeline steps: Capture → OCR → Vision → Embeddings → Retrieval → Answer → Summaries
+* Each step: checkboxes of available plugins for that kind
+* “Show outputs” shows the artifacts produced per plugin run
+
+**Pillars:** P1 4/5 | P2 4/5 | P3 4/5 | P4 5/5
+**Effort:** M–L
+
+---
+
+## P1 — Workflow trace and visualization (end-to-end)
+
+### P1‑10) A first-class Trace API: “show me everything about this frame/event”
+
+Implement endpoints:
+
+* `GET /api/trace/frame/{frame_id}`
+* `GET /api/trace/event/{event_id}`
+
+Return:
+
+* frame metadata (window/app/monitor)
+* media path(s)
+* artifacts (OCR spans, vision outputs, embeddings)
+* plugin runs (id, version, config hash)
+* ledger entries
+
+This directly satisfies your “visualize complete workflow” requirement.
+
+**Pillars:** P1 4/5 | P2 5/5 | P3 4/5 | P4 5/5
+**Effort:** M
+
+---
+
+### P1‑11) UI Trace Viewer: timeline + DAG
+
+Two synchronized visualizations:
+
+1. **Timeline**: frames/events and major derived artifacts over time
+2. **DAG view**: nodes = artifacts; edges = “derived from”; group by plugin id
+
+**Pillars:** P1 4/5 | P2 4/5 | P3 3/5 | P4 5/5
+**Effort:** M–L
+
+---
+
+### P1‑12) “Citable overlays” are the default evidence UX
+
+Your plugin types include UI overlays/panels.
+Your integrity tests imply bounding boxes/spans are central to citation quality.
+
+Make the default evidence view:
+
+* screenshot frame
+* span highlights (bbox)
+* clicking a span filters evidence list to that claim
+
+**Pillars:** P1 3/5 | P2 5/5 | P3 3/5 | P4 5/5
+**Effort:** M
+
+---
+
+## P1 — Enforce “invisible while active” processing (your scheduling rule)
+
+### P1‑13) Implement hard resource ceilings based on activity
+
+Repo already has runtime QoS notions (profiles, worker caps) in config. (Example: `RuntimeQosProfile` has per-mode limits like `max_ocr_workers`, `max_embed_workers`, etc.)
+
+Required enforcement:
+
+* When user input detected:
+
+  * OCR/VLM/embedding workers must drop to configured ceilings (often 0)
+  * GPU concurrency cap respected
+* When idle:
+
+  * workers ramp up
+
+**Pillars:** P1 5/5 | P2 4/5 | P3 3/5 | P4 3/5
+**Effort:** M
+
+---
+
+### P1‑14) “Work queue budgets” per plugin and per step
+
+Per step:
+
+* max items
+* max runtime
+* max VRAM estimate (for VLM)
+* backoff on failure
+
+This prevents one plugin from starving capture stability.
+
+**Pillars:** P1 5/5 | P2 4/5 | P3 4/5 | P4 4/5
+**Effort:** M
+
+---
+
+## P2 — Security posture consistent with “capture everything locally”
+
+### P2‑1) Default to encryption at rest for media + DB (and make key portability easy)
+
+The architecture notes explicitly call out “Key portability via encrypted export/import.”
+There’s CLI support for key export/import and DB encryption workflows.
+
+**Make it operationally safe:**
+
+* On first run: generate keys, store securely, show “backup keys” prompt.
+* Add “Key backup status” to dashboard.
+* Provide a one-click “export keys to USB path” flow (still local).
+
+**Pillars:** P1 3/5 | P2 4/5 | P3 5/5 | P4 4/5
+**Effort:** M
+
+---
+
+### P2‑2) Keep PolicyGate strict; add UI explanations and per-plugin “data handling” badges
+
+PolicyGate behavior exists and is tested (offline blocks cloud text; cloud images blocked unless allowed).
+
+Expose it in UI:
+
+* Each plugin shows:
+
+  * “Local only”
+  * “Cloud possible (text only)”
+  * “Cloud images possible (requires explicit allow)”
+* When blocked: clear error message.
+
+**Pillars:** P1 4/5 | P2 3/5 | P3 5/5 | P4 3/5
+**Effort:** S–M
+
+---
+
+### P2‑3) Cloud policy enforcement: sanitize/hashing only on egress
+
+To match your locked constraints:
+
+* Raw PII never leaves device.
+* Any export/share pipeline runs entity hashing/sanitization.
+
+**Pillars:** P1 3/5 | P2 3/5 | P3 5/5 | P4 4/5
+**Effort:** M
+
+---
+
+## Defaults tuned for your Windows 11 + WSL + RTX 4090 machine (minimal, defensible changes)
+
+These are defaults you can ship without redesigning the system.
+
+### Capture defaults (from `CaptureConfig`)
+
+Repo defaults include: `record_video=True`, `video_segment_seconds=60`, `video_bitrate="8M"`, `video_preset="p4"`, `max_pending=5000`, `multi_monitor_enabled=True`.
+
+Recommended adjustments:
+
+* Increase `max_pending` if you see backlog under bursty activity (mouse/typing + multi-monitor).
+* Increase `video_bitrate` if your captured resolution is 4K+ and you need legible UI text in video.
+
+### Tracking defaults
+
+* Set `enable_clipboard=True` (with “sensitive by default” handling).
+
+### FFmpeg defaults
+
+You have a formal `FFmpegConfig` with explicit path and fallback options.
+Recommended:
+
+* Bundle FFmpeg for deterministic behavior; keep `allow_system=True` as fallback.
+
+---
+
+## A concrete “Make it queryable soon” checklist (minimal refactors)
+
+These are the most direct steps to “I forgot what I was doing; tell me what I was looking at.”
+
+### Q‑1) Add a `/api/now` endpoint (and a big “NOW” panel)
+
+Return:
+
+* current foreground app/window
+* last N frames (thumbs)
+* last N events (clicks/keys aggregated)
+
+This is already structurally supported by the fact that frames store app/window context.
+
+**Pillars:** P1 5/5 | P2 4/5 | P3 3/5 | P4 4/5
+**Effort:** S–M
+
+---
+
+### Q‑2) “Rewind 5 minutes” as a first-class UI action
+
+UI button:
+
+* pulls events/frames for last 5 minutes
+* shows thumbnails + window titles
+* click opens full frame + related artifacts
+
+**Pillars:** P1 5/5 | P2 4/5 | P3 3/5 | P4 5/5
+**Effort:** M
+
+---
+
+### Q‑3) Search defaults to time-bounded + window/app cues
+
+The retrieval layer classifies time-ish queries (“today”, “yesterday”, etc.) and stores query records, implying time-aware behavior. (Evidence in retrieval code paths.)
+
+Make UI defaults:
+
+* last 60 minutes by default
+* show app/window title prominently
+
+**Pillars:** P1 4/5 | P2 4/5 | P3 3/5 | P4 4/5
+**Effort:** S–M
+
+---
+
+# Extended backlog (still important, but after P0/P1)
+
+I’m listing these in dense form to cover the “fill in gaps” requirement while keeping it actionable.
+
+## Capture & storage hardening
+
+1. **Atomic media writes + fsync for critical metadata** — P1 4 | P2 4 | P3 4 | P4 4 | Effort M
+2. **Crash-safe segment finalization** (video) — P1 4 | P2 4 | P3 3 | P4 4 | Effort M
+3. **Backpressure policy: drop derived work first** — P1 5 | P2 4 | P3 3 | P4 4 | Effort M
+4. **Expose capture queue depths in UI** — P1 4 | P2 3 | P3 3 | P4 3 | Effort S
+5. **Archive instead of delete** (to satisfy “no deletion locally”) — P1 4 | P2 4 | P3 4 | P4 4 | Effort M–L
+
+## Plugin system professionalization
+
+6. **Plugin “budget” contract** (time/VRAM) — P1 5 | P2 4 | P3 4 | P4 4 | Effort M
+7. **Plugin output versioning** (schema_version per artifact) — P1 3 | P2 5 | P3 4 | P4 5 | Effort M
+8. **Plugin crash containment** (circuit breaker + safe mode auto-enable) — P1 5 | P2 3 | P3 4 | P4 4 | Effort M
+9. **Multi-plugin fanout per kind** (routing list) — P1 4 | P2 5 | P3 4 | P4 5 | Effort M
+10. **Per-plugin UI badges for cloud/data handling** — P1 4 | P2 3 | P3 5 | P4 3 | Effort S–M
+
+## Traceability / workflow visualization
+
+11. **Trace API** — P1 4 | P2 5 | P3 4 | P4 5 | Effort M
+12. **DAG viewer** — P1 4 | P2 4 | P3 3 | P4 5 | Effort M–L
+13. **“Why is this in my memory?” explainer** (shows derivation chain) — P1 4 | P2 4 | P3 4 | P4 5 | Effort M
+
+## Accessibility-first UX
+
+14. **Everything collapsible** (accordion) — P1 4 | P2 3 | P3 3 | P4 3 | Effort M
+15. **Search within settings** — P1 4 | P2 2 | P3 3 | P4 3 | Effort S
+16. **Show-only-overrides default** — P1 3 | P2 3 | P3 4 | P4 5 | Effort M
+17. **“Undo last config change”** (append-only config log) — P1 4 | P2 4 | P3 4 | P4 5 | Effort M
+18. **Large “Capture On/Off” control and status** — P1 5 | P2 3 | P3 3 | P4 3 | Effort S
+
+## Security
+
+19. **Encryption-by-default wizard** + key backup status — P1 3 | P2 4 | P3 5 | P4 4 | Effort M
+20. **Never send images to cloud by default** (already supported by PolicyGate) — P1 4 | P2 3 | P3 5 | P4 3 | Effort S
+21. **Clipboard “sensitive” handling** — P1 4 | P2 4 | P3 5 | P4 4 | Effort M
+
+## Operational quality gates
+
+22. **Fix doctor + add CI smoke** for WSL paths — P1 5 | P2 3 | P3 4 | P4 3 | Effort M
+23. **Split/mark long tests** to eliminate timeouts — P1 4 | P2 4 | P3 3 | P4 3 | Effort M
+24. **Add regression tests for “no holes” capture** (excluded frames still stored) — P1 4 | P2 5 | P3 4 | P4 5 | Effort M
+
+---
+
+## The one change I would defend as “worth it” even if it touches multiple subsystems
+
+### “No holes” policy + “derived artifacts gating”
+
+This touches ingest, privacy semantics, and tests/spec. But it is the highest leverage change for your use case:
+
+* Completeness for memory disability requires raw capture continuity.
+* Security is preserved by encrypting at rest and gating cloud use (PolicyGate already exists).
+* Performance is preserved by skipping heavy derived work when frames are marked sensitive/excluded.
+
+**Net:** this improves **P2 (accuracy/completeness)** and **P4 (citable evidence)** without sacrificing your local-first posture; it reduces the chance of catastrophic “I needed that moment and it’s gone.”
+
+

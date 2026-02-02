@@ -829,6 +829,25 @@ pre {
   white-space: normal;
 }
 
+.model-table .table-row {
+  grid-template-columns: 1.6fr 0.7fr 0.7fr 0.7fr 1fr;
+}
+
+.model-table .table-row .actions {
+  justify-content: flex-end;
+}
+
+.model-name {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.model-name span {
+  white-space: normal;
+}
+
 .plugin-name {
   display: flex;
   flex-direction: column;

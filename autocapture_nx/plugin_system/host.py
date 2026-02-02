@@ -423,7 +423,11 @@ class PluginProcess:
             with self._response_lock:
                 self._responses.pop(req_id, None)
         if not response.get("ok"):
-            raise PluginError(response.get("error", "unknown error"))
+            error = response.get("error", "unknown error")
+            tb = response.get("traceback")
+            if tb:
+                error = f"{error}\n{tb}"
+            raise PluginError(error)
         return response.get("result")
 
     def capabilities(self) -> dict[str, list[str]]:

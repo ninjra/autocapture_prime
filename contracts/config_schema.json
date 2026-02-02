@@ -853,6 +853,20 @@
         },
         "startup_ms": {
           "type": "integer"
+        },
+        "state_layer": {
+          "additionalProperties": false,
+          "properties": {
+            "ingestion_latency_regression_pct": {"type": "number"},
+            "query_p95_ms": {"type": "integer"},
+            "storage_growth_mb_per_day": {"type": "integer"}
+          },
+          "required": [
+            "ingestion_latency_regression_pct",
+            "query_p95_ms",
+            "storage_growth_mb_per_day"
+          ],
+          "type": "object"
         }
       },
       "required": [
@@ -863,7 +877,8 @@
         "capture_lag_p95_ms",
         "capture_queue_p95",
         "capture_age_s",
-        "error_budget_pct"
+        "error_budget_pct",
+        "state_layer"
       ],
       "type": "object"
     },
@@ -1419,6 +1434,226 @@
           ],
           "type": "object"
         },
+        "state_layer": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "query_enabled": {"type": "boolean"},
+            "emit_frame_evidence": {"type": "boolean"},
+            "segment_frame_index": {"type": "integer"},
+            "builder_plugin_id": {"type": "string"},
+            "vector_index_plugin_id": {"type": "string"},
+            "evidence_compiler_plugin_id": {"type": "string"},
+            "retrieval_plugin_id": {"type": "string"},
+            "policy_plugin_id": {"type": "string"},
+            "workflow_miner_plugin_id": {"type": "string"},
+            "anomaly_plugin_id": {"type": "string"},
+            "training_plugin_id": {"type": "string"},
+            "windowing_mode": {"type": "string"},
+            "window_ms": {"type": "integer"},
+            "max_evidence_refs": {"type": "integer"},
+            "builder": {
+              "additionalProperties": false,
+              "properties": {
+                "text_weight": {"type": "number"},
+                "vision_weight": {"type": "number"},
+                "layout_weight": {"type": "number"},
+                "input_weight": {"type": "number"}
+              },
+              "required": [
+                "text_weight",
+                "vision_weight",
+                "layout_weight",
+                "input_weight"
+              ],
+              "type": "object"
+            },
+            "index": {
+              "additionalProperties": false,
+              "properties": {
+                "top_k": {"type": "integer"},
+                "min_score": {"type": "number"},
+                "max_candidates": {"type": "integer"}
+              },
+              "required": [
+                "top_k",
+                "min_score",
+                "max_candidates"
+              ],
+              "type": "object"
+            },
+            "evidence": {
+              "additionalProperties": false,
+              "properties": {
+                "max_hits": {"type": "integer"},
+                "max_evidence_per_hit": {"type": "integer"},
+                "max_snippets_per_hit": {"type": "integer"},
+                "max_snippet_chars": {"type": "integer"}
+              },
+              "required": [
+                "max_hits",
+                "max_evidence_per_hit",
+                "max_snippets_per_hit",
+                "max_snippet_chars"
+              ],
+              "type": "object"
+            },
+            "policy": {
+              "additionalProperties": false,
+              "properties": {
+                "allow_raw_media": {"type": "boolean"},
+                "allow_text_export": {"type": "boolean"},
+                "redact_text": {"type": "boolean"},
+                "app_allowlist": {"type": "array", "items": {"type": "string"}},
+                "app_denylist": {"type": "array", "items": {"type": "string"}}
+              },
+              "required": [
+                "allow_raw_media",
+                "allow_text_export",
+                "redact_text",
+                "app_allowlist",
+                "app_denylist"
+              ],
+              "type": "object"
+            },
+            "anomaly": {
+              "additionalProperties": false,
+              "properties": {
+                "pred_error_threshold": {"type": "number"},
+                "max_alerts_per_run": {"type": "integer"}
+              },
+              "required": [
+                "pred_error_threshold",
+                "max_alerts_per_run"
+              ],
+              "type": "object"
+            },
+            "workflow": {
+              "additionalProperties": false,
+              "properties": {
+                "min_support": {"type": "integer"},
+                "min_len": {"type": "integer"},
+                "max_len": {"type": "integer"},
+                "max_workflows": {"type": "integer"},
+                "max_gap_ms": {"type": "integer"},
+                "seed": {"type": "string"}
+              },
+              "required": [
+                "min_support",
+                "min_len",
+                "max_len",
+                "max_workflows",
+                "max_gap_ms",
+                "seed"
+              ],
+              "type": "object"
+            },
+            "training": {
+              "additionalProperties": false,
+              "properties": {
+                "latent_dim": {"type": "integer"},
+                "learning_rate": {"type": "number"},
+                "epochs": {"type": "integer"},
+                "max_samples": {"type": "integer"},
+                "init_scale": {"type": "number"},
+                "weight_scale": {"type": "integer"},
+                "error_clip": {"type": "number"},
+                "activation": {"type": "string"},
+                "projection_seed": {"type": "string"},
+                "seed": {"type": "string"},
+                "auto_approve": {"type": "boolean"},
+                "fallback_enabled": {"type": "boolean"},
+                "retention": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": {"type": "boolean"},
+                    "max_active_models": {"type": "integer"},
+                    "archive_unapproved": {"type": "boolean"},
+                    "archive_dir": {"type": "string"}
+                  },
+                  "required": [
+                    "enabled",
+                    "max_active_models",
+                    "archive_unapproved",
+                    "archive_dir"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "latent_dim",
+                "learning_rate",
+                "epochs",
+                "max_samples",
+                "init_scale",
+                "weight_scale",
+                "error_clip",
+                "activation",
+                "projection_seed",
+                "seed",
+                "auto_approve",
+                "fallback_enabled",
+                "retention"
+              ],
+              "type": "object"
+            },
+            "batch": {
+              "additionalProperties": false,
+              "properties": {
+                "max_states_per_run": {"type": "integer"},
+                "overlap_states": {"type": "integer"}
+              },
+              "required": [
+                "max_states_per_run",
+                "overlap_states"
+              ],
+              "type": "object"
+            },
+            "features": {
+              "additionalProperties": false,
+              "properties": {
+                "index_enabled": {"type": "boolean"},
+                "workflow_enabled": {"type": "boolean"},
+                "anomaly_enabled": {"type": "boolean"},
+                "training_enabled": {"type": "boolean"}
+              },
+              "required": [
+                "index_enabled",
+                "workflow_enabled",
+                "anomaly_enabled",
+                "training_enabled"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "enabled",
+            "query_enabled",
+            "emit_frame_evidence",
+            "segment_frame_index",
+            "builder_plugin_id",
+            "vector_index_plugin_id",
+            "evidence_compiler_plugin_id",
+            "retrieval_plugin_id",
+            "policy_plugin_id",
+            "workflow_miner_plugin_id",
+            "anomaly_plugin_id",
+            "training_plugin_id",
+            "windowing_mode",
+            "window_ms",
+            "max_evidence_refs",
+            "builder",
+            "index",
+            "evidence",
+            "policy",
+            "anomaly",
+            "workflow",
+            "training",
+            "batch",
+            "features"
+          ],
+          "type": "object"
+        },
         "watchdog": {
           "additionalProperties": false,
           "properties": {
@@ -1741,7 +1976,8 @@
       "required": [
         "idle",
         "on_query",
-        "sst"
+        "sst",
+        "state_layer"
       ],
       "type": "object"
     },
@@ -2482,6 +2718,12 @@
         "metadata_path": {
           "type": "string"
         },
+        "state_tape_path": {
+          "type": "string"
+        },
+        "state_vector_path": {
+          "type": "string"
+        },
         "audit_db_path": {
           "type": "string"
         },
@@ -2522,7 +2764,9 @@
         "retention",
         "disk_pressure",
         "entity_map",
-        "anchor"
+        "anchor",
+        "state_tape_path",
+        "state_vector_path"
       ],
       "type": "object"
     },

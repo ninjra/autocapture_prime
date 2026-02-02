@@ -684,6 +684,8 @@ class SSTPipeline:
             frame_id=record_id,
             ts_ms=ts_ms,
             phash=normalized.phash,
+            image_sha256=normalized.image_sha256,
+            frame_index=int(record.get("frame_index", 0) or 0),
             width=frame_width,
             height=frame_height,
             tokens=tokens,

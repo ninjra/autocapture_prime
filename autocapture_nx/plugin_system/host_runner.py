@@ -370,7 +370,11 @@ def main() -> None:
                     raise ValueError("unknown method")
                 response = {"id": req_id, "ok": True, "result": result}
             except Exception as exc:
-                response = {"id": req_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"}
+                response = {
+                    "id": req_id,
+                    "ok": False,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
             bridge.send(response)
     finally:
         bridge.close()

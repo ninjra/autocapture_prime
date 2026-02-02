@@ -125,6 +125,12 @@ def run_all_gates(
             artifacts=[str(retrieval_dir)],
         ),
         _run_check(
+            "state_layer_golden",
+            [py, "tools/state_layer_eval.py"],
+            env=env,
+            artifacts=[str(retrieval_dir)],
+        ),
+        _run_check(
             "sanitizer_ner_cases",
             [py, "-m", "unittest", "tests/test_sanitizer_ner_cases.py", "-q"],
             env=env,

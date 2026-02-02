@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
+import random
 import site
 import sys
 import sysconfig
@@ -15,11 +17,12 @@ from autocapture_nx import __version__ as kernel_version
 from autocapture_nx.kernel.config import SchemaLiteValidator
 from autocapture_nx.kernel.audit import PluginAuditLog, hash_payload
 from autocapture_nx.kernel.errors import PermissionError, PluginError
-from autocapture_nx.kernel.hashing import sha256_directory, sha256_file
+from autocapture_nx.kernel.hashing import sha256_directory, sha256_file, clear_directory_hash_cache
 from autocapture_nx.kernel.paths import plugins_dir, resolve_repo_path, load_json
 from autocapture_nx.kernel.schema_registry import SchemaRegistry, derive_schema_from_paths
 from autocapture_nx.kernel.rng import RNGScope, RNGService, install_rng_guard
 
+from .api import PluginContext
 from .contracts import IOContract, load_io_contracts
 from .host import SubprocessPlugin
 from .manifest import PluginManifest
@@ -493,6 +496,61 @@ class PluginRegistry:
             if hosting_mode != "subprocess" or manifest.get("plugin_id") in inproc_allowlist:
                 raise PluginError("Network-capable plugins must run in subprocess hosting mode")
 
+    def _load_inproc_instance(
+        self,
+        *,
+        module_path: Path,
+        callable_name: str,
+        plugin_id: str,
+        plugin_settings: dict[str, Any],
+        required_capabilities: set[str],
+        capabilities: "CapabilityRegistry",
+        network_allowed: bool,
+        filesystem_policy: FilesystemPolicy | None,
+        rng_seed: int | None,
+        rng_seed_hex: str | None,
+    ) -> Any:
+        module_name = f"autocapture_plugin_{plugin_id.replace('.', '_')}_{callable_name}"
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        if spec is None or spec.loader is None:
+            raise PluginError(f"Failed to load plugin module {module_path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        try:
+            source = module_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            raise PluginError(f"Failed to read plugin module {module_path}: {exc}") from exc
+        code = compile(source, str(module_path), "exec")
+        exec(code, module.__dict__)
+        factory = getattr(module, callable_name, None)
+        if not callable(factory):
+            raise PluginError(f"Plugin entrypoint {callable_name} not callable")
+        rng_instance = None
+        if self._rng_service.enabled and rng_seed is not None:
+            try:
+                rng_instance = random.Random(int(rng_seed))
+            except Exception:
+                rng_instance = random.Random(0)
+        get_capability = _capability_guard(capabilities, plugin_id, required_capabilities)
+        context = PluginContext(
+            config=plugin_settings,
+            get_capability=get_capability,
+            logger=lambda _m: None,
+            rng=rng_instance,
+            rng_seed=rng_seed,
+            rng_seed_hex=str(rng_seed_hex) if rng_seed_hex is not None else None,
+        )
+        with RNGScope(rng_seed, strict=self._rng_service.strict, enabled=self._rng_service.enabled):
+            with network_guard(network_allowed):
+                with filesystem_guard(filesystem_policy):
+                    instance = factory(plugin_id, context)
+        if isinstance(plugin_settings, dict):
+            try:
+                instance.settings = dict(plugin_settings)
+            except Exception:
+                pass
+        return instance
+
     def _resolve_settings_schema(
         self,
         manifest: dict[str, Any],
@@ -825,6 +883,8 @@ class PluginRegistry:
         blob_dir = str(config.get("storage", {}).get("blob_dir", "data/blobs"))
         lexical_db_path = str(config.get("storage", {}).get("lexical_path", "data/lexical.db"))
         vector_db_path = str(config.get("storage", {}).get("vector_path", "data/vector.db"))
+        state_tape_db_path = str(config.get("storage", {}).get("state_tape_path", "data/state/state_tape.db"))
+        state_vector_db_path = str(config.get("storage", {}).get("state_vector_path", "data/state/state_vector.db"))
         anchor_path = ""
         anchor_dir = ""
         keyring_path = ""
@@ -878,6 +938,8 @@ class PluginRegistry:
             "blob_dir": blob_dir,
             "lexical_db_path": lexical_db_path,
             "vector_db_path": vector_db_path,
+            "state_tape_db_path": state_tape_db_path,
+            "state_vector_db_path": state_vector_db_path,
             "anchor_path": anchor_path,
             "anchor_dir": anchor_dir,
             "keyring_path": keyring_path,
@@ -1190,7 +1252,10 @@ class PluginRegistry:
         *,
         plugin_ids: list[str] | None = None,
     ) -> tuple[list[LoadedPlugin], CapabilityRegistry, dict[str, Any]]:
+        clear_directory_hash_cache()
         new_plugins, _caps = self.load_plugins()
+        load_report = self.load_report()
+        failed = set(load_report.get("failed", [])) if isinstance(load_report, dict) else set()
         new_by_id = {plugin.plugin_id: plugin for plugin in new_plugins}
         current_by_id = {plugin.plugin_id: plugin for plugin in current_plugins}
         alias_map: dict[str, str] = {}
@@ -1214,6 +1279,9 @@ class PluginRegistry:
         blocklist |= inproc_allowlist
 
         requested = set(self._normalize_ids(plugin_ids or list(new_by_id.keys()), alias_map))
+        failed_requested = sorted(pid for pid in requested if pid in failed)
+        if failed_requested:
+            raise PluginError(f"hot_reload_failed: {', '.join(failed_requested)}")
         blocked = sorted(pid for pid in requested if pid in blocklist)
         if allowlist:
             reload_ids = requested & allowlist
@@ -1355,7 +1423,9 @@ class PluginRegistry:
         manifests = self.discover_manifest_paths()
         lockfile = self.load_lockfile()
         hosting_cfg = self.config.get("plugins", {}).get("hosting", {})
-        hosting_mode = hosting_cfg.get("mode", "subprocess")
+        hosting_mode = str(hosting_cfg.get("mode", "subprocess")).lower()
+        if hosting_mode not in {"subprocess", "inproc"}:
+            raise PluginError(f"Unsupported plugin hosting mode: {hosting_mode}")
 
         manifests_by_id: dict[str, tuple[Path, dict[str, Any]]] = {}
         for manifest_path in manifests:
@@ -1382,10 +1452,11 @@ class PluginRegistry:
         default_pack = set(self._normalize_ids(self.config.get("plugins", {}).get("default_pack", []), alias_map))
         inproc_allowlist = set(self._normalize_ids(hosting_cfg.get("inproc_allowlist", []), alias_map))
         self._validate_inproc_justifications(inproc_allowlist)
-        if hosting_mode != "subprocess":
-            raise PluginError("In-process plugins are disabled; set plugins.hosting.mode to 'subprocess'")
-        if inproc_allowlist:
-            raise PluginError("In-process plugins are disabled; empty plugins.hosting.inproc_allowlist")
+
+        def use_inproc(pid: str) -> bool:
+            if hosting_mode == "inproc":
+                return not inproc_allowlist or pid in inproc_allowlist
+            return pid in inproc_allowlist
 
         loaded: list[LoadedPlugin] = []
         capabilities = CapabilityRegistry()
@@ -1513,28 +1584,43 @@ class PluginRegistry:
                 network_allowed = bool(manifest.get("permissions", {}).get("network", False))
                 filesystem_policy = self._filesystem_policy(plugin_id, manifest, manifest_path.parent)
 
+                inproc = use_inproc(plugin_id)
                 for entry in entrypoints:
                     module_path = manifest_path.parent / entry["path"]
                     if not module_path.exists():
                         raise PluginError(f"Missing entrypoint module {module_path}")
-                    instance = SubprocessPlugin(
-                        module_path,
-                        entry["callable"],
-                        plugin_id,
-                        network_allowed,
-                        self.config,
-                        plugin_config=plugin_settings,
-                        capabilities=capabilities,
-                        allowed_capabilities=required_capabilities,
-                        filesystem_policy=filesystem_policy.payload() if filesystem_policy else None,
-                        rng_seed=rng_seed,
-                        rng_seed_hex=rng_seed_hex,
-                        rng_strict=self._rng_service.strict,
-                        rng_enabled=self._rng_service.enabled,
-                        audit_log=self._audit_log,
-                        code_hash=code_hash,
-                        settings_hash=settings_hash,
-                    )
+                    if inproc:
+                        instance = self._load_inproc_instance(
+                            module_path=module_path,
+                            callable_name=entry["callable"],
+                            plugin_id=plugin_id,
+                            plugin_settings=plugin_settings,
+                            required_capabilities=required_capabilities,
+                            capabilities=capabilities,
+                            network_allowed=network_allowed,
+                            filesystem_policy=filesystem_policy,
+                            rng_seed=rng_seed,
+                            rng_seed_hex=rng_seed_hex,
+                        )
+                    else:
+                        instance = SubprocessPlugin(
+                            module_path,
+                            entry["callable"],
+                            plugin_id,
+                            network_allowed,
+                            self.config,
+                            plugin_config=plugin_settings,
+                            capabilities=capabilities,
+                            allowed_capabilities=required_capabilities,
+                            filesystem_policy=filesystem_policy.payload() if filesystem_policy else None,
+                            rng_seed=rng_seed,
+                            rng_seed_hex=rng_seed_hex,
+                            rng_strict=self._rng_service.strict,
+                            rng_enabled=self._rng_service.enabled,
+                            audit_log=self._audit_log,
+                            code_hash=code_hash,
+                            settings_hash=settings_hash,
+                        )
                     try:
                         caps = instance.capabilities()
                     except Exception:

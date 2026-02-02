@@ -27,6 +27,9 @@ class EgressGateway(PluginBase):
         self._validator = SchemaLiteValidator()
         self._schema = None
 
+    def _cfg(self) -> dict[str, Any]:
+        return self.context.config if isinstance(self.context.config, dict) else {}
+
     def capabilities(self) -> dict[str, Any]:
         return {"egress.gateway": self}
 
@@ -39,6 +42,8 @@ class EgressGateway(PluginBase):
         return self._schema
 
     def _build_reasoning_packet(self, payload: dict[str, Any], sanitized: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(sanitized, dict):
+            sanitized = {}
         return {
             "schema_version": 1,
             "query_sanitized": sanitized.get("query", payload.get("query", "")),
@@ -53,7 +58,7 @@ class EgressGateway(PluginBase):
         }
 
     def _endpoint(self) -> tuple[str, dict[str, str], float]:
-        gateway_cfg = self.context.config.get("gateway", {}) if isinstance(self.context.config, dict) else {}
+        gateway_cfg = self._cfg().get("gateway", {})
         base_url = str(gateway_cfg.get("openai_base_url", "")).strip()
         if not base_url:
             raise ConfigError("gateway_base_url_missing")
@@ -85,13 +90,14 @@ class EgressGateway(PluginBase):
                 return resp.getcode(), {"text": body}
 
     def _policy_id(self) -> str:
-        privacy = self.context.config.get("privacy", {}) if isinstance(self.context.config, dict) else {}
+        privacy = self._cfg().get("privacy", {})
         egress_cfg = privacy.get("egress", {}) if isinstance(privacy, dict) else {}
         raw = str(egress_cfg.get("policy_id") or egress_cfg.get("destination_policy_id") or "").strip()
         if raw:
             return raw
-        base = self.context.config.get("gateway", {}).get("openai_base_url", "")
-        path = self.context.config.get("gateway", {}).get("egress_path", "/v1/egress")
+        gateway_cfg = self._cfg().get("gateway", {})
+        base = gateway_cfg.get("openai_base_url", "")
+        path = gateway_cfg.get("egress_path", "/v1/egress")
         return sha256_text(f"{base}:{path}")
 
     def _packet_hash(self, payload: dict[str, Any]) -> str:
@@ -139,14 +145,15 @@ class EgressGateway(PluginBase):
 
     def send(self, payload: dict[str, Any], provider: str = "default", approval_token: str | None = None) -> dict[str, Any]:
         _ = provider
-        privacy = self.context.config.get("privacy", {}) if isinstance(self.context.config, dict) else {}
+        config = self._cfg()
+        privacy = config.get("privacy", {})
         egress_cfg = privacy.get("egress", {})
 
         if not egress_cfg.get("enabled", True):
             raise NetworkDisabledError("Egress is disabled by config")
 
         sanitizer = self.context.get_capability("privacy.egress_sanitizer")
-        gate = PolicyGate(self.context.config, sanitizer)
+        gate = PolicyGate(config, sanitizer)
         allow_images = bool(payload.get("allow_images", False) or payload.get("images"))
         decision = gate.enforce(self.plugin_id, payload, allow_raw_egress=False, allow_images=allow_images)
         if not decision.ok:
@@ -159,7 +166,7 @@ class EgressGateway(PluginBase):
                 reason=decision.reason,
             )
             raise PermissionError(decision.reason)
-        sanitized = decision.sanitized_payload or payload
+        sanitized = decision.sanitized_payload if isinstance(decision.sanitized_payload, dict) else payload
 
         reasoning_only = egress_cfg.get("reasoning_packet_only", True)
         if reasoning_only:

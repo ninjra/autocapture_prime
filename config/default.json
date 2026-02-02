@@ -326,7 +326,12 @@
     "ingestion_mb_s": 50,
     "memory_ceiling_mb": 512,
     "query_latency_ms": 2000,
-    "startup_ms": 500
+    "startup_ms": 500,
+    "state_layer": {
+      "ingestion_latency_regression_pct": 10,
+      "query_p95_ms": 1500,
+      "storage_growth_mb_per_day": 250
+    }
   },
   "plugins": {
     "allowlist": [
@@ -736,6 +741,16 @@
       "builtin.research.default",
       "builtin.reranker.basic",
       "builtin.retrieval.basic",
+      "builtin.state.jepa_like",
+      "builtin.state.vector.linear",
+      "builtin.state.vector.sqlite_ts",
+      "builtin.state.vector.hnsw",
+      "builtin.state.evidence.compiler",
+      "builtin.state.retrieval",
+      "builtin.state.policy",
+      "builtin.state.workflow.miner",
+      "builtin.state.anomaly",
+      "builtin.state.jepa.training",
       "builtin.storage.sqlcipher",
       "builtin.time.advanced",
       "builtin.tracking.input.windows",
@@ -784,6 +799,16 @@
       "builtin.processing.sst.ui_vlm": false,
       "builtin.reranker.basic": true,
       "builtin.retrieval.basic": true,
+      "builtin.state.jepa_like": true,
+      "builtin.state.vector.linear": false,
+      "builtin.state.vector.sqlite_ts": true,
+      "builtin.state.vector.hnsw": true,
+      "builtin.state.evidence.compiler": true,
+      "builtin.state.retrieval": true,
+      "builtin.state.policy": true,
+      "builtin.state.workflow.miner": false,
+      "builtin.state.anomaly": false,
+      "builtin.state.jepa.training": false,
       "builtin.runtime.governor": false,
       "builtin.runtime.scheduler": false,
       "builtin.sst.build.delta": false,
@@ -820,7 +845,9 @@
         "{metadata_db_path}",
         "{audit_db_path}",
         "{lexical_db_path}",
-        "{vector_db_path}"
+        "{vector_db_path}",
+        "{state_tape_db_path}",
+        "{state_vector_db_path}"
       ],
       "readwrite": [
         "{run_dir}"
@@ -846,6 +873,8 @@
           "{spool_dir}",
           "{lexical_db_path}",
           "{vector_db_path}",
+          "{state_tape_db_path}",
+          "{state_vector_db_path}",
           "{keyring_dir}",
           "{root_key_dir}"
         ]
@@ -859,6 +888,8 @@
           "{spool_dir}",
           "{lexical_db_path}",
           "{vector_db_path}",
+          "{state_tape_db_path}",
+          "{state_vector_db_path}",
           "{keyring_dir}",
           "{root_key_dir}"
         ]
@@ -1011,6 +1042,89 @@
       },
       "max_window_minutes": 120,
       "require_idle": true
+    },
+    "state_layer": {
+      "enabled": false,
+      "query_enabled": false,
+      "emit_frame_evidence": true,
+      "segment_frame_index": 0,
+      "builder_plugin_id": "builtin.state.jepa_like",
+      "vector_index_plugin_id": "builtin.state.vector.sqlite_ts",
+      "evidence_compiler_plugin_id": "builtin.state.evidence.compiler",
+      "retrieval_plugin_id": "builtin.state.retrieval",
+      "policy_plugin_id": "builtin.state.policy",
+      "workflow_miner_plugin_id": "builtin.state.workflow.miner",
+      "anomaly_plugin_id": "builtin.state.anomaly",
+      "training_plugin_id": "builtin.state.jepa.training",
+      "windowing_mode": "fixed_duration",
+      "window_ms": 5000,
+      "max_evidence_refs": 3,
+      "builder": {
+        "text_weight": 1.0,
+        "vision_weight": 0.6,
+        "layout_weight": 0.4,
+        "input_weight": 0.2
+      },
+      "index": {
+        "top_k": 5,
+        "min_score": 0.1,
+        "max_candidates": 200
+      },
+      "evidence": {
+        "max_hits": 5,
+        "max_evidence_per_hit": 3,
+        "max_snippets_per_hit": 2,
+        "max_snippet_chars": 280
+      },
+      "policy": {
+        "allow_raw_media": false,
+        "allow_text_export": true,
+        "redact_text": false,
+        "app_allowlist": [],
+        "app_denylist": []
+      },
+      "anomaly": {
+        "pred_error_threshold": 0.4,
+        "max_alerts_per_run": 25
+      },
+      "workflow": {
+        "min_support": 2,
+        "min_len": 2,
+        "max_len": 4,
+        "max_workflows": 5,
+        "max_gap_ms": 300000,
+        "seed": ""
+      },
+      "training": {
+        "latent_dim": 64,
+        "learning_rate": 0.01,
+        "epochs": 3,
+        "max_samples": 200,
+        "init_scale": 0.02,
+        "weight_scale": 1000000,
+        "error_clip": 1.0,
+        "activation": "tanh",
+        "projection_seed": "",
+        "seed": "",
+        "auto_approve": false,
+        "fallback_enabled": true,
+        "retention": {
+          "enabled": false,
+          "max_active_models": 3,
+          "archive_unapproved": false,
+          "archive_dir": ""
+        }
+      },
+      "batch": {
+        "max_states_per_run": 200,
+        "overlap_states": 1
+      },
+      "features": {
+        "index_enabled": true,
+        "workflow_enabled": false,
+        "anomaly_enabled": false,
+        "training_enabled": false
+      }
     },
     "watchdog": {
       "enabled": true,
@@ -1221,7 +1335,7 @@
       "subprocess"
     ],
     "bundle_name": "default",
-    "bundle_root": "data/promptops/sources",
+    "bundle_root": "promptops/sources",
     "enabled": true,
     "examples": {},
     "eval": {
@@ -1253,6 +1367,7 @@
       "enabled": true,
       "include_prompt": false
     },
+    "prompt_dir": "promptops/prompts",
     "max_chars": 8000,
     "max_tokens": 2000,
     "min_pass_rate_pct": 100,
@@ -1411,6 +1526,8 @@
     "media_dir": "data/media",
     "metadata_require_db": true,
     "metadata_path": "data/metadata.db",
+    "state_tape_path": "data/state/state_tape.db",
+    "state_vector_path": "data/state/state_vector.db",
     "audit_db_path": "data/audit/kernel_audit.db",
     "retention": {
       "evidence": "infinite",

@@ -21,6 +21,7 @@ from autocapture_nx.kernel.crypto import (
 from autocapture_nx.kernel.metadata_store import ImmutableMetadataStore
 from autocapture_nx.kernel.keyring import KeyRing
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
+from autocapture_nx.state_layer.store_sqlite import StateTapeStore
 
 ENC_PREFIX = "rid_"
 BLOB_MAGIC = b"ACNXBLOB1"
@@ -876,12 +877,17 @@ class EncryptedStoragePlugin(PluginBase):
             require_decrypt=require_decrypt,
             fsync_policy=fsync_policy,
         )
+        state_tape_path = storage_cfg.get("state_tape_path") or os.path.join(data_dir, "state", "state_tape.db")
+        if encryption_required:
+            context.logger("State tape uses plaintext SQLite store; SQLCipher is required for encrypted state tape")
+        self._state_tape = StateTapeStore(state_tape_path, key=None, fsync_policy=fsync_policy)
 
     def capabilities(self) -> dict[str, Any]:
         return {
             "storage.metadata": self._metadata,
             "storage.media": self._media,
             "storage.entity_map": self._entity_map,
+            "storage.state_tape": self._state_tape,
             "storage.keyring": self._keyring,
         }
 

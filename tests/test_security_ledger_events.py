@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,8 +12,13 @@ class SecurityLedgerEventTests(unittest.TestCase):
     def test_lock_and_config_changes_emit_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            data_dir = root / "data"
-            data_dir.mkdir(parents=True, exist_ok=True)
+            env_data = os.environ.get("AUTOCAPTURE_DATA_DIR")
+            if env_data:
+                data_dir = Path(env_data)
+                data_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                data_dir = root / "data"
+                data_dir.mkdir(parents=True, exist_ok=True)
             run_state = {
                 "run_id": "prev",
                 "state": "stopped",

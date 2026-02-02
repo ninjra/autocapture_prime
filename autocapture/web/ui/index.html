@@ -46,6 +46,7 @@
         <button class="nav-btn active" data-panel="capture">Capture</button>
         <button class="nav-btn" data-panel="trace">Trace</button>
         <button class="nav-btn" data-panel="plugins">Plugins</button>
+        <button class="nav-btn" data-panel="jepa">JEPA</button>
         <button class="nav-btn" data-panel="status">Status</button>
         <button class="nav-btn" data-panel="ops">Ops</button>
       </nav>
@@ -447,6 +448,30 @@
               <div id="pluginSettingsStatus" class="status-line"></div>
               <div id="pluginOptionGroups" class="pill-row"></div>
               <div id="pluginSettingsList" class="settings-list"></div>
+            </article>
+          </section>
+        </section>
+
+        <section class="panel" id="panel-jepa">
+          <section class="grid">
+            <article class="card" id="jepaModelsCard">
+              <div class="card-header">
+                <h2>JEPA Models</h2>
+                <div class="actions">
+                  <button id="refreshJepaModels" class="ghost">Refresh</button>
+                  <button id="approveJepaLatest">Approve latest</button>
+                </div>
+              </div>
+              <div id="jepaModelsStatus" class="status-line"></div>
+              <div id="jepaModelsList" class="table model-table"></div>
+            </article>
+
+            <article class="card" id="jepaReportCard">
+              <div class="card-header">
+                <h2>JEPA Training Report</h2>
+                <button id="clearJepaReport" class="ghost">Clear</button>
+              </div>
+              <pre id="jepaReportOutput"></pre>
             </article>
           </section>
         </section>

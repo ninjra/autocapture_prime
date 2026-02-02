@@ -10,9 +10,12 @@ from typing import Any
 
 from autocapture.core.hashing import hash_text, normalize_text
 from autocapture_nx.kernel.derived_records import build_derivation_edge, build_text_record, derivation_edge_id
+from autocapture_nx.kernel.frame_evidence import ensure_frame_evidence
 from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.kernel.telemetry import record_telemetry
+from autocapture_nx.state_layer.policy_gate import StatePolicyGate
+from autocapture_nx.state_layer.evidence_compiler import EvidenceCompiler
 
 
 def _parse_ts(ts: str | None) -> datetime | None:
@@ -77,6 +80,22 @@ def _capability_providers(capability: Any | None, default_provider: str) -> list
         except Exception:
             pass
     return [(default_provider, capability)]
+
+
+def _resolve_single_provider(capability: Any | None) -> Any | None:
+    if capability is None:
+        return None
+    target = capability
+    if hasattr(target, "target"):
+        target = getattr(target, "target")
+    if hasattr(target, "items"):
+        try:
+            items = list(target.items())
+        except Exception:
+            items = []
+        if items:
+            return items[0][1]
+    return target
 
 
 def extract_on_demand(
@@ -150,6 +169,24 @@ def extract_on_demand(
             continue
         if not _within_window(record.get("ts_utc"), time_window):
             continue
+        blob = media.get(record_id)
+        if not blob:
+            continue
+        frame = _extract_frame(blob, record)
+        if not frame:
+            continue
+
+        record_id, record = ensure_frame_evidence(
+            config=system.config if hasattr(system, "config") else {},
+            metadata=metadata,
+            media=media,
+            record_id=record_id,
+            record=record if isinstance(record, dict) else {},
+            frame_bytes=frame,
+            event_builder=event_builder,
+            logger=None,
+        )
+
         run_id = record_id.split("/", 1)[0] if "/" in record_id else None
         if not run_id and hasattr(system, "config"):
             run_id = getattr(system, "config", {}).get("runtime", {}).get("run_id")
@@ -177,12 +214,6 @@ def extract_on_demand(
                 )
             )
         if not derived_ids:
-            continue
-        blob = media.get(record_id)
-        if not blob:
-            continue
-        frame = _extract_frame(blob, record)
-        if not frame:
             continue
         if pipeline_enabled and pipeline is not None and hasattr(pipeline, "process_record"):
             try:
@@ -302,7 +333,289 @@ def _extract_frame(blob: bytes, record: dict[str, Any]) -> bytes | None:
         return None
 
 
+def run_state_query(system, query: str) -> dict[str, Any]:
+    start_perf = time.perf_counter()
+    parser = system.get("time.intent_parser")
+    retrieval = _resolve_single_provider(system.get("state.retrieval")) if hasattr(system, "get") else None
+    evidence_compiler = _resolve_single_provider(system.get("state.evidence_compiler")) if hasattr(system, "get") else None
+    policy_gate = _resolve_single_provider(system.get("state.policy")) if hasattr(system, "get") else None
+    answer = system.get("answer.builder")
+    metadata = system.get("storage.metadata")
+    event_builder = None
+    if hasattr(system, "get"):
+        try:
+            event_builder = system.get("event.builder")
+        except Exception:
+            event_builder = None
+
+    query_text = query
+    promptops_result = None
+    promptops_cfg = system.config.get("promptops", {}) if hasattr(system, "config") else {}
+    if isinstance(promptops_cfg, dict) and bool(promptops_cfg.get("enabled", True)):
+        try:
+            from autocapture.promptops.engine import PromptOpsLayer
+
+            layer = PromptOpsLayer(system.config)
+            strategy = promptops_cfg.get("query_strategy", "none")
+            promptops_result = layer.prepare_prompt(
+                query,
+                prompt_id="state_query",
+                strategy=str(strategy) if strategy is not None else "none",
+                persist=False,
+            )
+            query_text = promptops_result.prompt
+        except Exception:
+            query_text = query
+
+    if retrieval is None:
+        try:
+            from autocapture_nx.state_layer.retrieval import StateRetrieval
+            from autocapture_nx.plugin_system.api import PluginContext
+
+            ctx = PluginContext(
+                config=system.config if hasattr(system, "config") else {},
+                get_capability=system.get if hasattr(system, "get") else (lambda _name: None),
+                logger=(getattr(system.get("observability.logger"), "log", lambda *_a, **_k: None) if hasattr(system, "get") else (lambda *_a, **_k: None)),
+                rng=None,
+                rng_seed=None,
+                rng_seed_hex=None,
+            )
+            retrieval = StateRetrieval("state.retrieval.fallback", ctx)
+        except Exception:
+            retrieval = None
+
+    if evidence_compiler is None:
+        try:
+            from autocapture_nx.plugin_system.api import PluginContext
+
+            ctx = PluginContext(
+                config=system.config if hasattr(system, "config") else {},
+                get_capability=system.get if hasattr(system, "get") else (lambda _name: None),
+                logger=(getattr(system.get("observability.logger"), "log", lambda *_a, **_k: None) if hasattr(system, "get") else (lambda *_a, **_k: None)),
+                rng=None,
+                rng_seed=None,
+                rng_seed_hex=None,
+            )
+            evidence_compiler = EvidenceCompiler("state.evidence.compiler.fallback", ctx)
+        except Exception:
+            evidence_compiler = None
+
+    if policy_gate is None:
+        policy_gate = StatePolicyGate(system.config if hasattr(system, "config") else {})
+
+    intent = parser.parse(query_text)
+    time_window = intent.get("time_window")
+    hits = retrieval.search(query_text, time_window=time_window) if retrieval is not None else []
+    policy_decision = policy_gate.decide({"time_window": time_window})
+    if evidence_compiler is None:
+        bundle = {
+            "query_id": "state_query_error",
+            "hits": [],
+            "policy": {"can_show_raw_media": False, "can_export_text": False},
+        }
+    else:
+        import json
+        import hashlib
+
+        seed = json.dumps({"query": query_text, "time_window": time_window}, sort_keys=True)
+        query_id = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+        bundle = evidence_compiler.compile(
+            query_id=query_id,
+            hits=hits,
+            policy=policy_decision,
+            metadata=metadata,
+        )
+
+    query_ledger_hash = None
+    anchor_ref = None
+    retrieval_trace = retrieval.trace() if retrieval is not None and hasattr(retrieval, "trace") else []
+    if event_builder is not None:
+        run_id = system.config.get("runtime", {}).get("run_id", "run")
+        state_ids = [hit.get("state_id") for hit in hits if hit.get("state_id")]
+        payload = {
+            "event": "state.query.execute",
+            "run_id": run_id,
+            "query": query_text,
+            "query_original": query,
+            "time_window": time_window,
+            "result_count": int(len(hits)),
+            "state_ids": state_ids,
+            "promptops_applied": bool(promptops_result and promptops_result.applied),
+            "retrieval_trace": retrieval_trace,
+        }
+        query_ledger_hash = event_builder.ledger_entry(
+            "state.query.execute",
+            inputs=[],
+            outputs=state_ids,
+            payload=payload,
+        )
+        anchor_ref = event_builder.last_anchor() if hasattr(event_builder, "last_anchor") else None
+
+    claims: list[dict[str, Any]] = []
+    bundle_hits = bundle.get("hits") if isinstance(bundle.get("hits"), list) else []
+    if policy_decision.can_export_text and bundle_hits:
+        for hit in bundle_hits:
+            if not isinstance(hit, dict):
+                continue
+            snippets = hit.get("extracted_text_snippets")
+            if not isinstance(snippets, list):
+                continue
+            for snippet in snippets:
+                if not isinstance(snippet, dict):
+                    continue
+                text = str(snippet.get("text", "")).strip()
+                if not text:
+                    continue
+                media_id = str(snippet.get("media_id", ""))
+                derived_id, derived_record = _derived_text_doc(hit, media_id, metadata)
+                evidence_record = metadata.get(media_id, {}) if metadata is not None else {}
+                evidence_hash = evidence_record.get("content_hash") or evidence_record.get("payload_hash")
+                span_kind = "record"
+                derived_hash = None
+                if derived_record and derived_record.get("text"):
+                    span_kind = "text"
+                    derived_hash = derived_record.get("content_hash") or derived_record.get("payload_hash")
+                if not query_ledger_hash or not anchor_ref or not evidence_hash:
+                    continue
+                offset_end = len(text) if span_kind == "text" else 0
+                citations = [
+                    {
+                        "schema_version": 1,
+                        "span_id": media_id,
+                        "evidence_id": media_id,
+                        "evidence_hash": evidence_hash,
+                        "derived_id": derived_id,
+                        "derived_hash": derived_hash,
+                        "span_kind": span_kind,
+                        "span_ref": derived_record.get("span_ref") if isinstance(derived_record, dict) else None,
+                        "ledger_head": query_ledger_hash,
+                        "anchor_ref": anchor_ref,
+                        "source": "local",
+                        "offset_start": 0,
+                        "offset_end": offset_end,
+                    }
+                ]
+                claims.append({"text": text, "citations": citations})
+
+    if not claims and hits:
+        for hit_item in hits:
+            if not isinstance(hit_item, dict):
+                continue
+            evidence_list = hit_item.get("evidence", [])
+            if not isinstance(evidence_list, list) or not evidence_list:
+                continue
+            ref = evidence_list[0] if isinstance(evidence_list[0], dict) else None
+            if not ref:
+                continue
+            media_id = str(ref.get("media_id", ""))
+            if not media_id:
+                continue
+            evidence_record = metadata.get(media_id, {}) if metadata is not None else {}
+            evidence_hash = evidence_record.get("content_hash") or evidence_record.get("payload_hash")
+            if not query_ledger_hash or not anchor_ref or not evidence_hash:
+                continue
+            summary = hit_item.get("summary_features", {}) if isinstance(hit_item.get("summary_features"), dict) else {}
+            app = str(summary.get("app") or "unknown app")
+            ts_start_ms = int(hit_item.get("ts_start_ms", 0) or 0)
+            ts_end_ms = int(hit_item.get("ts_end_ms", 0) or 0)
+            limitation = "summary-only (text export disabled)" if not policy_decision.can_export_text else "summary-only (text unavailable)"
+            text = f"Observed activity in {app} between {ts_start_ms} and {ts_end_ms} ms ({limitation})."
+            citations = [
+                {
+                    "schema_version": 1,
+                    "span_id": media_id,
+                    "evidence_id": media_id,
+                    "evidence_hash": evidence_hash,
+                    "derived_id": None,
+                    "derived_hash": None,
+                    "span_kind": "record",
+                    "span_ref": None,
+                    "ledger_head": query_ledger_hash,
+                    "anchor_ref": anchor_ref,
+                    "source": "local",
+                    "offset_start": 0,
+                    "offset_end": 0,
+                }
+            ]
+            claims.append({"text": text, "citations": citations})
+
+    try:
+        answer_obj = answer.build(claims) if claims else {"state": "no_evidence", "claims": [], "errors": []}
+    except Exception as exc:
+        answer_obj = {
+            "state": "error",
+            "claims": [],
+            "errors": [
+                {
+                    "error": "answer_builder_failed",
+                    "detail": f"{type(exc).__name__}: {exc}",
+                }
+            ],
+        }
+    require_citations = bool(promptops_cfg.get("require_citations", True))
+    if isinstance(answer_obj, dict):
+        answer_obj = dict(answer_obj)
+        answer_obj["policy"] = {"require_citations": require_citations}
+        if claims and not policy_decision.can_export_text:
+            answer_obj.setdefault("notice", "summary-only (text export disabled)")
+        if require_citations and not answer_obj.get("claims"):
+            answer_obj.setdefault("notice", "no evidence")
+
+    elapsed_ms = (time.perf_counter() - start_perf) * 1000.0
+    record_telemetry(
+        "state.query",
+        {
+            "ts_utc": datetime.now(timezone.utc).isoformat(),
+            "latency_ms": float(round(elapsed_ms, 3)),
+            "result_count": int(len(bundle.get("hits", []))),
+        },
+    )
+    return {
+        "intent": intent,
+        "bundle": bundle,
+        "answer": answer_obj,
+        "processing": {
+            "state_layer": {
+                "query_enabled": True,
+                "hits": int(len(bundle.get("hits", []))),
+                "retrieval_trace": retrieval_trace,
+            }
+        },
+    }
+
+
+def _derived_text_doc(hit: dict[str, Any], media_id: str, metadata: Any) -> tuple[str | None, dict[str, Any] | None]:
+    if metadata is None:
+        return None, None
+    provenance = hit.get("provenance", {}) if isinstance(hit.get("provenance"), dict) else {}
+    input_ids = provenance.get("input_artifact_ids", []) if isinstance(provenance.get("input_artifact_ids"), list) else []
+    for record_id in input_ids:
+        record = metadata.get(record_id, {})
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("record_type")) != "derived.sst.state":
+            continue
+        screen_state_raw = record.get("screen_state")
+        screen_state = screen_state_raw if isinstance(screen_state_raw, dict) else {}
+        frame_id = str(screen_state.get("frame_id") or record.get("frame_id") or "")
+        if frame_id != media_id:
+            continue
+        state_id = screen_state.get("state_id")
+        run_id = record.get("run_id")
+        if not state_id or not run_id:
+            return None, None
+        component = encode_record_id_component(str(state_id))
+        doc_id = f"{run_id}/derived.sst.text/state/{component}"
+        doc = metadata.get(doc_id, {})
+        if isinstance(doc, dict):
+            return doc_id, doc
+    return None, None
+
+
 def run_query(system, query: str) -> dict[str, Any]:
+    state_cfg = system.config.get("processing", {}).get("state_layer", {}) if hasattr(system, "config") else {}
+    if isinstance(state_cfg, dict) and bool(state_cfg.get("query_enabled", False)):
+        return run_state_query(system, query)
     start_perf = time.perf_counter()
     parser = system.get("time.intent_parser")
     retrieval = system.get("retrieval.strategy")

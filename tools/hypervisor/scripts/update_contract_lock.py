@@ -26,6 +26,7 @@ CONTRACT_FILES = [
     "contracts/sst_stage_output.schema.json",
     "contracts/answer_build_input.schema.json",
     "contracts/answer_build_output.schema.json",
+    "contracts/state_layer.schema.json",
 ]
 
 

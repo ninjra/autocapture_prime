@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from autocapture_nx.kernel.crypto import EncryptedBlob, decrypt_bytes, encrypt_bytes
 from autocapture_nx.kernel.keyring import KeyRing
 from autocapture_nx.kernel.metadata_store import ImmutableMetadataStore
+from autocapture_nx.state_layer.store_sqlite import StateTapeStore
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 from plugins.builtin.storage_encrypted.plugin import (
     DerivedKeyProvider,
@@ -55,13 +56,14 @@ class _LazyStores:
         self.metadata = None
         self.media = None
         self.entity_map = None
+        self.state_tape = None
 
     def ensure(self) -> "_LazyStores":
         if self._ready:
             return self
         with self._lock:
             if not self._ready:
-                self.metadata, self.media, self.entity_map = self._builder()
+                self.metadata, self.media, self.entity_map, self.state_tape = self._builder()
                 self._ready = True
         return self
 
@@ -1065,6 +1067,7 @@ class SQLCipherStoragePlugin(PluginBase):
         self._meta_provider = DerivedKeyProvider(keyring, "metadata")
         self._media_provider = DerivedKeyProvider(keyring, "media")
         self._entity_provider = DerivedKeyProvider(keyring, "entity_tokens")
+        self._state_provider = DerivedKeyProvider(keyring, "state_tape")
         data_dir = storage_cfg.get("data_dir", "data")
         run_id = str(context.config.get("runtime", {}).get("run_id", "run"))
         fsync_policy = _FsyncPolicy.normalize(storage_cfg.get("fsync_policy"))
@@ -1080,6 +1083,7 @@ class SQLCipherStoragePlugin(PluginBase):
         self._metadata_path = metadata_path
         self._data_dir = data_dir
         self._media_dir = storage_cfg.get("media_dir") or os.path.join(data_dir, "media")
+        self._state_tape_path = storage_cfg.get("state_tape_path") or os.path.join(data_dir, "state", "state_tape.db")
         self._run_id = run_id
         self._fsync_policy = fsync_policy
         self._require_decrypt = require_decrypt
@@ -1090,8 +1094,10 @@ class SQLCipherStoragePlugin(PluginBase):
         self._metadata = _LazyProxy(self._lazy, "metadata")
         self._entity_map = _LazyProxy(self._lazy, "entity_map")
         self._media = _LazyProxy(self._lazy, "media")
+        self._state_tape = _LazyProxy(self._lazy, "state_tape")
 
     def _build_stores(self):
+        state_tape = None
         if self._encryption_enabled:
             available, reason = _sqlcipher_available()
             if available:
@@ -1121,19 +1127,29 @@ class SQLCipherStoragePlugin(PluginBase):
                 require_decrypt=self._require_decrypt,
                 fsync_policy=self._fsync_policy,
             )
-            return metadata, media, entity_map
+            state_key = None
+            if available:
+                _state_id, state_key = self._state_provider.active()
+            elif self._require_decrypt:
+                self.context.logger(
+                    f"SQLCipher unavailable ({reason}); using unencrypted state tape store"
+                )
+            state_tape = StateTapeStore(self._state_tape_path, key=state_key, fsync_policy=self._fsync_policy)
+            return metadata, media, entity_map, state_tape
 
         store = PlainSQLiteStore(self._metadata_path, self._run_id, self._fsync_policy)
         metadata = ImmutableMetadataStore(store)
         entity_map = EntityMapAdapter(store)
         media = PlainBlobStore(self._media_dir, self._run_id, self._fsync_policy)
-        return metadata, media, entity_map
+        state_tape = StateTapeStore(self._state_tape_path, key=None, fsync_policy=self._fsync_policy)
+        return metadata, media, entity_map, state_tape
 
     def capabilities(self) -> dict[str, Any]:
         return {
             "storage.metadata": self._metadata,
             "storage.media": self._media,
             "storage.entity_map": self._entity_map,
+            "storage.state_tape": self._state_tape,
             "storage.keyring": self._keyring,
         }
 

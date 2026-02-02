@@ -77,6 +77,9 @@ class EgressSanitizer(PluginBase):
     def capabilities(self) -> dict[str, Any]:
         return {"privacy.egress_sanitizer": self}
 
+    def _cfg(self) -> dict[str, Any]:
+        return self.context.config if isinstance(self.context.config, dict) else {}
+
     def _get_entity_map(self) -> EntityMap:
         if self._entity_map is not None:
             return self._entity_map
@@ -92,7 +95,7 @@ class EgressSanitizer(PluginBase):
     def _entity_key_bytes(self) -> bytes:
         if self._entity_key is not None:
             return self._entity_key
-        storage_cfg = self.context.config.get("storage", {})
+        storage_cfg = self._cfg().get("storage", {})
         crypto_cfg = storage_cfg.get("crypto", {})
         root_key_path = crypto_cfg.get("root_key_path", "data/vault/root.key")
         keyring_path = crypto_cfg.get("keyring_path", "data/vault/keyring.json")
@@ -134,7 +137,10 @@ class EgressSanitizer(PluginBase):
         entity_map = self._get_entity_map()
         while token is None:
             candidate = base64.b32encode(digest[:length]).decode("ascii").rstrip("=")
-            existing = entity_map.get(candidate)
+            try:
+                existing = entity_map.get(candidate)
+            except Exception:
+                existing = None
             if existing and existing.get("value") != value:
                 length += 4
                 continue
@@ -142,11 +148,11 @@ class EgressSanitizer(PluginBase):
         return token
 
     def _token_format(self, kind: str, token: str) -> str:
-        fmt = self.context.config.get("privacy", {}).get("egress", {}).get("token_format", "⟦ENT:{type}:{token}⟧")
+        fmt = self._cfg().get("privacy", {}).get("egress", {}).get("token_format", "⟦ENT:{type}:{token}⟧")
         return fmt.format(type=kind, token=token)
 
     def _recognizers(self) -> list[tuple[str, re.Pattern[str]]]:
-        rec = self.context.config.get("privacy", {}).get("egress", {}).get("recognizers", {})
+        rec = self._cfg().get("privacy", {}).get("egress", {}).get("recognizers", {})
         recognizers = []
         if rec.get("ssn", True):
             recognizers.append(("SSN", SSN_RE))
@@ -169,7 +175,7 @@ class EgressSanitizer(PluginBase):
         return recognizers
 
     def _find_entities(self, text: str) -> list[Entity]:
-        matches = memory_entities.find_entities(text, self.context.config)
+        matches = memory_entities.find_entities(text, self._cfg())
         return [Entity(ent.start, ent.end, ent.kind, ent.value) for ent in matches]
 
     def sanitize_text(self, text: str, scope: str = "default") -> dict[str, Any]:
@@ -196,14 +202,17 @@ class EgressSanitizer(PluginBase):
             first_seen_ts = None
             if not existing or not existing.get("first_seen_ts"):
                 first_seen_ts = datetime.now(timezone.utc).isoformat()
-            entity_map.put(
-                token,
-                ent.value,
-                ent.kind,
-                key_id=token_meta.get("key_id"),
-                key_version=token_meta.get("key_version"),
-                first_seen_ts=first_seen_ts,
-            )
+            try:
+                entity_map.put(
+                    token,
+                    ent.value,
+                    ent.kind,
+                    key_id=token_meta.get("key_id"),
+                    key_version=token_meta.get("key_version"),
+                    first_seen_ts=first_seen_ts,
+                )
+            except Exception:
+                pass
             tokens[token] = {
                 "value": ent.value,
                 "kind": ent.kind,

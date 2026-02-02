@@ -577,6 +577,8 @@ class BuildStatePlugin(SSTStagePluginBase):
             frame_id=str(items.get("record_id") or "frame"),
             ts_ms=int(items.get("ts_ms") or 0),
             phash=str(items.get("phash") or ""),
+            image_sha256=str(items.get("image_sha256") or ""),
+            frame_index=int(items.get("frame_index") or 0),
             width=int(items.get("frame_width") or 0),
             height=int(items.get("frame_height") or 0),
             tokens=tokens,

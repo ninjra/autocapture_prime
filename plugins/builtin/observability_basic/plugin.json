@@ -31,5 +31,10 @@
     "observability",
     "storage"
   ],
-  "version": "0.1.0"
+  "version": "0.1.0",
+  "filesystem_policy": {
+    "readwrite": [
+      "{data_dir}"
+    ]
+  }
 }

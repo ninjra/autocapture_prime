@@ -33,5 +33,11 @@
     "privacy",
     "storage"
   ],
-  "version": "0.1.0"
+  "version": "0.1.0",
+  "filesystem_policy": {
+    "readwrite": [
+      "{keyring_dir}",
+      "{root_key_dir}"
+    ]
+  }
 }

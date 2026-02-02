@@ -31,6 +31,7 @@ from autocapture.web.routes import (
     telemetry,
     media,
     trace,
+    state,
 )
 
 
@@ -79,6 +80,7 @@ def get_app() -> FastAPI:
     app.include_router(bookmarks.router)
     app.include_router(media.router)
     app.include_router(trace.router)
+    app.include_router(state.router)
     return app
 
 

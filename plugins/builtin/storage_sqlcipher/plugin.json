@@ -29,6 +29,7 @@
     "storage.metadata",
     "storage.media",
     "storage.entity_map",
+    "storage.state_tape",
     "storage.keyring"
   ],
   "plugin_id": "builtin.storage.sqlcipher",
@@ -37,5 +38,20 @@
     "storage",
     "runtime"
   ],
-  "version": "0.1.0"
+  "version": "0.1.0",
+  "filesystem_policy": {
+    "readwrite": [
+      "{data_dir}",
+      "{metadata_db_path}",
+      "{media_dir}",
+      "{blob_dir}",
+      "{spool_dir}",
+      "{lexical_db_path}",
+      "{vector_db_path}",
+      "{state_tape_db_path}",
+      "{state_vector_db_path}",
+      "{keyring_dir}",
+      "{root_key_dir}"
+    ]
+  }
 }

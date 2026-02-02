@@ -1,0 +1,1571 @@
+1. System Context & Constraints
+   Project_Scope: Implement the attached plan for a Windows 11 host capture + WSL/Linux backend system to maximize recall for severe working-memory impairment via complete local capture, multi-plugin processing, traceability (citable answers), and an accessibility-first UI.
+   Primary_Source_File: 
+   Architectural_Hard_Rules:
+
+* MUST run as Windows 11 host capture with WSL/Linux backend targeting RTX 4090 hardware.
+* MUST eliminate “silent holes” by never dropping raw pixels locally for excluded frames; exclusion must gate derived artifacts, not raw media storage.
+* MUST keep capture running under storage pressure by degrading processing before capture; stop capture only as last resort.
+* MUST provide a capture heartbeat invariant and a persistent UI indicator that clearly shows Capturing/Degraded/Stopped and the reason.
+* MUST enforce the locked constraint: no heavy processing while the user is actively using the PC (OCR/VLM/embeddings worker caps often 0 while active).
+* MUST keep PolicyGate strict: offline blocks cloud use; cloud images blocked unless explicitly allowed; never send images to cloud by default.
+* MUST ensure raw PII never leaves the device; any export/share pipeline must apply entity hashing/sanitization on egress.
+* MUST support multi-plugin orchestration per pipeline step (routing entries accept scalar or list; run multiple plugins per kind).
+* MUST enforce plugin isolation: plugins read immutable inputs, write new outputs, emit logs/metrics; never mutate other plugin outputs or global config.
+* MUST preserve backward compatibility for routing (scalar → list accepted).
+* MUST make Windows+WSL setup deterministic via a robust “doctor” command that detects WSL and validates storage roots and FFmpeg availability.
+  Environment_Standards:
+  Host_Environment:
+  OS: windows 11
+  Backend_Environment: wsl/linux
+  GPU: rtx 4090
+  RAM: 64gb
+  Monitor_Resolution: 76180 x 2160
+  Sources: [SRC-002, SRC-006, SRC-007, SRC-008, SRC-009]
+  Tooling_And_Runtime:
+  Test_Runner: pytest (timeouts observed)
+  Video_Recorder: ffmpeg (NVENC-style preset naming; e.g., p4)
+  Config_Modeling: pydantic (json_schema_extra metadata required)
+  Sources: [SRC-004, SRC-011, SRC-032, SRC-053]
+  Repository_Freshness_And_Completeness_Risk:
+  Constraint: Some uploaded files expired; implementations may require re-uploading missing UI code/assets to complete all planned UI work.
+  Sources: [SRC-005]
+  Source_Index:
+* SRC-001:
+  Type: Requirement
+  Priority: MUST
+  Quote: "create blueprint and specs needed to implement the attached"
+  Notes: User request to produce implementation blueprint/specs.
+* SRC-002:
+  Type: Constraint
+  Priority: MUST
+  Quote: "targets a Windows 11 host capture + WSL/Linux backend architecture on an RTX 4090"
+  Notes: Deployment/architecture target.
+* SRC-003:
+  Type: Decision
+  Priority: SHOULD
+  Quote: "trying to land “WSL bridge endpoints” plus a dashboard storage widget"
+  Notes: Phase work items; details not specified.
+* SRC-004:
+  Type: Data
+  Priority: [MISSING_VALUE]
+  Quote: "`pytest` timed out and the “doctor” command failed creating a path"
+  Notes: Observed instability in setup/tests.
+* SRC-005:
+  Type: Constraint
+  Priority: SHOULD
+  Quote: "repo tooling reports that “some uploaded files expired.”"
+  Notes: May block exhaustive UI implementation without re-upload.
+* SRC-006:
+  Type: Data
+  Priority: [MISSING_VALUE]
+  Quote: "gpu:rtx 4090"
+  Notes: Hardware context.
+* SRC-007:
+  Type: Data
+  Priority: [MISSING_VALUE]
+  Quote: "ram: 64gb"
+  Notes: Hardware context.
+* SRC-008:
+  Type: Data
+  Priority: [MISSING_VALUE]
+  Quote: "os:windows 11"
+  Notes: Host OS context.
+* SRC-009:
+  Type: Data
+  Priority: [MISSING_VALUE]
+  Quote: "monitor resolution: 76180 x 2160"
+  Notes: Display context as provided.
+* SRC-010:
+  Type: Behavior
+  Priority: MUST
+  Quote: "frame ingests that include foreground app/window context (`app_name`, `window_title`)"
+  Notes: Ingested metadata requirements.
+* SRC-011:
+  Type: Behavior
+  Priority: MUST
+  Quote: "FFmpeg video recording for activity segments... (e.g., `p4`)"
+  Notes: Video capture capability and preset naming.
+* SRC-012:
+  Type: Behavior
+  Priority: MUST
+  Quote: "disk free-space gating... `staging_min_free_mb` and `data_min_free_mb`"
+  Notes: Existing storage gating behavior.
+* SRC-013:
+  Type: Behavior
+  Priority: MUST
+  Quote: "TrackingConfig with foreground polling, mouse movement sampling... `enable_clipboard`"
+  Notes: Tracking config capabilities; clipboard default is currently False.
+* SRC-014:
+  Type: Behavior
+  Priority: MUST
+  Quote: "extension “kinds”... OCR engine, vision extractor, embedder... UI overlays/panels"
+  Notes: Plugin taxonomy must be supported end-to-end.
+* SRC-015:
+  Type: Constraint
+  Priority: MUST
+  Quote: "PolicyGate that blocks cloud use in offline mode and blocks cloud images"
+  Notes: Security baseline behavior to preserve.
+* SRC-016:
+  Type: Requirement
+  Priority: MUST
+  Quote: "answer must point back to frames/spans"
+  Notes: Citable/traceable answers are foundational.
+* SRC-017:
+  Type: Data
+  Priority: [MISSING_VALUE]
+  Quote: "excluded frames as “do not persist pixels.” ... sets `media_path=None`"
+  Notes: Current undesired behavior causing unrecoverable gaps.
+* SRC-018:
+  Type: Risk
+  Priority: MUST
+  Quote: "doctor failing to create `/home/ninjra/AppData/Local/Autocapture`"
+  Notes: Must be mitigated via deterministic doctor + path handling.
+* SRC-019:
+  Type: Risk
+  Priority: MUST
+  Quote: "If the UX doesn’t scream about “capture stopped because disk low,”"
+  Notes: Must be mitigated via status UX and storage pressure design.
+* SRC-020:
+  Type: Risk
+  Priority: MUST
+  Quote: "UI as overwhelming: too many settings, no grouping/collapsing"
+  Notes: Must be mitigated via presets/advanced + grouping/collapsing.
+* SRC-021:
+  Type: Requirement
+  Priority: MUST
+  Quote: "Single-selection routing fights your “multi-plugin per step” requirement"
+  Notes: Must support multi-plugin fanout per kind.
+* SRC-022:
+  Type: Constraint
+  Priority: MUST
+  Quote: "no heavy processing while you’re actively using the PC"
+  Notes: Hard scheduling rule; enforce by design.
+* SRC-023:
+  Type: Requirement
+  Priority: MUST
+  Quote: "Always store raw pixels locally (preferably encrypted at rest)."
+  Notes: No-holes capture requirement.
+* SRC-024:
+  Type: Requirement
+  Priority: MUST
+  Quote: "Mark the frame as `privacy.excluded=true`... skip derived artifacts"
+  Notes: Privacy exclusion gates derived artifacts unless opt-in.
+* SRC-025:
+  Type: Behavior
+  Priority: MUST
+  Quote: "Always write media to a “vault” location... keep `media_path`"
+  Notes: Required ingest refactor to preserve pixels.
+* SRC-026:
+  Type: Requirement
+  Priority: MUST
+  Quote: "Backend writes a lightweight `heartbeat` row every N seconds"
+  Notes: Heartbeat invariant for capture status.
+* SRC-027:
+  Type: Requirement
+  Priority: MUST
+  Quote: "Web UI shows a persistent banner: ✅ Capturing... ⚠️ Degraded... ⛔ Stopped"
+  Notes: Status UX requirements.
+* SRC-028:
+  Type: Requirement
+  Priority: MUST
+  Quote: "Introduce a “storage pressure state machine”"
+  Notes: Degrade processing before capture.
+* SRC-029:
+  Type: Requirement
+  Priority: MUST
+  Quote: "**Yellow:** pause processing... keep capture"
+  Notes: State machine behavior (Yellow).
+* SRC-030:
+  Type: Requirement
+  Priority: MUST
+  Quote: "**Red:** lower capture rate / lower video bitrate / stop video segments"
+  Notes: State machine behavior (Red).
+* SRC-031:
+  Type: Requirement
+  Priority: MUST
+  Quote: "**Black:** only then stop capture (last resort)"
+  Notes: State machine behavior (Black).
+* SRC-032:
+  Type: Recommendation
+  Priority: SHOULD
+  Quote: "raise `video_bitrate` above "8M" if you’re capturing 4K/8K content"
+  Notes: Quality tuning for legible UI/video.
+* SRC-033:
+  Type: Recommendation
+  Priority: SHOULD
+  Quote: "Capture clipboard text locally... Mark it as `sensitive=true`"
+  Notes: High-value recall signal with sensitivity default.
+* SRC-034:
+  Type: Constraint
+  Priority: MUST
+  Quote: "Do not send clipboard-derived text to any cloud plugin."
+  Notes: Clipboard egress restriction.
+* SRC-035:
+  Type: Requirement
+  Priority: MUST
+  Quote: "Doctor must: detect WSL"
+  Notes: Deterministic doctor behavior.
+* SRC-036:
+  Type: Requirement
+  Priority: MUST
+  Quote: "pick a storage root that is valid and writable"
+  Notes: Deterministic doctor behavior.
+* SRC-037:
+  Type: Requirement
+  Priority: MUST
+  Quote: "validate access to the actual intended data directory"
+  Notes: Windows path / WSL path / bridged mount.
+* SRC-038:
+  Type: Recommendation
+  Priority: SHOULD
+  Quote: "Doctor should also validate: FFmpeg availability"
+  Notes: Prevent video capture failures.
+* SRC-039:
+  Type: Requirement
+  Priority: MUST
+  Quote: "Default view: Preset cards"
+  Notes: Accessibility-first settings UX.
+* SRC-040:
+  Type: Requirement
+  Priority: MUST
+  Quote: "Each preset is a patch applied to config (not a separate config system)."
+  Notes: Presets must be config patches.
+* SRC-041:
+  Type: Requirement
+  Priority: MUST
+  Quote: "Advanced view: accordion groups with search and “show advanced”."
+  Notes: Advanced settings UX.
+* SRC-042:
+  Type: Recommendation
+  Priority: SHOULD
+  Quote: "Default: show only overrides... Toggle: show all"
+  Notes: “Only show changed” UX.
+* SRC-043:
+  Type: Recommendation
+  Priority: SHOULD
+  Quote: "Button: reset group to defaults"
+  Notes: Safe config management.
+* SRC-044:
+  Type: Constraint
+  Priority: MUST
+  Quote: "Do not refactor config into new models unless necessary."
+  Notes: Prefer metadata-driven grouping.
+* SRC-045:
+  Type: Requirement
+  Priority: MUST
+  Quote: "add `json_schema_extra` metadata... `{ui_group, ui_subgroup, advanced, order, sensitive}`"
+  Notes: UI grouping metadata contract.
+* SRC-046:
+  Type: Requirement
+  Priority: MUST
+  Quote: "`/api/settings/schema` returns: defaults... current... groupings... descriptions"
+  Notes: Backend schema endpoint contract.
+* SRC-047:
+  Type: Requirement
+  Priority: SHOULD
+  Quote: "Per-plugin settings: always collapsed"
+  Notes: Prevent UI overwhelm.
+* SRC-048:
+  Type: Requirement
+  Priority: SHOULD
+  Quote: "Plugin card shows: Enabled toggle... “Using defaults”... “Overrides: N”"
+  Notes: Plugin settings summary UX.
+* SRC-049:
+  Type: Recommendation
+  Priority: SHOULD
+  Quote: "Add plugin-provided settings schema... `settings_schema`... `settings_defaults`"
+  Notes: Manifest extension for dynamic UI rendering.
+* SRC-050:
+  Type: Recommendation
+  Priority: SHOULD
+  Quote: "default landing page should be: Now, Rewind, Search, Status"
+  Notes: Cognitive Safe Mode navigation.
+* SRC-051:
+  Type: Requirement
+  Priority: MUST
+  Quote: "Convert routing entries from scalar → list (backward compatible)"
+  Notes: Multi-plugin routing compatibility.
+* SRC-052:
+  Type: Requirement
+  Priority: MUST
+  Quote: ""vision.extractor": ["pluginA", "pluginB"]"
+  Notes: Example of list routing.
+* SRC-053:
+  Type: Constraint
+  Priority: MUST
+  Quote: "Rule: plugin can only: read input artifacts (immutable)"
+  Notes: Isolation requirement.
+* SRC-054:
+  Type: Constraint
+  Priority: MUST
+  Quote: "It must never mutate other plugin outputs or global config."
+  Notes: Isolation requirement.
+* SRC-055:
+  Type: Requirement
+  Priority: MUST
+  Quote: "Store outputs as `ArtifactRecord` rows keyed by `(frame_id, artifact_type, engine, engine_version)`"
+  Notes: Artifact identity contract.
+* SRC-056:
+  Type: Requirement
+  Priority: MUST
+  Quote: "Implement endpoints: `GET /api/trace/frame/{frame_id}`"
+  Notes: Trace API requirement.
+* SRC-057:
+  Type: Requirement
+  Priority: MUST
+  Quote: "`GET /api/trace/event/{event_id}`"
+  Notes: Trace API requirement.
+* SRC-058:
+  Type: Requirement
+  Priority: MUST
+  Quote: "Return: frame metadata... media path(s)... artifacts... plugin runs... ledger entries"
+  Notes: Trace API response content contract.
+* SRC-059:
+  Type: Recommendation
+  Priority: SHOULD
+  Quote: "UI Trace Viewer: timeline + DAG"
+  Notes: Visualization UX.
+* SRC-060:
+  Type: Recommendation
+  Priority: SHOULD
+  Quote: "Make the default evidence view: screenshot frame... span highlights (bbox)"
+  Notes: Evidence UX for citations.
+* SRC-061:
+  Type: Constraint
+  Priority: MUST
+  Quote: "OCR/VLM/embedding workers must drop to configured ceilings (often 0)"
+  Notes: Activity-based throttling requirement.
+* SRC-062:
+  Type: Requirement
+  Priority: MUST
+  Quote: "GPU concurrency cap respected"
+  Notes: Activity-based throttling requirement.
+* SRC-063:
+  Type: Recommendation
+  Priority: SHOULD
+  Quote: "“Work queue budgets” per plugin and per step"
+  Notes: Prevent starvation and manage resources.
+* SRC-064:
+  Type: Requirement
+  Priority: MUST
+  Quote: "Default to encryption at rest for media + DB"
+  Notes: Local-first security baseline.
+* SRC-065:
+  Type: Data
+  Priority: [MISSING_VALUE]
+  Quote: "Key portability via encrypted export/import."
+  Notes: Existing architecture note.
+* SRC-066:
+  Type: Data
+  Priority: [MISSING_VALUE]
+  Quote: "CLI support for key export/import and DB encryption workflows."
+  Notes: Existing capability.
+* SRC-067:
+  Type: Requirement
+  Priority: SHOULD
+  Quote: "On first run: generate keys... show “backup keys” prompt."
+  Notes: Operational safety for encryption.
+* SRC-068:
+  Type: Requirement
+  Priority: SHOULD
+  Quote: "Add “Key backup status” to dashboard."
+  Notes: Operational safety for encryption.
+* SRC-069:
+  Type: Recommendation
+  Priority: SHOULD
+  Quote: "one-click “export keys to USB path” flow"
+  Notes: Key portability UX.
+* SRC-070:
+  Type: Requirement
+  Priority: MUST
+  Quote: "Keep PolicyGate strict; add UI explanations and per-plugin “data handling” badges"
+  Notes: Preserve enforcement + clarify in UI.
+* SRC-071:
+  Type: Requirement
+  Priority: MUST
+  Quote: "Raw PII never leaves device."
+  Notes: Locked constraint for egress.
+* SRC-072:
+  Type: Requirement
+  Priority: MUST
+  Quote: "Any export/share pipeline runs entity hashing/sanitization."
+  Notes: Egress sanitization requirement.
+* SRC-073:
+  Type: Data
+  Priority: [MISSING_VALUE]
+  Quote: "Repo defaults include: `record_video=True`... `video_bitrate=\"8M\"`"
+  Notes: Default configuration values.
+* SRC-074:
+  Type: Recommendation
+  Priority: SHOULD
+  Quote: "Increase `max_pending` if you see backlog"
+  Notes: Performance tuning guidance.
+* SRC-075:
+  Type: Recommendation
+  Priority: SHOULD
+  Quote: "Bundle FFmpeg for deterministic behavior; keep `allow_system=True` as fallback."
+  Notes: Deterministic video capture.
+* SRC-076:
+  Type: Recommendation
+  Priority: SHOULD
+  Quote: "Add a `/api/now` endpoint (and a big “NOW” panel)"
+  Notes: Fast recall UX.
+* SRC-077:
+  Type: Recommendation
+  Priority: SHOULD
+  Quote: "“Rewind 5 minutes” as a first-class UI action"
+  Notes: Fast recall UX.
+* SRC-078:
+  Type: Recommendation
+  Priority: SHOULD
+  Quote: "last 60 minutes by default... show app/window title prominently"
+  Notes: Search UX defaults.
+* SRC-079:
+  Type: Decision
+  Priority: MUST
+  Quote: "“No holes” policy + “derived artifacts gating”"
+  Notes: Highest leverage change across subsystems.
+  Coverage_Map:
+* SRC-001: Section 1.Project_Scope
+* SRC-002: Section 1.Architectural_Hard_Rules; MOD-035; MOD-014
+* SRC-003: MOD-034; MOD-035
+* SRC-004: MOD-014; MOD-033
+* SRC-005: Section 1.Repository_Freshness_And_Completeness_Risk
+* SRC-006: Section 1.Host_Environment
+* SRC-007: Section 1.Host_Environment
+* SRC-008: Section 1.Host_Environment
+* SRC-009: Section 1.Host_Environment
+* SRC-010: MOD-001; MOD-002
+* SRC-011: MOD-006; MOD-010
+* SRC-012: MOD-007; MOD-011
+* SRC-013: MOD-008; MOD-013; MOD-027
+* SRC-014: MOD-017; MOD-018; MOD-016
+* SRC-015: MOD-022; ADR-008
+* SRC-016: MOD-028; MOD-030; ADR-007
+* SRC-017: ADR-001; MOD-001; MOD-003
+* SRC-018: MOD-014; ADR-009
+* SRC-019: MOD-012; ADR-002
+* SRC-020: MOD-032; ADR-006
+* SRC-021: MOD-018; ADR-004
+* SRC-022: MOD-029; ADR-003
+* SRC-023: ADR-001; MOD-003; MOD-001
+* SRC-024: ADR-001; MOD-001; MOD-013
+* SRC-025: MOD-001; MOD-003
+* SRC-026: MOD-012
+* SRC-027: MOD-012; MOD-034
+* SRC-028: ADR-002; MOD-011
+* SRC-029: MOD-011
+* SRC-030: MOD-011; MOD-006
+* SRC-031: MOD-011
+* SRC-032: MOD-007
+* SRC-033: MOD-013
+* SRC-034: MOD-013; MOD-022; ADR-008
+* SRC-035: MOD-014
+* SRC-036: MOD-014
+* SRC-037: MOD-014
+* SRC-038: MOD-014; MOD-010
+* SRC-039: MOD-032
+* SRC-040: MOD-032
+* SRC-041: MOD-032
+* SRC-042: MOD-032
+* SRC-043: MOD-032
+* SRC-044: MOD-015
+* SRC-045: MOD-015
+* SRC-046: MOD-015
+* SRC-047: MOD-032
+* SRC-048: MOD-032
+* SRC-049: MOD-017
+* SRC-050: MOD-032
+* SRC-051: MOD-018
+* SRC-052: MOD-018
+* SRC-053: MOD-019; ADR-005
+* SRC-054: MOD-019; ADR-005
+* SRC-055: MOD-016; ADR-005
+* SRC-056: MOD-028; ADR-007
+* SRC-057: MOD-028; ADR-007
+* SRC-058: MOD-028; MOD-002; MOD-016; MOD-017; MOD-004
+* SRC-059: MOD-029
+* SRC-060: MOD-030
+* SRC-061: MOD-029
+* SRC-062: MOD-029
+* SRC-063: MOD-021
+* SRC-064: MOD-024; ADR-008
+* SRC-065: MOD-024
+* SRC-066: MOD-024
+* SRC-067: MOD-024; MOD-036
+* SRC-068: MOD-036
+* SRC-069: MOD-036
+* SRC-070: MOD-022
+* SRC-071: MOD-023; ADR-008
+* SRC-072: MOD-023; ADR-008
+* SRC-073: MOD-007
+* SRC-074: MOD-007
+* SRC-075: MOD-010
+* SRC-076: MOD-025
+* SRC-077: MOD-026
+* SRC-078: MOD-027
+* SRC-079: ADR-001; ADR-007; MOD-001; MOD-003; MOD-019
+  Validation_Checklist:
+* [ ] All four top-level sections exist and are ordered 1→4.
+* [ ] No deferral markers; only [MISSING_VALUE] where absent from sources.
+* [ ] Every MOD-* entry includes Sources: [...]
+* [ ] Every ADR-* entry includes Sources: [...]
+* [ ] Coverage_Map lists every SRC-### exactly once.
+* [ ] Every logic-heavy module listed in Section 2 has a 3-row sample table in Section 4.
+* [ ] All [MISSING_VALUE] fields correspond to information not present in the attached plan.
+
+2. Functional Modules & Logic
+
+* Object_ID: MOD-001
+  Object_Name: FrameIngestHandler
+  Object_Type: API Endpoint
+  Priority: MUST
+  Primary_Purpose: Receive frame ingests with app/window context; persist FrameRecord and ledger; always store raw media locally (including excluded frames) and conditionally enqueue derived processing.
+  Sources: [SRC-010, SRC-017, SRC-023, SRC-024, SRC-025]
+  Interface_Definition:
+
+  ```text
+  Input: FrameIngest
+    - app_name: string
+    - window_title: string
+    - captured_at: [MISSING_VALUE]
+    - monitor_bounds: [MISSING_VALUE]
+    - frame_hash: [MISSING_VALUE]
+    - pixels_payload: [MISSING_VALUE]  # transport/format not specified
+    - privacy_excluded: boolean
+  Output: FrameIngestResult
+    - frame_id: string
+    - media_path: string  # MUST be non-null even if privacy_excluded==true (vault path)
+    - privacy_excluded: boolean
+    - derived_enqueue:
+        ocr: "enqueued" | "skipped"
+        vision: "enqueued" | "skipped"
+        embeddings: "enqueued" | "skipped"
+    - ledger_entry_id: string
+  Core_Rules:
+    - Always write pixels to local storage (vault if privacy_excluded==true).
+    - Set FrameRecord.privacy_excluded = true when excluded.
+    - If excluded: skip enqueue for OCR/VLM/embeddings unless explicit opt-in is present ([MISSING_VALUE] opt-in mechanism).
+  ```
+* Object_ID: MOD-002
+  Object_Name: FrameRecordStore
+  Object_Type: Data Store
+  Priority: MUST
+  Primary_Purpose: Persist FrameRecord-like rows including app/window metadata, hashes, monitor bounds, privacy flags, and media path.
+  Sources: [SRC-010, SRC-017, SRC-025]
+  Interface_Definition:
+
+  ```text
+  Data_Model: FrameRecord
+    - frame_id: string
+    - captured_at: [MISSING_VALUE]
+    - app_name: string
+    - window_title: string
+    - monitor_bounds: [MISSING_VALUE]
+    - frame_hash: [MISSING_VALUE]
+    - media_path: string
+    - privacy_excluded: boolean
+  Operations:
+    - create_frame(record: FrameRecord) -> frame_id
+    - get_frame(frame_id: string) -> FrameRecord
+    - list_frames(time_range: [MISSING_VALUE], limit: integer) -> list[FrameRecord]
+  ```
+* Object_ID: MOD-003
+  Object_Name: MediaVaultStorage
+  Object_Type: Data Store
+  Priority: MUST
+  Primary_Purpose: Store raw pixels locally for all frames; provide a “vault” location for excluded/sensitive frames while retaining media_path references.
+  Sources: [SRC-023, SRC-025, SRC-064]
+  Interface_Definition:
+
+  ```text
+  Storage_Namespaces:
+    - standard_media_root: [MISSING_VALUE]
+    - vault_media_root: [MISSING_VALUE]
+  Operations:
+    - write_media(frame_id: string, payload: [MISSING_VALUE], namespace: "standard"|"vault") -> media_path: string
+    - read_media(media_path: string) -> payload: [MISSING_VALUE]
+    - verify_media_exists(media_path: string) -> boolean
+  Security:
+    - Encryption-at-rest: enabled by default ([MISSING_VALUE] algorithm/key handling specifics).
+  ```
+* Object_ID: MOD-004
+  Object_Name: LedgerEntryStore
+  Object_Type: Data Store
+  Priority: MUST
+  Primary_Purpose: Record ingest and processing ledger entries for traceability, including for excluded frames.
+  Sources: [SRC-017, SRC-058]
+  Interface_Definition:
+
+  ```text
+  Data_Model: LedgerEntry
+    - ledger_entry_id: string
+    - timestamp: [MISSING_VALUE]
+    - entity_type: "frame" | "event" | "artifact" | [MISSING_VALUE]
+    - entity_id: string
+    - action: string
+    - details: [MISSING_VALUE]
+  Operations:
+    - append(entry: LedgerEntry) -> ledger_entry_id
+    - list_by_entity(entity_type: string, entity_id: string) -> list[LedgerEntry]
+  ```
+* Object_ID: MOD-005
+  Object_Name: ArtifactRecordStore
+  Object_Type: Data Store
+  Priority: MUST
+  Primary_Purpose: Persist derived artifacts and enforce artifact identity keying by (frame_id, artifact_type, engine, engine_version) with upstream artifact references.
+  Sources: [SRC-055, SRC-058]
+  Interface_Definition:
+
+  ```text
+  Data_Model: ArtifactRecord
+    - artifact_id: string
+    - frame_id: string
+    - artifact_type: string
+    - engine: string
+    - engine_version: string
+    - schema_version: [MISSING_VALUE]  # present as backlog item but not specified in plan body
+    - created_at: [MISSING_VALUE]
+    - upstream_artifact_ids: list[string]
+    - payload_ref: [MISSING_VALUE]  # inline JSON or path/ref not specified
+  Key_Constraint:
+    - UNIQUE(frame_id, artifact_type, engine, engine_version)
+  Operations:
+    - upsert(record: ArtifactRecord) -> artifact_id
+    - list_by_frame(frame_id: string) -> list[ArtifactRecord]
+    - list_by_event(event_id: string) -> list[ArtifactRecord]
+  ```
+* Object_ID: MOD-006
+  Object_Name: PluginRunStore
+  Object_Type: Data Store
+  Priority: MUST
+  Primary_Purpose: Store per-plugin execution runs with id, version, config hash, inputs/outputs, status, and timing for traceability and debugging.
+  Sources: [SRC-058]
+  Interface_Definition:
+
+  ```text
+  Data_Model: PluginRun
+    - run_id: string
+    - plugin_id: string
+    - plugin_version: string
+    - config_hash: string
+    - started_at: [MISSING_VALUE]
+    - finished_at: [MISSING_VALUE]
+    - status: "success" | "failed" | "skipped"
+    - input_refs: [MISSING_VALUE]
+    - output_artifact_ids: list[string]
+    - error: [MISSING_VALUE]
+  Operations:
+    - create(run: PluginRun) -> run_id
+    - update(run_id: string, patch: [MISSING_VALUE]) -> void
+    - list_by_frame(frame_id: string) -> list[PluginRun]
+    - list_by_event(event_id: string) -> list[PluginRun]
+  ```
+* Object_ID: MOD-007
+  Object_Name: CaptureConfigModel
+  Object_Type: Data Model
+  Priority: MUST
+  Primary_Purpose: Represent capture configuration including video settings, multi-monitor enablement, pending limits, and free-space gating.
+  Sources: [SRC-011, SRC-012, SRC-032, SRC-073, SRC-074]
+  Interface_Definition:
+
+  ```text
+  Data_Model: CaptureConfig
+    - record_video: boolean  # default True per repo defaults
+    - video_segment_seconds: integer  # default 60 per repo defaults
+    - video_bitrate: string  # default "8M" per repo defaults
+    - video_preset: string  # default "p4" per repo defaults
+    - multi_monitor_enabled: boolean  # default True per repo defaults
+    - max_pending: integer  # default 5000 per repo defaults
+    - staging_min_free_mb: integer
+    - data_min_free_mb: integer
+  Constraints:
+    - When capturing 4K/8K UI, SHOULD raise video_bitrate above "8M" (exact target bitrate [MISSING_VALUE]).
+  ```
+
+  Rationale: Provide explicit tunables for video capture quality and backlog management on RTX 4090 hardware.
+  Acceptance_Criteria:
+
+  * Defaults match: record_video=True, video_segment_seconds=60, video_bitrate="8M", video_preset="p4", max_pending=5000, multi_monitor_enabled=True.
+  * Configuration supports increasing video_bitrate and max_pending without requiring a schema refactor.
+    Regression_Detection:
+  * Config schema snapshot test fails if defaults drift from the specified defaults.
+  * Integration test flags if video_preset no longer accepts "p4" or video_bitrate no longer configurable.
+* Object_ID: MOD-008
+  Object_Name: TrackingConfigModel
+  Object_Type: Data Model
+  Priority: MUST
+  Primary_Purpose: Represent tracking configuration for foreground polling, mouse sampling, and clipboard capture enablement.
+  Sources: [SRC-013, SRC-033]
+  Interface_Definition:
+
+  ```text
+  Data_Model: TrackingConfig
+    - foreground_polling: [MISSING_VALUE]
+    - mouse_movement_sampling: [MISSING_VALUE]
+    - enable_clipboard: boolean  # currently default False; recommended True with sensitivity handling
+  ```
+* Object_ID: MOD-009
+  Object_Name: FFmpegConfigModel
+  Object_Type: Data Model
+  Priority: MUST
+  Primary_Purpose: Represent FFmpeg configuration with explicit path and fallback options, including allow_system behavior.
+  Sources: [SRC-075]
+  Interface_Definition:
+
+  ```text
+  Data_Model: FFmpegConfig
+    - ffmpeg_path: [MISSING_VALUE]
+    - allow_system: boolean  # keep True as fallback
+    - bundled_ffmpeg_path: [MISSING_VALUE]
+  ```
+* Object_ID: MOD-010
+  Object_Name: FFmpegVideoSegmentRecorder
+  Object_Type: Library
+  Priority: MUST
+  Primary_Purpose: Record video “activity segments” with FFmpeg using CaptureConfig settings and deterministic FFmpeg selection when bundled.
+  Sources: [SRC-011, SRC-075, SRC-038]
+  Interface_Definition:
+
+  ```text
+  Operations:
+    - start_segment(segment_id: string, config: CaptureConfig, ffmpeg: FFmpegConfig) -> void
+    - stop_segment(segment_id: string) -> void
+    - validate_ffmpeg(ffmpeg: FFmpegConfig) -> {available: boolean, version: [MISSING_VALUE], error: [MISSING_VALUE]}
+  Selection_Rule:
+    - Prefer bundled_ffmpeg_path when present; otherwise fall back to system ffmpeg when allow_system==true.
+  ```
+
+  Rationale: Deterministic video recording reduces capture instability in Windows+WSL setups.
+  Acceptance_Criteria:
+
+  * When bundled_ffmpeg_path exists and is executable, recorder uses it.
+  * When bundled_ffmpeg_path missing and allow_system==true, system ffmpeg is used.
+  * validate_ffmpeg reports availability and errors clearly.
+    Regression_Detection:
+  * CI smoke test fails if validate_ffmpeg cannot locate ffmpeg under expected configuration.
+* Object_ID: MOD-011
+  Object_Name: StoragePressureManager
+  Object_Type: Business Logic
+  Priority: MUST
+  Primary_Purpose: Implement the storage pressure state machine to degrade processing before capture and avoid silent downtime.
+  Sources: [SRC-012, SRC-028, SRC-029, SRC-030, SRC-031, SRC-019]
+  Interface_Definition:
+
+  ```text
+  Enums:
+    - StoragePressureState: "green" | "yellow" | "red" | "black"
+  Input: DiskFree
+    - staging_free_mb: integer
+    - data_free_mb: integer
+  Output: StoragePressureDecision
+    - state: StoragePressureState
+    - actions:
+        pause_processing: boolean
+        lower_capture_rate: boolean
+        lower_video_bitrate: boolean
+        stop_video_segments: boolean
+        keep_periodic_frames: boolean
+        stop_capture: boolean  # only true in black
+    - reason: string
+  Rules:
+    - green: normal
+    - yellow: pause processing (OCR/VLM/embeddings), keep capture
+    - red: lower capture rate/bitrate and/or stop video segments; keep periodic frames
+    - black: stop capture (last resort)
+  Thresholds:
+    - Mapping of disk free -> state uses [MISSING_VALUE] thresholds; MUST be driven by configuration and/or existing min-free settings.
+  ```
+* Object_ID: MOD-012
+  Object_Name: CaptureHeartbeatAndStatusBanner
+  Object_Type: Background Worker
+  Priority: MUST
+  Primary_Purpose: Record capture heartbeat rows and drive a persistent UI banner showing Capturing/Degraded/Stopped with reasons and fix steps.
+  Sources: [SRC-026, SRC-027, SRC-019]
+  Interface_Definition:
+
+  ```text
+  Data_Model: Heartbeat
+    - heartbeat_id: string
+    - timestamp: [MISSING_VALUE]
+    - last_frame_timestamp: [MISSING_VALUE]
+    - last_hid_event_timestamp: [MISSING_VALUE]
+    - queue_sizes: map[string, integer]
+    - disk_free_mb:
+        staging: integer
+        data: integer
+  Writer_Job:
+    - run_every_seconds: [MISSING_VALUE]
+    - write_latest_heartbeat() -> Heartbeat
+  UI_Banner_Inputs:
+    - latest Heartbeat
+    - current StoragePressureDecision (optional)
+    - capture_running: boolean ([MISSING_VALUE] detection mechanism)
+  UI_Banner_States:
+    - Capturing: last frame age shown (e.g., "2s ago")
+    - Degraded: disk low / dropping processing
+    - Stopped: include reason + fix-now steps
+  ```
+* Object_ID: MOD-013
+  Object_Name: ClipboardCaptureAndSensitivityPolicy
+  Object_Type: Business Logic
+  Priority: SHOULD
+  Primary_Purpose: Capture clipboard text locally, mark as sensitive by default, and prevent clipboard-derived content from being sent to cloud plugins.
+  Sources: [SRC-033, SRC-034]
+  Interface_Definition:
+
+  ```text
+  Event: ClipboardEvent
+    - event_id: string
+    - timestamp: [MISSING_VALUE]
+    - clipboard_text: string
+    - sensitive: boolean  # default true
+  Operations:
+    - on_clipboard_change(text: string) -> ClipboardEvent
+    - store_clipboard_event(event: ClipboardEvent) -> event_id
+    - is_cloud_egress_allowed_for_clipboard() -> false
+    - should_embed_clipboard(event: ClipboardEvent) -> boolean  # default false unless explicit opt-in [MISSING_VALUE]
+  ```
+
+  Rationale: Clipboard is high value for memory assistance but must be treated as sensitive and local-only by default.
+  Acceptance_Criteria:
+
+  * Clipboard events are captured locally when enable_clipboard==true.
+  * Each clipboard event stored with sensitive==true by default.
+  * Clipboard-derived content is blocked from cloud plugins.
+    Regression_Detection:
+  * Test that any cloud-bound request builder rejects clipboard events.
+  * Test that clipboard events default to sensitive==true.
+* Object_ID: MOD-014
+  Object_Name: DoctorCLIAndWSLPathResolver
+  Object_Type: CLI
+  Priority: MUST
+  Primary_Purpose: Provide deterministic environment diagnostics and fix guidance for Windows+WSL setup, including storage root validation and FFmpeg availability.
+  Sources: [SRC-018, SRC-035, SRC-036, SRC-037, SRC-038, SRC-004]
+  Interface_Definition:
+
+  ```text
+  Command: doctor
+  Checks:
+    - detect_wsl() -> boolean
+    - select_storage_root() -> {path: string, writable: boolean, reason: string}
+    - validate_intended_data_directory() -> {ok: boolean, resolved_path: string, error: [MISSING_VALUE]}
+      - Must consider: Windows path, WSL path, bridged mount (selection rules [MISSING_VALUE])
+    - validate_ffmpeg() -> {available: boolean, error: [MISSING_VALUE]}
+    - report_pytest_health() -> {last_status: [MISSING_VALUE], timeout_risk: boolean}
+  Output:
+    - human-readable report including fix steps for failures (exact phrasing [MISSING_VALUE])
+  ```
+* Object_ID: MOD-015
+  Object_Name: SettingsSchemaAPI
+  Object_Type: API Endpoint
+  Priority: MUST
+  Primary_Purpose: Serve config defaults/current values and UI grouping metadata for auto-generated collapsible settings UI.
+  Sources: [SRC-044, SRC-045, SRC-046]
+  Interface_Definition:
+
+  ```json
+  {
+    "endpoint": "/api/settings/schema",
+    "method": "GET",
+    "response": {
+      "defaults": "[MISSING_VALUE]", 
+      "current": "[MISSING_VALUE]",
+      "groupings": {
+        "fields": [
+          {
+            "path": "string",
+            "ui_group": "string",
+            "ui_subgroup": "string",
+            "advanced": "boolean",
+            "order": "integer",
+            "sensitive": "boolean",
+            "description": "string"
+          }
+        ]
+      },
+      "descriptions": "[MISSING_VALUE]"
+    }
+  }
+  ```
+* Object_ID: MOD-016
+  Object_Name: SettingsAndPluginsUI
+  Object_Type: Other
+  Priority: MUST
+  Primary_Purpose: Provide accessibility-first settings UX with presets→advanced, accordion grouping, search, show-only-overrides, and per-plugin collapsed settings.
+  Sources: [SRC-020, SRC-039, SRC-040, SRC-041, SRC-042, SRC-043, SRC-047, SRC-048, SRC-050]
+  Interface_Definition:
+
+  ```text
+  UI_Screens:
+    - CognitiveSafeModeLanding:
+        Tabs: ["Now", "Rewind", "Search", "Status"]
+        SecondaryTabs: ["Settings", "Plugins"]
+    - Settings:
+        DefaultView: PresetCards
+          Presets: ["Capture Everything (Max Recall)", "Balanced", "Low Impact"]
+          PresetBehavior: apply_patch_to_config (not separate config system)
+        AdvancedView:
+          - AccordionGroups from /api/settings/schema groupings
+          - Search within settings
+          - Toggle: show_only_overrides (default true)
+          - Action: reset_group_to_defaults
+    - Plugins:
+        PluginCard:
+          - enabled_toggle
+          - using_defaults_indicator
+          - overrides_count
+          - collapsible settings accordion
+          - reset_to_defaults button
+  ```
+* Object_ID: MOD-017
+  Object_Name: PluginManifestSchemaAndRegistry
+  Object_Type: Library
+  Priority: MUST
+  Primary_Purpose: Define plugin kinds, register available plugins, and support optional plugin-provided settings schema for UI rendering.
+  Sources: [SRC-014, SRC-049]
+  Interface_Definition:
+
+  ```json
+  {
+    "PluginKind": [
+      "ocr_engine",
+      "vision_extractor",
+      "embedder",
+      "retrieval_strategy",
+      "reranker",
+      "compressor",
+      "verifier",
+      "agent",
+      "ui_overlay",
+      "ui_panel"
+    ],
+    "PluginManifest": {
+      "plugin_id": "string",
+      "kind": "PluginKind",
+      "version": "string",
+      "settings_schema": "[MISSING_VALUE]", 
+      "settings_defaults": "[MISSING_VALUE]",
+      "ui_groups": "[MISSING_VALUE]"
+    }
+  }
+  ```
+
+  Rationale: Manifest-provided schemas reduce bespoke UI coding and allow per-plugin settings to render correctly.
+  Acceptance_Criteria:
+
+  * Registry can enumerate plugins by kind.
+  * Manifests may omit settings_schema/settings_defaults/ui_groups without breaking loading.
+    Regression_Detection:
+  * Manifest validation test fails if optional fields become required.
+* Object_ID: MOD-018
+  Object_Name: RoutingNormalizerAndPipelineFanout
+  Object_Type: Business Logic
+  Priority: MUST
+  Primary_Purpose: Normalize routing entries from scalar→list (backward compatible) and enable multi-plugin execution per pipeline step.
+  Sources: [SRC-021, SRC-051, SRC-052]
+  Interface_Definition:
+
+  ```text
+  Input: RoutingConfig
+    - entries: map[string, string | list[string]]
+      e.g., "vision.extractor": "pluginA"
+            "vision.extractor": ["pluginA", "pluginB"]
+  Output: NormalizedRouting
+    - entries: map[string, list[string]]
+  Normalization_Rule:
+    - If value is string: wrap into single-element list.
+    - If value is list: keep as-is.
+  Fanout_Rule:
+    - Pipeline step loops over plugin ids for that kind in normalized list order.
+  ```
+* Object_ID: MOD-019
+  Object_Name: PluginIsolationAndExecutionOrchestrator
+  Object_Type: Business Logic
+  Priority: MUST
+  Primary_Purpose: Execute plugins under isolation constraints, write ArtifactRecords and PluginRun records, and prevent shared-state mutation; integrate budgeting and crash containment hooks.
+  Sources: [SRC-053, SRC-054, SRC-055, SRC-063]
+  Interface_Definition:
+
+  ```text
+  Isolation_Contract:
+    - Inputs: immutable artifact refs (including frames/media refs)
+    - Outputs: new ArtifactRecords only
+    - Allowed side-effects: logs/metrics emission
+    - Forbidden: mutate other plugin outputs; mutate global config
+  Execution:
+    - run_plugin(plugin_id: string, inputs: [MISSING_VALUE], config: [MISSING_VALUE]) -> {status, output_artifact_ids}
+    - record PluginRun with id/version/config_hash and outputs
+    - upsert ArtifactRecords with key (frame_id, artifact_type, engine, engine_version)
+  Budget_Hooks (work-queue budgets detailed in MOD-021):
+    - enforce max runtime [MISSING_VALUE]
+    - enforce max items [MISSING_VALUE]
+    - enforce max VRAM estimate [MISSING_VALUE]
+  Crash_Containment_Hook:
+    - circuit_breaker/safe_mode auto-enable integration point [MISSING_VALUE]
+  ```
+* Object_ID: MOD-020
+  Object_Name: ActivityDetector
+  Object_Type: Business Logic
+  Priority: MUST
+  Primary_Purpose: Detect user activity/input to drive activity-based scheduling (no heavy processing while active).
+  Sources: [SRC-022, SRC-061, SRC-062, SRC-026]
+  Interface_Definition:
+
+  ```text
+  Inputs:
+    - HID events (mouse/keyboard) [MISSING_VALUE] source
+    - Foreground polling signals [MISSING_VALUE]
+  Output:
+    - UserActivityState: "active" | "idle"
+    - last_hid_event_timestamp: [MISSING_VALUE]
+  Rules:
+    - active when recent HID activity within [MISSING_VALUE] seconds
+    - idle otherwise
+  ```
+* Object_ID: MOD-021
+  Object_Name: WorkQueueBudgetEnforcer
+  Object_Type: Business Logic
+  Priority: SHOULD
+  Primary_Purpose: Enforce per-step/per-plugin budgets (max items, runtime, VRAM estimate) with backoff to prevent any plugin from starving capture stability.
+  Sources: [SRC-063]
+  Interface_Definition:
+
+  ```text
+  BudgetSpec:
+    - max_items: integer
+    - max_runtime_ms: integer
+    - max_vram_mb: integer
+    - backoff_policy: [MISSING_VALUE]
+  Decision:
+    - admit(job) -> boolean
+    - if reject: return reason and next_retry_after ([MISSING_VALUE])
+  ```
+
+  Rationale: Prevent runaway workloads and preserve capture stability and responsiveness.
+  Acceptance_Criteria:
+
+  * Jobs exceeding budgets are rejected or deferred with backoff.
+  * Capture pipeline remains functional when a plugin misbehaves.
+    Regression_Detection:
+  * Stress test ensures plugin backlog cannot grow unbounded when budgets configured.
+* Object_ID: MOD-022
+  Object_Name: PolicyGateAndDataHandlingBadges
+  Object_Type: Business Logic
+  Priority: MUST
+  Primary_Purpose: Enforce PolicyGate constraints (offline/cloud/image rules) and expose per-plugin data-handling badges with clear blocked error messages.
+  Sources: [SRC-015, SRC-070, SRC-034]
+  Interface_Definition:
+
+  ```text
+  PolicyGateRules:
+    - offline_mode: blocks cloud use (text)
+    - cloud_images: blocked unless explicitly allowed
+  UI_Badges_Per_Plugin:
+    - "Local only"
+    - "Cloud possible (text only)"
+    - "Cloud images possible (requires explicit allow)"
+  When_Blocked:
+    - Return/Display clear error message (exact text [MISSING_VALUE])
+  ```
+* Object_ID: MOD-023
+  Object_Name: CloudEgressSanitizer
+  Object_Type: Business Logic
+  Priority: MUST
+  Primary_Purpose: Ensure raw PII never leaves device; apply entity hashing/sanitization on any export/share egress pathway.
+  Sources: [SRC-071, SRC-072]
+  Interface_Definition:
+
+  ```text
+  Input: ExportPayload
+    - data: [MISSING_VALUE]
+    - contains_pii: [MISSING_VALUE]
+  Output: SanitizedExportPayload
+    - data: [MISSING_VALUE]  # with entities hashed/sanitized
+    - transformation_log: [MISSING_VALUE]
+  Rules:
+    - Reject any egress containing raw PII.
+    - Apply hashing/sanitization before any export/share operation.
+  ```
+* Object_ID: MOD-024
+  Object_Name: EncryptionAtRestAndKeyPortability
+  Object_Type: Library
+  Priority: MUST
+  Primary_Purpose: Enable encryption at rest for media and DB; support key export/import and operational key backup flows.
+  Sources: [SRC-064, SRC-065, SRC-066, SRC-067, SRC-068, SRC-069]
+  Interface_Definition:
+
+  ```text
+  KeyLifecycle:
+    - first_run_generate_keys() -> {key_id: string, backup_required: boolean}
+    - export_keys(destination_path: string) -> {ok: boolean, error: [MISSING_VALUE]}
+    - import_keys(source_path: string) -> {ok: boolean, error: [MISSING_VALUE]}
+  Dashboard_Integration:
+    - get_key_backup_status() -> {status: "backed_up"|"not_backed_up"|[MISSING_VALUE], last_backup_at: [MISSING_VALUE]}
+  Storage_Integration:
+    - encrypt_media_write(...) -> media_path
+    - decrypt_media_read(...) -> payload
+    - encrypt_db_at_rest: [MISSING_VALUE]
+  ```
+* Object_ID: MOD-025
+  Object_Name: NowAPIAndNowPanel
+  Object_Type: API Endpoint
+  Priority: SHOULD
+  Primary_Purpose: Provide a fast “NOW” view for immediate context: current foreground app/window and recent frames/events.
+  Sources: [SRC-076, SRC-010]
+  Interface_Definition:
+
+  ```json
+  {
+    "endpoint": "/api/now",
+    "method": "GET",
+    "response": {
+      "foreground": {
+        "app_name": "string",
+        "window_title": "string"
+      },
+      "recent_frames": [
+        {
+          "frame_id": "string",
+          "captured_at": "[MISSING_VALUE]",
+          "thumbnail_ref": "[MISSING_VALUE]"
+        }
+      ],
+      "recent_events": [
+        {
+          "event_id": "string",
+          "timestamp": "[MISSING_VALUE]",
+          "type": "click|key|[MISSING_VALUE]",
+          "summary": "string"
+        }
+      ]
+    }
+  }
+  ```
+
+  Rationale: Reduce friction for “what was I just doing?” recall.
+  Acceptance_Criteria:
+
+  * Response includes current foreground app/window plus recent frames and events.
+  * NOW panel renders without navigating settings.
+    Regression_Detection:
+  * UI smoke test verifies NOW panel loads and includes window_title.
+* Object_ID: MOD-026
+  Object_Name: RewindFiveMinutesAction
+  Object_Type: Other
+  Priority: SHOULD
+  Primary_Purpose: Provide a first-class “Rewind 5 minutes” action that retrieves frames/events for last 5 minutes and opens detailed views.
+  Sources: [SRC-077]
+  Interface_Definition:
+
+  ```text
+  UI_Action: Rewind5Minutes
+    - Query: frames/events for last 5 minutes (time source [MISSING_VALUE])
+    - Display: thumbnails + window titles
+    - OnClick: open full frame + related artifacts
+  ```
+
+  Rationale: Quick time-bounded recovery under cognitive load.
+  Acceptance_Criteria:
+
+  * Rewind retrieves and displays last 5 minutes of frames/events.
+  * Selecting an item opens frame view with related artifacts.
+    Regression_Detection:
+  * E2E test asserts rewind list has window titles and opens detail view.
+* Object_ID: MOD-027
+  Object_Name: SearchExperienceAndQueryRecords
+  Object_Type: Other
+  Priority: SHOULD
+  Primary_Purpose: Default search to time-bounded queries (last 60 minutes) and emphasize app/window cues; store query records and classify time-ish queries.
+  Sources: [SRC-078]
+  Interface_Definition:
+
+  ```text
+  Search_Defaults:
+    - default_time_window: last 60 minutes
+    - UI shows app_name/window_title prominently in results
+  Query_Records:
+    - store(query_text, parsed_time_hints, created_at) -> query_id
+    - classification: detect "today", "yesterday", etc. (implementation specifics [MISSING_VALUE])
+  ```
+
+  Rationale: Time-bounded search reduces overwhelming result sets and aligns with time-ish user queries.
+  Acceptance_Criteria:
+
+  * Search UI defaults to last 60 minutes unless user changes.
+  * Query records are stored with detected time hints.
+    Regression_Detection:
+  * Unit test for default search window == 60 minutes.
+* Object_ID: MOD-028
+  Object_Name: TraceAPIService
+  Object_Type: API Endpoint
+  Priority: MUST
+  Primary_Purpose: Provide complete traceability for frames/events including media, artifacts, plugin runs, and ledger entries.
+  Sources: [SRC-056, SRC-057, SRC-058, SRC-016]
+  Interface_Definition:
+
+  ```json
+  {
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/api/trace/frame/{frame_id}",
+        "response": {
+          "frame": "[FrameRecord]",
+          "media_paths": ["string"],
+          "artifacts": ["ArtifactRecord"],
+          "plugin_runs": ["PluginRun"],
+          "ledger_entries": ["LedgerEntry"]
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/api/trace/event/{event_id}",
+        "response": {
+          "event": "[MISSING_VALUE]",
+          "related_frames": ["FrameRecord"],
+          "artifacts": ["ArtifactRecord"],
+          "plugin_runs": ["PluginRun"],
+          "ledger_entries": ["LedgerEntry"]
+        }
+      }
+    ]
+  }
+  ```
+* Object_ID: MOD-029
+  Object_Name: TraceViewerTimelineAndDag
+  Object_Type: Other
+  Priority: SHOULD
+  Primary_Purpose: Visualize the end-to-end workflow with a synchronized timeline and DAG of artifact derivations grouped by plugin id.
+  Sources: [SRC-059]
+  Interface_Definition:
+
+  ```text
+  UI_Views:
+    - Timeline:
+        Displays frames/events and major derived artifacts over time.
+    - DAG:
+        Nodes: artifacts
+        Edges: "derived from"
+        GroupBy: plugin_id
+  Data_Source:
+    - TraceAPIService responses.
+  ```
+
+  Rationale: Make “visualize complete workflow” feasible and debuggable.
+  Acceptance_Criteria:
+
+  * Timeline and DAG are both available and synchronized to a selected time/frame.
+    Regression_Detection:
+  * UI test asserts DAG renders at least one edge when artifacts have upstream_artifact_ids.
+* Object_ID: MOD-030
+  Object_Name: EvidenceOverlayViewer
+  Object_Type: Other
+  Priority: SHOULD
+  Primary_Purpose: Provide default evidence UX with screenshot frame, bbox/span highlights, and click-to-filter evidence for a claim.
+  Sources: [SRC-060, SRC-016]
+  Interface_Definition:
+
+  ```text
+  Evidence_View:
+    - Base: screenshot frame (from media_path)
+    - Overlays: bbox/span highlights (from OCR/Vision artifacts)
+    - Interaction: clicking a span filters evidence list to that claim
+  ```
+
+  Rationale: Evidence-first UX improves citable answers and user trust.
+  Acceptance_Criteria:
+
+  * Overlays render from stored artifacts and align with the displayed frame.
+  * Clicking a highlight filters the evidence list.
+    Regression_Detection:
+  * UI test clicks a span and verifies evidence list is filtered.
+* Object_ID: MOD-031
+  Object_Name: ConfigChangeLogAndUndo
+  Object_Type: Business Logic
+  Priority: SHOULD
+  Primary_Purpose: Support “Undo last config change” via an append-only config log for safe configuration management.
+  Sources: [SRC-042, SRC-043]
+  Interface_Definition:
+
+  ```text
+  Data_Model: ConfigChange
+    - change_id: string
+    - timestamp: [MISSING_VALUE]
+    - patch: [MISSING_VALUE]
+    - actor: [MISSING_VALUE]
+  Operations:
+    - append_change(patch) -> change_id
+    - undo_last_change() -> {ok: boolean, reverted_change_id: string}
+  ```
+
+  Rationale: Prevent configuration paralysis and enable audit/rollback.
+  Acceptance_Criteria:
+
+  * Every config change is appended; undo reverts exactly the latest change.
+    Regression_Detection:
+  * Unit test applies two patches and confirms undo only reverts the second.
+* Object_ID: MOD-032
+  Object_Name: CaptureOnOffControl
+  Object_Type: Other
+  Priority: SHOULD
+  Primary_Purpose: Provide a large “Capture On/Off” control and status indicator aligned with heartbeat/status banner.
+  Sources: [SRC-027]
+  Interface_Definition:
+
+  ```text
+  UI_Control:
+    - Toggle: capture_enabled
+    - Status: shows Capturing/Degraded/Stopped consistent with heartbeat banner
+  Backend_Integration:
+    - set_capture_enabled(boolean) -> [MISSING_VALUE]
+    - read_capture_enabled() -> boolean
+  ```
+
+  Rationale: Explicit control reduces confusion and helps recover when capture stops.
+  Acceptance_Criteria:
+
+  * Toggle immediately updates capture state and UI status.
+    Regression_Detection:
+  * E2E test toggles capture off then on and verifies heartbeat resumes.
+* Object_ID: MOD-033
+  Object_Name: OpsQualityGatesAndCI
+  Object_Type: Other
+  Priority: SHOULD
+  Primary_Purpose: Reduce setup friction and test flakiness by adding WSL path CI smoke checks and eliminating pytest timeouts.
+  Sources: [SRC-004]
+  Interface_Definition:
+
+  ```text
+  CI_Gates:
+    - WSL path smoke test: verifies doctor path selection & directory creation under WSL
+    - Test suite classification: mark/split long tests to avoid timeouts
+    - Regression tests: ensure excluded frames still stored (no holes)
+  ```
+
+  Rationale: Prevent silent capture downtime and improve reliability in Windows+WSL setup.
+  Acceptance_Criteria:
+
+  * CI includes a smoke test covering WSL path resolution.
+  * No test times out due to known long-running tests being split/marked.
+    Regression_Detection:
+  * CI failure if doctor cannot create/validate required paths under WSL.
+* Object_ID: MOD-034
+  Object_Name: DashboardStorageWidget
+  Object_Type: Other
+  Priority: SHOULD
+  Primary_Purpose: Provide a dashboard storage widget that exposes disk free/pressure state to the user.
+  Sources: [SRC-003, SRC-026, SRC-028]
+  Interface_Definition:
+
+  ```text
+  UI_Widget:
+    - Shows staging/data disk free (MB)
+    - Shows StoragePressureState (green/yellow/red/black)
+    - Links to fix steps when low disk triggers degraded/stopped
+  Data_Source:
+    - latest Heartbeat + StoragePressureDecision
+  ```
+
+  Rationale: Avoid “quiet downtime” by surfacing storage pressure prominently.
+  Acceptance_Criteria:
+
+  * Widget updates with latest disk free values and pressure state.
+    Regression_Detection:
+  * UI test verifies widget shows state changes when simulated disk free changes.
+* Object_ID: MOD-035
+  Object_Name: WSLBridgeEndpoints
+  Object_Type: API Endpoint
+  Priority: SHOULD
+  Primary_Purpose: Implement “WSL bridge endpoints” for the Windows host capture + WSL/Linux backend architecture.
+  Sources: [SRC-003, SRC-002]
+  Interface_Definition:
+
+  ```text
+  Endpoints: [MISSING_VALUE]
+  Purpose:
+    - Bridge communication between Windows host capture components and WSL backend services.
+  Constraints:
+    - Must preserve local-first posture; cloud egress rules still apply.
+  ```
+
+3. Architecture Decision Records (ADRs)
+
+* ADR_ID: ADR-001
+  Title: No Holes Capture Policy
+  Status: Accepted
+  Context: Excluded frames currently drop pixels (`media_path=None`), causing unrecoverable gaps in a memory disability use case.
+  Decision: Always store raw pixels locally, even when excluded, by writing excluded frames to a vault and retaining a non-null media_path; gate derived artifacts instead (OCR/VLM/embeddings skipped unless explicit opt-in).
+  Consequences:
+
+  * Improves recall continuity and citation integrity.
+  * Requires secure storage (encryption at rest) and clear UX about excluded/sensitive content.
+    Sources: [SRC-017, SRC-023, SRC-024, SRC-025, SRC-079, SRC-064]
+* ADR_ID: ADR-002
+  Title: Storage Pressure Degrades Processing Before Capture
+  Status: Accepted
+  Context: Disk free-space gating can cause capture to halt; quiet downtime is unacceptable for recall.
+  Decision: Implement a storage pressure state machine (green/yellow/red/black) that pauses processing first, then reduces capture/video, stopping capture only as last resort.
+  Consequences:
+
+  * Preserves capture continuity under low disk.
+  * Requires clear status reporting and actions tied to state.
+    Sources: [SRC-012, SRC-019, SRC-028, SRC-029, SRC-030, SRC-031]
+* ADR_ID: ADR-003
+  Title: Activity-Based Scheduling Enforced by Design
+  Status: Accepted
+  Context: Locked constraint forbids heavy processing while the user is actively using the PC.
+  Decision: Detect user activity and enforce worker ceilings (often 0) for OCR/VLM/embeddings during activity; respect GPU concurrency caps; ramp workers when idle.
+  Consequences:
+
+  * Protects responsiveness and trust.
+  * May delay derived artifacts until idle periods.
+    Sources: [SRC-022, SRC-061, SRC-062]
+* ADR_ID: ADR-004
+  Title: Multi-Plugin Routing With Backward Compatibility
+  Status: Accepted
+  Context: Single-selection routing blocks the required workflow (run multiple OCR/VLM components per step).
+  Decision: Routing entries accept scalar or list; normalize to list; pipeline executes plugins in list order for each kind.
+  Consequences:
+
+  * Enables multi-engine comparisons and redundancy.
+  * Requires artifact identity and run tracking to avoid collisions.
+    Sources: [SRC-021, SRC-051, SRC-052]
+* ADR_ID: ADR-005
+  Title: Plugin Isolation via Artifact Contracts
+  Status: Accepted
+  Context: Multi-plugin execution must not introduce shared-state corruption.
+  Decision: Plugins only read immutable inputs and write new outputs; outputs stored as ArtifactRecords keyed by (frame_id, artifact_type, engine, engine_version) with upstream references; plugins cannot mutate global config or other outputs.
+  Consequences:
+
+  * Strong traceability and reproducibility.
+  * Requires stable artifact schemas and run metadata.
+    Sources: [SRC-053, SRC-054, SRC-055]
+* ADR_ID: ADR-006
+  Title: Accessibility-First Settings via Presets and Schema Metadata
+  Status: Accepted
+  Context: UI complexity causes misconfiguration and paralysis.
+  Decision: Provide preset cards (config patches) and an advanced accordion UI generated from Pydantic json_schema_extra metadata served via /api/settings/schema, with show-only-overrides default and safe reset controls.
+  Consequences:
+
+  * Reduces cognitive load.
+  * Requires consistent field metadata and schema endpoint stability.
+    Sources: [SRC-020, SRC-039, SRC-040, SRC-041, SRC-042, SRC-043, SRC-044, SRC-045, SRC-046, SRC-050]
+* ADR_ID: ADR-007
+  Title: Traceability-First Workflow Visualization
+  Status: Accepted
+  Context: Citable answers require linking claims to frames/spans; debugging requires end-to-end visibility.
+  Decision: Provide Trace API endpoints for frame/event returning media, artifacts, plugin runs, and ledger entries; build timeline+DAG viewer and evidence overlays.
+  Consequences:
+
+  * Increases transparency and trust.
+  * Requires consistent artifact/run/ledger storage.
+    Sources: [SRC-016, SRC-056, SRC-057, SRC-058, SRC-059, SRC-060]
+* ADR_ID: ADR-008
+  Title: Local-First Security With Strict PolicyGate and Sanitized Egress
+  Status: Accepted
+  Context: Capturing everything locally demands strong protections; cloud use must be controlled.
+  Decision: Default encryption at rest for media+DB; keep PolicyGate strict (offline blocks cloud; images blocked unless allowed; never send images to cloud by default); ensure raw PII never leaves device and sanitize/hash on any export/share.
+  Consequences:
+
+  * Strong security posture aligned with local-first capture.
+  * Requires key management UX and clear plugin badges/errors.
+    Sources: [SRC-015, SRC-064, SRC-070, SRC-071, SRC-072, SRC-034]
+* ADR_ID: ADR-009
+  Title: Deterministic Setup and Quality Gates for Windows+WSL
+  Status: Accepted
+  Context: Doctor failures and test timeouts cause long stretches of broken capture.
+  Decision: Fix doctor to detect WSL, select writable storage roots, validate data directory access and FFmpeg; add CI smoke checks and reduce pytest timeouts.
+  Consequences:
+
+  * Reduced operational friction and downtime.
+  * Requires investment in tests and environment-specific validations.
+    Sources: [SRC-018, SRC-035, SRC-036, SRC-037, SRC-038, SRC-004]
+
+4. Grounding Data (Few-Shot Samples)
+
+* Sample_ID: SAMPLE-001
+  Related_Object_ID: MOD-001
+  Description: Ingest behavior for excluded vs non-excluded frames and derived enqueue gating.
+  Table:
+
+  ```text
+  | app_name | window_title           | privacy_excluded | media_path_written_to | derived_enqueue_ocr | derived_enqueue_vision | derived_enqueue_embeddings |
+  |---------|--------------------------|------------------|-----------------------|---------------------|------------------------|---------------------------|
+  | "AppA"  | "Normal Document"        | false            | "standard"            | enqueued            | enqueued               | enqueued                  |
+  | "AppB"  | "Password Prompt"        | true             | "vault"               | skipped             | skipped                | skipped                   |
+  | "AppC"  | "Excluded + Opt-In"      | true             | "vault"               | enqueued            | skipped                | skipped                   |
+  ```
+* Sample_ID: SAMPLE-002
+  Related_Object_ID: MOD-011
+  Description: Storage pressure state machine decisions (qualitative thresholds; numeric triggers are [MISSING_VALUE]).
+  Table:
+
+  ```text
+  | staging_free_mb | data_free_mb | state   | pause_processing | lower_capture_rate | stop_video_segments | stop_capture |
+  |-----------------|-------------|---------|------------------|-------------------|---------------------|------------|
+  | 50000           | 50000       | green   | false            | false             | false               | false      |
+  | 800             | 1200        | yellow  | true             | false             | false               | false      |
+  | 200             | 150         | black   | true             | true              | true                | true       |
+  ```
+* Sample_ID: SAMPLE-003
+  Related_Object_ID: MOD-018
+  Description: Routing normalization from scalar/list to normalized list and resulting fanout.
+  Table:
+
+  ```text
+  | routing_key        | input_value                     | normalized_value                 | execution_order                |
+  |--------------------|----------------------------------|----------------------------------|--------------------------------|
+  | "vision.extractor" | "pluginA"                        | ["pluginA"]                      | pluginA                        |
+  | "vision.extractor" | ["pluginA","pluginB"]            | ["pluginA","pluginB"]            | pluginA -> pluginB             |
+  | "ocr.engine"       | ["ocr1","ocr2","ocr3"]            | ["ocr1","ocr2","ocr3"]           | ocr1 -> ocr2 -> ocr3           |
+  ```
+* Sample_ID: SAMPLE-004
+  Related_Object_ID: MOD-020
+  Description: Activity detection outcomes and downstream enforcement expectation (ceilings often 0 while active).
+  Table:
+
+  ```text
+  | last_hid_event_age_seconds | activity_state | ocr_workers_allowed | vlm_workers_allowed | embed_workers_allowed |
+  |----------------------------|----------------|---------------------|---------------------|-----------------------|
+  | 2                          | active         | 0                   | 0                   | 0                     |
+  | 30                         | active         | 0                   | 0                   | 0                     |
+  | 600                        | idle           | [MISSING_VALUE]     | [MISSING_VALUE]     | [MISSING_VALUE]       |
+  ```
+* Sample_ID: SAMPLE-005
+  Related_Object_ID: MOD-022
+  Description: PolicyGate badge classification and enforcement examples.
+  Table:
+
+  ```text
+  | plugin_id | offline_mode | cloud_text_allowed | cloud_images_allowed | ui_badge                                 | blocked_reason                         |
+  |----------|--------------|--------------------|----------------------|------------------------------------------|----------------------------------------|
+  | "local1" | true         | false              | false                | "Local only"                             | [MISSING_VALUE]                         |
+  | "cloudT" | false        | true               | false                | "Cloud possible (text only)"             | "cloud images blocked unless allowed"  |
+  | "cloudI" | false        | true               | true                 | "Cloud images possible (requires allow)" | [MISSING_VALUE]                         |
+  ```
+* Sample_ID: SAMPLE-006
+  Related_Object_ID: MOD-015
+  Description: /api/settings/schema field grouping metadata examples used to render accordions.
+  Table:
+
+  ```text
+  | field_path                    | ui_group   | ui_subgroup     | advanced | order | sensitive |
+  |------------------------------|------------|-----------------|----------|-------|-----------|
+  | "capture.video_bitrate"      | "Capture"  | "Video"         | true     | 20    | false     |
+  | "tracking.enable_clipboard"  | "Tracking" | "Clipboard"     | true     | 30    | true      |
+  | "policy.offline_mode"        | "Security" | "Cloud Policy"  | false    | 10    | false     |
+  ```
+* Sample_ID: SAMPLE-007
+  Related_Object_ID: MOD-028
+  Description: Trace API response composition for a frame.
+  Table:
+
+  ```text
+  | frame_id | media_paths_count | artifacts_count | plugin_runs_count | ledger_entries_count |
+  |---------|--------------------|----------------|-------------------|----------------------|
+  | "f1"    | 1                  | 0              | 0                 | 1                    |
+  | "f2"    | 1                  | 3              | 2                 | 5                    |
+  | "f3"    | 1                  | 7              | 4                 | 9                    |
+  ```
