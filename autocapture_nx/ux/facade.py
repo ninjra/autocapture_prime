@@ -13,7 +13,12 @@ from typing import Any, Iterator, cast
 
 from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.config import ConfigPaths, load_config, reset_user_config, restore_user_config, validate_config
-from autocapture_nx.kernel.derived_records import build_derivation_edge, build_text_record, derivation_edge_id
+from autocapture_nx.kernel.derived_records import (
+    build_derivation_edge,
+    build_text_record,
+    derivation_edge_id,
+    extract_text_payload,
+)
 from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.kernel.loader import Kernel, default_config_paths
 from autocapture_nx.kernel.query import run_query
@@ -1544,7 +1549,7 @@ class UXFacade:
                 if metadata.get(derived_id):
                     continue
                 try:
-                    text = extractor.extract(frame).get("text", "")
+                    text = extract_text_payload(extractor.extract(frame))
                 except Exception:
                     continue
                 payload = build_text_record(

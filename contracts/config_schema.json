@@ -742,13 +742,49 @@
     "models": {
       "additionalProperties": false,
       "properties": {
+        "ocr_lang": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ocr_oem": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ocr_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ocr_psm": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "reranker_path": {
           "type": [
             "string",
             "null"
           ]
         },
+        "vlm_max_new_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "vlm_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "vlm_prompt": {
           "type": [
             "string",
             "null"

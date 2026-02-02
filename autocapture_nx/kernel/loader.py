@@ -1504,6 +1504,7 @@ class Kernel:
         if isinstance(models_cfg, dict):
             _check_model_path("vlm_model", models_cfg.get("vlm_path"))
             _check_model_path("reranker_model", models_cfg.get("reranker_path"))
+            _check_model_path("ocr_model", models_cfg.get("ocr_path"))
         indexing_cfg = config.get("indexing", {})
         if isinstance(indexing_cfg, dict):
             _check_model_path("embedder_model", indexing_cfg.get("embedder_model"))

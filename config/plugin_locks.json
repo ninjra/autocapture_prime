@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-02T03:42:46.125473+00:00",
+  "generated_at": "2026-02-02T15:10:31.459666+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "9dbb34cf46de240ed0c86ff2597d80a48c08104a331cb63474278022053f0def",
@@ -18,7 +18,7 @@
       "manifest_sha256": "5420df1d9ab3294d8e7a04172c7dcfdb2c34834623dd4ca09e63835492a9fe87"
     },
     "builtin.capture.basic": {
-      "artifact_sha256": "f8e1f300ca7dd8d4514b6e37fd626f89e713426901fad0b9e76069567fb6177b",
+      "artifact_sha256": "eba579ec7b9a8d3b3f4f91f75bf95c32e2ce53f77e4f772821e14082ca4679b2",
       "manifest_sha256": "de450719fc2364c720292db489f971efbb220c249b8f369910059b09620c84c7"
     },
     "builtin.capture.screenshot.windows": {
@@ -50,7 +50,7 @@
       "manifest_sha256": "abef25db8a661696be8fa7192b7179b0c0b7b259bb92d97bbdc8f71b9cf9c5dc"
     },
     "builtin.embedder.basic": {
-      "artifact_sha256": "34acc6632c29fb20bb6dd1321fbe4e98177688e7dad22fb4a2e8fefa33b7ac81",
+      "artifact_sha256": "b1be5e2f1da02922d9d6cb752009f362855a5641cc58d411da878d3e48c95074",
       "manifest_sha256": "1398a797cf5a8dbbb265041940b34f28dce29aca82636a522866d78ef40f7d1d"
     },
     "builtin.journal.basic": {
@@ -74,7 +74,7 @@
       "manifest_sha256": "fe16f7b5543428dfd3ee7208c269cdff02e6bd122168637d44c99ffd2c66357e"
     },
     "builtin.ocr.basic": {
-      "artifact_sha256": "de63b31abdbd0120feebf0766c0ee261a5df49167d31a2832f14fd1b7988e8c9",
+      "artifact_sha256": "77f674b658870357792d279e3a056edaa9fc2ffce2a8a093b179cc6e54d3507f",
       "manifest_sha256": "9f7a929dee7ebdd2ec16cb8752a5d18f91a8c52913d62268eebb30971f4f209e"
     },
     "builtin.privacy.egress_sanitizer": {
@@ -94,7 +94,7 @@
       "manifest_sha256": "c49f9a5918ef7f57f382082e7b52998a4f585f39b99db167241d5c3fd2bb0f76"
     },
     "builtin.reranker.basic": {
-      "artifact_sha256": "21ee57b2b3510301bd47ba93d5c694e5923c1061620e37231842c088e520eef4",
+      "artifact_sha256": "e422c59a8aa39bd50c7a5336f42432eacd2b1dba2bc28e0d0ad7988fa7b12a91",
       "manifest_sha256": "b476ae975432b73e9add098c5494b9ff9bdd279ba4ac2c35e3e0efa93e184a7a"
     },
     "builtin.research.default": {
@@ -258,7 +258,7 @@
       "manifest_sha256": "9d6569db49ca6c4de4245e0dfa032163dc37d6a8797afc92b9b16cde9fba2bee"
     },
     "builtin.vlm.basic": {
-      "artifact_sha256": "9c2d1c6436fcaf0649c64c6eba018a04717aca03beb2d8bb271e8d5859c580ca",
+      "artifact_sha256": "88b4b0e638468d989e9088f695df7d845febb61fda96666ceed21c570525d306",
       "manifest_sha256": "18d6c802bfbe78ece22d42905612879a92c27c450c78f131bfce356198575b99"
     },
     "builtin.window.metadata.windows": {

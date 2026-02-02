@@ -958,11 +958,13 @@ def _parse_element_graph_from_vlm(
     for provider_id, provider in providers:
         try:
             response = provider.extract(frame_bytes)
+            raw_layout = response.get("layout") if isinstance(response, dict) else None
             text = str(response.get("text", "") or "")
         except Exception as exc:
             diagnostics.append({"kind": "sst.ui_vlm_error", "error": str(exc), "provider_id": provider_id})
             continue
-        element_graph = _parse_element_graph(text, tokens, frame_bbox, provider_id=str(provider_id))
+        source = raw_layout if raw_layout is not None else text
+        element_graph = _parse_element_graph(source, tokens, frame_bbox, provider_id=str(provider_id))
         if element_graph:
             return element_graph
     diagnostics.append({"kind": "sst.ui_vlm_empty"})
@@ -984,16 +986,19 @@ def _providers(capability: Any) -> list[tuple[str, Any]]:
 
 
 def _parse_element_graph(
-    text: str,
+    text: str | dict[str, Any],
     tokens: list[dict[str, Any]],
     frame_bbox: tuple[int, int, int, int],
     *,
     provider_id: str,
 ) -> dict[str, Any] | None:
-    try:
-        data = json.loads(text)
-    except Exception:
-        return None
+    if isinstance(text, dict):
+        data = text
+    else:
+        try:
+            data = json.loads(text)
+        except Exception:
+            return None
     if not isinstance(data, dict):
         return None
     raw_elements = data.get("elements")

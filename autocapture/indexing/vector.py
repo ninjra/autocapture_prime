@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
+import os
+import re
 import sqlite3
 import urllib.request
-import hashlib
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -31,9 +32,10 @@ class HashEmbedder:
 
 class LocalEmbedder:
     def __init__(self, model_name: str | None = None) -> None:
+        self._model_name = str(model_name) if model_name else None
         self._bundle: BundleInfo | None = None
-        if model_name:
-            candidate = Path(str(model_name))
+        if self._model_name:
+            candidate = Path(self._model_name)
             try:
                 if candidate.exists():
                     self._bundle = select_bundle("embedder", [candidate])
@@ -43,17 +45,33 @@ class LocalEmbedder:
                 self._bundle = None
         if self._bundle is None:
             self._bundle = select_bundle("embedder")
+        if self._bundle is not None and self._bundle.config.get("model_path") and not self._model_name:
+            self._model_name = str(self._bundle.config.get("model_path"))
         dims = 384
         if self._bundle is not None:
             dims = int(self._bundle.config.get("dims", dims))
         self._fallback = HashEmbedder(dims=dims)
-        self._model_name = model_name
+        self._backend = "hash"
+        self._model = None
+        self._model_error: str | None = None
+        self._model_dims = dims
+        self._load_sentence_transformer()
 
     def embed(self, text: str) -> list[float]:
+        if self._model is not None:
+            try:
+                return self._embed_with_model(text or "")
+            except Exception:
+                return self._fallback.embed(text)
         return self._fallback.embed(text)
 
     def identity(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {"backend": "hash", "dims": self._fallback.dims}
+        payload: dict[str, Any] = {"backend": self._backend, "dims": self._model_dims}
+        if self._backend != "hash" and self._model_name:
+            payload["model_name"] = self._model_name
+            digest = self._model_digest(self._model_name)
+            if digest:
+                payload["model_digest"] = digest
         if self._bundle is not None:
             payload.update(
                 {
@@ -62,7 +80,81 @@ class LocalEmbedder:
                     "bundle_path": str(self._bundle.path),
                 }
             )
+        if self._model_error:
+            payload["model_error"] = self._model_error
         return payload
+
+    def _load_sentence_transformer(self) -> None:
+        if not self._model_name:
+            return
+        try:
+            from sentence_transformers import SentenceTransformer
+        except Exception as exc:
+            self._model_error = f"sentence_transformers_unavailable:{exc}"
+            return
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+        os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+        cache_dir = os.getenv("AUTOCAPTURE_MODEL_CACHE", "").strip() or None
+        try:
+            try:
+                model = SentenceTransformer(
+                    self._model_name,
+                    device="cpu",
+                    cache_folder=cache_dir,
+                    local_files_only=True,
+                )
+            except TypeError:
+                model = SentenceTransformer(self._model_name, device="cpu", cache_folder=cache_dir)
+        except Exception as exc:
+            self._model_error = f"sentence_transformer_load_failed:{exc}"
+            return
+        try:
+            model.eval()
+        except Exception:
+            pass
+        self._model = model
+        try:
+            self._model_dims = int(model.get_sentence_embedding_dimension())
+        except Exception:
+            self._model_dims = int(self._fallback.dims)
+        self._backend = "sentence-transformers"
+
+    def _embed_with_model(self, text: str) -> list[float]:
+        model = self._model
+        if model is None:
+            return self._fallback.embed(text)
+        try:
+            vecs = model.encode(
+                [text],
+                normalize_embeddings=True,
+                convert_to_numpy=True,
+                show_progress_bar=False,
+            )
+        except Exception:
+            return self._fallback.embed(text)
+        if hasattr(vecs, "tolist"):
+            values = vecs.tolist()
+            if isinstance(values, list) and values and isinstance(values[0], list):
+                return [float(v) for v in values[0]]
+        if isinstance(vecs, list) and vecs and isinstance(vecs[0], list):
+            return [float(v) for v in vecs[0]]
+        return self._fallback.embed(text)
+
+    def _model_digest(self, model_name: str) -> str | None:
+        path = Path(str(model_name))
+        if not path.exists():
+            return None
+        try:
+            from autocapture_nx.kernel.hashing import sha256_directory, sha256_file
+        except Exception:
+            return None
+        try:
+            if path.is_dir():
+                return sha256_directory(path)
+            return sha256_file(path)
+        except Exception:
+            return None
 
 
 class QdrantSidecar:

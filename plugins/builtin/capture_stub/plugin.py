@@ -1,4 +1,4 @@
-"""Replay/synthetic capture plugin for non-Windows environments."""
+"""Fallback capture plugin with optional replay/synthetic mode."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from autocapture_nx.windows.win_capture import Frame
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 
 
-class CaptureStub(PluginBase):
+class CaptureBasic(PluginBase):
     def __init__(self, plugin_id: str, context: PluginContext) -> None:
         super().__init__(plugin_id, context)
         self._stop = threading.Event()
@@ -51,6 +51,7 @@ class CaptureStub(PluginBase):
         input_tracker = _optional_capability(self.context, "tracking.input")
         governor = _optional_capability(self.context, "runtime.governor")
 
+        frame_source = self._frame_source()
         pipeline = CapturePipeline(
             self.context.config,
             plugin_id=self.plugin_id,
@@ -63,13 +64,13 @@ class CaptureStub(PluginBase):
             input_tracker=input_tracker,
             governor=governor,
             stop_event=self._stop,
-            frame_source=self._frame_source(),
+            frame_source=frame_source,
         )
         self._pipeline = pipeline
         pipeline.start()
         pipeline.join()
 
-    def _frame_source(self) -> Iterator[Frame]:
+    def _frame_source(self) -> Iterator[Frame] | None:
         cfg = self.context.config.get("capture", {}).get("stub", {})
         frames_dir = str(cfg.get("frames_dir", "")).strip()
         loop = bool(cfg.get("loop", False))
@@ -87,13 +88,15 @@ class CaptureStub(PluginBase):
                 if paths:
                     return _file_frames(paths, loop=loop, max_frames=max_frames, jpeg_quality=jpeg_quality)
 
-        return _synthetic_frames(
-            frame_width,
-            frame_height,
-            loop=loop,
-            max_frames=max_frames,
-            jpeg_quality=jpeg_quality,
-        )
+        if max_frames > 0:
+            return _synthetic_frames(
+                frame_width,
+                frame_height,
+                loop=loop,
+                max_frames=max_frames,
+                jpeg_quality=jpeg_quality,
+            )
+        return None
 
 
 def _optional_capability(context: PluginContext, name: str):
@@ -177,5 +180,8 @@ def _synthetic_frames(
             return
 
 
-def create_plugin(plugin_id: str, context: PluginContext) -> CaptureStub:
-    return CaptureStub(plugin_id, context)
+def create_plugin(plugin_id: str, context: PluginContext) -> CaptureBasic:
+    return CaptureBasic(plugin_id, context)
+
+
+CaptureStub = CaptureBasic

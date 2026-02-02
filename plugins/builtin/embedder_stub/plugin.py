@@ -1,4 +1,4 @@
-"""Local embedding plugin with hash fallback."""
+"""Local embedding plugin with deterministic fallback."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 from autocapture.indexing.vector import LocalEmbedder
 
 
-class EmbedderLocal(PluginBase):
+class EmbedderBasic(PluginBase):
     def __init__(self, plugin_id: str, context: PluginContext) -> None:
         super().__init__(plugin_id, context)
         model_name = None
@@ -29,5 +29,8 @@ class EmbedderLocal(PluginBase):
         return {"vector": vector, "model_id": model_id, "identity": identity}
 
 
-def create_plugin(plugin_id: str, context: PluginContext) -> EmbedderLocal:
-    return EmbedderLocal(plugin_id, context)
+def create_plugin(plugin_id: str, context: PluginContext) -> EmbedderBasic:
+    return EmbedderBasic(plugin_id, context)
+
+
+EmbedderLocal = EmbedderBasic

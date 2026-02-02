@@ -39,6 +39,21 @@ def model_identity(kind: str, provider_id: str, config: dict[str, Any]) -> dict[
     }
 
 
+def extract_text_payload(response: Any) -> str:
+    if isinstance(response, dict):
+        for key in ("text_plain", "caption", "text"):
+            value = response.get(key)
+            if value is None:
+                continue
+            if isinstance(value, str):
+                text = value.strip()
+                if text:
+                    return text
+            else:
+                return str(value)
+    return ""
+
+
 def build_text_record(
     *,
     kind: str,

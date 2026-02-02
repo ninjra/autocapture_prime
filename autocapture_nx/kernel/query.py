@@ -9,7 +9,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from autocapture.core.hashing import hash_text, normalize_text
-from autocapture_nx.kernel.derived_records import build_derivation_edge, build_text_record, derivation_edge_id
+from autocapture_nx.kernel.derived_records import (
+    build_derivation_edge,
+    build_text_record,
+    derivation_edge_id,
+    extract_text_payload,
+)
 from autocapture_nx.kernel.frame_evidence import ensure_frame_evidence
 from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.ids import encode_record_id_component
@@ -238,7 +243,7 @@ def extract_on_demand(
             if metadata.get(derived_id):
                 continue
             try:
-                text = extractor.extract(frame).get("text", "")
+                text = extract_text_payload(extractor.extract(frame))
             except Exception:
                 continue
             payload = build_text_record(

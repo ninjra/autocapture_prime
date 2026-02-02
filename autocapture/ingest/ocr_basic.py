@@ -34,7 +34,14 @@ class OCRToken:
 _GLYPH_CACHE: dict[str, tuple[int, ...]] | None = None
 
 
-def ocr_tokens_from_bytes(image_bytes: bytes) -> list[OCRToken]:
+def ocr_tokens_from_bytes(
+    image_bytes: bytes,
+    *,
+    lang: str | None = None,
+    psm: int | None = None,
+    oem: int | None = None,
+    tesseract_cmd: str | None = None,
+) -> list[OCRToken]:
     if not _PIL_AVAILABLE:
         return []
     if not image_bytes:
@@ -43,39 +50,83 @@ def ocr_tokens_from_bytes(image_bytes: bytes) -> list[OCRToken]:
         image = Image.open(_as_bytes_io(image_bytes)).convert("RGB")
     except Exception:
         return []
-    return ocr_tokens_from_image(image)
+    return ocr_tokens_from_image(image, lang=lang, psm=psm, oem=oem, tesseract_cmd=tesseract_cmd)
 
 
-def ocr_text_from_bytes(image_bytes: bytes) -> str:
+def ocr_text_from_bytes(
+    image_bytes: bytes,
+    *,
+    lang: str | None = None,
+    psm: int | None = None,
+    oem: int | None = None,
+    tesseract_cmd: str | None = None,
+) -> str:
     if not _PIL_AVAILABLE:
         return ""
-    tokens = ocr_tokens_from_bytes(image_bytes)
+    tokens = ocr_tokens_from_bytes(image_bytes, lang=lang, psm=psm, oem=oem, tesseract_cmd=tesseract_cmd)
     return _tokens_to_text(tokens)
 
 
-def ocr_text_from_image(image: Image.Image) -> str:
+def ocr_text_from_image(
+    image: Image.Image,
+    *,
+    lang: str | None = None,
+    psm: int | None = None,
+    oem: int | None = None,
+    tesseract_cmd: str | None = None,
+) -> str:
     if not _PIL_AVAILABLE:
         return ""
-    tokens = ocr_tokens_from_image(image)
+    tokens = ocr_tokens_from_image(image, lang=lang, psm=psm, oem=oem, tesseract_cmd=tesseract_cmd)
     return _tokens_to_text(tokens)
 
 
-def ocr_tokens_from_image(image: Image.Image) -> list[OCRToken]:
+def ocr_tokens_from_image(
+    image: Image.Image,
+    *,
+    lang: str | None = None,
+    psm: int | None = None,
+    oem: int | None = None,
+    tesseract_cmd: str | None = None,
+) -> list[OCRToken]:
     if not _PIL_AVAILABLE:
         return []
-    tokens = _tesseract_tokens(image)
+    tokens = _tesseract_tokens(image, lang=lang, psm=psm, oem=oem, tesseract_cmd=tesseract_cmd)
     if tokens is not None:
         return tokens
     return _basic_tokens(image)
 
 
-def _tesseract_tokens(image: Image.Image) -> list[OCRToken] | None:
+def _tesseract_tokens(
+    image: Image.Image,
+    *,
+    lang: str | None = None,
+    psm: int | None = None,
+    oem: int | None = None,
+    tesseract_cmd: str | None = None,
+) -> list[OCRToken] | None:
     try:
         import pytesseract
     except Exception:
         return None
     try:
-        data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+        if tesseract_cmd and hasattr(pytesseract, "pytesseract"):
+            try:
+                pytesseract.pytesseract.tesseract_cmd = str(tesseract_cmd)
+            except Exception:
+                pass
+        config_parts: list[str] = []
+        if psm is not None:
+            config_parts.append(f"--psm {int(psm)}")
+        if oem is not None:
+            config_parts.append(f"--oem {int(oem)}")
+        config = " ".join(config_parts) if config_parts else None
+        data = pytesseract.image_to_data(
+            image,
+            output_type=pytesseract.Output.DICT,
+            lang=str(lang) if lang else None,
+            config=config,
+        )
     except Exception:
         return None
     results: list[OCRToken] = []

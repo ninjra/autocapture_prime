@@ -261,8 +261,14 @@
     "model": "sshleifer/tiny-gpt2"
   },
   "models": {
+    "ocr_lang": null,
+    "ocr_oem": null,
+    "ocr_path": null,
+    "ocr_psm": null,
     "reranker_path": null,
-    "vlm_path": null
+    "vlm_max_new_tokens": 160,
+    "vlm_path": null,
+    "vlm_prompt": "Describe the screen contents concisely."
   },
   "observability": {
     "allow_evidence": false,

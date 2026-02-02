@@ -427,6 +427,8 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
     ],
     "builtin.vlm.basic": [
         "models.vlm_path",
+        "models.vlm_prompt",
+        "models.vlm_max_new_tokens",
         "processing.idle.extractors.vlm",
         "processing.on_query.extractors.vlm",
         "plugins.capabilities.vision.extractor.mode",
@@ -485,6 +487,10 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "plugins.capabilities.storage.entity_map.preferred",
     ],
     "builtin.ocr.basic": [
+        "models.ocr_path",
+        "models.ocr_lang",
+        "models.ocr_psm",
+        "models.ocr_oem",
         "processing.idle.extractors.ocr",
         "processing.on_query.extractors.ocr",
         "plugins.capabilities.ocr.engine.mode",

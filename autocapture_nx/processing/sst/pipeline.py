@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.canonical_json import CanonicalJSONError, dumps as canonical_dumps
+from autocapture_nx.kernel.derived_records import extract_text_payload
 from autocapture_nx.kernel.ids import encode_record_id_component
 
 from .action import infer_action
@@ -1116,7 +1117,7 @@ class SSTPipeline:
             if deadline_ts is not None and time.time() >= deadline_ts:
                 break
             try:
-                text = str(provider.extract(frame_bytes).get("text", ""))
+                text = extract_text_payload(provider.extract(frame_bytes))
             except Exception:
                 continue
             text = norm_text(text)
