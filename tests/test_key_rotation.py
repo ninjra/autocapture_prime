@@ -47,7 +47,10 @@ class KeyRotationTests(unittest.TestCase):
                 self.assertEqual(store.get("rec1")["value"], 123)
                 rotate_keys(system)
                 self.assertEqual(store.get("rec1")["value"], 123)
-                ledger_path = Path(safe_tmp) / "ledger.ndjson"
+                data_dir = safe_tmp
+                if isinstance(kernel.config, dict):
+                    data_dir = str(kernel.config.get("storage", {}).get("data_dir") or safe_tmp)
+                ledger_path = Path(data_dir) / "ledger.ndjson"
                 entries = []
                 if ledger_path.exists():
                     with open(ledger_path, "r", encoding="utf-8") as handle:

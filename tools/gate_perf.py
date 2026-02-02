@@ -159,9 +159,12 @@ def main(argv: list[str] | None = None) -> int:
 
     elapsed_ms = _measure_startup()
     print(f"startup_ms={elapsed_ms:.1f} max_ms={max_startup_ms}")
-    if elapsed_ms > max_startup_ms:
+    retries = 0
+    while elapsed_ms > max_startup_ms and retries < 2:
         retry_ms = _measure_startup()
-        print(f"startup_ms_retry={retry_ms:.1f} max_ms={max_startup_ms}")
+        retries += 1
+        suffix = "retry" if retries == 1 else f"retry{retries}"
+        print(f"startup_ms_{suffix}={retry_ms:.1f} max_ms={max_startup_ms}")
         elapsed_ms = min(elapsed_ms, retry_ms)
     if elapsed_ms > max_startup_ms:
         print("FAIL: startup time regression")

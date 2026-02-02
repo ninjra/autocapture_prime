@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 try:
@@ -26,6 +27,7 @@ from autocapture_nx.processing.sst.layout import assemble_layout
 from autocapture_nx.processing.sst.utils import norm_text
 
 from autocapture.ingest.ocr_basic import ocr_tokens_from_bytes
+from autocapture.models.bundles import select_bundle, BundleInfo
 
 
 class VLMStub(PluginBase):
@@ -34,12 +36,21 @@ class VLMStub(PluginBase):
         cfg = context.config if isinstance(context.config, dict) else {}
         models_cfg = cfg.get("models", {}) if isinstance(cfg.get("models", {}), dict) else {}
         self._model_path = models_cfg.get("vlm_path")
+        self._bundle: BundleInfo | None = None
+        if not self._model_path:
+            self._bundle = select_bundle("vlm")
+            if self._bundle is not None and self._bundle.config.get("model_path"):
+                raw = str(self._bundle.config.get("model_path"))
+                self._model_path = self._resolve_bundle_path(self._bundle.path, raw)
         self._prompt = str(models_cfg.get("vlm_prompt") or "Describe the screen contents concisely.")
         self._max_new_tokens = int(models_cfg.get("vlm_max_new_tokens") or 160)
         self._backend = "heuristic"
         self._pipeline = None
         self._processor = None
         self._model = None
+        self._toy_caption: str | None = None
+        self._toy_tags: list[str] = []
+        self._toy_payload: dict[str, Any] | None = None
         self._model_error: str | None = None
         self._model_loaded = False
 
@@ -62,14 +73,24 @@ class VLMStub(PluginBase):
         if caption:
             payload["caption"] = caption
             payload["text_plain"] = caption
+        if self._toy_tags:
+            payload["tags"] = list(self._toy_tags)
         if self._model_path:
             payload["model_id"] = str(self._model_path)
+        if self._bundle is not None:
+            payload["bundle_id"] = self._bundle.bundle_id
+            payload["bundle_version"] = self._bundle.version
+            payload["bundle_path"] = str(self._bundle.path)
+        if self._toy_payload is not None:
+            payload["toy_model"] = dict(self._toy_payload)
         if self._model_error:
             payload["model_error"] = self._model_error
         return payload
 
     def _caption_from_model(self, image: "Image.Image") -> str:
         self._load_model()
+        if self._toy_caption is not None:
+            return self._toy_caption
         if self._pipeline is not None:
             try:
                 result = self._pipeline(image, max_new_tokens=self._max_new_tokens)
@@ -102,6 +123,9 @@ class VLMStub(PluginBase):
             return
         self._model_loaded = True
         if not self._model_path:
+            return
+        handled = self._load_toy_model()
+        if handled:
             return
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
         os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
@@ -170,6 +194,40 @@ class VLMStub(PluginBase):
         self._processor = processor
         self._model = model
         self._backend = "transformers.vision2seq"
+
+    def _load_toy_model(self) -> bool:
+        if not self._model_path:
+            return False
+        path = str(self._model_path)
+        candidate = Path(os.path.expanduser(path))
+        if not candidate.exists() or candidate.is_dir():
+            return False
+        try:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception:
+            return False
+        kind = str(payload.get("kind", "")).strip().lower()
+        if kind not in {"toy-vlm", "toy_vlm"}:
+            return False
+        caption = str(payload.get("caption", "")).strip()
+        tags = payload.get("tags", [])
+        if isinstance(tags, list):
+            self._toy_tags = [str(tag) for tag in tags if str(tag).strip()]
+        else:
+            self._toy_tags = []
+        if not caption and self._toy_tags:
+            caption = ", ".join(self._toy_tags)
+        self._toy_caption = caption
+        self._toy_payload = payload if isinstance(payload, dict) else None
+        self._backend = "toy.vlm"
+        return True
+
+    @staticmethod
+    def _resolve_bundle_path(bundle_root: "os.PathLike[str]", model_path: str) -> str:
+        candidate = os.fspath(model_path)
+        if os.path.isabs(candidate):
+            return candidate
+        return os.fspath(os.path.join(os.fspath(bundle_root), candidate))
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> VLMStub:

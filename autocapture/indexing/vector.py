@@ -30,6 +30,37 @@ class HashEmbedder:
         return [v / norm for v in vec]
 
 
+class ToyEmbedder:
+    def __init__(
+        self,
+        dims: int,
+        vocab: dict[str, list[float]],
+        default: list[float] | None = None,
+        normalize: bool = True,
+    ) -> None:
+        self.dims = int(dims)
+        self._vocab = {key: self._fit_vector(value) for key, value in vocab.items()}
+        self._default = self._fit_vector(default or [0.0] * self.dims)
+        self._normalize = normalize
+
+    def embed(self, text: str) -> list[float]:
+        vec = [0.0] * self.dims
+        for token in re.findall(r"[A-Za-z0-9_]+", (text or "").lower()):
+            values = self._vocab.get(token, self._default)
+            for idx, value in enumerate(values[: self.dims]):
+                vec[idx] += float(value)
+        if not self._normalize:
+            return vec
+        norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+        return [v / norm for v in vec]
+
+    def _fit_vector(self, values: list[float]) -> list[float]:
+        out = [0.0] * self.dims
+        for idx, value in enumerate(values[: self.dims]):
+            out[idx] = float(value)
+        return out
+
+
 class LocalEmbedder:
     def __init__(self, model_name: str | None = None) -> None:
         self._model_name = str(model_name) if model_name else None
@@ -43,21 +74,30 @@ class LocalEmbedder:
                 self._bundle = None
             except Exception:
                 self._bundle = None
-        if self._bundle is None:
+        if self._bundle is None and not self._model_name:
             self._bundle = select_bundle("embedder")
         if self._bundle is not None and self._bundle.config.get("model_path") and not self._model_name:
-            self._model_name = str(self._bundle.config.get("model_path"))
+            raw_path = str(self._bundle.config.get("model_path"))
+            self._model_name = self._resolve_bundle_path(self._bundle.path, raw_path)
         dims = 384
         if self._bundle is not None:
             dims = int(self._bundle.config.get("dims", dims))
         self._fallback = HashEmbedder(dims=dims)
         self._backend = "hash"
         self._model = None
+        self._toy_embedder: ToyEmbedder | None = None
         self._model_error: str | None = None
         self._model_dims = dims
-        self._load_sentence_transformer()
+        handled = self._load_toy_embedder()
+        if not handled:
+            self._load_sentence_transformer()
 
     def embed(self, text: str) -> list[float]:
+        if self._toy_embedder is not None:
+            try:
+                return self._toy_embedder.embed(text or "")
+            except Exception:
+                return self._fallback.embed(text)
         if self._model is not None:
             try:
                 return self._embed_with_model(text or "")
@@ -120,6 +160,44 @@ class LocalEmbedder:
             self._model_dims = int(self._fallback.dims)
         self._backend = "sentence-transformers"
 
+    def _load_toy_embedder(self) -> bool:
+        if not self._model_name:
+            return False
+        path = Path(str(self._model_name))
+        if not path.exists() or path.is_dir():
+            return False
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return False
+        kind = str(payload.get("kind", "")).strip().lower()
+        if kind not in {"toy-embedder", "toy_embedder"}:
+            return False
+        dims = int(payload.get("dims", self._model_dims or 384))
+        raw_vocab = payload.get("vocab", {})
+        if not isinstance(raw_vocab, dict):
+            self._model_error = "toy_embedder_invalid_vocab"
+            return True
+        vocab: dict[str, list[float]] = {}
+        for key, value in raw_vocab.items():
+            if isinstance(value, list):
+                vocab[str(key)] = [float(v) for v in value]
+        default_vec = None
+        raw_default = payload.get("default")
+        if isinstance(raw_default, list):
+            default_vec = [float(v) for v in raw_default]
+        else:
+            raw_default = payload.get("__default__")
+            if isinstance(raw_default, list):
+                default_vec = [float(v) for v in raw_default]
+        normalize = bool(payload.get("normalize", True))
+        self._toy_embedder = ToyEmbedder(dims=dims, vocab=vocab, default=default_vec, normalize=normalize)
+        self._backend = "toy"
+        self._model_dims = dims
+        if self._fallback.dims != dims:
+            self._fallback = HashEmbedder(dims=dims)
+        return True
+
     def _embed_with_model(self, text: str) -> list[float]:
         model = self._model
         if model is None:
@@ -140,6 +218,13 @@ class LocalEmbedder:
         if isinstance(vecs, list) and vecs and isinstance(vecs[0], list):
             return [float(v) for v in vecs[0]]
         return self._fallback.embed(text)
+
+    @staticmethod
+    def _resolve_bundle_path(bundle_root: Path, model_path: str) -> str:
+        candidate = Path(model_path)
+        if not candidate.is_absolute():
+            candidate = bundle_root / candidate
+        return str(candidate)
 
     def _model_digest(self, model_name: str) -> str | None:
         path = Path(str(model_name))

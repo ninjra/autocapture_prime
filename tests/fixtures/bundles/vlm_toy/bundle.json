@@ -1,0 +1,6 @@
+{
+  "bundle_id": "vlm.toy",
+  "version": "1.0.0",
+  "kind": "vlm",
+  "model_path": "toy_vlm.json"
+}

@@ -14,14 +14,14 @@ Source of truth: `docs/reports/implementation_matrix.md` (mapped to `docs/bluepr
 - Add deterministic gates under `tools/` and wire them into `doctor`/`verify` so both local CLI and CI can enforce them.
 - For each phase, add a single phase gate that fails if any item in the phase is incomplete.
 - Gate outputs are captured under `docs/reports/gate_runs/` when run locally.
-- TODO: define the exact CLI entrypoints for `doctor`/`verify` phase gates once the gate scripts exist (fail closed).
+- Gate entrypoints: `python -m autocapture_nx doctor` and `python -m autocapture_nx verify <ledger|anchors|evidence>`, with `tools/run_all_tests.py` invoking doctor checks; CI can call the same entrypoints.
 
 ## Dependency strategy
-- Python has no lockfile today. Adopt a single hash-locked `requirements.lock` generated from `pyproject.toml` constraints.
+- Python has no lockfile today. Adopt a single hash-locked `requirements.lock.json` generated from `pyproject.toml` constraints.
 - Lock updates are explicit and documented; CI verifies lock drift.
 - Heavy ML deps (torch/transformers/sentence-transformers) move to optional extras with lazy imports inside plugins.
 - Offline constraints: any feature requiring missing deps must be optional and reported by doctor; the base system remains functional.
-- TODO: choose the lock tool available in this repo (e.g., pip-tools) and document the exact command in `docs/deps.md` once confirmed.
+- Lock tooling: `python tools/generate_dep_lock.py` writes `requirements.lock.json`; `python tools/gate_deps_lock.py` verifies the lock against `pyproject.toml`.
 
 ## Data migration strategy
 - Introduce explicit storage versioning and migrations for metadata/media layout changes.

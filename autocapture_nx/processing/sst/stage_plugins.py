@@ -194,7 +194,20 @@ class SSTStagePluginBase(PluginBase):
         }
 
     def run(self, inp: PluginInput, ctx: RunContext) -> PluginOutput:  # pragma: no cover - interface
-        raise NotImplementedError
+        ctx.logger(
+            f"sst.plugin.noop: {self.meta.id} run not implemented for stages {self.stage_names or ()}"
+        )
+        return PluginOutput(
+            items={},
+            metrics={},
+            diagnostics=[
+                {
+                    "kind": "sst.plugin_noop",
+                    "plugin": self.meta.id,
+                    "stages": list(self.stage_names or ()),
+                }
+            ],
+        )
 
 
 class PreprocessNormalizePlugin(SSTStagePluginBase):
