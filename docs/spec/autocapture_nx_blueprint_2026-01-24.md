@@ -1,17 +1,275 @@
 Source_Document: docs/spec/autocapture_nx_blueprint_2026-01-24.md
 
 # 1. Source_Index
-- SRC-001: [MISSING_VALUE]
+- SRC-001: I001 (Phase 1) - Eliminate floats from journal/ledger payloads
+- SRC-002: I002 (Phase 1) - Make backpressure actually affect capture rate
+- SRC-003: I003 (Phase 1) - Stop buffering whole segments in RAM; stream segments
+- SRC-004: I004 (Phase 1) - Do not write to storage from realtime audio callback
+- SRC-005: I005 (Phase 1) - Stop mutating primary evidence metadata during query
+- SRC-006: I006 (Phase 1) - Introduce globally unique run/session identifier; prefix all record IDs
+- SRC-007: I007 (Phase 1) - Make ledger writing thread-safe
+- SRC-008: I008 (Phase 1) - Make journal writing thread-safe; centralize sequences
+- SRC-009: I009 (Phase 1) - Fail closed if DPAPI protection fails when encryption_required
+- SRC-010: I010 (Phase 1) - Sort all store keys deterministically
+- SRC-011: I011 (Phase 1) - Use monotonic clocks for segment duration
+- SRC-012: I012 (Phase 1) - Align default config with implemented capture backend
+- SRC-013: I013 (Phase 1) - Remove hard-coded model paths; config-driven + portable
+- SRC-014: I014 (Phase 1) - Enforce plugin compat.requires_kernel / schema versions
+- SRC-015: I015 (Phase 1) - Verify contract lock at boot/doctor
+- SRC-016: I016 (Phase 2) - Split capture into grab -> encode/pack -> encrypt/write pipeline
+- SRC-017: I017 (Phase 2) - Bounded queues with explicit drop policies
+- SRC-018: I018 (Phase 2) - Replace zip-of-JPEG with real video container for primary artifact
+- SRC-019: I019 (Phase 2) - Add GPU-accelerated capture/encode backend (NVENC/DD)
+- SRC-020: I020 (Phase 2) - Record segment start/end timestamps
+- SRC-021: I021 (Phase 2) - Record capture parameters per segment
+- SRC-022: I022 (Phase 2) - Correlate frames with active window via synchronized timeline
+- SRC-023: I023 (Phase 2) - Add cursor/input correlation timeline references
+- SRC-024: I024 (Phase 2) - Disk pressure degrades capture quality before stopping
+- SRC-025: I025 (Phase 2) - Atomic segment writes (temp + os.replace)
+- SRC-026: I026 (Phase 3) - Default to SQLCipher for metadata when available
+- SRC-027: I027 (Phase 3) - Add DB indexes on ts_utc, record_type, run_id
+- SRC-028: I028 (Phase 3) - Store media in binary encrypted format (not base64 JSON)
+- SRC-029: I029 (Phase 3) - Stream encryption (avoid whole-segment in memory)
+- SRC-030: I030 (Phase 3) - Immutability/versioning in stores (put_new vs put_replace)
+- SRC-031: I031 (Phase 3) - Make record ID encoding reversible (no lossy mapping)
+- SRC-032: I032 (Phase 3) - Shard media/metadata directories by date/run
+- SRC-033: I033 (Phase 3) - Add per-run storage manifest records
+- SRC-034: I034 (Phase 3) - Configurable fsync policy (critical vs bulk)
+- SRC-035: I035 (Phase 4) - Replace full-scan query with tiered indexed retrieval
+- SRC-036: I036 (Phase 4) - Deterministic retrieval ordering (stable sort keys)
+- SRC-037: I037 (Phase 4) - Candidate-first extraction (retrieve then extract)
+- SRC-038: I038 (Phase 4) - Derived artifact records for OCR/VLM outputs
+- SRC-039: I039 (Phase 4) - Ledger query executions (inputs/outputs)
+- SRC-040: I040 (Phase 4) - Ledger extraction operations (inputs/outputs)
+- SRC-041: I041 (Phase 4) - Citations point to immutable evidence IDs + spans
+- SRC-042: I042 (Phase 4) - Citation resolver validates hashes/anchors/spans
+- SRC-043: I043 (Phase 4) - Fail closed if citations do not resolve
+- SRC-044: I044 (Phase 5) - Real scheduler plugin gates heavy work on user activity
+- SRC-045: I045 (Phase 5) - Input tracker exposes activity signals (not only journal)
+- SRC-046: I046 (Phase 5) - Capture emits telemetry (queues, drops, lag, CPU)
+- SRC-047: I047 (Phase 5) - Governor outputs feed backpressure and job admission
+- SRC-048: I048 (Phase 5) - Immediate ramp down on user input (cancel/deprioritize heavy jobs)
+- SRC-049: I049 (Phase 6) - Egress gateway must be subprocess-hosted; kernel network-denied
+- SRC-050: I050 (Phase 6) - Minimize inproc_allowlist; prefer subprocess hosting
+- SRC-051: I051 (Phase 6) - Capability bridging for subprocess plugins (real capability plumbing)
+- SRC-052: I052 (Phase 6) - Enforce least privilege per plugin manifest
+- SRC-053: I053 (Phase 6) - Enforce filesystem permission policy declared by plugins
+- SRC-054: I054 (Phase 6) - Strengthen Windows job object restrictions (limits)
+- SRC-055: I055 (Phase 6) - Sanitize subprocess env; pin caches; disable proxies
+- SRC-056: I056 (Phase 6) - Plugin RPC timeouts and watchdogs
+- SRC-057: I057 (Phase 6) - Max message size limits in plugin RPC protocol
+- SRC-058: I058 (Phase 6) - Harden hashing against symlinks / filesystem nondeterminism
+- SRC-059: I059 (Phase 6) - Secure vault file permissions (Windows ACLs)
+- SRC-060: I060 (Phase 6) - Separate keys by purpose (metadata/media/tokenization/anchor)
+- SRC-061: I061 (Phase 6) - Anchor signing (HMAC/signature) with separate key domain
+- SRC-062: I062 (Phase 6) - Add verify commands (ledger/anchors/evidence)
+- SRC-063: I063 (Phase 6) - Audit security events in ledger (key rotations, lock updates, config)
+- SRC-064: I064 (Phase 6) - Dependency pinning + hash checking (supply chain)
+- SRC-065: I065 (Phase 4) - Define canonical evidence model (EvidenceObject)
+- SRC-066: I066 (Phase 4) - Hash everything that matters (media/metadata/derived)
+- SRC-067: I067 (Phase 4) - Ledger every state transition
+- SRC-068: I068 (Phase 4) - Anchor on schedule (N entries or M minutes)
+- SRC-069: I069 (Phase 4) - Immutable per-run manifest (config+locks+versions)
+- SRC-070: I070 (Phase 4) - Citation objects carry verifiable pointers
+- SRC-071: I071 (Phase 4) - Citation resolver CLI/API
+- SRC-072: I072 (Phase 4) - Metadata immutable by default; derived never overwrites
+- SRC-073: I073 (Phase 4) - Persist derivation graphs (parent->child links)
+- SRC-074: I074 (Phase 4) - Record model identity for ML outputs
+- SRC-075: I075 (Phase 4) - Deterministic text normalization before hashing
+- SRC-076: I076 (Phase 4) - Proof bundles export (evidence + ledger slice + anchors)
+- SRC-077: I077 (Phase 4) - Replay mode validates citations without model calls
+- SRC-078: I078 (Phase 7) - FastAPI UX facade as canonical interface
+- SRC-079: I079 (Phase 7) - CLI parity: CLI calls shared UX facade functions
+- SRC-080: I080 (Phase 7) - Web Console UI (status/timeline/query/proof/plugins/keys)
+- SRC-081: I081 (Phase 7) - Alerts panel driven by journal events
+- SRC-082: I082 (Phase 7) - Local-only auth boundary (bind localhost + token)
+- SRC-083: I083 (Phase 7) - Websocket for live telemetry
+- SRC-084: I084 (Phase 0) - Split heavy ML dependencies into optional extras
+- SRC-085: I085 (Phase 0) - Make resource paths package-safe (no CWD dependence)
+- SRC-086: I086 (Phase 0) - Use OS-appropriate default data/config dirs (platformdirs)
+- SRC-087: I087 (Phase 0) - Package builtin plugins as package data
+- SRC-088: I088 (Phase 0) - Add reproducible dependency lockfile (hash-locked)
+- SRC-089: I089 (Phase 0) - Add canonical-json safety tests for journal/ledger payloads
+- SRC-090: I090 (Phase 0) - Add concurrency tests for ledger/journal append correctness
+- SRC-091: I091 (Phase 0) - Add golden chain test: ledger verify + anchor verify
+- SRC-092: I092 (Phase 0) - Add performance regression tests (capture latency/memory/query latency)
+- SRC-093: I093 (Phase 0) - Add security regression tests (DPAPI fail-closed, network guard, no raw egress)
+- SRC-094: I094 (Phase 0) - Static analysis: ruff + typing + vuln scan
+- SRC-095: I095 (Phase 0) - Doctor validates locks, storage, anchors, and network policy
+- SRC-096: I096 (Phase 1) - Fail loud on decrypt errors when encryption_required
+- SRC-097: I097 (Phase 1) - Add record type fields everywhere
+- SRC-098: I098 (Phase 1) - Add unified EventBuilder helper
+- SRC-099: I099 (Phase 1) - Stamp every journal event with run_id
+- SRC-100: I100 (Phase 1) - Cache policy snapshot hashing per run
+- SRC-101: I101 (Phase 3) - Add content_hash to metadata for every media put
+- SRC-102: I102 (Phase 3) - Track partial failures explicitly in journal/ledger
+- SRC-103: I103 (Phase 3) - Add segment sealing ledger entry after successful write
+- SRC-104: I104 (Phase 3) - Add startup recovery scanner to reconcile stores
+- SRC-105: I105 (Phase 2) - If keeping zips, use ZIP_STORED for JPEG frames
+- SRC-106: I106 (Phase 2) - If keeping zips, stream ZipFile writes to a real file
+- SRC-107: I107 (Phase 2) - Batch input events to reduce write overhead
+- SRC-108: I108 (Phase 3) - Add compact binary input log (derived) + JSON summary
+- SRC-109: I109 (Phase 2) - Add WASAPI loopback option for system audio capture
+- SRC-110: I110 (Phase 2) - Store audio as PCM/FLAC/Opus derived artifact
+- SRC-111: I111 (Phase 2) - Normalize active window process paths (device -> drive paths)
+- SRC-112: I112 (Phase 2) - Capture window.rect and monitor mapping
+- SRC-113: I113 (Phase 2) - Optional cursor position+shape capture
+- SRC-114: I114 (Phase 8) - Clipboard capture plugin (local-only, append-only)
+- SRC-115: I115 (Phase 8) - File activity capture plugin (USN journal / watcher)
+- SRC-116: I116 (Phase 5) - Model execution budgets per idle window
+- SRC-117: I117 (Phase 5) - Preemption/chunking for long jobs
+- SRC-118: I118 (Phase 4) - Index versioning for retrieval reproducibility
+- SRC-119: I119 (Phase 6) - Persist entity-tokenizer key id/version; version tokenization
+- SRC-120: I120 (Phase 6) - Ledger sanitized egress packets (hash + schema version)
+- SRC-121: I121 (Phase 7) - Egress approval workflow in UI
+- SRC-122: I122 (Phase 8) - Plugin hot-reload with hash verification and safe swap
+- SRC-123: I123 (Phase 1) - Write kernel boot ledger entry system.start
+- SRC-124: I124 (Phase 1) - Write kernel shutdown ledger entry system.stop
+- SRC-125: I125 (Phase 1) - Write crash ledger entry on next startup
+- SRC-126: I126 (Phase 0) - Make sha256_directory path sorting deterministic across OSes
+- SRC-127: I127 (Phase 4) - Record python/OS/package versions into run manifest
+- SRC-128: I128 (Phase 3) - Tooling to migrate data_dir safely (copy+verify, no delete)
+- SRC-129: I129 (Phase 3) - Disk usage forecasting (days remaining) + alerts
+- SRC-130: I130 (Phase 3) - Storage compaction for derived artifacts only
 
 # 2. Coverage_Map
-- SRC-001: [MISSING_VALUE]
+- SRC-001: FS-001
+- SRC-002: FS-001
+- SRC-003: FS-001
+- SRC-004: FS-001
+- SRC-005: FS-001
+- SRC-006: FS-001
+- SRC-007: FS-001
+- SRC-008: FS-001
+- SRC-009: FS-001
+- SRC-010: FS-001
+- SRC-011: FS-001
+- SRC-012: FS-001
+- SRC-013: FS-001
+- SRC-014: FS-001
+- SRC-015: FS-001
+- SRC-016: FS-001
+- SRC-017: FS-001
+- SRC-018: FS-001
+- SRC-019: FS-001
+- SRC-020: FS-001
+- SRC-021: FS-001
+- SRC-022: FS-001
+- SRC-023: FS-001
+- SRC-024: FS-001
+- SRC-025: FS-001
+- SRC-026: FS-001
+- SRC-027: FS-001
+- SRC-028: FS-001
+- SRC-029: FS-001
+- SRC-030: FS-001
+- SRC-031: FS-001
+- SRC-032: FS-001
+- SRC-033: FS-001
+- SRC-034: FS-001
+- SRC-035: FS-001
+- SRC-036: FS-001
+- SRC-037: FS-001
+- SRC-038: FS-001
+- SRC-039: FS-001
+- SRC-040: FS-001
+- SRC-041: FS-001
+- SRC-042: FS-001
+- SRC-043: FS-001
+- SRC-044: FS-001
+- SRC-045: FS-001
+- SRC-046: FS-001
+- SRC-047: FS-001
+- SRC-048: FS-001
+- SRC-049: FS-001
+- SRC-050: FS-001
+- SRC-051: FS-001
+- SRC-052: FS-001
+- SRC-053: FS-001
+- SRC-054: FS-001
+- SRC-055: FS-001
+- SRC-056: FS-001
+- SRC-057: FS-001
+- SRC-058: FS-001
+- SRC-059: FS-001
+- SRC-060: FS-001
+- SRC-061: FS-001
+- SRC-062: FS-001
+- SRC-063: FS-001
+- SRC-064: FS-001
+- SRC-065: FS-001
+- SRC-066: FS-001
+- SRC-067: FS-001
+- SRC-068: FS-001
+- SRC-069: FS-001
+- SRC-070: FS-001
+- SRC-071: FS-001
+- SRC-072: FS-001
+- SRC-073: FS-001
+- SRC-074: FS-001
+- SRC-075: FS-001
+- SRC-076: FS-001
+- SRC-077: FS-001
+- SRC-078: FS-001
+- SRC-079: FS-001
+- SRC-080: FS-001
+- SRC-081: FS-001
+- SRC-082: FS-001
+- SRC-083: FS-001
+- SRC-084: FS-001
+- SRC-085: FS-001
+- SRC-086: FS-001
+- SRC-087: FS-001
+- SRC-088: FS-001
+- SRC-089: FS-001
+- SRC-090: FS-001
+- SRC-091: FS-001
+- SRC-092: FS-001
+- SRC-093: FS-001
+- SRC-094: FS-001
+- SRC-095: FS-001
+- SRC-096: FS-001
+- SRC-097: FS-001
+- SRC-098: FS-001
+- SRC-099: FS-001
+- SRC-100: FS-001
+- SRC-101: FS-001
+- SRC-102: FS-001
+- SRC-103: FS-001
+- SRC-104: FS-001
+- SRC-105: FS-001
+- SRC-106: FS-001
+- SRC-107: FS-001
+- SRC-108: FS-001
+- SRC-109: FS-001
+- SRC-110: FS-001
+- SRC-111: FS-001
+- SRC-112: FS-001
+- SRC-113: FS-001
+- SRC-114: FS-001
+- SRC-115: FS-001
+- SRC-116: FS-001
+- SRC-117: FS-001
+- SRC-118: FS-001
+- SRC-119: FS-001
+- SRC-120: FS-001
+- SRC-121: FS-001
+- SRC-122: FS-001
+- SRC-123: FS-001
+- SRC-124: FS-001
+- SRC-125: FS-001
+- SRC-126: FS-001
+- SRC-127: FS-001
+- SRC-128: FS-001
+- SRC-129: FS-001
+- SRC-130: FS-001
 
 # 3. Modules
-- MOD-001: [MISSING_VALUE]
-  Sources: [SRC-001]
+- MOD-001: Blueprint coverage gate
+  Sources: [SRC-001, SRC-002, SRC-003, SRC-004, SRC-005, SRC-006, SRC-007, SRC-008, SRC-009, SRC-010, SRC-011, SRC-012, SRC-013, SRC-014, SRC-015, SRC-016, SRC-017, SRC-018, SRC-019, SRC-020, SRC-021, SRC-022, SRC-023, SRC-024, SRC-025, SRC-026, SRC-027, SRC-028, SRC-029, SRC-030, SRC-031, SRC-032, SRC-033, SRC-034, SRC-035, SRC-036, SRC-037, SRC-038, SRC-039, SRC-040, SRC-041, SRC-042, SRC-043, SRC-044, SRC-045, SRC-046, SRC-047, SRC-048, SRC-049, SRC-050, SRC-051, SRC-052, SRC-053, SRC-054, SRC-055, SRC-056, SRC-057, SRC-058, SRC-059, SRC-060, SRC-061, SRC-062, SRC-063, SRC-064, SRC-065, SRC-066, SRC-067, SRC-068, SRC-069, SRC-070, SRC-071, SRC-072, SRC-073, SRC-074, SRC-075, SRC-076, SRC-077, SRC-078, SRC-079, SRC-080, SRC-081, SRC-082, SRC-083, SRC-084, SRC-085, SRC-086, SRC-087, SRC-088, SRC-089, SRC-090, SRC-091, SRC-092, SRC-093, SRC-094, SRC-095, SRC-096, SRC-097, SRC-098, SRC-099, SRC-100, SRC-101, SRC-102, SRC-103, SRC-104, SRC-105, SRC-106, SRC-107, SRC-108, SRC-109, SRC-110, SRC-111, SRC-112, SRC-113, SRC-114, SRC-115, SRC-116, SRC-117, SRC-118, SRC-119, SRC-120, SRC-121, SRC-122, SRC-123, SRC-124, SRC-125, SRC-126, SRC-127, SRC-128, SRC-129, SRC-130]
 
-- FS-001: [MISSING_VALUE]
-  Sources: [SRC-001]
+- FS-001: Blueprint gap tracker (I001-I130)
+  Sources: [SRC-001, SRC-002, SRC-003, SRC-004, SRC-005, SRC-006, SRC-007, SRC-008, SRC-009, SRC-010, SRC-011, SRC-012, SRC-013, SRC-014, SRC-015, SRC-016, SRC-017, SRC-018, SRC-019, SRC-020, SRC-021, SRC-022, SRC-023, SRC-024, SRC-025, SRC-026, SRC-027, SRC-028, SRC-029, SRC-030, SRC-031, SRC-032, SRC-033, SRC-034, SRC-035, SRC-036, SRC-037, SRC-038, SRC-039, SRC-040, SRC-041, SRC-042, SRC-043, SRC-044, SRC-045, SRC-046, SRC-047, SRC-048, SRC-049, SRC-050, SRC-051, SRC-052, SRC-053, SRC-054, SRC-055, SRC-056, SRC-057, SRC-058, SRC-059, SRC-060, SRC-061, SRC-062, SRC-063, SRC-064, SRC-065, SRC-066, SRC-067, SRC-068, SRC-069, SRC-070, SRC-071, SRC-072, SRC-073, SRC-074, SRC-075, SRC-076, SRC-077, SRC-078, SRC-079, SRC-080, SRC-081, SRC-082, SRC-083, SRC-084, SRC-085, SRC-086, SRC-087, SRC-088, SRC-089, SRC-090, SRC-091, SRC-092, SRC-093, SRC-094, SRC-095, SRC-096, SRC-097, SRC-098, SRC-099, SRC-100, SRC-101, SRC-102, SRC-103, SRC-104, SRC-105, SRC-106, SRC-107, SRC-108, SRC-109, SRC-110, SRC-111, SRC-112, SRC-113, SRC-114, SRC-115, SRC-116, SRC-117, SRC-118, SRC-119, SRC-120, SRC-121, SRC-122, SRC-123, SRC-124, SRC-125, SRC-126, SRC-127, SRC-128, SRC-129, SRC-130]
   Sample_Table:
   | field_a | field_b |
   | row1_a  | row1_b  |
@@ -19,5 +277,5 @@ Source_Document: docs/spec/autocapture_nx_blueprint_2026-01-24.md
   | row3_a  | row3_b  |
 
 # 4. ADRs
-- ADR-001: [MISSING_VALUE]
+- ADR-001: Blueprint coverage policy
   Sources: [SRC-001]

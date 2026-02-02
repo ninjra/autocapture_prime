@@ -2,8 +2,11 @@ const state = {
   token: localStorage.getItem("acToken") || "",
   ws: null,
   settingsFields: [],
+  settingsDefaults: {},
+  settingsCurrent: {},
   settingsDirty: {},
   settingsGroupOpen: {},
+  settingsShowAll: localStorage.getItem("acSettingsShowAll") === "true",
   pluginDirty: {},
   activePluginId: null,
   activePluginGroupId: null,
@@ -68,9 +71,11 @@ const configOutput = qs("configOutput");
 const egressList = qs("egressList");
 const settingsList = qs("settingsList");
 const settingsFilter = qs("settingsFilter");
+const settingsShowAll = qs("settingsShowAll");
 const settingsApply = qs("settingsApply");
 const settingsReload = qs("settingsReload");
 const settingsStatus = qs("settingsStatus");
+const presetStatus = qs("presetStatus");
 const captureEssentialsList = qs("captureEssentialsList");
 const captureEssentialsApply = qs("captureEssentialsApply");
 const captureEssentialsReload = qs("captureEssentialsReload");
@@ -201,6 +206,16 @@ function setSettingsStatusText(text) {
   if (settingsStatus) settingsStatus.textContent = text;
   if (captureEssentialsStatus) captureEssentialsStatus.textContent = text;
   if (storageEssentialsStatus) storageEssentialsStatus.textContent = text;
+}
+
+function setQuickStatusText(text, warn = false) {
+  if (!quickPauseStatus) return;
+  quickPauseStatus.textContent = text || "";
+  quickPauseStatus.classList.toggle("warn", Boolean(warn));
+}
+
+function setPresetStatus(text) {
+  if (presetStatus) presetStatus.textContent = text || "";
 }
 
 function showPanel(name) {
@@ -531,6 +546,38 @@ const SETTINGS_GROUPS = [
     summary: ["time.timezone", "runtime.timezone"],
   },
 ];
+
+const PRESET_PATCHES = {
+  balanced: {},
+  high_fidelity: {
+    capture: {
+      video: {
+        fps_target: 30,
+        jpeg_quality: 95,
+      },
+    },
+    processing: {
+      idle: {
+        max_concurrency_cpu: 2,
+        max_concurrency_gpu: 1,
+      },
+    },
+  },
+  low_power: {
+    capture: {
+      video: {
+        fps_target: 10,
+        jpeg_quality: 80,
+      },
+    },
+    processing: {
+      idle: {
+        max_concurrency_cpu: 1,
+        max_concurrency_gpu: 0,
+      },
+    },
+  },
+};
 
 const CAPTURE_ESSENTIAL_FIELDS = [
   "capture.auto_start",
@@ -1376,12 +1423,44 @@ async function loadJepaReport(model) {
 }
 
 async function postConfigPatch(patch) {
-  await apiFetch("/api/config", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ patch }),
-  });
-  await refreshConfig();
+  let resp;
+  try {
+    resp = await apiFetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ patch }),
+    });
+  } catch (err) {
+    const detail = err && err.message ? err.message : String(err);
+    return { ok: false, status: 0, data: null, error: `network_error: ${detail}` };
+  }
+  const status = Number(resp.status || 0);
+  const data = await readJson(resp);
+  let error = null;
+  if (!resp.ok || (data && data.error)) {
+    const detail = data && data.error ? data.error : resp.statusText || "request_failed";
+    error = status ? `HTTP ${status}: ${detail}` : detail;
+  }
+  return { ok: resp.ok && !error, status, data, error };
+}
+
+async function applyPreset(presetId) {
+  const patch = PRESET_PATCHES[presetId];
+  if (!patch) return;
+  setPresetStatus("Applying preset...");
+  try {
+    const result = await postConfigPatch(patch);
+    if (!result.ok) {
+      setPresetStatus(`Preset failed: ${result.error || "request_failed"}`);
+      return;
+    }
+    setPresetStatus("Preset applied");
+    await refreshConfig();
+    await refreshSettings();
+  } catch (err) {
+    const detail = err && err.message ? err.message : String(err);
+    setPresetStatus(`Preset failed: ${detail}`);
+  }
 }
 
 function updateQuickControls() {
@@ -1391,6 +1470,7 @@ function updateQuickControls() {
     quickCaptureToggle.disabled = !controlsEnabled;
   }
   if (quickPauseStatus) {
+    quickPauseStatus.classList.toggle("warn", false);
     if (state.status.paused_until_utc) {
       quickPauseStatus.textContent = `Paused until ${formatTs(state.status.paused_until_utc)}`;
     } else {
@@ -2086,6 +2166,45 @@ function buildPatch(dirty) {
   return patch;
 }
 
+function getByPath(obj, path) {
+  if (!obj || typeof obj !== "object") return undefined;
+  const parts = (path || "").split(".");
+  let cursor = obj;
+  for (const part of parts) {
+    if (!part) continue;
+    if (!cursor || typeof cursor !== "object") return undefined;
+    cursor = cursor[part];
+  }
+  return cursor;
+}
+
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (!deepEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  if (a && b && typeof a === "object") {
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+    if (keysA.length !== keysB.length) return false;
+    keysA.sort();
+    keysB.sort();
+    for (let i = 0; i < keysA.length; i += 1) {
+      if (keysA[i] !== keysB[i]) return false;
+    }
+    for (const key of keysA) {
+      if (!deepEqual(a[key], b[key])) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
 function inferType(value) {
   if (typeof value === "boolean") return "boolean";
   if (typeof value === "number") return Number.isInteger(value) ? "integer" : "number";
@@ -2263,6 +2382,8 @@ async function refreshSettings() {
   const resp = await apiFetch("/api/settings/schema");
   const data = await readJson(resp);
   state.settingsFields = data.fields || [];
+  state.settingsDefaults = data.defaults || {};
+  state.settingsCurrent = data.current || {};
   state.settingsDirty = {};
   renderSettings();
   renderCaptureEssentials();
@@ -2272,25 +2393,36 @@ async function refreshSettings() {
 function renderSettings() {
   if (!settingsList) return;
   const query = (settingsFilter?.value || "").trim();
-  const fields = state.settingsFields.map((field) => ({
-    ...field,
-    label: field.label || prettyLabel(field.path || ""),
-  }));
+  const fields = state.settingsFields.map((field) => {
+    const path = field.path || "";
+    const defaultValue = getByPath(state.settingsDefaults, path);
+    const isOverride = !deepEqual(field.value, defaultValue);
+    return {
+      ...field,
+      label: field.label || prettyLabel(path),
+      defaultValue,
+      isOverride,
+    };
+  });
+  let visibleFields = fields;
+  if (!state.settingsShowAll) {
+    visibleFields = fields.filter(
+      (field) => field.isOverride || Object.prototype.hasOwnProperty.call(state.settingsDirty, field.path)
+    );
+  }
   settingsList.innerHTML = "";
   if (query) {
-    const filtered = filterFields(fields, query);
-    if (!filtered.length) {
-      settingsList.textContent = "No settings found";
-      return;
-    }
-    const fragment = document.createDocumentFragment();
-    filtered.forEach((field) => {
-      renderField(fragment, field, state.settingsDirty);
-    });
-    settingsList.appendChild(fragment);
+    visibleFields = filterFields(visibleFields, query);
+  }
+  if (!visibleFields.length) {
+    settingsList.textContent = query
+      ? "No settings found"
+      : state.settingsShowAll
+        ? "No settings found"
+        : "No overrides yet";
     return;
   }
-  const groups = buildSettingsGroups(fields);
+  const groups = buildSettingsGroups(visibleFields);
   if (!groups.length) {
     settingsList.textContent = "No settings found";
     return;
@@ -2308,8 +2440,16 @@ function renderSettings() {
     const desc = document.createElement("div");
     desc.className = "group-meta";
     desc.textContent = group.description || "";
+    const actions = document.createElement("div");
+    actions.className = "group-actions";
+    const resetBtn = document.createElement("button");
+    resetBtn.className = "ghost";
+    resetBtn.textContent = "Reset group";
+    resetBtn.addEventListener("click", () => resetSettingsGroup(group.id));
+    actions.appendChild(resetBtn);
     header.appendChild(title);
     header.appendChild(desc);
+    header.appendChild(actions);
     card.appendChild(header);
 
     if (group.summaryFields.length) {
@@ -2350,6 +2490,24 @@ function renderSettings() {
     fragment.appendChild(card);
   });
   settingsList.appendChild(fragment);
+}
+
+function resetSettingsGroup(groupId) {
+  if (!groupId) return;
+  const defaults = state.settingsDefaults || {};
+  const allFields = state.settingsFields || [];
+  allFields.forEach((field) => {
+    if (!field || !field.path) return;
+    if (settingsGroupForPath(field.path) !== groupId) return;
+    const defValue = getByPath(defaults, field.path);
+    if (typeof defValue === "undefined") {
+      delete state.settingsDirty[field.path];
+    } else {
+      state.settingsDirty[field.path] = defValue;
+    }
+  });
+  setSettingsStatusText("Group reset to defaults (pending apply)");
+  renderSettings();
 }
 
 function renderCaptureEssentials() {
@@ -2574,6 +2732,15 @@ if (settingsFilter) {
   settingsFilter.addEventListener("input", renderSettings);
 }
 
+if (settingsShowAll) {
+  settingsShowAll.checked = Boolean(state.settingsShowAll);
+  settingsShowAll.addEventListener("change", () => {
+    state.settingsShowAll = settingsShowAll.checked;
+    localStorage.setItem("acSettingsShowAll", state.settingsShowAll ? "true" : "false");
+    renderSettings();
+  });
+}
+
 if (settingsApply) {
   settingsApply.addEventListener("click", applySettings);
 }
@@ -2581,6 +2748,10 @@ if (settingsApply) {
 if (settingsReload) {
   settingsReload.addEventListener("click", refreshSettings);
 }
+
+document.querySelectorAll(".preset-card").forEach((btn) => {
+  btn.addEventListener("click", () => applyPreset(btn.dataset.preset));
+});
 
 if (captureEssentialsApply) {
   captureEssentialsApply.addEventListener("click", applySettings);
@@ -2651,13 +2822,19 @@ quickResume?.addEventListener("click", async () => {
 
 quickPrivacyMode?.addEventListener("change", async () => {
   const baselineKey = "acPrivacyBaseline";
+  const targetEnabled = quickPrivacyMode.checked;
   if (quickPrivacyMode.checked) {
     const baseline = {
       egress_enabled: state.config.privacy?.egress?.enabled,
       cloud_enabled: state.config.privacy?.cloud?.enabled,
     };
+    const result = await postConfigPatch({ privacy: { egress: { enabled: false }, cloud: { enabled: false } } });
+    if (!result.ok) {
+      setQuickStatusText(`Privacy mode failed: ${result.error || "request_failed"}`, true);
+      quickPrivacyMode.checked = !targetEnabled;
+      return;
+    }
     localStorage.setItem(baselineKey, JSON.stringify(baseline));
-    await postConfigPatch({ privacy: { egress: { enabled: false }, cloud: { enabled: false } } });
   } else {
     let baseline = null;
     try {
@@ -2667,7 +2844,12 @@ quickPrivacyMode?.addEventListener("change", async () => {
     }
     const egressEnabled = baseline && typeof baseline.egress_enabled === "boolean" ? baseline.egress_enabled : true;
     const cloudEnabled = baseline && typeof baseline.cloud_enabled === "boolean" ? baseline.cloud_enabled : false;
-    await postConfigPatch({ privacy: { egress: { enabled: egressEnabled }, cloud: { enabled: cloudEnabled } } });
+    const result = await postConfigPatch({ privacy: { egress: { enabled: egressEnabled }, cloud: { enabled: cloudEnabled } } });
+    if (!result.ok) {
+      setQuickStatusText(`Privacy mode failed: ${result.error || "request_failed"}`, true);
+      quickPrivacyMode.checked = !targetEnabled;
+      return;
+    }
   }
   refreshConfig();
 });
@@ -2675,6 +2857,7 @@ quickPrivacyMode?.addEventListener("change", async () => {
 quickFidelityMode?.addEventListener("change", async () => {
   const modeKey = "acFidelityMode";
   const baselineKey = "acFidelityBaseline";
+  const targetEnabled = quickFidelityMode.checked;
   if (quickFidelityMode.checked) {
     const video = state.config.capture?.video || {};
     const activity = video.activity || {};
@@ -2689,13 +2872,11 @@ quickFidelityMode?.addEventListener("change", async () => {
       activity_idle_quality: activity.idle_jpeg_quality,
       activity_preserve: activity.preserve_quality,
     };
-    localStorage.setItem(baselineKey, JSON.stringify(baseline));
-    localStorage.setItem(modeKey, "true");
     const backpressure = state.config.backpressure || {};
     const maxFps = backpressure.max_fps || video.fps_target || 30;
     const maxBitrate = backpressure.max_bitrate_kbps || activity.active_bitrate_kbps || 8000;
     const highQuality = Math.max(video.jpeg_quality || 90, 95);
-    await postConfigPatch({
+    const result = await postConfigPatch({
       capture: {
         video: {
           fps_target: maxFps,
@@ -2712,6 +2893,13 @@ quickFidelityMode?.addEventListener("change", async () => {
         },
       },
     });
+    if (!result.ok) {
+      setQuickStatusText(`Fidelity mode failed: ${result.error || "request_failed"}`, true);
+      quickFidelityMode.checked = !targetEnabled;
+      return;
+    }
+    localStorage.setItem(baselineKey, JSON.stringify(baseline));
+    localStorage.setItem(modeKey, "true");
   } else {
     let baseline = null;
     try {
@@ -2719,9 +2907,8 @@ quickFidelityMode?.addEventListener("change", async () => {
     } catch (err) {
       baseline = null;
     }
-    localStorage.setItem(modeKey, "false");
     if (baseline) {
-      await postConfigPatch({
+      const result = await postConfigPatch({
         capture: {
           video: {
             fps_target: baseline.fps_target,
@@ -2738,7 +2925,14 @@ quickFidelityMode?.addEventListener("change", async () => {
           },
         },
       });
+      if (!result.ok) {
+        setQuickStatusText(`Fidelity mode failed: ${result.error || "request_failed"}`, true);
+        quickFidelityMode.checked = !targetEnabled;
+        localStorage.setItem(modeKey, "true");
+        return;
+      }
     }
+    localStorage.setItem(modeKey, "false");
   }
   refreshConfig();
 });

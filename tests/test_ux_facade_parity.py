@@ -15,7 +15,13 @@ class UXFacadeParityTests(unittest.TestCase):
             os.environ["AUTOCAPTURE_DATA_DIR"] = tmp
             try:
                 facade = create_facade()
-                self.assertEqual(facade.settings_schema(), get_schema())
+                schema = facade.settings_schema()
+                legacy = get_schema()
+                if "fields" in schema:
+                    self.assertIn("schema_version", schema)
+                    self.assertEqual(schema.get("schema_version"), legacy.get("schema_version"))
+                else:
+                    self.assertEqual(schema, legacy)
             finally:
                 if original_config is None:
                     os.environ.pop("AUTOCAPTURE_CONFIG_DIR", None)

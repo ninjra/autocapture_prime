@@ -255,6 +255,9 @@ class IdleProcessor:
         extractors = idle_cfg.get("extractors", {})
         allow_ocr = bool(extractors.get("ocr", True))
         allow_vlm = bool(extractors.get("vlm", True))
+        max_gpu = int(idle_cfg.get("max_concurrency_gpu", 1) or 0)
+        if max_gpu <= 0:
+            allow_vlm = False
         sst_cfg = self._config.get("processing", {}).get("sst", {})
         pipeline_enabled = bool(sst_cfg.get("enabled", True)) and self._pipeline is not None
         start_mono = time.monotonic()
@@ -305,6 +308,15 @@ class IdleProcessor:
                 stats.skipped += 1
                 last_record_id = source_record_id
                 continue
+            if isinstance(record, dict):
+                privacy_excluded = bool(
+                    record.get("privacy_excluded")
+                    or (isinstance(record.get("privacy"), dict) and record.get("privacy", {}).get("excluded"))
+                )
+                if privacy_excluded:
+                    stats.skipped += 1
+                    last_record_id = source_record_id
+                    continue
             stats.scanned += 1
 
             blob = _get_media_blob(self._media, record_id)

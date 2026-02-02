@@ -435,7 +435,7 @@ class UXFacade:
     def settings_schema(self) -> dict[str, Any]:
         from autocapture_nx.ux.settings_schema import build_settings_schema
 
-        return build_settings_schema(self._paths.schema_path, self._config)
+        return build_settings_schema(self._paths.schema_path, self._paths.default_path, self._config)
 
     def config_reset(self) -> None:
         reset_user_config(self._paths)

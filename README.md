@@ -8,6 +8,8 @@ python3 -m autocapture_nx doctor
 python3 -m autocapture_nx config show
 ```
 
+Note: `autocapture_nx` is the canonical runtime. Legacy `autocapture` UX facades are deprecated and should not be used for new work.
+
 ## Tests
 Linux/WSL:
 ```bash

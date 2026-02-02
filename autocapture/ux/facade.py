@@ -1,7 +1,8 @@
-"""UX facade for CLI + Web parity."""
+"""Legacy UX facade for CLI + Web parity (deprecated; use autocapture_nx.ux.facade)."""
 
 from __future__ import annotations
 
+import warnings
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,9 +20,24 @@ from autocapture.ux.models import DoctorCheck, DoctorReport
 from autocapture.ux.settings_schema import get_schema
 from autocapture.ux.plugin_options import build_plugin_options
 
+_DEPRECATION_WARNED = False
+
+
+def _warn_legacy() -> None:
+    global _DEPRECATION_WARNED
+    if _DEPRECATION_WARNED:
+        return
+    warnings.warn(
+        "autocapture.ux.facade is deprecated; use autocapture_nx.ux.facade instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    _DEPRECATION_WARNED = True
+
 
 class UXFacade:
     def __init__(self, config: dict[str, Any]) -> None:
+        _warn_legacy()
         self.config = config
         self._retriever = TieredRetriever(
             LexicalIndex(config.get("storage", {}).get("lexical_path", "data/lexical.db")),
@@ -159,5 +175,6 @@ class UXFacade:
 
 
 def create_facade() -> UXFacade:
+    _warn_legacy()
     config = load_config(default_config_paths(), safe_mode=False)
     return UXFacade(config)

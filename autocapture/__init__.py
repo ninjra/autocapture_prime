@@ -1,4 +1,4 @@
-"""Autocapture MX package (additive to NX)."""
+"""Autocapture MX package (legacy facade; NX is the canonical runtime)."""
 
 from __future__ import annotations
 
