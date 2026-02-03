@@ -69,6 +69,7 @@ class RuntimeConductor:
         self._resume_requested_at: float | None = None
         self._suspend_acked = False
         self._resume_acked = False
+        self._fixture_override_audited = False
         telemetry_cfg = self._config.get("runtime", {}).get("telemetry", {})
         self._telemetry_enabled = bool(telemetry_cfg.get("enabled", True))
         self._telemetry_interval_s = float(telemetry_cfg.get("emit_interval_s", 5))
@@ -161,6 +162,7 @@ class RuntimeConductor:
         suspend_workers = bool(enforce_cfg.get("suspend_workers", True))
         activity_score = 0.0
         activity_recent = False
+        fixture_override = bool(enforce_cfg.get("fixture_override", False))
         if self._input_tracker is not None and hasattr(self._input_tracker, "activity_signal"):
             try:
                 signal = self._input_tracker.activity_signal()
@@ -171,6 +173,22 @@ class RuntimeConductor:
                 user_active = bool(signal.get("user_active", user_active))
                 activity_score = float(signal.get("activity_score", 0.0) or 0.0)
                 activity_recent = bool(signal.get("recent_activity", False))
+        if fixture_override:
+            idle_seconds = float("inf")
+            user_active = False
+            activity_score = 0.0
+            activity_recent = False
+            if not self._fixture_override_audited:
+                self._fixture_override_audited = True
+                append_audit_event(
+                    action="runtime.fixture_override",
+                    actor="runtime.conductor",
+                    outcome="ok",
+                    details={
+                        "run_id": str(self._config.get("runtime", {}).get("run_id") or ""),
+                        "reason": str(enforce_cfg.get("fixture_override_reason") or ""),
+                    },
+                )
         signals = {
             "idle_seconds": idle_seconds,
             "user_active": user_active,
@@ -180,6 +198,8 @@ class RuntimeConductor:
             "activity_score": activity_score,
             "activity_recent": activity_recent,
         }
+        if fixture_override:
+            signals["fixture_override"] = True
         resources = sample_resources()
         if resources.cpu_utilization is not None:
             signals["cpu_utilization"] = resources.cpu_utilization

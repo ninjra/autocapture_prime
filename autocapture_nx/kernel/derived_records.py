@@ -22,14 +22,37 @@ def build_span_ref(source_record: dict[str, Any], source_id: str) -> dict[str, A
     return span_ref
 
 
+def _provider_model_override(models_cfg: dict[str, Any], provider_id: str) -> dict[str, Any] | None:
+    providers = models_cfg.get("providers")
+    if not isinstance(providers, dict):
+        return None
+    raw = providers.get(provider_id)
+    if not isinstance(raw, dict):
+        return None
+    return raw
+
+
 def model_identity(kind: str, provider_id: str, config: dict[str, Any]) -> dict[str, Any]:
     model_id = provider_id
     models_cfg = config.get("models", {}) if isinstance(config, dict) else {}
-    if kind == "vlm" and models_cfg.get("vlm_path"):
-        model_id = str(models_cfg.get("vlm_path"))
-    if kind == "ocr" and models_cfg.get("ocr_path"):
-        model_id = str(models_cfg.get("ocr_path"))
+    override = _provider_model_override(models_cfg, provider_id)
+    if override:
+        override_id = override.get("model_id") or override.get("model_path")
+        if override_id:
+            model_id = str(override_id)
+    else:
+        if kind == "vlm" and models_cfg.get("vlm_path"):
+            model_id = str(models_cfg.get("vlm_path"))
+        if kind == "ocr" and models_cfg.get("ocr_path"):
+            model_id = str(models_cfg.get("ocr_path"))
     params = {"provider_id": provider_id}
+    if override:
+        if override.get("revision"):
+            params["revision"] = override.get("revision")
+        if override.get("model_path"):
+            params["path"] = override.get("model_path")
+        if override.get("files"):
+            params["files"] = override.get("files")
     digest_seed = json.dumps({"model_id": model_id, "provider_id": provider_id, "params": params}, sort_keys=True)
     return {
         "model_id": model_id,
@@ -69,6 +92,8 @@ def build_text_record(
         return None
     span_ref = build_span_ref(source_record, source_id)
     identity = model_identity(kind, provider_id, config)
+    models_cfg = config.get("models", {}) if isinstance(config, dict) else {}
+    override = _provider_model_override(models_cfg, provider_id)
     payload: dict[str, Any] = {
         "record_type": f"derived.text.{kind}",
         "run_id": (source_record.get("run_id") or source_id.split("/", 1)[0]),
@@ -87,6 +112,13 @@ def build_text_record(
         "parameters": identity["parameters"],
         "content_hash": hash_text(normalized_text),
     }
+    if override:
+        if override.get("revision"):
+            payload["model_revision"] = override.get("revision")
+        if override.get("model_path"):
+            payload["model_path"] = override.get("model_path")
+        if override.get("files"):
+            payload["model_files"] = override.get("files")
     if normalized_text != text:
         payload["text_raw"] = text
     payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})

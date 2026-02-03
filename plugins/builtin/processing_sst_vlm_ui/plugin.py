@@ -8,6 +8,7 @@ from typing import Any
 from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 from autocapture_nx.processing.sst.utils import clamp_bbox
+from autocapture_nx.kernel.providers import capability_providers
 
 
 class VLMUIStageHook(PluginBase):
@@ -59,19 +60,7 @@ def create_plugin(plugin_id: str, context: PluginContext) -> VLMUIStageHook:
 
 
 def _providers(capability: Any | None) -> list[tuple[str, Any]]:
-    if capability is None:
-        return []
-    target = capability
-    if hasattr(target, "target"):
-        target = getattr(target, "target")
-    if hasattr(target, "items"):
-        try:
-            items = list(target.items())
-        except Exception:
-            items = []
-        if items:
-            return [(str(pid), provider) for pid, provider in items]
-    return [("vision.extractor", capability)]
+    return capability_providers(capability, "vision.extractor")
 
 
 def _parse_element_graph(

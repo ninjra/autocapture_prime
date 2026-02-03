@@ -1,0 +1,15 @@
+﻿{
+    "generated_utc":  "2026-02-03T15:33:53",
+    "root_dir":  "D:\\\\autocapture\\\\models",
+    "schema_version":  1,
+    "manifest_path":  "D:\\projects\\autocapture_prime\\tools\\\\model_manifest.json",
+    "results":  {
+                    "huggingface":  [
+
+                                    ],
+                    "vllm":  [
+
+                             ]
+                },
+    "manifest_sha256":  "45731E1B715ACF8916C80A7D8D84EC6DED5340F11755E7E3405CB899748705E9"
+}

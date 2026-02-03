@@ -1372,20 +1372,7 @@ class UXFacade:
         allow_vlm: bool = True,
         force: bool = False,
     ) -> dict[str, Any]:
-        def _capability_providers(capability: Any | None, default_provider: str) -> list[tuple[str, Any]]:
-            if capability is None:
-                return []
-            target = capability
-            if hasattr(target, "target"):
-                target = getattr(target, "target")
-            if hasattr(target, "items"):
-                try:
-                    items = target.items()
-                    if items:
-                        return list(items)
-                except Exception:
-                    pass
-            return [(default_provider, capability)]
+        from autocapture_nx.kernel.providers import capability_providers as _capability_providers
 
         with self._kernel_mgr.session() as system:
             if system is None:

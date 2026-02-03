@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "root_dir": "D:\\autocapture\\models",
+  "huggingface": {
+    "models": [
+      {
+        "id": "deepseek-ai/DeepSeek-OCR-2",
+        "kind": "vlm",
+        "required": true,
+        "provider_id": "builtin.vlm.deepseek_ocr2",
+        "candidates": [
+          "deepseek-ai/DeepSeek-OCR-2"
+        ],
+        "subdir": "deepseek-ocr2",
+        "revision": "",
+        "notes": "User-specified deepseek-ocr2 mapped to deepseek-ai/DeepSeek-OCR-2."
+      },
+      {
+        "id": "Qwen/Qwen2-VL-7B-Instruct",
+        "kind": "vlm",
+        "required": false,
+        "provider_id": "builtin.vlm.qwen2_vl_7b",
+        "subdir": "qwen2-vl-7b-instruct",
+        "revision": ""
+      },
+      {
+        "id": "Qwen/Qwen2-VL-2B-Instruct",
+        "kind": "vlm",
+        "required": false,
+        "provider_id": "builtin.vlm.qwen2_vl_2b",
+        "subdir": "qwen2-vl-2b-instruct",
+        "revision": ""
+      },
+      {
+        "id": "llava-hf/llava-1.5-7b-hf",
+        "kind": "vlm",
+        "required": false,
+        "provider_id": "builtin.vlm.llava_1_5_7b",
+        "subdir": "llava-1.5-7b-hf",
+        "revision": ""
+      },
+      {
+        "id": "openbmb/MiniCPM-V-2_6",
+        "kind": "vlm",
+        "required": false,
+        "provider_id": "builtin.vlm.minicpm_v_2_6",
+        "subdir": "minicpm-v-2_6",
+        "revision": ""
+      },
+      {
+        "id": "Ooredoo-Group/rapidocr-models",
+        "kind": "ocr",
+        "required": true,
+        "provider_id": "builtin.ocr.rapid",
+        "subdir": "rapidocr-models",
+        "revision": "",
+        "files": {
+          "det": "ch_PP-OCRv4_det_infer.onnx",
+          "rec": "ch_PP-OCRv4_rec_infer.onnx",
+          "cls": "ch_ppocr_mobile_v2.0_cls_infer.onnx"
+        },
+        "notes": "PP-OCRv4 ONNX models for RapidOCR."
+      },
+      {
+        "id": "Qwen/Qwen2.5-7B-Instruct",
+        "kind": "llm",
+        "required": false,
+        "subdir": "qwen2.5-7b-instruct",
+        "revision": ""
+      },
+      {
+        "id": "Qwen/Qwen2.5-14B-Instruct",
+        "kind": "llm",
+        "required": false,
+        "subdir": "qwen2.5-14b-instruct",
+        "revision": ""
+      }
+    ]
+  },
+  "vllm": {
+    "server": {
+      "host": "127.0.0.1",
+      "port": 8000,
+      "api_key": ""
+    },
+    "serve": {
+      "prefer_kind": "llm",
+      "engine_args": [
+        "--dtype",
+        "auto",
+        "--gpu-memory-utilization",
+        "0.9",
+        "--max-model-len",
+        "4096"
+      ]
+    },
+    "models": [
+      {
+        "id": "Qwen/Qwen2.5-7B-Instruct",
+        "kind": "llm",
+        "required": false,
+        "subdir": "qwen2.5-7b-instruct"
+      },
+      {
+        "id": "Qwen/Qwen2.5-14B-Instruct",
+        "kind": "llm",
+        "required": false,
+        "subdir": "qwen2.5-14b-instruct"
+      }
+    ]
+  },
+  "llm": {
+    "models": []
+  }
+}

@@ -18,6 +18,7 @@ from autocapture_nx.kernel.derived_records import (
 from autocapture_nx.kernel.frame_evidence import ensure_frame_evidence
 from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.ids import encode_record_id_component
+from autocapture_nx.kernel.providers import capability_providers
 
 
 @dataclass
@@ -93,19 +94,18 @@ def _get_media_blob(store: Any, record_id: str) -> bytes | None:
 
 
 def _capability_providers(capability: Any | None, default_provider: str) -> list[tuple[str, Any]]:
-    if capability is None:
-        return []
-    target = capability
-    if hasattr(target, "target"):
-        target = getattr(target, "target")
-    if hasattr(target, "items"):
-        try:
-            items = target.items()
-            if items:
-                return list(items)
-        except Exception:
-            pass
-    return [(default_provider, capability)]
+    return capability_providers(capability, default_provider)
+
+
+def _ts_key(ts: str | None) -> float:
+    if not ts:
+        return 0.0
+    if ts.endswith("Z"):
+        ts = ts[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(ts).timestamp()
+    except ValueError:
+        return 0.0
 
 
 class IdleProcessor:
@@ -193,6 +193,44 @@ class IdleProcessor:
         keys.sort()
         return keys
 
+    def _ordered_evidence_ids(self, order_by: str) -> list[str]:
+        if self._metadata is None:
+            return []
+        evidence: list[tuple[str, str | None]] = []
+        for record_id in self._record_ids():
+            record = self._metadata.get(record_id, {})
+            record_type = str(record.get("record_type", ""))
+            if not record_type.startswith("evidence.capture."):
+                continue
+            ts = record.get("ts_start_utc") or record.get("ts_utc")
+            evidence.append((record_id, ts))
+        if order_by == "ts_utc":
+            evidence.sort(key=lambda item: (_ts_key(item[1]), item[0]))
+        else:
+            evidence.sort(key=lambda item: item[0])
+        return [record_id for record_id, _ts in evidence]
+
+    def _needs_processing(self, record_id: str, record: dict[str, Any], allow_ocr: bool, allow_vlm: bool) -> bool:
+        if self._metadata is None:
+            return False
+        run_id = _derive_run_id(self._config, record_id)
+        encoded_source = encode_record_id_component(record_id)
+        derived_ids: list[str] = []
+        if allow_ocr and self._ocr is not None:
+            for provider_id, _extractor in _capability_providers(self._ocr, "ocr.engine"):
+                provider_component = encode_record_id_component(provider_id)
+                derived_ids.append(f"{run_id}/derived.text.ocr/{provider_component}/{encoded_source}")
+        if allow_vlm and self._vlm is not None:
+            for provider_id, _extractor in _capability_providers(self._vlm, "vision.extractor"):
+                provider_component = encode_record_id_component(provider_id)
+                derived_ids.append(f"{run_id}/derived.text.vlm/{provider_component}/{encoded_source}")
+        if not derived_ids:
+            return False
+        for derived_id in derived_ids:
+            if self._metadata.get(derived_id) is None:
+                return True
+        return False
+
     def _ensure_indexes(self) -> None:
         if self._indexes_ready:
             return
@@ -255,6 +293,9 @@ class IdleProcessor:
         extractors = idle_cfg.get("extractors", {})
         allow_ocr = bool(extractors.get("ocr", True))
         allow_vlm = bool(extractors.get("vlm", True))
+        order_by = str(idle_cfg.get("order_by", "record_id") or "record_id").lower()
+        checkpoint_mode = str(idle_cfg.get("checkpoint_mode", "record_id") or "record_id").lower()
+        backfill_out_of_order = bool(idle_cfg.get("backfill_out_of_order", order_by == "ts_utc"))
         max_gpu = int(idle_cfg.get("max_concurrency_gpu", 1) or 0)
         if max_gpu <= 0:
             allow_vlm = False
@@ -278,24 +319,29 @@ class IdleProcessor:
                 return True
             return False
 
-        record_ids = self._record_ids()
-        evidence_ids = []
-        for record_id in record_ids:
-            record = self._metadata.get(record_id, {})
-            record_type = str(record.get("record_type", ""))
-            if record_type.startswith("evidence.capture."):
-                evidence_ids.append(record_id)
-
+        evidence_ids = self._ordered_evidence_ids(order_by)
         start_index = 0
-        checkpoint = self._load_checkpoint() if persist_checkpoint else None
+        checkpoint = self._load_checkpoint() if persist_checkpoint and checkpoint_mode != "none" else None
         if checkpoint and checkpoint.last_record_id in evidence_ids:
             start_index = evidence_ids.index(checkpoint.last_record_id) + 1
+        pending_ids = list(evidence_ids[start_index:])
+        if backfill_out_of_order and start_index > 0:
+            backlog: list[str] = []
+            for record_id in evidence_ids[:start_index]:
+                record = self._metadata.get(record_id, {})
+                record_type = str(record.get("record_type", ""))
+                if not record_type.startswith("evidence.capture."):
+                    continue
+                if self._needs_processing(record_id, record if isinstance(record, dict) else {}, allow_ocr, allow_vlm):
+                    backlog.append(record_id)
+            if backlog:
+                pending_ids = list(dict.fromkeys(backlog + pending_ids))
 
         processed_total = checkpoint.processed_total if checkpoint else 0
         last_record_id: str | None = None
         aborted = False
 
-        for record_id in evidence_ids[start_index:]:
+        for record_id in pending_ids:
             source_record_id = record_id
             if should_abort and should_abort():
                 aborted = True
@@ -372,6 +418,11 @@ class IdleProcessor:
                 stats.skipped += 1
                 last_record_id = source_record_id
                 continue
+            if self._metadata is not None:
+                if all(self._metadata.get(item[2]) is not None for item in derived_items):
+                    stats.skipped += 1
+                    last_record_id = source_record_id
+                    continue
 
             pipeline = self._pipeline
             if pipeline_enabled and pipeline is not None and hasattr(pipeline, "process_record"):

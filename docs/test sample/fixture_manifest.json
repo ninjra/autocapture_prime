@@ -1,0 +1,79 @@
+{
+  "created_utc": "2026-02-02T00:00:00Z",
+  "fixture_id": "docs-test-sample-20260202",
+  "inputs": {
+    "screenshots": [
+      {
+        "id": "screenshot_1",
+        "path": "docs/test sample/Screenshot 2026-02-02 113519.png"
+      }
+    ]
+  },
+  "queries": {
+    "auto": {
+      "casefold": true,
+      "include_visible_apps": true,
+      "include_window_titles": true,
+      "match_mode": "exact_word",
+      "max_tokens": 40,
+      "min_token_len": 4,
+      "stopwords": [
+        "about",
+        "after",
+        "again",
+        "also",
+        "and",
+        "another",
+        "back",
+        "because",
+        "before",
+        "being",
+        "below",
+        "between",
+        "both",
+        "button",
+        "could",
+        "does",
+        "download",
+        "edit",
+        "from",
+        "here",
+        "home",
+        "https",
+        "into",
+        "just",
+        "like",
+        "more",
+        "next",
+        "only",
+        "open",
+        "page",
+        "previous",
+        "save",
+        "search",
+        "settings",
+        "should",
+        "since",
+        "that",
+        "then",
+        "there",
+        "this",
+        "those",
+        "title",
+        "under",
+        "using",
+        "view",
+        "when",
+        "where",
+        "which",
+        "with",
+        "your"
+      ]
+    },
+    "explicit": [],
+    "mode": "auto",
+    "require_citations": true,
+    "require_state": "ok"
+  },
+  "version": 1
+}

@@ -661,6 +661,7 @@ class CapturePipeline:
         active_quality = int(activity_cfg.get("active_jpeg_quality", jpeg_quality))
         idle_quality = int(activity_cfg.get("idle_jpeg_quality", jpeg_quality))
         runtime_cfg = self._config.get("runtime", {})
+        idle_window_s = float(runtime_cfg.get("idle_window_s", activity_window_s))
         suspend_workers = bool(runtime_cfg.get("mode_enforcement", {}).get("suspend_workers", True))
         fullscreen_cfg = runtime_cfg.get("fullscreen_halt", {}) if isinstance(runtime_cfg, dict) else {}
         fullscreen_enabled = bool(fullscreen_cfg.get("enabled", True))
@@ -804,7 +805,10 @@ class CapturePipeline:
                         mode = "idle" if decision.mode == "IDLE_DRAIN" else "active"
                         reason = str(decision.reason)
                 return (mode, idle_seconds, activity_score, reason)
-            idle_seconds = float("inf") if assume_idle else 0.0
+            if assume_idle:
+                idle_seconds = max(idle_window_s, activity_window_s) + 1.0
+            else:
+                idle_seconds = 0.0
             user_active = idle_seconds < activity_window_s
             mode = "idle" if idle_seconds >= activity_window_s else "active"
             reason = None

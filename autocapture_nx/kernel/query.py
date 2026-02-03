@@ -18,6 +18,7 @@ from autocapture_nx.kernel.derived_records import (
 from autocapture_nx.kernel.frame_evidence import ensure_frame_evidence
 from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.ids import encode_record_id_component
+from autocapture_nx.kernel.providers import capability_providers
 from autocapture_nx.kernel.telemetry import record_telemetry
 from autocapture_nx.state_layer.policy_gate import StatePolicyGate
 from autocapture_nx.state_layer.evidence_compiler import EvidenceCompiler
@@ -72,19 +73,7 @@ def _evidence_candidates(metadata: Any, time_window: dict[str, Any] | None, limi
 
 
 def _capability_providers(capability: Any | None, default_provider: str) -> list[tuple[str, Any]]:
-    if capability is None:
-        return []
-    target = capability
-    if hasattr(target, "target"):
-        target = getattr(target, "target")
-    if hasattr(target, "items"):
-        try:
-            items = target.items()
-            if items:
-                return list(items)
-        except Exception:
-            pass
-    return [(default_provider, capability)]
+    return capability_providers(capability, default_provider)
 
 
 def _resolve_single_provider(capability: Any | None) -> Any | None:

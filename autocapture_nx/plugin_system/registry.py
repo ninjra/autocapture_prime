@@ -28,6 +28,7 @@ from .host import SubprocessPlugin
 from .manifest import PluginManifest
 from .runtime import FilesystemPolicy, filesystem_guard, network_guard
 from .settings import build_plugin_settings
+from .trace import PluginExecutionTrace, PluginLoadReport
 
 if TYPE_CHECKING:
     from autocapture_nx.kernel.system import System
@@ -131,6 +132,8 @@ class CapabilityProxy:
         rng_seed: int | None = None,
         rng_strict: bool = False,
         rng_enabled: bool = False,
+        plugin_id: str | None = None,
+        trace_hook: Any | None = None,
     ) -> None:
         self._target = target
         self._network_allowed = network_allowed
@@ -141,6 +144,8 @@ class CapabilityProxy:
         self._rng_seed = rng_seed
         self._rng_strict = rng_strict
         self._rng_enabled = rng_enabled
+        self._plugin_id = str(plugin_id or "")
+        self._trace_hook = trace_hook
 
     @property
     def network_allowed(self) -> bool:
@@ -149,6 +154,10 @@ class CapabilityProxy:
     @property
     def target(self) -> Any:
         return self._target
+
+    @property
+    def plugin_id(self) -> str:
+        return self._plugin_id
 
     def _validate_input(self, method: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
         contract = self._io_contracts.get(method)
@@ -174,13 +183,46 @@ class CapabilityProxy:
             )
 
     def _invoke(self, method: str, func, args: tuple[Any, ...], kwargs: dict[str, Any]):
+        from datetime import datetime, timezone
+        import time
+
         self._validate_input(method, args, kwargs)
-        with RNGScope(self._rng_seed, strict=self._rng_strict, enabled=self._rng_enabled):
-            with network_guard(self._network_allowed):
-                with filesystem_guard(self._filesystem_policy):
-                    result = func(*args, **kwargs)
-        self._validate_output(method, result)
-        return result
+        start_utc = datetime.now(timezone.utc).isoformat()
+        start_perf = time.perf_counter()
+        ok = True
+        error = None
+        try:
+            with RNGScope(self._rng_seed, strict=self._rng_strict, enabled=self._rng_enabled):
+                with network_guard(self._network_allowed):
+                    with filesystem_guard(self._filesystem_policy):
+                        result = func(*args, **kwargs)
+            self._validate_output(method, result)
+        except Exception as exc:
+            ok = False
+            error = f"{type(exc).__name__}: {exc}"
+            raise
+        finally:
+            end_utc = datetime.now(timezone.utc).isoformat()
+            duration_ms = int(max(0.0, (time.perf_counter() - start_perf) * 1000.0))
+            if callable(self._trace_hook) and self._plugin_id:
+                try:
+                    self._trace_hook(
+                        {
+                            "plugin_id": self._plugin_id,
+                            "capability": self._capability,
+                            "method": method,
+                            "start_utc": start_utc,
+                            "end_utc": end_utc,
+                            "duration_ms": duration_ms,
+                            "ok": bool(ok),
+                            "error": error,
+                        }
+                    )
+                except Exception:
+                    pass
+        if ok:
+            return result
+        return None
 
     def __call__(self, *args, **kwargs):
         if not callable(self._target):
@@ -361,6 +403,8 @@ class PluginRegistry:
         self._config_schema = self._schema_registry.load_schema_path("contracts/config_schema.json")
         self._rng_service = RNGService.from_config(config)
         self._audit_log = PluginAuditLog.from_config(config)
+        self._trace = PluginExecutionTrace()
+        self._load_reporter = PluginLoadReport(self.load_report)
         self._failure_summary_cache: dict[str, dict[str, Any]] | None = None
         self._load_report: dict[str, Any] = {"loaded": [], "failed": [], "skipped": [], "errors": []}
         if self._rng_service.enabled:
@@ -386,6 +430,12 @@ class PluginRegistry:
 
     def load_report(self) -> dict[str, Any]:
         return dict(self._load_report)
+
+    def trace(self) -> PluginExecutionTrace:
+        return self._trace
+
+    def load_reporter(self) -> PluginLoadReport:
+        return self._load_reporter
 
     def _record_load_failure(
         self,
@@ -1233,6 +1283,8 @@ class PluginRegistry:
                     rng_seed=rng_seed,
                     rng_strict=self._rng_service.strict,
                     rng_enabled=self._rng_service.enabled,
+                    plugin_id=plugin.plugin_id,
+                    trace_hook=self._trace.record,
                 )
                 providers_by_cap.setdefault(cap_name, []).append((plugin.plugin_id, proxy))
         return self._resolve_capabilities(providers_by_cap)
@@ -1373,6 +1425,8 @@ class PluginRegistry:
                                 rng_seed=rng_seed,
                                 rng_strict=self._rng_service.strict,
                                 rng_enabled=self._rng_service.enabled,
+                                plugin_id=plugin_id,
+                                trace_hook=self._trace.record,
                             ),
                         )
                         continue
@@ -1393,6 +1447,8 @@ class PluginRegistry:
                                     rng_seed=rng_seed,
                                     rng_strict=self._rng_service.strict,
                                     rng_enabled=self._rng_service.enabled,
+                                    plugin_id=plugin_id,
+                                    trace_hook=self._trace.record,
                                 ),
                             )
                         ],
@@ -1412,6 +1468,8 @@ class PluginRegistry:
                             rng_seed=rng_seed,
                             rng_strict=self._rng_service.strict,
                             rng_enabled=self._rng_service.enabled,
+                            plugin_id=plugin_id,
+                            trace_hook=self._trace.record,
                         ),
                         network_allowed=network_allowed,
                         filesystem_policy=filesystem_policy,
@@ -1645,6 +1703,8 @@ class PluginRegistry:
                             rng_seed=rng_seed,
                             rng_strict=self._rng_service.strict,
                             rng_enabled=self._rng_service.enabled,
+                            plugin_id=plugin_id,
+                            trace_hook=self._trace.record,
                         )
                         local_providers.setdefault(cap_name, []).append((plugin_id, proxy))
                     local_loaded.append(LoadedPlugin(plugin_id, manifest, instance, caps, filesystem_policy, manifest_path))
@@ -1698,4 +1758,9 @@ class PluginRegistry:
         self._load_report["loaded"] = sorted(loaded_ids)
         self._load_report["failed"] = sorted(failed_ids)
         self._load_report["skipped"] = sorted(skipped_ids)
+        try:
+            capabilities.register("observability.plugin_trace", self._trace, network_allowed=False)
+            capabilities.register("observability.plugin_load_report", self._load_reporter, network_allowed=False)
+        except Exception:
+            pass
         return loaded, capabilities

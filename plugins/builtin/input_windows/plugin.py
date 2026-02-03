@@ -44,6 +44,13 @@ class InputTrackerWindows(PluginBase):
         self._display_poll_interval_s = 1.0
         self._display_idle_seconds = 300.0
         self._display_enabled = True
+        self._screensaver_on: bool | None = None
+        self._screensaver_last_change_ts: float | None = None
+        self._screensaver_last_on_ts: float | None = None
+        self._screensaver_last_poll: float | None = None
+        self._screensaver_poll_interval_s = 1.0
+        self._screensaver_idle_seconds = 300.0
+        self._screensaver_enabled = False
 
     def _update_display_state(self, now: float) -> bool | None:
         if not self._display_enabled:
@@ -69,6 +76,31 @@ class InputTrackerWindows(PluginBase):
             if not self._display_on:
                 self._display_last_off_ts = now
         return self._display_on
+
+    def _update_screensaver_state(self, now: float) -> bool | None:
+        if not self._screensaver_enabled:
+            return None
+        if self._screensaver_last_poll is not None:
+            interval = max(0.2, float(self._screensaver_poll_interval_s))
+            if now - self._screensaver_last_poll < interval:
+                return self._screensaver_on
+        self._screensaver_last_poll = now
+        try:
+            from autocapture_nx.windows.screensaver import screensaver_running
+        except Exception:
+            return self._screensaver_on
+        try:
+            state = screensaver_running()
+        except Exception:
+            return self._screensaver_on
+        if state is None:
+            return self._screensaver_on
+        if self._screensaver_on is None or state != self._screensaver_on:
+            self._screensaver_on = bool(state)
+            self._screensaver_last_change_ts = now
+            if self._screensaver_on:
+                self._screensaver_last_on_ts = now
+        return self._screensaver_on
 
     def capabilities(self) -> dict[str, Any]:
         return {"tracking.input": self}
@@ -105,7 +137,15 @@ class InputTrackerWindows(PluginBase):
                 self._activity_events.popleft()
             events = list(self._activity_events)
             last_event_ts = self._last_event_ts
+        screensaver_on = self._update_screensaver_state(now)
         display_on = self._update_display_state(now)
+        screensaver_idle_seconds = None
+        if screensaver_on is True:
+            if self._screensaver_last_on_ts is not None:
+                screensaver_idle_seconds = max(0.0, now - self._screensaver_last_on_ts)
+            idle = max(idle, screensaver_idle_seconds or 0.0, float(self._screensaver_idle_seconds))
+        elif screensaver_on is False:
+            idle = 0.0
         display_idle_seconds = None
         if display_on is True:
             idle = 0.0
@@ -122,11 +162,18 @@ class InputTrackerWindows(PluginBase):
         rate_score = min(1.0, rate_hz / target_rate) if target_rate > 0 else 0.0
         score = max(freshness, rate_score)
         user_active = idle < active_window_s if idle != float("inf") else False
-        if display_on is True:
+        if screensaver_on is True:
+            user_active = False
+            score = 0.0
+        elif screensaver_on is False:
             user_active = True
             score = 1.0
-        elif display_on is False:
-            user_active = False
+        if screensaver_on is None:
+            if display_on is True:
+                user_active = True
+                score = 1.0
+            elif display_on is False:
+                user_active = False
         return {
             "idle_seconds": idle,
             "user_active": user_active,
@@ -134,6 +181,8 @@ class InputTrackerWindows(PluginBase):
             "event_rate_hz": rate_hz,
             "recent_activity": bool(events),
             "last_event_ts": last_event_ts,
+            "screensaver_on": screensaver_on,
+            "screensaver_idle_seconds": screensaver_idle_seconds,
             "display_on": display_on,
             "display_idle_seconds": display_idle_seconds,
         }
@@ -158,6 +207,9 @@ class InputTrackerWindows(PluginBase):
             self._display_enabled = bool(runtime_activity.get("display_power_enabled", True))
             self._display_poll_interval_s = float(runtime_activity.get("display_poll_interval_s", 1.0) or 1.0)
             self._display_idle_seconds = float(runtime_activity.get("display_idle_seconds", 300) or 300.0)
+            self._screensaver_enabled = bool(runtime_activity.get("screensaver_enabled", False))
+            self._screensaver_poll_interval_s = float(runtime_activity.get("screensaver_poll_interval_s", 1.0) or 1.0)
+            self._screensaver_idle_seconds = float(runtime_activity.get("screensaver_idle_seconds", 300) or 300.0)
         self._batcher = _InputBatcher(store_events=(mode == "raw"))
         self._flush_interval_ms = int(capture_cfg.get("flush_interval_ms", 250))
         if mode == "off":

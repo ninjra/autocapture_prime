@@ -88,9 +88,11 @@
     },
     "stub": {
       "frame_height": 720,
+      "frame_format": "jpeg",
       "frame_width": 1280,
       "frames_dir": "",
       "jpeg_quality": 90,
+      "lossless": false,
       "loop": false,
       "max_frames": 0
     },
@@ -360,6 +362,7 @@
       "builtin.meta.policy.noop",
       "builtin.observability.basic",
       "builtin.ocr.basic",
+      "builtin.ocr.rapid",
       "builtin.privacy.egress_sanitizer",
       "builtin.processing.sst.pipeline",
       "builtin.processing.sst.ui_vlm",
@@ -376,6 +379,11 @@
       "builtin.tracking.clipboard.windows",
       "builtin.tracking.file_activity.windows",
       "builtin.vlm.basic",
+      "builtin.vlm.deepseek_ocr2",
+      "builtin.vlm.qwen2_vl_7b",
+      "builtin.vlm.qwen2_vl_2b",
+      "builtin.vlm.llava_1_5_7b",
+      "builtin.vlm.minicpm_v_2_6",
       "builtin.window.metadata.windows",
       "mx.core.capture_win",
       "mx.core.compression_and_verify",
@@ -1414,9 +1422,12 @@
     "active_window_s": 3,
     "activity": {
       "assume_idle_when_missing": false,
-      "display_power_enabled": true,
+      "display_power_enabled": false,
       "display_poll_interval_s": 1.0,
-      "display_idle_seconds": 300
+      "display_idle_seconds": 300,
+      "screensaver_enabled": true,
+      "screensaver_poll_interval_s": 1.0,
+      "screensaver_idle_seconds": 60
     },
     "capture_controls": {
       "enabled": false
@@ -1456,6 +1467,8 @@
   "mode_enforcement": {
     "idle_resume_budget_ms": 3000,
     "suspend_deadline_ms": 500,
+    "fixture_override": false,
+    "fixture_override_reason": "",
     "suspend_workers": true
   },
   "fullscreen_halt": {

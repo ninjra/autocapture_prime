@@ -1,0 +1,118 @@
+{
+  "capture": {
+    "auto_start": false,
+    "audio": {
+      "enabled": false
+    },
+    "screenshot": {
+      "enabled": false
+    },
+    "stub": {
+      "frame_format": "png",
+      "frames_dir": "__FIXTURE_FRAMES_DIR__",
+      "jpeg_quality": 90,
+      "lossless": true,
+      "loop": false,
+      "max_frames": 0
+    },
+    "video": {
+      "activity": {
+        "enabled": false
+      },
+      "backend": "mss",
+      "container": "zip",
+      "dedupe": {
+        "enabled": false
+      },
+      "enabled": true,
+      "frame_format": "png",
+      "fps_target": 1,
+      "segment_seconds": 1
+    },
+    "window_metadata": {
+      "enabled": false
+    }
+  },
+  "processing": {
+    "idle": {
+      "enabled": true,
+      "extractors": {
+        "ocr": true,
+        "vlm": true
+      },
+      "order_by": "ts_utc",
+      "checkpoint_mode": "none",
+      "backfill_out_of_order": true
+    },
+    "on_query": {
+      "allow_decode_extract": false,
+      "extractors": {
+        "ocr": true,
+        "vlm": true
+      },
+      "require_idle": true
+    }
+  },
+  "plugins": {
+    "enabled": {
+      "builtin.capture.audio.windows": false,
+      "builtin.capture.basic": true,
+      "builtin.capture.screenshot.windows": false,
+      "builtin.capture.windows": false,
+      "builtin.cursor.windows": false,
+      "builtin.processing.sst.ui_vlm": true,
+      "builtin.tracking.input.windows": true,
+      "builtin.window.metadata.windows": false
+    },
+    "capabilities": {
+      "ocr.engine": {
+        "mode": "multi",
+        "fanout": true,
+        "max_providers": 0,
+        "preferred": [],
+        "provider_ids": []
+      },
+      "vision.extractor": {
+        "mode": "multi",
+        "fanout": true,
+        "max_providers": 0,
+        "preferred": [],
+        "provider_ids": []
+      }
+    }
+  },
+  "runtime": {
+    "activity": {
+      "assume_idle_when_missing": true,
+      "display_power_enabled": false,
+      "screensaver_enabled": true,
+      "screensaver_poll_interval_s": 1.0,
+      "screensaver_idle_seconds": 15
+    },
+    "silence": {
+      "enabled": false
+    },
+    "budgets": {
+      "cpu_max_utilization": 0.5,
+      "ram_max_utilization": 0.5
+    },
+    "routing": {
+      "gpu_heavy": {
+        "allow_fallback": true,
+        "target": "native"
+      }
+    }
+  },
+  "storage": {
+    "anchor": {
+      "every_entries": 1,
+      "every_minutes": 1
+    },
+    "no_deletion_mode": true,
+    "raw_first_local": true
+  },
+  "web": {
+    "allow_remote": false,
+    "bind_host": "127.0.0.1"
+  }
+}

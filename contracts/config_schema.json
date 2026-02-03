@@ -271,11 +271,23 @@
             "frame_width": {
               "type": "integer"
             },
+            "frame_format": {
+              "enum": [
+                "auto",
+                "jpeg",
+                "png",
+                "rgb"
+              ],
+              "type": "string"
+            },
             "frames_dir": {
               "type": "string"
             },
             "jpeg_quality": {
               "type": "integer"
+            },
+            "lossless": {
+              "type": "boolean"
             },
             "loop": {
               "type": "boolean"
@@ -742,6 +754,10 @@
     "models": {
       "additionalProperties": false,
       "properties": {
+        "providers": {
+          "additionalProperties": true,
+          "type": "object"
+        },
         "ocr_lang": {
           "type": [
             "string",
@@ -1404,6 +1420,15 @@
                 "vlm"
               ],
               "type": "object"
+            },
+            "order_by": {
+              "type": "string"
+            },
+            "checkpoint_mode": {
+              "type": "string"
+            },
+            "backfill_out_of_order": {
+              "type": "boolean"
             },
             "max_concurrency_cpu": {
               "type": "integer"
@@ -2299,6 +2324,15 @@
             },
             "display_idle_seconds": {
               "type": "integer"
+            },
+            "screensaver_enabled": {
+              "type": "boolean"
+            },
+            "screensaver_poll_interval_s": {
+              "type": "number"
+            },
+            "screensaver_idle_seconds": {
+              "type": "integer"
             }
           },
           "required": [
@@ -2454,6 +2488,12 @@
         "mode_enforcement": {
           "additionalProperties": false,
           "properties": {
+            "fixture_override": {
+              "type": "boolean"
+            },
+            "fixture_override_reason": {
+              "type": "string"
+            },
             "idle_resume_budget_ms": {
               "type": "integer"
             },

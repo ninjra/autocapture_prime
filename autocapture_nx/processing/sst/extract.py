@@ -9,6 +9,7 @@ from io import StringIO
 from typing import Any, Callable, Iterable
 
 from autocapture_nx.kernel.ids import encode_record_id_component
+from autocapture_nx.kernel.providers import capability_providers
 
 from .utils import bp, bbox_iou, bbox_union, norm_text
 
@@ -29,19 +30,7 @@ class ExtractDiagnostics:
 
 
 def providers_from_capability(capability: Any | None, default_provider: str) -> list[tuple[str, Any]]:
-    if capability is None:
-        return []
-    target = capability
-    if hasattr(target, "target"):
-        target = getattr(target, "target")
-    if hasattr(target, "items"):
-        try:
-            items = list(target.items())
-        except Exception:
-            items = []
-        if items:
-            return items
-    return [(default_provider, capability)]
+    return capability_providers(capability, default_provider)
 
 
 def run_ocr_tokens(
