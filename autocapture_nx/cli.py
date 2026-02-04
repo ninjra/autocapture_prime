@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+from getpass import getpass
 from dataclasses import asdict
 from pathlib import Path
 
 from autocapture_nx.kernel.config import load_config
+from autocapture_nx.kernel.audit import append_audit_event
 from autocapture_nx.kernel.errors import AutocaptureError
+from autocapture_nx.kernel.keyring import KeyRing, export_keyring_bundle, import_keyring_bundle
 from autocapture_nx.kernel.loader import default_config_paths
 from autocapture_nx.ux.facade import create_facade
 
@@ -246,6 +250,112 @@ def cmd_keys_rotate(args: argparse.Namespace) -> int:
     result = facade.keys_rotate()
     _print_json(result)
     return 0
+
+
+def _load_crypto_config(data_dir: str, config_dir: str, *, safe_mode: bool) -> dict:
+    if data_dir:
+        os.environ["AUTOCAPTURE_DATA_DIR"] = data_dir
+    if config_dir:
+        os.environ["AUTOCAPTURE_CONFIG_DIR"] = config_dir
+    paths = default_config_paths()
+    config = load_config(paths, safe_mode=safe_mode)
+    storage = config.get("storage", {}) if isinstance(config, dict) else {}
+    crypto = storage.get("crypto", {}) if isinstance(storage, dict) else {}
+    return {
+        "keyring_path": str(crypto.get("keyring_path", "data/vault/keyring.json")),
+        "root_key_path": str(crypto.get("root_key_path", "data/vault/root.key")),
+        "backend": str(crypto.get("keyring_backend", "auto")),
+        "credential_name": str(crypto.get("keyring_credential_name", "autocapture.keyring")),
+        "encryption_required": bool(storage.get("encryption_required", False)),
+    }
+
+
+def _prompt_passphrase(value: str) -> str:
+    if value:
+        return value
+    return getpass("Keyring bundle passphrase: ")
+
+
+def cmd_keys_export(args: argparse.Namespace) -> int:
+    details = {"bundle_path": str(args.out)}
+    try:
+        crypto = _load_crypto_config(args.data_dir, args.config_dir, safe_mode=args.safe_mode)
+        require_protection = bool(crypto["encryption_required"] and os.name == "nt")
+        details.update(
+            {
+                "keyring_path": crypto["keyring_path"],
+                "backend": crypto["backend"],
+                "require_protection": require_protection,
+            }
+        )
+        keyring = KeyRing.load(
+            crypto["keyring_path"],
+            legacy_root_path=crypto["root_key_path"],
+            require_protection=require_protection,
+            backend=crypto["backend"],
+            credential_name=crypto["credential_name"],
+        )
+        passphrase = _prompt_passphrase(args.passphrase)
+        export_keyring_bundle(keyring, path=str(args.out), passphrase=passphrase)
+        append_audit_event(
+            action="keyring.export",
+            actor="cli.keys",
+            outcome="success",
+            details=details,
+        )
+        print(f"OK: keyring bundle written to {args.out}")
+        return 0
+    except Exception as exc:
+        details["error"] = str(exc)
+        append_audit_event(
+            action="keyring.export",
+            actor="cli.keys",
+            outcome="error",
+            details=details,
+        )
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+
+def cmd_keys_import(args: argparse.Namespace) -> int:
+    details = {"bundle_path": str(args.bundle)}
+    try:
+        crypto = _load_crypto_config(args.data_dir, args.config_dir, safe_mode=args.safe_mode)
+        require_protection = bool(crypto["encryption_required"] and os.name == "nt")
+        details.update(
+            {
+                "keyring_path": crypto["keyring_path"],
+                "backend": crypto["backend"],
+                "require_protection": require_protection,
+            }
+        )
+        passphrase = _prompt_passphrase(args.passphrase)
+        import_keyring_bundle(
+            path=str(args.bundle),
+            passphrase=passphrase,
+            keyring_path=crypto["keyring_path"],
+            require_protection=require_protection,
+            backend=crypto["backend"],
+            credential_name=crypto["credential_name"],
+        )
+        append_audit_event(
+            action="keyring.import",
+            actor="cli.keys",
+            outcome="success",
+            details=details,
+        )
+        print(f"OK: keyring bundle imported into {crypto['keyring_path']}")
+        return 0
+    except Exception as exc:
+        details["error"] = str(exc)
+        append_audit_event(
+            action="keyring.import",
+            actor="cli.keys",
+            outcome="error",
+            details=details,
+        )
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
 
 def cmd_provenance_verify(args: argparse.Namespace) -> int:
@@ -563,6 +673,18 @@ def build_parser() -> argparse.ArgumentParser:
     keys_sub = keys.add_subparsers(dest="keys_cmd", required=True)
     rotate = keys_sub.add_parser("rotate")
     rotate.set_defaults(func=cmd_keys_rotate)
+    keys_export = keys_sub.add_parser("export")
+    keys_export.add_argument("--out", required=True, help="Output bundle path (JSON)")
+    keys_export.add_argument("--passphrase", default="", help="Bundle passphrase (prompted if empty)")
+    keys_export.add_argument("--data-dir", default="", help="Override AUTOCAPTURE_DATA_DIR")
+    keys_export.add_argument("--config-dir", default="", help="Override AUTOCAPTURE_CONFIG_DIR")
+    keys_export.set_defaults(func=cmd_keys_export)
+    keys_import = keys_sub.add_parser("import")
+    keys_import.add_argument("--bundle", required=True, help="Input bundle path (JSON)")
+    keys_import.add_argument("--passphrase", default="", help="Bundle passphrase (prompted if empty)")
+    keys_import.add_argument("--data-dir", default="", help="Override AUTOCAPTURE_DATA_DIR")
+    keys_import.add_argument("--config-dir", default="", help="Override AUTOCAPTURE_CONFIG_DIR")
+    keys_import.set_defaults(func=cmd_keys_import)
 
     provenance = sub.add_parser("provenance")
     provenance_sub = provenance.add_subparsers(dest="provenance_cmd", required=True)

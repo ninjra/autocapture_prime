@@ -9,6 +9,7 @@ import queue
 import sys
 import threading
 import random
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,30 @@ def _debug(message: str) -> None:
     if os.getenv("AUTOCAPTURE_HOST_DEBUG", ""):
         sys.stderr.write(f"[host_runner] {message}\n")
         sys.stderr.flush()
+
+
+def _host_log_path(config: dict[str, Any], plugin_id: str) -> Path | None:
+    try:
+        storage = config.get("storage", {}) if isinstance(config, dict) else {}
+        data_dir = storage.get("data_dir", "data")
+        runtime = config.get("runtime", {}) if isinstance(config, dict) else {}
+        run_id = runtime.get("run_id", "run")
+        run_dir = Path(str(data_dir)) / "runs" / str(run_id)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        return run_dir / f"plugin_host_{plugin_id}.log"
+    except Exception:
+        return None
+
+
+def _log_host_error(config: dict[str, Any], plugin_id: str, message: str) -> None:
+    path = _host_log_path(config, plugin_id)
+    if not path:
+        return
+    try:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(message + "\n")
+    except Exception:
+        return
 
 
 def _decode(obj: Any) -> Any:
@@ -266,6 +291,7 @@ def main() -> None:
 
     set_global_filesystem_policy(fs_policy)
     _debug("filesystem policy installed")
+    _log_host_error(config, plugin_id, f"host_runner start: pid={os.getpid()} python={sys.executable}")
 
     rng_enabled = bool(rng_info.get("enabled", False))
     rng_seed_value = rng_info.get("seed")
@@ -309,38 +335,43 @@ def main() -> None:
             raise PermissionError(f"capability not allowed: {cap}")
         return _CapabilityProxy(bridge, cap)
 
-    _debug(f"loading plugin module {plugin_path}")
-    spec = importlib.util.spec_from_file_location("plugin_module", plugin_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError("Failed to load plugin module")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["plugin_module"] = module
-    spec.loader.exec_module(module)  # type: ignore[call-arg]
-    factory = getattr(module, callable_name)
-    _debug("plugin module loaded")
+    try:
+        _debug(f"loading plugin module {plugin_path}")
+        spec = importlib.util.spec_from_file_location("plugin_module", plugin_path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError("Failed to load plugin module")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["plugin_module"] = module
+        spec.loader.exec_module(module)  # type: ignore[call-arg]
+        factory = getattr(module, callable_name)
+        _debug("plugin module loaded")
 
-    context = PluginContext(
-        config=config,
-        get_capability=_get_capability,
-        logger=lambda _m: None,
-        rng=rng_instance,
-        rng_seed=rng_seed_int,
-        rng_seed_hex=str(rng_seed_hex) if rng_seed_hex is not None else None,
-    )
-    trace_enabled = os.getenv("AUTOCAPTURE_HOST_TRACE", "")
-    with network_guard(network_allowed):
-        if trace_enabled:
-            import faulthandler
+        context = PluginContext(
+            config=config,
+            get_capability=_get_capability,
+            logger=lambda _m: None,
+            rng=rng_instance,
+            rng_seed=rng_seed_int,
+            rng_seed_hex=str(rng_seed_hex) if rng_seed_hex is not None else None,
+        )
+        trace_enabled = os.getenv("AUTOCAPTURE_HOST_TRACE", "")
+        with network_guard(network_allowed):
+            if trace_enabled:
+                import faulthandler
 
-            faulthandler.dump_traceback_later(5.0, repeat=False, file=sys.stderr)
-        instance = factory(plugin_id, context)
-        if trace_enabled:
-            import faulthandler
+                faulthandler.dump_traceback_later(5.0, repeat=False, file=sys.stderr)
+            instance = factory(plugin_id, context)
+            if trace_enabled:
+                import faulthandler
 
-            faulthandler.cancel_dump_traceback_later()
-        _debug("plugin instance created")
-        caps = instance.capabilities()
-        _debug("plugin capabilities collected")
+                faulthandler.cancel_dump_traceback_later()
+            _debug("plugin instance created")
+            caps = instance.capabilities()
+            _debug("plugin capabilities collected")
+    except Exception as exc:
+        tb = traceback.format_exc()
+        _log_host_error(config, plugin_id, f"plugin init error: {type(exc).__name__}: {exc}\n{tb}")
+        raise
 
     cap_map = {name: cap for name, cap in caps.items()}
     _debug("entering request loop")

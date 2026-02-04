@@ -28,6 +28,10 @@ Commands:
   - Runs AST/IR analysis and writes artifacts under `tools/hypervisor/runs/<run_id>/`.
 - `autocapture keys rotate`
   - Rotates root keys, rewraps storage, and writes a ledger + anchor entry.
+- `autocapture keys export --out <path> [--passphrase <pass>] [--data-dir <dir>] [--config-dir <dir>]`
+  - Exports an encrypted keyring bundle for backup/transfer between machines.
+- `autocapture keys import --bundle <path> [--passphrase <pass>] [--data-dir <dir>] [--config-dir <dir>]`
+  - Imports an encrypted keyring bundle into the local keyring.
 
 ## Exit codes
 - 0: success

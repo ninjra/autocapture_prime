@@ -16,8 +16,8 @@
     "contracts/sst_stage_output.schema.json": "48fef9b4b0546d98b2b157a8f791acfe05ebe280c1df7de925020f83e24c9f45",
     "contracts/state_layer.schema.json": "6e279ba99b24febb3a728f2dfb313a9eb1acdcdd42e0c29fd5a96f3a3f9430ff",
     "contracts/time_intent.schema.json": "6696c55883e35e0f2eb0689d61b7a05c637959d1d53ba7d8f985bbc2d5e397d8",
-    "contracts/user_surface.md": "7f44da70f20655037997ca91fefd7f0bac9598cc84e528516af3bfc92abf7429"
+    "contracts/user_surface.md": "9eb471dc67affe574e89ff86f975ba12ff96f693a40b81fc8b92790a6e88e764"
   },
-  "generated_at": "2026-02-03T04:40:58.606061+00:00",
+  "generated_at": "2026-02-04T02:59:36.569757+00:00",
   "version": 1
 }

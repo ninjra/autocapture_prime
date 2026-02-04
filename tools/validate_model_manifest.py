@@ -45,7 +45,7 @@ def validate_manifest(payload: dict[str, Any]) -> list[str]:
                 _error(f"duplicate model id: {mid}", errors)
             ids.add(mid)
         kind = str(model.get("kind", "")).strip()
-        if kind not in {"ocr", "vlm", "llm"}:
+        if kind not in {"ocr", "vlm", "llm", "embedding"}:
             _error(f"models[{idx}] invalid kind: {kind}", errors)
         subdir = str(model.get("subdir", "")).strip()
         if not subdir:

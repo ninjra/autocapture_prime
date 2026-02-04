@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -216,6 +217,8 @@ def _build_plugin_status(
 
 
 def main(argv: list[str] | None = None) -> int:
+    if not os.environ.get("AUTOCAPTURE_PYTHON_EXE"):
+        os.environ["AUTOCAPTURE_PYTHON_EXE"] = sys.executable
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", default="docs/test sample/fixture_manifest.json")
     parser.add_argument("--output-dir", default="artifacts/fixture_runs")

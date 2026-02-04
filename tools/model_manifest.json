@@ -62,6 +62,27 @@
         "notes": "PP-OCRv4 ONNX models for RapidOCR."
       },
       {
+        "id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+        "kind": "llm",
+        "required": false,
+        "subdir": "tinyllama-1.1b-chat-v1.0",
+        "revision": ""
+      },
+      {
+        "id": "microsoft/Phi-3-mini-4k-instruct",
+        "kind": "llm",
+        "required": false,
+        "subdir": "phi-3-mini-4k-instruct",
+        "revision": ""
+      },
+      {
+        "id": "sentence-transformers/all-MiniLM-L6-v2",
+        "kind": "embedding",
+        "required": false,
+        "subdir": "all-minilm-l6-v2",
+        "revision": ""
+      },
+      {
         "id": "Qwen/Qwen2.5-7B-Instruct",
         "kind": "llm",
         "required": false,
@@ -91,10 +112,22 @@
         "--gpu-memory-utilization",
         "0.9",
         "--max-model-len",
-        "4096"
+        "2048"
       ]
     },
     "models": [
+      {
+        "id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+        "kind": "llm",
+        "required": false,
+        "subdir": "tinyllama-1.1b-chat-v1.0"
+      },
+      {
+        "id": "microsoft/Phi-3-mini-4k-instruct",
+        "kind": "llm",
+        "required": false,
+        "subdir": "phi-3-mini-4k-instruct"
+      },
       {
         "id": "Qwen/Qwen2.5-7B-Instruct",
         "kind": "llm",

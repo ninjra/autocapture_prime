@@ -1,15 +1,160 @@
 ﻿{
-    "generated_utc":  "2026-02-03T15:33:53",
+    "generated_utc":  "2026-02-04T04:35:30",
     "root_dir":  "D:\\\\autocapture\\\\models",
     "schema_version":  1,
-    "manifest_path":  "D:\\projects\\autocapture_prime\\tools\\\\model_manifest.json",
+    "manifest_path":  "D:\\\\projects\\\\autocapture_prime\\\\tools\\\\model_manifest.json",
     "results":  {
-                    "huggingface":  [
-
-                                    ],
                     "vllm":  [
-
-                             ]
+                                 {
+                                     "id":  "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+                                     "error":  "server_unavailable",
+                                     "ok":  true,
+                                     "required":  false,
+                                     "served_id":  "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+                                     "status":  "local_only"
+                                 },
+                                 {
+                                     "id":  "microsoft/Phi-3-mini-4k-instruct",
+                                     "error":  "server_unavailable",
+                                     "ok":  true,
+                                     "required":  false,
+                                     "served_id":  "microsoft/Phi-3-mini-4k-instruct",
+                                     "status":  "local_only"
+                                 },
+                                 {
+                                     "id":  "Qwen/Qwen2.5-7B-Instruct",
+                                     "error":  "server_unavailable",
+                                     "ok":  true,
+                                     "required":  false,
+                                     "served_id":  "Qwen/Qwen2.5-7B-Instruct",
+                                     "status":  "local_only"
+                                 },
+                                 {
+                                     "id":  "Qwen/Qwen2.5-14B-Instruct",
+                                     "error":  "server_unavailable",
+                                     "ok":  true,
+                                     "required":  false,
+                                     "served_id":  "Qwen/Qwen2.5-14B-Instruct",
+                                     "status":  "local_only"
+                                 }
+                             ],
+                    "huggingface":  [
+                                        {
+                                            "id":  "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+                                            "dest":  "D:\\\\autocapture\\\\models\\tinyllama-1.1b-chat-v1.0",
+                                            "files":  [
+                                                          {
+                                                              "path":  ".gitattributes",
+                                                              "sha256":  "11AD7EFA24975EE4B0C3C3A38ED18737F0658A5F75A0A96787B576A78A023361",
+                                                              "size_bytes":  1519
+                                                          },
+                                                          {
+                                                              "path":  "config.json",
+                                                              "sha256":  "486BEDDA3A6988332E60D9638A09CA4B260D34EBCF1B19E22CF3B140B63D8FE9",
+                                                              "size_bytes":  608
+                                                          },
+                                                          {
+                                                              "path":  "eval_results.json",
+                                                              "sha256":  "637DAAEBE7AA8AF0E678F9E79EC33FA29F8635090D45EC813F0E7474320D7351",
+                                                              "size_bytes":  566
+                                                          },
+                                                          {
+                                                              "path":  "generation_config.json",
+                                                              "sha256":  "18046D04F5BD8B4998095ECABDD17A1BF0053D9ACDCCEAD4A05BE4A3575F3C5C",
+                                                              "size_bytes":  124
+                                                          },
+                                                          {
+                                                              "path":  "model.safetensors",
+                                                              "sha256":  "6E6001DA2106D4757498752A021DF6C2BDC332C650AAE4BAE6B0C004DCF14933",
+                                                              "size_bytes":  2200119864
+                                                          },
+                                                          {
+                                                              "path":  "README.md",
+                                                              "sha256":  "6F620F661CE3F8425B49301B64A642AA7451CE9FBD3B8115E899DE59147121C8",
+                                                              "size_bytes":  3196
+                                                          },
+                                                          {
+                                                              "path":  "special_tokens_map.json",
+                                                              "sha256":  "82D96D7A9E6CED037F12394B7EA6A5B02E6CA87E0D11EDAA8D60D9BE857CE7DB",
+                                                              "size_bytes":  551
+                                                          },
+                                                          {
+                                                              "path":  "tokenizer.json",
+                                                              "sha256":  "BCD04F0EADF90287BD26E1A183AC487D8A141B09B06AECB7725BBDD343640F2E",
+                                                              "size_bytes":  1842767
+                                                          },
+                                                          {
+                                                              "path":  "tokenizer.model",
+                                                              "sha256":  "9E556AFD44213B6BD1BE2B850EBBBD98F5481437A8021AFAF58EE7FB1818D347",
+                                                              "size_bytes":  499723
+                                                          },
+                                                          {
+                                                              "path":  "tokenizer_config.json",
+                                                              "sha256":  "7B41BA7D0EB91E77914CA3DAFDE559EA3E19878769B7E68409E89BED5222E77A",
+                                                              "size_bytes":  1289
+                                                          },
+                                                          {
+                                                              "path":  ".cache\\huggingface\\.gitignore",
+                                                              "sha256":  "684888C0EBB17F374298B65EE2807526C066094C701BCC7EBBE1C1095F494FC1",
+                                                              "size_bytes":  1
+                                                          },
+                                                          {
+                                                              "path":  ".cache\\huggingface\\download\\.gitattributes.metadata",
+                                                              "sha256":  "04E8135230BA1099400FED6AA315CCDA857959EE8EF107EFC427ADCA1A511629",
+                                                              "size_bytes":  104
+                                                          },
+                                                          {
+                                                              "path":  ".cache\\huggingface\\download\\config.json.metadata",
+                                                              "sha256":  "EFE7D141C67E3AAD1EF57463FA7D6E53A1098753989F6DA9EF0850E45096C51B",
+                                                              "size_bytes":  104
+                                                          },
+                                                          {
+                                                              "path":  ".cache\\huggingface\\download\\eval_results.json.metadata",
+                                                              "sha256":  "7EBD30D647B798D22E0C461E2370CDA5A4748A2DD4477D8E79EF0A357FC8EB8B",
+                                                              "size_bytes":  104
+                                                          },
+                                                          {
+                                                              "path":  ".cache\\huggingface\\download\\generation_config.json.metadata",
+                                                              "sha256":  "47AD3AAB320D6FD78193CBE614EE0CBCDBC4CA6F099D9C6B8C566FE19EF391E1",
+                                                              "size_bytes":  103
+                                                          },
+                                                          {
+                                                              "path":  ".cache\\huggingface\\download\\model.safetensors.metadata",
+                                                              "sha256":  "AD9903DD2F636C77B2B2A143331A760A591D40A5F84F177B3FB30AB585CD9514",
+                                                              "size_bytes":  127
+                                                          },
+                                                          {
+                                                              "path":  ".cache\\huggingface\\download\\README.md.metadata",
+                                                              "sha256":  "7ADBC4C50409970BD1DADCE82334FB5728E16EBE2AA3F58BEC4C69F49FA07807",
+                                                              "size_bytes":  104
+                                                          },
+                                                          {
+                                                              "path":  ".cache\\huggingface\\download\\special_tokens_map.json.metadata",
+                                                              "sha256":  "250E2FFE87A7970700E8BC1617227035BA1D5CFFA4C399F77FFDB980FAA668A3",
+                                                              "size_bytes":  103
+                                                          },
+                                                          {
+                                                              "path":  ".cache\\huggingface\\download\\tokenizer.json.metadata",
+                                                              "sha256":  "C3E60AA4297747B733CAFD95A448996FFA9FEB7A85336C46C9D6D6FACED23F1F",
+                                                              "size_bytes":  104
+                                                          },
+                                                          {
+                                                              "path":  ".cache\\huggingface\\download\\tokenizer.model.metadata",
+                                                              "sha256":  "64DE028F55F935C50E0FDD3A270FF6F7B6039AF69F58E45803473CDEB1127AF6",
+                                                              "size_bytes":  128
+                                                          },
+                                                          {
+                                                              "path":  ".cache\\huggingface\\download\\tokenizer_config.json.metadata",
+                                                              "sha256":  "EBA7580FB0C9E5AF5B06C68887E8B1EE25446151FE7F49286A58B0712FAC8604",
+                                                              "size_bytes":  104
+                                                          }
+                                                      ],
+                                            "error":  null,
+                                            "ok":  true,
+                                            "required":  false,
+                                            "status":  "downloaded"
+                                        }
+                                    ]
                 },
-    "manifest_sha256":  "45731E1B715ACF8916C80A7D8D84EC6DED5340F11755E7E3405CB899748705E9"
+    "manifest_sha256":  "5076DF566DFF21435053A9246B94863CE39DBCDC9D3D5E58F3D9D457B75F148F"
 }
