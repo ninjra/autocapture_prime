@@ -22,3 +22,4 @@
 ## Definition of Done
 - All test suites in MOD-021 pass.
 - Coverage_Map is satisfied: every SRC implemented and verifiable.
+Always provide a single short one-line command with no line breaks and keep it under terminal width; create any needed script/cmd to implement the command and provide a short full-path command to run that script.

@@ -294,6 +294,14 @@
             },
             "max_frames": {
               "type": "integer"
+            },
+            "timestamp_source": {
+              "enum": [
+                "now",
+                "filename",
+                "mtime"
+              ],
+              "type": "string"
             }
           },
           "required": [

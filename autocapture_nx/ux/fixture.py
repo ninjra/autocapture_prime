@@ -214,6 +214,7 @@ def run_idle_processing(system: Any, *, max_steps: int = 20, timeout_s: float = 
     while steps < max_steps and (time.monotonic() - start) <= timeout_s:
         signals = _runtime_signals(system)
         decision = governor.decide(signals)
+        fixture_override = bool(signals.get("fixture_override"))
         if decision.mode != "IDLE_DRAIN":
             blocked = {
                 "mode": decision.mode,
@@ -229,6 +230,8 @@ def run_idle_processing(system: Any, *, max_steps: int = 20, timeout_s: float = 
         step_start = time.monotonic()
 
         def _should_abort() -> bool:
+            if fixture_override:
+                return False
             return bool(governor.should_preempt(_runtime_signals(system)))
 
         result = idle.process_step(

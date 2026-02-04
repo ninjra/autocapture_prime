@@ -77,6 +77,10 @@ class FixturePipelineCliTests(unittest.TestCase):
             report = json.loads(reports[0].read_text(encoding="utf-8"))
             queries = report.get("queries", {})
             self.assertEqual(queries.get("failures"), 0)
+            config_dir = Path(report.get("config_dir") or "")
+            user_path = config_dir / "user.json"
+            self.assertTrue(user_path.exists())
+            self.assertNotIn("{data_dir}", user_path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

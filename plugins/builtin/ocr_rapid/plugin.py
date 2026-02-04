@@ -22,6 +22,15 @@ class RapidOcrPlugin(PluginBase):
         cfg = context.config if isinstance(context.config, dict) else {}
         models_cfg = cfg.get("models", {}) if isinstance(cfg.get("models", {}), dict) else {}
         rapid_cfg = models_cfg.get("rapidocr", {}) if isinstance(models_cfg.get("rapidocr", {}), dict) else {}
+        if not rapid_cfg:
+            providers_cfg = models_cfg.get("providers", {}) if isinstance(models_cfg.get("providers", {}), dict) else {}
+            rapid_cfg = providers_cfg.get("rapidocr", {}) if isinstance(providers_cfg.get("rapidocr", {}), dict) else {}
+            if not rapid_cfg:
+                rapid_cfg = (
+                    providers_cfg.get("ocr.rapid", {})
+                    if isinstance(providers_cfg.get("ocr.rapid", {}), dict)
+                    else {}
+                )
         self._det_model_path = rapid_cfg.get("det_model_path") or rapid_cfg.get("det_path")
         self._rec_model_path = rapid_cfg.get("rec_model_path") or rapid_cfg.get("rec_path")
         self._cls_model_path = rapid_cfg.get("cls_model_path") or rapid_cfg.get("cls_path")

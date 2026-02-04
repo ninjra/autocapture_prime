@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable, Iterable
 
 from autocapture_nx.kernel.ids import encode_record_id_component
@@ -303,6 +304,7 @@ class SSTPersistence:
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         run_id = artifact_id.split("/", 1)[0] if "/" in artifact_id else "run"
+        ts_utc = datetime.fromtimestamp(int(ts_ms) / 1000.0, tz=timezone.utc).isoformat()
         envelope = {
             **payload,
             "run_id": run_id,
@@ -310,6 +312,7 @@ class SSTPersistence:
             "kind": kind,
             "schema_version": self._schema_version,
             "created_ts_ms": int(ts_ms),
+            "ts_utc": payload.get("ts_utc") or ts_utc,
             "extractor": self._extractor,
             "provenance": {
                 "frame_ids": (record_id,),
@@ -319,6 +322,8 @@ class SSTPersistence:
             },
             "confidence_bp": int(confidence_bp),
         }
+        if "source_id" not in envelope:
+            envelope["source_id"] = record_id
         if "content_hash" not in envelope:
             envelope["content_hash"] = sha256_canonical(envelope)
         envelope["payload_hash"] = sha256_canonical({k: v for k, v in envelope.items() if k != "payload_hash"})

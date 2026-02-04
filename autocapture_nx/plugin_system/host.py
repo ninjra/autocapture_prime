@@ -28,6 +28,12 @@ def _encode(obj: Any) -> Any:
         import base64
 
         return {"__bytes__": base64.b64encode(obj).decode("ascii")}
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, tuple):
+        return [_encode(v) for v in obj]
+    if isinstance(obj, set):
+        return [_encode(v) for v in obj]
     if isinstance(obj, list):
         return [_encode(v) for v in obj]
     if isinstance(obj, dict):

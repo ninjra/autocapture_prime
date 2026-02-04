@@ -810,6 +810,9 @@ class IndexPlugin(SSTStagePluginBase):
         if state is None:
             return PluginOutput(items={}, metrics={}, diagnostics=[])
         extra_docs: list[dict[str, Any]] = []
+        provider_id = str(self.plugin_id or self.meta.id)
+        stage_name = self.stage_names[0] if self.stage_names else "index.text"
+        confidence_bp = 8000
         run_id = str(items.get("run_id") or "run")
         record_id = str(items.get("record_id") or "frame")
         state_id = str(state.get("state_id") or "state")
@@ -828,6 +831,9 @@ class IndexPlugin(SSTStagePluginBase):
                     "text": label,
                     "doc_kind": "ui.label",
                     "meta": {"element_id": el.get("element_id")},
+                    "provider_id": provider_id,
+                    "stage": stage_name,
+                    "confidence_bp": confidence_bp,
                     "bboxes": [el.get("bbox")],
                 }
             )
@@ -842,6 +848,9 @@ class IndexPlugin(SSTStagePluginBase):
                     "text": summary,
                     "doc_kind": "chart.summary",
                     "meta": {"chart_id": chart.get("chart_id")},
+                    "provider_id": provider_id,
+                    "stage": stage_name,
+                    "confidence_bp": confidence_bp,
                     "bboxes": [chart.get("bbox")],
                 }
             )
@@ -857,6 +866,9 @@ class IndexPlugin(SSTStagePluginBase):
                         "text": text,
                         "doc_kind": "table.cell",
                         "meta": {"table_id": table.get("table_id"), "r": cell.get("r"), "c": cell.get("c")},
+                        "provider_id": provider_id,
+                        "stage": stage_name,
+                        "confidence_bp": confidence_bp,
                         "bboxes": [cell.get("bbox")],
                     }
                 )
@@ -871,6 +883,9 @@ class IndexPlugin(SSTStagePluginBase):
                         "text": summary,
                         "doc_kind": "delta.summary",
                         "meta": {"delta_id": delta_event.get("delta_id")},
+                        "provider_id": provider_id,
+                        "stage": stage_name,
+                        "confidence_bp": confidence_bp,
                         "bboxes": [frame_bbox],
                     }
                 )

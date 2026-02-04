@@ -73,6 +73,16 @@ def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _replace_placeholder(value: Any, placeholder: str, replacement: str) -> Any:
+    if isinstance(value, dict):
+        return {k: _replace_placeholder(v, placeholder, replacement) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_replace_placeholder(v, placeholder, replacement) for v in value]
+    if isinstance(value, str):
+        return value.replace(placeholder, replacement)
+    return value
+
+
 def _ocr_report(system) -> dict:
     report = {"provider_ids": []}
     try:
@@ -259,6 +269,20 @@ def main(argv: list[str] | None = None) -> int:
         max_frames=len(frame_files),
         run_id=run_id,
     )
+    if isinstance(user_config, dict):
+        storage_cfg = user_config.setdefault("storage", {})
+        if isinstance(storage_cfg, dict):
+            storage_cfg["data_dir"] = str(data_dir)
+        plugins_cfg = user_config.setdefault("plugins", {})
+        if isinstance(plugins_cfg, dict):
+            settings_cfg = plugins_cfg.setdefault("settings", {})
+            if isinstance(settings_cfg, dict):
+                jepa_cfg = settings_cfg.setdefault("builtin.state.jepa.training", {})
+                if isinstance(jepa_cfg, dict):
+                    storage_cfg = jepa_cfg.setdefault("storage", {})
+                    if isinstance(storage_cfg, dict):
+                        storage_cfg["data_dir"] = str(data_dir)
+        user_config = _replace_placeholder(user_config, "{data_dir}", str(data_dir))
     if args.force_idle and isinstance(user_config, dict):
         runtime_cfg = user_config.setdefault("runtime", {})
         if isinstance(runtime_cfg, dict):

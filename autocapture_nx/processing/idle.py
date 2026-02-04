@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import io
+import json
 import zipfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable
 
 from autocapture_nx.kernel.derived_records import (
@@ -442,6 +444,30 @@ class IdleProcessor:
                         self._logger.log("sst.pipeline_error", {"source_id": record_id, "error": str(exc)})
                     last_record_id = source_record_id
                     continue
+                if result.diagnostics and self._logger is not None:
+                    self._logger.log(
+                        "sst.pipeline_diagnostics",
+                        {"source_id": record_id, "diagnostics": list(result.diagnostics)},
+                    )
+                if result.diagnostics:
+                    try:
+                        runtime_cfg = self._config.get("runtime", {}) if isinstance(self._config, dict) else {}
+                        enforce_cfg = runtime_cfg.get("mode_enforcement", {}) if isinstance(runtime_cfg, dict) else {}
+                        fixture_override = bool(enforce_cfg.get("fixture_override", False))
+                        if fixture_override:
+                            data_dir = self._config.get("storage", {}).get("data_dir", "data")
+                            diag_path = Path(str(data_dir)) / "logs" / "sst_diagnostics.jsonl"
+                            diag_path.parent.mkdir(parents=True, exist_ok=True)
+                            with diag_path.open("a", encoding="utf-8") as handle:
+                                handle.write(
+                                    json.dumps(
+                                        {"source_id": record_id, "diagnostics": list(result.diagnostics)},
+                                        sort_keys=True,
+                                    )
+                                    + "\n"
+                                )
+                    except Exception:
+                        pass
                 stats.sst_runs += 1
                 stats.sst_heavy += int(result.heavy_ran)
                 stats.sst_tokens += int(result.ocr_tokens)

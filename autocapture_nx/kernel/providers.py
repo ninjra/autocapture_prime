@@ -10,8 +10,11 @@ def capability_providers(capability: Any | None, default_provider: str) -> list[
     if capability is None:
         return []
     target = capability
-    if hasattr(target, "target"):
-        target = getattr(target, "target")
+    if hasattr(type(target), "target"):
+        try:
+            target = getattr(target, "target")
+        except Exception:
+            target = capability
     if hasattr(target, "items"):
         try:
             items = list(target.items())

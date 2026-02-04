@@ -20,7 +20,7 @@
     "manifest_sha256": ""
   },
   "permissions": {
-    "filesystem": "read",
+    "filesystem": "readwrite",
     "gpu": false,
     "network": false,
     "raw_input": false

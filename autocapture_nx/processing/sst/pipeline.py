@@ -1888,12 +1888,12 @@ def _sst_config(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _should_heavy(cfg: dict[str, Any], decision: SegmentDecision, should_abort: ShouldAbortFn | None, deadline_ts: float | None) -> bool:
+    if cfg["heavy_always"]:
+        return True
     if should_abort and should_abort():
         return False
     if deadline_ts is not None and time.time() >= deadline_ts:
         return False
-    if cfg["heavy_always"]:
-        return True
     if not cfg["heavy_on_boundary"]:
         return False
     return bool(decision.boundary)

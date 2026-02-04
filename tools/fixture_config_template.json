@@ -13,6 +13,7 @@
       "jpeg_quality": 90,
       "lossless": true,
       "loop": false,
+      "timestamp_source": "filename",
       "max_frames": 0
     },
     "video": {
@@ -36,6 +37,10 @@
   "processing": {
     "idle": {
       "enabled": true,
+      "max_seconds_per_run": 300,
+      "max_items_per_run": 20,
+      "max_concurrency_cpu": 1,
+      "max_concurrency_gpu": 1,
       "extractors": {
         "ocr": true,
         "vlm": true
@@ -51,6 +56,28 @@
         "vlm": true
       },
       "require_idle": true
+    },
+    "sst": {
+      "heavy_always": true,
+      "ocr_min_conf_bp": 0,
+      "persist": {
+        "mode": "replace"
+      },
+      "redact_enabled": false,
+      "ui_vlm": {
+        "enabled": true,
+        "max_providers": 0
+      }
+    },
+    "state_layer": {
+      "enabled": true,
+      "query_enabled": true,
+      "features": {
+        "index_enabled": true,
+        "workflow_enabled": true,
+        "anomaly_enabled": true,
+        "training_enabled": true
+      }
     }
   },
   "plugins": {
@@ -61,23 +88,244 @@
       "builtin.capture.windows": false,
       "builtin.cursor.windows": false,
       "builtin.processing.sst.ui_vlm": true,
+      "builtin.runtime.governor": true,
+      "builtin.runtime.scheduler": true,
+      "builtin.sst.build.delta": true,
+      "builtin.sst.build.state": true,
+      "builtin.sst.compliance.redact": true,
+      "builtin.sst.extract.chart": true,
+      "builtin.sst.extract.code": true,
+      "builtin.sst.extract.spreadsheet": true,
+      "builtin.sst.extract.table": true,
+      "builtin.sst.index": true,
+      "builtin.sst.infer.action": true,
+      "builtin.sst.layout.assemble": true,
+      "builtin.sst.match.ids": true,
+      "builtin.sst.ocr.onnx": true,
+      "builtin.sst.persist": true,
+      "builtin.sst.preprocess.normalize": true,
+      "builtin.sst.preprocess.tile": true,
+      "builtin.sst.temporal.segment": true,
+      "builtin.sst.track.cursor": true,
+      "builtin.sst.ui.parse": true,
+      "builtin.state.anomaly": true,
+      "builtin.state.jepa.training": true,
+      "builtin.state.workflow.miner": true,
+      "builtin.storage.encrypted": true,
       "builtin.tracking.input.windows": true,
       "builtin.window.metadata.windows": false
     },
+    "conflicts": {
+      "enforce": false
+    },
+    "hosting": {
+      "rpc_timeout_s": 60,
+      "rpc_startup_timeout_s": 60,
+      "rpc_timeout_limit": 6,
+      "rpc_timeout_window_s": 300,
+      "inproc_allowlist": [
+        "builtin.runtime.governor",
+        "builtin.runtime.scheduler",
+        "builtin.processing.sst.pipeline",
+        "builtin.processing.sst.ui_vlm",
+        "builtin.sst.temporal.segment",
+        "builtin.sst.preprocess.normalize",
+        "builtin.sst.preprocess.tile",
+        "builtin.sst.ocr.onnx",
+        "builtin.ocr.rapid",
+        "builtin.ocr.basic",
+        "builtin.sst.layout.assemble",
+        "builtin.sst.extract.table",
+        "builtin.sst.extract.spreadsheet",
+        "builtin.sst.extract.code",
+        "builtin.sst.extract.chart",
+        "builtin.sst.ui.parse",
+        "builtin.sst.track.cursor",
+        "builtin.sst.build.state",
+        "builtin.sst.match.ids",
+        "builtin.sst.build.delta",
+        "builtin.sst.infer.action",
+        "builtin.sst.compliance.redact",
+        "builtin.sst.persist",
+        "builtin.sst.index",
+        "builtin.state.policy",
+        "builtin.storage.sqlcipher"
+      ],
+      "inproc_justifications": {
+        "builtin.runtime.governor": "Fixture run requires local governor decisions without JSON IPC.",
+        "builtin.runtime.scheduler": "Fixture run avoids IPC for scheduler state.",
+        "builtin.processing.sst.pipeline": "Fixture run keeps SST results local to avoid IPC serialization issues.",
+        "builtin.processing.sst.ui_vlm": "Fixture run keeps SST VLM stage in-process to avoid IPC serialization issues.",
+        "builtin.sst.temporal.segment": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.preprocess.normalize": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.preprocess.tile": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.ocr.onnx": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.ocr.rapid": "Fixture run keeps RapidOCR tokens in-process to avoid IPC serialization of OCR text.",
+        "builtin.ocr.basic": "Fixture run keeps basic OCR tokens in-process to avoid IPC serialization of OCR text.",
+        "builtin.sst.layout.assemble": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.extract.table": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.extract.spreadsheet": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.extract.code": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.extract.chart": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.ui.parse": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.track.cursor": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.build.state": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.match.ids": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.build.delta": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.infer.action": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.compliance.redact": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.persist": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.index": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.state.policy": "Fixture run keeps policy gate local; plugin is not IPC-safe.",
+        "builtin.storage.sqlcipher": "Fixture run keeps metadata storage local for deterministic SQLite writes."
+      }
+    },
     "capabilities": {
+      "capture.source": {
+        "mode": "single",
+        "preferred": [
+          "builtin.capture.basic"
+        ],
+        "provider_ids": [
+          "builtin.capture.basic"
+        ]
+      },
       "ocr.engine": {
         "mode": "multi",
         "fanout": true,
         "max_providers": 0,
-        "preferred": [],
-        "provider_ids": []
+        "preferred": [
+          "builtin.ocr.rapid"
+        ],
+        "provider_ids": [
+          "builtin.ocr.rapid",
+          "builtin.ocr.basic"
+        ]
       },
       "vision.extractor": {
         "mode": "multi",
         "fanout": true,
         "max_providers": 0,
         "preferred": [],
-        "provider_ids": []
+        "provider_ids": [
+          "builtin.vlm.basic",
+          "builtin.vlm.deepseek_ocr2",
+          "builtin.vlm.qwen2_vl_7b",
+          "builtin.vlm.qwen2_vl_2b",
+          "builtin.vlm.llava_1_5_7b",
+          "builtin.vlm.minicpm_v_2_6"
+        ]
+      },
+      "storage.metadata": {
+        "mode": "single",
+        "fanout": false,
+        "max_providers": 1,
+        "preferred": [
+          "builtin.storage.encrypted"
+        ],
+        "provider_ids": [
+          "builtin.storage.encrypted"
+        ]
+      },
+      "storage.media": {
+        "mode": "single",
+        "fanout": false,
+        "max_providers": 1,
+        "preferred": [
+          "builtin.storage.encrypted"
+        ],
+        "provider_ids": [
+          "builtin.storage.encrypted"
+        ]
+      },
+      "storage.entity_map": {
+        "mode": "single",
+        "fanout": false,
+        "max_providers": 1,
+        "preferred": [
+          "builtin.storage.encrypted"
+        ],
+        "provider_ids": [
+          "builtin.storage.encrypted"
+        ]
+      },
+      "storage.keyring": {
+        "mode": "single",
+        "fanout": false,
+        "max_providers": 1,
+        "preferred": [
+          "builtin.storage.encrypted"
+        ],
+        "provider_ids": [
+          "builtin.storage.encrypted"
+        ]
+      },
+      "storage.state_tape": {
+        "mode": "single",
+        "fanout": false,
+        "max_providers": 1,
+        "preferred": [
+          "builtin.storage.encrypted"
+        ],
+        "provider_ids": [
+          "builtin.storage.encrypted"
+        ]
+      }
+    },
+    "filesystem_policies": {
+      "builtin.state.jepa.training": {
+        "readwrite": [
+          "{data_dir}/state"
+        ]
+      },
+      "builtin.processing.sst.pipeline": {
+        "readwrite": [
+          "{data_dir}"
+        ]
+      },
+      "builtin.retrieval.basic": {
+        "readwrite": [
+          "{data_dir}"
+        ]
+      },
+      "builtin.ocr.rapid": {
+        "read": [
+          "/etc/os-release"
+        ]
+      },
+      "builtin.storage.sqlcipher": {
+        "readwrite": [
+          "{data_dir}"
+        ]
+      },
+      "builtin.sst.index": {
+        "readwrite": [
+          "{data_dir}"
+        ]
+      }
+    },
+    "settings": {
+      "builtin.state.jepa.training": {
+        "storage": {
+          "data_dir": "{data_dir}"
+        }
+      },
+      "builtin.processing.sst.pipeline": {
+        "storage": {
+          "data_dir": "{data_dir}",
+          "lexical_path": "{data_dir}/lexical.db",
+          "vector_path": "{data_dir}/vector.db"
+        },
+        "indexing": {
+          "vector_backend": "sqlite"
+        }
+      },
+      "builtin.retrieval.basic": {
+        "storage": {
+          "data_dir": "{data_dir}",
+          "lexical_path": "{data_dir}/lexical.db",
+          "vector_path": "{data_dir}/vector.db"
+        }
       }
     }
   },
@@ -94,7 +342,11 @@
     },
     "budgets": {
       "cpu_max_utilization": 0.5,
-      "ram_max_utilization": 0.5
+      "ram_max_utilization": 0.5,
+      "window_budget_ms": 300000,
+      "per_job_max_ms": 120000,
+      "max_jobs_per_window": 20,
+      "preempt_grace_ms": 2000
     },
     "routing": {
       "gpu_heavy": {
@@ -106,10 +358,28 @@
   "storage": {
     "anchor": {
       "every_entries": 1,
-      "every_minutes": 1
+      "every_minutes": 1,
+      "path": "{data_dir}/anchor/anchors.ndjson"
     },
+    "audit_db_path": "{data_dir}/audit/kernel_audit.db",
+    "blob_dir": "{data_dir}/blobs",
+    "crypto": {
+      "backend": "aesgcm",
+      "keyring_backend": "auto",
+      "keyring_credential_name": "autocapture.keyring",
+      "keyring_path": "{data_dir}/vault/keyring.json",
+      "root_key_path": "{data_dir}/vault/root.key"
+    },
+    "data_dir": "{data_dir}",
+    "lexical_path": "{data_dir}/lexical.db",
+    "media_dir": "{data_dir}/media",
+    "vector_path": "{data_dir}/vector.db",
+    "metadata_path": "{data_dir}/metadata.db",
     "no_deletion_mode": true,
-    "raw_first_local": true
+    "raw_first_local": true,
+    "spool_dir": "{data_dir}/spool",
+    "state_tape_path": "{data_dir}/state/state_tape.db",
+    "state_vector_path": "{data_dir}/state/state_vector.db"
   },
   "web": {
     "allow_remote": false,
