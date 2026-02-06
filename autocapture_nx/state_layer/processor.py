@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from autocapture_nx.kernel.audit import append_audit_event
+from autocapture_nx.kernel.hashing import sha256_canonical
 from autocapture_nx.plugin_system.api import PluginContext
 
 from .builder_jepa import JEPAStateBuilder
@@ -30,6 +31,20 @@ class StateTapeStats:
     training_runs: int = 0
 
 
+def _normalize_counts(counts: Any) -> tuple[int, int, int]:
+    if isinstance(counts, dict):
+        return (
+            int(counts.get("spans_inserted", 0) or 0),
+            int(counts.get("edges_inserted", 0) or 0),
+            int(counts.get("evidence_inserted", 0) or 0),
+        )
+    return (
+        int(getattr(counts, "spans_inserted", 0) or 0),
+        int(getattr(counts, "edges_inserted", 0) or 0),
+        int(getattr(counts, "evidence_inserted", 0) or 0),
+    )
+
+
 class StateTapeProcessor:
     def __init__(self, system: Any) -> None:
         self._system = system
@@ -40,9 +55,10 @@ class StateTapeProcessor:
         self._workflow_miner = self._cap("state.workflow_miner")
         self._anomaly = self._cap("state.anomaly")
         self._training = self._cap("state.training")
-        self._builder = self._resolve_builder()
         self._logger = self._cap("observability.logger")
         self._events = self._cap("event.builder")
+        # Builder construction may need the logger, so resolve it after logger is available.
+        self._builder = self._resolve_builder()
 
     def _cap(self, name: str) -> Any | None:
         if hasattr(self._system, "has") and self._system.has(name):
@@ -111,6 +127,7 @@ class StateTapeProcessor:
             "config_hash": config_hash or "",
             "version_key": version_key or "",
         }
+        payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
         if hasattr(self._metadata, "put_replace"):
             try:
                 self._metadata.put_replace(self._checkpoint_id(run_id, version_key), payload)
@@ -245,9 +262,10 @@ class StateTapeProcessor:
             for edge in edges:
                 validate_state_edge(edge)
             counts = self._state_store.insert_batch(spans, edges)
-            stats.spans_inserted += counts.spans_inserted
-            stats.edges_inserted += counts.edges_inserted
-            stats.evidence_inserted += counts.evidence_inserted
+            spans_inserted, edges_inserted, evidence_inserted = _normalize_counts(counts)
+            stats.spans_inserted += spans_inserted
+            stats.edges_inserted += edges_inserted
+            stats.evidence_inserted += evidence_inserted
             stats.batches += 1
             processed_total += len(window)
             stats.states_processed += len(window)
@@ -318,8 +336,8 @@ class StateTapeProcessor:
                 details={
                     "run_id": run_id,
                     "states": len(window),
-                    "spans_inserted": counts.spans_inserted,
-                    "edges_inserted": counts.edges_inserted,
+                    "spans_inserted": spans_inserted,
+                    "edges_inserted": edges_inserted,
                 },
             )
             if len(window) >= max_states:

@@ -855,6 +855,7 @@
     "settings": {},
     "filesystem_defaults": {
       "read": [
+        "{repo_root}",
         "{run_dir}",
         "{metadata_db_path}",
         "{audit_db_path}",
@@ -864,6 +865,7 @@
         "{state_vector_db_path}"
       ],
       "readwrite": [
+        "{data_dir}",
         "{run_dir}"
       ]
     },
@@ -1044,6 +1046,7 @@
       },
       "max_concurrency_cpu": 2,
       "max_concurrency_gpu": 1,
+      "batch_size": 6,
       "max_items_per_run": 20,
       "max_seconds_per_run": 30,
       "sleep_ms": 2000
@@ -1058,8 +1061,8 @@
       "require_idle": true
     },
     "state_layer": {
-      "enabled": false,
-      "query_enabled": false,
+      "enabled": true,
+      "query_enabled": true,
       "emit_frame_evidence": true,
       "segment_frame_index": 0,
       "builder_plugin_id": "builtin.state.jepa_like",
@@ -1137,7 +1140,7 @@
         "index_enabled": true,
         "workflow_enabled": false,
         "anomaly_enabled": false,
-        "training_enabled": false
+        "training_enabled": true
       }
     },
     "watchdog": {

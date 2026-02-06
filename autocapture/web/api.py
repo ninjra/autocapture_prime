@@ -40,7 +40,8 @@ def get_app() -> FastAPI:
     app.state.facade = create_facade(
         persistent=True,
         start_conductor=False,
-        auto_start_capture=True,
+        # Web console must be safe to import and test; capture start is an explicit action.
+        auto_start_capture=False,
     )
     ui_dir = Path(__file__).resolve().parent / "ui"
     if ui_dir.exists():

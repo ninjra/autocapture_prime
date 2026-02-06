@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 from pathlib import Path
 
-from autocapture_nx.kernel.loader import Kernel, default_config_paths
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from autocapture_nx.kernel.loader import Kernel, default_config_paths  # noqa: E402
 
 
 def main() -> int:

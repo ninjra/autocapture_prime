@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from autocapture.core.hashing import canonical_dumps, hash_canonical
+from autocapture.core.hashing import canonical_dumps
 from autocapture_nx.kernel.canonical_json import dumps as nx_canonical_dumps
 from autocapture_nx.kernel.hashing import sha256_file
 from autocapture_nx.plugin_system.api import PluginContext
@@ -144,11 +144,14 @@ def _compute_time_section() -> dict[str, Any]:
     for case_id, payload in _time_cases().items():
         now = datetime.fromisoformat(payload["now"])
         output = parser.parse(payload["input"], now=now)
+        # Use SHA256 over canonical JSON to keep this gate independent of
+        # optional hashing dependencies (e.g. blake3).
+        canon = canonical_dumps(output)
         results[case_id] = {
             "input": payload["input"],
             "now": payload["now"],
             "output": output,
-            "hash": hash_canonical(output),
+            "hash": _sha256_text(canon),
         }
     return {"cases": results}
 
@@ -169,6 +172,13 @@ def _compute_sanitizer_section() -> dict[str, Any]:
             sanitized = sanitizer.sanitize_text(text, scope=scope)
             leak_ok = sanitizer.leak_check({"text": sanitized["text"], "_tokens": sanitized["tokens"]})
             detok = sanitizer.detokenize_text(sanitized["text"])
+            canon_payload = {
+                "text": sanitized["text"],
+                "glossary": sanitized["glossary"],
+                "tokens": sanitized["tokens"],
+                "leak_ok": leak_ok,
+                "detokenized": detok,
+            }
             results[case_id] = {
                 "input": {"text": text, "scope": scope},
                 "output": {
@@ -178,15 +188,7 @@ def _compute_sanitizer_section() -> dict[str, Any]:
                     "leak_ok": leak_ok,
                     "detokenized": detok,
                 },
-                "hash": hash_canonical(
-                    {
-                        "text": sanitized["text"],
-                        "glossary": sanitized["glossary"],
-                        "tokens": sanitized["tokens"],
-                        "leak_ok": leak_ok,
-                        "detokenized": detok,
-                    }
-                ),
+                "hash": _sha256_text(canonical_dumps(canon_payload)),
             }
     return {"cases": results}
 

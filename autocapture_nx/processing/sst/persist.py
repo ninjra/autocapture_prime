@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from autocapture_nx.kernel.ids import encode_record_id_component
@@ -44,6 +47,19 @@ class SSTPersistence:
             "config_hash": config_hash,
         }
         self._schema_version = int(schema_version)
+        self._last_error: str | None = None
+
+    def _debug_log(self, entry: dict[str, Any]) -> None:
+        data_dir = os.environ.get("AUTOCAPTURE_DATA_DIR")
+        if not data_dir:
+            return
+        try:
+            log_path = Path(data_dir) / "logs" / "sst_persist_debug.jsonl"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with log_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, sort_keys=True) + "\n")
+        except Exception:
+            return
 
     def persist_frame(
         self,
@@ -108,7 +124,8 @@ class SSTPersistence:
         indexed_ids: list[str] = []
 
         state_id = state["state_id"]
-        state_record_id = f"{run_id}/derived.sst.state/{encode_record_id_component(record_id)}"
+        screen_state, normalized = _ensure_json(state)
+        state_record_id = f"{run_id}/derived.sst.state/{_state_record_component(record_id)}"
         state_payload = self._envelope(
             artifact_id=state_record_id,
             kind="ScreenState",
@@ -123,7 +140,8 @@ class SSTPersistence:
                 "state_id": state_id,
                 "frame_id": state.get("frame_id"),
                 "phash": state.get("phash"),
-                "screen_state": state,
+                "screen_state": screen_state,
+                "screen_state_normalized": bool(normalized),
                 "summary": {
                     "visible_apps": tuple(state.get("visible_apps", ())),
                     "focus_element_id": state.get("focus_element_id"),
@@ -135,10 +153,56 @@ class SSTPersistence:
                 },
             },
         )
-        if self._put_new(state_record_id, state_payload):
+        payload_normalized = False
+        try:
+            json.dumps(state_payload, sort_keys=True)
+        except Exception as exc:
+            extra_docs = list(extra_docs or [])
+            extra_docs.append(
+                {
+                    "text": f"state_payload_json_error:{type(exc).__name__}:{exc}",
+                    "doc_kind": "state.persist.error",
+                    "provider_id": "sst.persist",
+                    "stage": "persist.bundle",
+                    "confidence_bp": 1000,
+                }
+            )
+        state_payload, payload_normalized = _ensure_json(state_payload)
+        if payload_normalized and isinstance(state_payload, dict):
+            state_payload["payload_normalized"] = True
+            self._debug_log(
+                {
+                    "event": "sst.state.payload_normalized",
+                    "record_id": record_id,
+                    "state_record_id": state_record_id,
+                    "state_id": state_id,
+                }
+            )
+        state_created = self._put_new(state_record_id, state_payload)
+        if state_created:
             derived_records += 1
             derived_ids.append(state_record_id)
             self._emit_event("sst.state", state_payload, inputs=(record_id,), outputs=(state_record_id,))
+        elif self._last_error:
+            extra_docs = list(extra_docs or [])
+            extra_docs.append(
+                {
+                    "text": f"state_persist_error:{self._last_error}",
+                    "doc_kind": "state.persist.error",
+                    "provider_id": "sst.persist",
+                    "stage": "persist.bundle",
+                    "confidence_bp": 1000,
+                }
+            )
+            self._debug_log(
+                {
+                    "event": "sst.state.persist_failed",
+                    "record_id": record_id,
+                    "state_record_id": state_record_id,
+                    "state_id": state_id,
+                    "error": self._last_error,
+                }
+            )
 
         docs = list(_state_docs(run_id, state))
         doc_records: list[tuple[str, dict[str, Any]]] = []
@@ -330,19 +394,23 @@ class SSTPersistence:
         return envelope
 
     def _put_new(self, record_id: str, payload: dict[str, Any]) -> bool:
+        self._last_error = None
         existing = self._metadata.get(record_id, None)
         if existing is not None:
+            self._last_error = "exists"
             return False
         if hasattr(self._metadata, "put_new"):
             try:
                 self._metadata.put_new(record_id, payload)
                 return True
-            except Exception:
+            except Exception as exc:
+                self._last_error = f"put_new_failed:{type(exc).__name__}:{exc}"
                 return False
         try:
             self._metadata.put(record_id, payload)
             return True
-        except Exception:
+        except Exception as exc:
+            self._last_error = f"put_failed:{type(exc).__name__}:{exc}"
             return False
 
     def _put_batch(self, records: list[tuple[str, dict[str, Any]]]) -> set[str]:
@@ -434,6 +502,30 @@ def _bp_int(value: Any) -> int:
     if bp > 10000:
         return 10000
     return bp
+
+
+def _state_record_component(record_id: str) -> str:
+    return f"rid_{sha256_text(record_id)}"
+
+
+def _normalize_json(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, bytes):
+        return {"__bytes_len": len(value), "__bytes_sha256": sha256_text(value.hex())}
+    if isinstance(value, dict):
+        return {str(key): _normalize_json(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_normalize_json(item) for item in value]
+    return str(value)
+
+
+def _ensure_json(value: Any) -> tuple[Any, bool]:
+    try:
+        json.dumps(value, sort_keys=True)
+        return value, False
+    except TypeError:
+        return _normalize_json(value), True
 
 
 def _extra_doc_bboxes(doc: dict[str, Any], *, default_bbox: tuple[int, int, int, int]) -> tuple[tuple[int, int, int, int], ...]:

@@ -39,6 +39,17 @@ def _state_record(ts_ms: int, frame_id: str, text: str) -> dict:
     }
 
 
+def _state_record_missing_frame_id(ts_ms: int, record_id: str, text: str) -> dict:
+    record = _state_record(ts_ms, "missing", text)
+    record["record_id"] = record_id
+    record["source_id"] = record_id
+    screen_state = record.get("screen_state", {})
+    if isinstance(screen_state, dict):
+        screen_state["frame_id"] = ""
+        record["screen_state"] = screen_state
+    return record
+
+
 class StateLayerBuilderTests(unittest.TestCase):
     def _builder(self):
         config = {
@@ -78,6 +89,19 @@ class StateLayerBuilderTests(unittest.TestCase):
         self.assertEqual(out1["spans"], out2["spans"])
         self.assertEqual(out1["edges"], out2["edges"])
         self.assertTrue(out1["spans"])
+
+    def test_builder_falls_back_to_record_id_for_evidence(self):
+        builder = self._builder()
+        states = [
+            _state_record_missing_frame_id(1000, "frameA", "Hello World"),
+            _state_record_missing_frame_id(2000, "frameB", "Hello Again"),
+        ]
+        batch = {"session_id": "run", "states": states}
+        out = builder.process(batch)
+        self.assertTrue(out["spans"])
+        evidence = out["spans"][0].get("evidence", [])
+        self.assertTrue(evidence)
+        self.assertEqual(evidence[0].get("media_id"), "frameA")
 
 
 if __name__ == "__main__":

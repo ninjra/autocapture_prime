@@ -1480,10 +1480,22 @@ class PluginRegistry:
         self._failure_summary_cache = None
         manifests = self.discover_manifest_paths()
         lockfile = self.load_lockfile()
+        plugins_cfg = self.config.get("plugins", {}) if isinstance(self.config, dict) else {}
+        safe_mode_minimal = bool(plugins_cfg.get("safe_mode_minimal", False))
+        if os.getenv("AUTOCAPTURE_SAFE_MODE_MINIMAL", "").lower() in {"1", "true", "yes"}:
+            safe_mode_minimal = True
         hosting_cfg = self.config.get("plugins", {}).get("hosting", {})
         hosting_mode = str(hosting_cfg.get("mode", "subprocess")).lower()
+        # Tests and low-resource environments (WSL) may need to force inproc hosting
+        # to avoid spawning many subprocess plugin hosts and exhausting RAM.
+        hosting_mode_env = os.getenv("AUTOCAPTURE_PLUGINS_HOSTING_MODE", "").strip().lower()
+        if hosting_mode_env:
+            hosting_mode = hosting_mode_env
         if hosting_mode not in {"subprocess", "inproc"}:
             raise PluginError(f"Unsupported plugin hosting mode: {hosting_mode}")
+        # Safe-mode minimal is used by perf/health gates; avoid paying the subprocess startup tax.
+        if self.safe_mode and safe_mode_minimal:
+            hosting_mode = "inproc"
 
         manifests_by_id: dict[str, tuple[Path, dict[str, Any]]] = {}
         for manifest_path in manifests:
@@ -1536,10 +1548,6 @@ class PluginRegistry:
             if pid in allowlist and is_enabled(pid, manifest)
         }
 
-        plugins_cfg = self.config.get("plugins", {}) if isinstance(self.config, dict) else {}
-        safe_mode_minimal = bool(plugins_cfg.get("safe_mode_minimal", False))
-        if os.getenv("AUTOCAPTURE_SAFE_MODE_MINIMAL", "").lower() in {"1", "true", "yes"}:
-            safe_mode_minimal = True
         if (self.safe_mode or plugins_cfg.get("safe_mode", False)) and safe_mode_minimal:
             minimal = self._minimal_safe_mode_set(manifests_by_id, allowlist, alias_map)
             if minimal:
@@ -1661,6 +1669,9 @@ class PluginRegistry:
                             rng_seed_hex=rng_seed_hex,
                         )
                     else:
+                        provides = manifest.get("provides", [])
+                        if not isinstance(provides, list):
+                            provides = []
                         instance = SubprocessPlugin(
                             module_path,
                             entry["callable"],
@@ -1671,6 +1682,8 @@ class PluginRegistry:
                             capabilities=capabilities,
                             allowed_capabilities=required_capabilities,
                             filesystem_policy=filesystem_policy.payload() if filesystem_policy else None,
+                            entrypoint_kind=str(entry.get("kind", "")).strip() or None,
+                            provided_capabilities=[str(item) for item in provides if str(item).strip()],
                             rng_seed=rng_seed,
                             rng_seed_hex=rng_seed_hex,
                             rng_strict=self._rng_service.strict,

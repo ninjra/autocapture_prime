@@ -391,13 +391,13 @@ def _state_input_seed(state: dict[str, Any]) -> str:
 
 def _state_evidence_ref(state_record: dict[str, Any]) -> dict[str, Any] | None:
     state = _screen_state(state_record)
-    media_id = state.get("frame_id")
+    media_id = state.get("frame_id") or state_record.get("frame_id") or state_record.get("record_id") or state_record.get("source_id")
     if not media_id:
         return None
-    ts_ms = int(state.get("ts_ms", 0) or 0)
-    width = int(state.get("width", 0) or 0)
-    height = int(state.get("height", 0) or 0)
-    sha256 = str(state.get("image_sha256") or "")
+    ts_ms = int(state.get("ts_ms") or state_record.get("ts_ms") or state_record.get("created_ts_ms") or 0)
+    width = int(state.get("width") or state_record.get("width") or 0)
+    height = int(state.get("height") or state_record.get("height") or 0)
+    sha256 = str(state.get("image_sha256") or state_record.get("image_sha256") or "")
     return {
         "media_id": str(media_id),
         "ts_start_ms": ts_ms,

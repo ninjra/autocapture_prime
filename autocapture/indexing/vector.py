@@ -70,7 +70,7 @@ class LocalEmbedder:
             try:
                 if candidate.exists():
                     self._bundle = select_bundle("embedder", [candidate])
-            except PermissionError:
+            except Exception:
                 self._bundle = None
             except Exception:
                 self._bundle = None
@@ -164,7 +164,12 @@ class LocalEmbedder:
         if not self._model_name:
             return False
         path = Path(str(self._model_name))
-        if not path.exists() or path.is_dir():
+        try:
+            if not path.exists() or path.is_dir():
+                return False
+        except Exception:
+            # In sandboxed plugin hosts, the configured model path may be outside the
+            # allowed filesystem roots; treat as "not a toy embedder" and fall back.
             return False
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
@@ -228,7 +233,10 @@ class LocalEmbedder:
 
     def _model_digest(self, model_name: str) -> str | None:
         path = Path(str(model_name))
-        if not path.exists():
+        try:
+            if not path.exists():
+                return None
+        except Exception:
             return None
         try:
             from autocapture_nx.kernel.hashing import sha256_directory, sha256_file

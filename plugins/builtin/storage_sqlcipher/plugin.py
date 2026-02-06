@@ -182,8 +182,9 @@ class SQLCipherStore:
             import sqlcipher3
         except Exception as exc:
             raise RuntimeError(f"Missing SQLCipher dependency: {exc}")
-        conn = sqlcipher3.connect(self._db_path)
-        conn.execute("PRAGMA key = ?", (self._key.hex(),))
+        conn = sqlcipher3.connect(self._db_path, check_same_thread=False)
+        # sqlcipher3 does not support parameter binding for PRAGMA key.
+        conn.execute(f"PRAGMA key = \"x'{self._key.hex()}'\"")
         self._apply_fsync_policy(conn)
         return conn
 

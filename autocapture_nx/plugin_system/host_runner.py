@@ -10,6 +10,7 @@ import sys
 import threading
 import random
 import traceback
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -72,6 +73,10 @@ def _encode(obj: Any) -> Any:
         import base64
 
         return {"__bytes__": base64.b64encode(obj).decode("ascii")}
+    if obj.__class__.__name__ == "CapabilityProxy":
+        return {"__capability_proxy__": True, "repr": str(obj)}
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return _encode(asdict(obj))
     if isinstance(obj, Path):
         return str(obj)
     if isinstance(obj, tuple):
@@ -264,6 +269,28 @@ def _filesystem_policy(payload: Any) -> FilesystemPolicy | None:
     return FilesystemPolicy.from_paths(read=read if isinstance(read, list) else [], readwrite=readwrite if isinstance(readwrite, list) else [])
 
 
+def _seed_optional_libs(seed: int) -> None:
+    """Seed optional heavy deps without importing them.
+
+    Importing torch in every subprocess host was causing large RSS (hundreds of MB)
+    even for plugins that never touch torch. We only seed if the module is already
+    loaded by the plugin.
+    """
+
+    np = sys.modules.get("numpy")
+    if np is not None:
+        try:
+            getattr(np, "random").seed(seed)
+        except Exception:
+            pass
+    torch = sys.modules.get("torch")
+    if torch is not None:
+        try:
+            getattr(torch, "manual_seed")(seed)
+        except Exception:
+            pass
+
+
 def main() -> None:
     if len(sys.argv) < 5:
         raise SystemExit("usage: host_runner <plugin_path> <callable> <plugin_id> <network_allowed>")
@@ -307,18 +334,6 @@ def main() -> None:
         install_rng_guard()
         set_thread_seed(rng_seed_int, strict=rng_strict)
         rng_instance = random.Random(rng_seed_int)
-        try:  # optional deps
-            import numpy as np  # type: ignore
-
-            np.random.seed(rng_seed_int)
-        except Exception:
-            pass
-        try:  # optional deps
-            import torch  # type: ignore
-
-            torch.manual_seed(rng_seed_int)
-        except Exception:
-            pass
 
     if not isinstance(host_config, dict):
         host_config = {}
@@ -360,6 +375,8 @@ def main() -> None:
                 import faulthandler
 
                 faulthandler.dump_traceback_later(5.0, repeat=False, file=sys.stderr)
+            if rng_enabled and rng_seed_int is not None:
+                _seed_optional_libs(rng_seed_int)
             instance = factory(plugin_id, context)
             if trace_enabled:
                 import faulthandler
@@ -395,6 +412,8 @@ def main() -> None:
                     args = _decode(request.get("args", []))
                     kwargs = _decode(request.get("kwargs", {}))
                     with network_guard(network_allowed):
+                        if rng_enabled and rng_seed_int is not None:
+                            _seed_optional_libs(rng_seed_int)
                         result = func(*args, **kwargs)
                     result = _encode(result)
                 else:

@@ -2,11 +2,25 @@ import os
 import tempfile
 import unittest
 
-from fastapi.testclient import TestClient
+try:
+    from fastapi.testclient import TestClient  # type: ignore
+    from autocapture.gateway.app import get_app
+    from tests._fastapi_support import fastapi_testclient_usable
+except Exception:  # pragma: no cover
+    TestClient = None  # type: ignore[assignment]
+    get_app = None  # type: ignore[assignment]
+    fastapi_testclient_usable = None  # type: ignore[assignment]
 
-from autocapture.gateway.app import get_app
+
+_FASTAPI_OK = bool(
+    TestClient is not None
+    and get_app is not None
+    and fastapi_testclient_usable is not None
+    and fastapi_testclient_usable()
+)
 
 
+@unittest.skipUnless(_FASTAPI_OK, "fastapi TestClient unavailable or unusable")
 class GatewayPolicyBlockTests(unittest.TestCase):
     def test_cloud_blocked_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

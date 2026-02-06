@@ -34,13 +34,19 @@
       "enabled": false
     }
   },
+  "models": {
+    "vlm_path": "/mnt/d/autocapture/models/qwen2-vl-2b-instruct",
+    "vlm_prompt": "Describe the screen contents concisely. Include any visible media playback and list the current song title and artist if shown. Capture on-screen labels or track info verbatim when possible.",
+    "vlm_max_new_tokens": 256
+  },
   "processing": {
     "idle": {
       "enabled": true,
       "max_seconds_per_run": 300,
       "max_items_per_run": 20,
       "max_concurrency_cpu": 1,
-      "max_concurrency_gpu": 1,
+      "max_concurrency_gpu": 2,
+      "batch_size": 6,
       "extractors": {
         "ocr": true,
         "vlm": true
@@ -72,6 +78,12 @@
     "state_layer": {
       "enabled": true,
       "query_enabled": true,
+      "index": {
+        "min_score": 0.0
+      },
+      "evidence": {
+        "max_snippet_chars": 25000
+      },
       "features": {
         "index_enabled": true,
         "workflow_enabled": true,
@@ -109,9 +121,15 @@
       "builtin.sst.track.cursor": true,
       "builtin.sst.ui.parse": true,
       "builtin.state.anomaly": true,
+      "builtin.state.evidence.compiler": true,
+      "builtin.state.jepa_like": true,
       "builtin.state.jepa.training": true,
+      "builtin.state.retrieval": true,
+      "builtin.state.vector.sqlite_ts": true,
       "builtin.state.workflow.miner": true,
       "builtin.storage.encrypted": true,
+      "builtin.vlm.basic": false,
+      "builtin.vlm.qwen2_vl_2b": true,
       "builtin.tracking.input.windows": true,
       "builtin.window.metadata.windows": false
     },
@@ -149,6 +167,10 @@
         "builtin.sst.persist",
         "builtin.sst.index",
         "builtin.state.policy",
+        "builtin.state.evidence.compiler",
+        "builtin.state.jepa_like",
+        "builtin.state.retrieval",
+        "builtin.state.vector.sqlite_ts",
         "builtin.storage.sqlcipher"
       ],
       "inproc_justifications": {
@@ -177,6 +199,10 @@
         "builtin.sst.persist": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
         "builtin.sst.index": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
         "builtin.state.policy": "Fixture run keeps policy gate local; plugin is not IPC-safe.",
+        "builtin.state.evidence.compiler": "Fixture run keeps evidence compiler local for deterministic metadata access.",
+        "builtin.state.jepa_like": "Fixture run keeps JEPA-like state builder in-process for deterministic span building.",
+        "builtin.state.retrieval": "Fixture run keeps state retrieval local for deterministic vector access.",
+        "builtin.state.vector.sqlite_ts": "Fixture run keeps vector index local for deterministic SQLite access.",
         "builtin.storage.sqlcipher": "Fixture run keeps metadata storage local for deterministic SQLite writes."
       }
     },
@@ -205,15 +231,12 @@
       "vision.extractor": {
         "mode": "multi",
         "fanout": true,
-        "max_providers": 0,
-        "preferred": [],
+        "max_providers": 1,
+        "preferred": [
+          "builtin.vlm.qwen2_vl_2b"
+        ],
         "provider_ids": [
-          "builtin.vlm.basic",
-          "builtin.vlm.deepseek_ocr2",
-          "builtin.vlm.qwen2_vl_7b",
-          "builtin.vlm.qwen2_vl_2b",
-          "builtin.vlm.llava_1_5_7b",
-          "builtin.vlm.minicpm_v_2_6"
+          "builtin.vlm.qwen2_vl_2b"
         ]
       },
       "storage.metadata": {
@@ -221,59 +244,84 @@
         "fanout": false,
         "max_providers": 1,
         "preferred": [
+          "builtin.storage.sqlcipher",
           "builtin.storage.encrypted"
         ],
-        "provider_ids": [
-          "builtin.storage.encrypted"
-        ]
+        "provider_ids": []
       },
       "storage.media": {
         "mode": "single",
         "fanout": false,
         "max_providers": 1,
         "preferred": [
+          "builtin.storage.sqlcipher",
           "builtin.storage.encrypted"
         ],
-        "provider_ids": [
-          "builtin.storage.encrypted"
-        ]
+        "provider_ids": []
       },
       "storage.entity_map": {
         "mode": "single",
         "fanout": false,
         "max_providers": 1,
         "preferred": [
+          "builtin.storage.sqlcipher",
           "builtin.storage.encrypted"
         ],
-        "provider_ids": [
-          "builtin.storage.encrypted"
-        ]
+        "provider_ids": []
       },
       "storage.keyring": {
         "mode": "single",
         "fanout": false,
         "max_providers": 1,
         "preferred": [
+          "builtin.storage.sqlcipher",
           "builtin.storage.encrypted"
         ],
-        "provider_ids": [
-          "builtin.storage.encrypted"
-        ]
+        "provider_ids": []
       },
       "storage.state_tape": {
         "mode": "single",
         "fanout": false,
         "max_providers": 1,
         "preferred": [
+          "builtin.storage.sqlcipher",
           "builtin.storage.encrypted"
         ],
-        "provider_ids": [
-          "builtin.storage.encrypted"
-        ]
+        "provider_ids": []
       }
     },
     "filesystem_policies": {
       "builtin.state.jepa.training": {
+        "readwrite": [
+          "{data_dir}/state"
+        ]
+      },
+      "builtin.state.jepa_like": {
+        "readwrite": [
+          "{data_dir}/state"
+        ]
+      },
+      "builtin.state.retrieval": {
+        "readwrite": [
+          "{data_dir}/state"
+        ]
+      },
+      "builtin.state.vector.sqlite_ts": {
+        "readwrite": [
+          "{data_dir}/state"
+        ]
+      },
+      "builtin.state.workflow.miner": {
+        "readwrite": [
+          "{data_dir}/state"
+        ]
+      },
+      "builtin.state.anomaly": {
+        "readwrite": [
+          "{data_dir}/state"
+        ]
+      },
+      "builtin.state.evidence.compiler": {
         "readwrite": [
           "{data_dir}/state"
         ]
@@ -291,6 +339,11 @@
       "builtin.ocr.rapid": {
         "read": [
           "/etc/os-release"
+        ]
+      },
+      "builtin.vlm.qwen2_vl_2b": {
+        "read": [
+          "/mnt/d/autocapture/models/qwen2-vl-2b-instruct"
         ]
       },
       "builtin.storage.sqlcipher": {
@@ -358,7 +411,7 @@
   "storage": {
     "anchor": {
       "every_entries": 1,
-      "every_minutes": 1,
+      "every_minutes": 0,
       "path": "{data_dir}/anchor/anchors.ndjson"
     },
     "audit_db_path": "{data_dir}/audit/kernel_audit.db",

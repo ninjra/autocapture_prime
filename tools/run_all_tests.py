@@ -26,6 +26,7 @@ def _commands(py: str) -> Iterable[list[str]]:
         [py, "tools/gate_concurrency.py"],
         [py, "tools/gate_ledger.py"],
         [py, "tools/gate_perf.py"],
+        [py, "tools/gate_acceptance_coverage.py"],
         [py, "tools/gate_pillars.py"],
         [py, "tools/gate_security.py"],
         [py, "tools/gate_phase0.py"],
@@ -43,7 +44,8 @@ def _commands(py: str) -> Iterable[list[str]]:
         [py, "-m", "autocapture_nx", "doctor"],
         [py, "-m", "autocapture_nx", "--safe-mode", "doctor"],
         [py, "-m", "unittest", "tests/test_blueprint_spec_validation.py", "-q"],
-        [py, "-m", "unittest", "discover", "-s", "tests", "-q"],
+        # Run the suite sharded-by-file to avoid single-process memory blowups on WSL.
+        [py, "tools/run_unittest_sharded.py", "--timeout-s", os.environ.get("AUTO_CAPTURE_UNITTEST_FILE_TIMEOUT_S", "600")],
     ]
 
 
@@ -141,6 +143,9 @@ def main() -> int:
     base_env = os.environ.copy()
     root = Path(__file__).resolve().parents[1]
     base_env.setdefault("PYTHONPATH", str(root))
+    # Prefer the repo venv for deterministic deps when it exists.
+    venv_python = root / ".venv" / "bin" / "python3"
+    project_python = str(venv_python) if venv_python.exists() else str(sys.executable)
     temp_root: Path | None = None
     test_root = root / ".dev" / "test_env"
     if root.as_posix().startswith("/mnt/") and os.name != "nt":
@@ -167,7 +172,7 @@ def main() -> int:
         return 1
 
     try:
-        for idx, cmd in enumerate(_commands(sys.executable)):
+        for idx, cmd in enumerate(_commands(project_python)):
             env = base_env.copy()
             step_dir = test_root / f"step_{idx:02d}"
             config_dir = step_dir / "config"
@@ -180,9 +185,9 @@ def main() -> int:
             _write_log(log_path, f"Running: {' '.join(cmd)}")
             code = _run(cmd, env)
             if code != 0:
-                _write_report(report_path, log_path, "failed", step, code, str(sys.executable))
+                _write_report(report_path, log_path, "failed", step, code, project_python)
                 return code
-        _write_report(report_path, log_path, "ok", "complete", 0, str(sys.executable))
+        _write_report(report_path, log_path, "ok", "complete", 0, project_python)
         print("OK: all tests and invariants passed")
         return 0
     finally:

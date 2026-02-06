@@ -1444,6 +1444,9 @@
             "max_concurrency_gpu": {
               "type": "integer"
             },
+            "batch_size": {
+              "type": "integer"
+            },
             "max_items_per_run": {
               "type": "integer"
             },

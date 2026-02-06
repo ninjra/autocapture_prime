@@ -271,6 +271,26 @@ class CitationValidator(PluginBase):
             keyring = self.context.get_capability("storage.keyring")
         except Exception:
             keyring = None
+        if keyring is not None and hasattr(keyring, "_target"):
+            keyring = getattr(keyring, "_target")
+        if not isinstance(keyring, KeyRing):
+            storage_cfg = self.context.config.get("storage", {}) if isinstance(self.context.config, dict) else {}
+            crypto_cfg = storage_cfg.get("crypto", {}) if isinstance(storage_cfg, dict) else {}
+            keyring_path = crypto_cfg.get("keyring_path", "data/vault/keyring.json")
+            root_key_path = crypto_cfg.get("root_key_path", "data/vault/root.key")
+            require_protection = bool(storage_cfg.get("encryption_required", False) and os.name == "nt")
+            backend = crypto_cfg.get("keyring_backend", "auto")
+            credential = crypto_cfg.get("keyring_credential_name", "autocapture.keyring")
+            try:
+                keyring = KeyRing.load(
+                    keyring_path,
+                    legacy_root_path=root_key_path,
+                    require_protection=require_protection,
+                    backend=backend,
+                    credential_name=credential,
+                )
+            except Exception:
+                return False
         if not isinstance(keyring, KeyRing):
             return False
         key_id = record.get("anchor_key_id")

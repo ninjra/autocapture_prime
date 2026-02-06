@@ -1,5 +1,3 @@
-import types
-
 from autocapture.runtime.conductor import RuntimeConductor
 
 

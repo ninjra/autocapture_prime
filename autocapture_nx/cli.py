@@ -9,6 +9,7 @@ import sys
 from getpass import getpass
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from autocapture_nx.kernel.config import load_config
 from autocapture_nx.kernel.audit import append_audit_event
@@ -277,7 +278,7 @@ def _prompt_passphrase(value: str) -> str:
 
 
 def cmd_keys_export(args: argparse.Namespace) -> int:
-    details = {"bundle_path": str(args.out)}
+    details: dict[str, Any] = {"bundle_path": str(args.out)}
     try:
         crypto = _load_crypto_config(args.data_dir, args.config_dir, safe_mode=args.safe_mode)
         require_protection = bool(crypto["encryption_required"] and os.name == "nt")
@@ -318,7 +319,7 @@ def cmd_keys_export(args: argparse.Namespace) -> int:
 
 
 def cmd_keys_import(args: argparse.Namespace) -> int:
-    details = {"bundle_path": str(args.bundle)}
+    details: dict[str, Any] = {"bundle_path": str(args.bundle)}
     try:
         crypto = _load_crypto_config(args.data_dir, args.config_dir, safe_mode=args.safe_mode)
         require_protection = bool(crypto["encryption_required"] and os.name == "nt")

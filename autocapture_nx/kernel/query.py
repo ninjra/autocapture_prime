@@ -20,7 +20,7 @@ from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.kernel.providers import capability_providers
 from autocapture_nx.kernel.telemetry import record_telemetry
-from autocapture_nx.state_layer.policy_gate import StatePolicyGate
+from autocapture_nx.state_layer.policy_gate import StatePolicyGate, normalize_state_policy_decision
 from autocapture_nx.state_layer.evidence_compiler import EvidenceCompiler
 
 
@@ -330,9 +330,22 @@ def _extract_frame(blob: bytes, record: dict[str, Any]) -> bytes | None:
 def run_state_query(system, query: str) -> dict[str, Any]:
     start_perf = time.perf_counter()
     parser = system.get("time.intent_parser")
-    retrieval = _resolve_single_provider(system.get("state.retrieval")) if hasattr(system, "get") else None
-    evidence_compiler = _resolve_single_provider(system.get("state.evidence_compiler")) if hasattr(system, "get") else None
-    policy_gate = _resolve_single_provider(system.get("state.policy")) if hasattr(system, "get") else None
+    retrieval = None
+    evidence_compiler = None
+    policy_gate = None
+    if hasattr(system, "get"):
+        try:
+            retrieval = _resolve_single_provider(system.get("state.retrieval"))
+        except Exception:
+            retrieval = None
+        try:
+            evidence_compiler = _resolve_single_provider(system.get("state.evidence_compiler"))
+        except Exception:
+            evidence_compiler = None
+        try:
+            policy_gate = _resolve_single_provider(system.get("state.policy"))
+        except Exception:
+            policy_gate = None
     answer = system.get("answer.builder")
     metadata = system.get("storage.metadata")
     event_builder = None
@@ -400,7 +413,7 @@ def run_state_query(system, query: str) -> dict[str, Any]:
     intent = parser.parse(query_text)
     time_window = intent.get("time_window")
     hits = retrieval.search(query_text, time_window=time_window) if retrieval is not None else []
-    policy_decision = policy_gate.decide({"time_window": time_window})
+    policy_decision = normalize_state_policy_decision(policy_gate.decide({"time_window": time_window}))
     if evidence_compiler is None:
         bundle = {
             "query_id": "state_query_error",
@@ -606,10 +619,7 @@ def _derived_text_doc(hit: dict[str, Any], media_id: str, metadata: Any) -> tupl
     return None, None
 
 
-def run_query(system, query: str) -> dict[str, Any]:
-    state_cfg = system.config.get("processing", {}).get("state_layer", {}) if hasattr(system, "config") else {}
-    if isinstance(state_cfg, dict) and bool(state_cfg.get("query_enabled", False)):
-        return run_state_query(system, query)
+def run_query_without_state(system, query: str) -> dict[str, Any]:
     start_perf = time.perf_counter()
     parser = system.get("time.intent_parser")
     retrieval = system.get("retrieval.strategy")
@@ -859,3 +869,38 @@ def run_query(system, query: str) -> dict[str, Any]:
             }
         },
     }
+
+
+def _should_fallback_state(result: dict[str, Any]) -> bool:
+    if not isinstance(result, dict):
+        return True
+    answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
+    state = str(answer.get("state", ""))
+    if state in ("no_evidence", "error"):
+        return True
+    bundle = result.get("bundle", {}) if isinstance(result.get("bundle", {}), dict) else {}
+    hits = bundle.get("hits", []) if isinstance(bundle.get("hits", []), list) else []
+    return not hits
+
+
+def _merge_state_fallback(state_result: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(fallback)
+    processing = merged.get("processing", {}) if isinstance(merged.get("processing", {}), dict) else {}
+    processing["state_fallback"] = {
+        "used": True,
+        "state_answer": state_result.get("answer"),
+        "state_processing": state_result.get("processing"),
+    }
+    merged["processing"] = processing
+    return merged
+
+
+def run_query(system, query: str) -> dict[str, Any]:
+    state_cfg = system.config.get("processing", {}).get("state_layer", {}) if hasattr(system, "config") else {}
+    if isinstance(state_cfg, dict) and bool(state_cfg.get("query_enabled", False)):
+        state_result = run_state_query(system, query)
+        if _should_fallback_state(state_result):
+            fallback = run_query_without_state(system, query)
+            return _merge_state_fallback(state_result, fallback)
+        return state_result
+    return run_query_without_state(system, query)

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-04T21:16:10.928737+00:00",
+  "generated_at": "2026-02-05T08:05:41.591081+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "9dbb34cf46de240ed0c86ff2597d80a48c08104a331cb63474278022053f0def",
@@ -30,7 +30,7 @@
       "manifest_sha256": "369fa9a3d23a194097c42d05e233d18dce36281af86986f101954e6600aa2579"
     },
     "builtin.citation.basic": {
-      "artifact_sha256": "e9962b6a602e463b1d2bbd7dddac07c0652d7948928c182c479b7f1ee08871a8",
+      "artifact_sha256": "d74ef3a849ddd030ff7d1eea5ad1815905e61e77127ea6b60c70deff8f2df7e9",
       "manifest_sha256": "e1e4b1f135dad92093e645d8d2c29598a8394ced6e318dd60e1be1484fc8bb52"
     },
     "builtin.cursor.windows": {
@@ -238,7 +238,7 @@
       "manifest_sha256": "f81c2dc2abbacfd28cfe34be3335049c400d3799843579d21bd9a6e67bce9c55"
     },
     "builtin.storage.sqlcipher": {
-      "artifact_sha256": "3f376f40f2323a784cf2a08b89c4012c5d2e9a419676db8e91a5dda3f5532dce",
+      "artifact_sha256": "e726fd0da6d3eb6668d83f213168d9f7a07035e5850c733ceadd5f761751030d",
       "manifest_sha256": "849ec2818c654c7f66503b7f99f1c6b00061ce17887737a9c40efd09900b06d5"
     },
     "builtin.time.advanced": {

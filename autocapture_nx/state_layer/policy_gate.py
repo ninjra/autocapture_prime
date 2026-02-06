@@ -41,8 +41,7 @@ class StatePolicyGate:
         )
 
     def app_allowed(self, app_hint: str | None, decision: StatePolicyDecision | None = None) -> bool:
-        if decision is None:
-            decision = self.decide()
+        decision = normalize_state_policy_decision(decision or self.decide())
         if not app_hint:
             return True
         needle = str(app_hint).lower()
@@ -51,3 +50,27 @@ class StatePolicyGate:
         if decision.app_denylist:
             return not any(token in needle for token in decision.app_denylist)
         return True
+
+
+def normalize_state_policy_decision(
+    decision: StatePolicyDecision | dict[str, Any] | None,
+) -> StatePolicyDecision:
+    if isinstance(decision, StatePolicyDecision):
+        return decision
+    if isinstance(decision, dict):
+        allowlist = decision.get("app_allowlist") or ()
+        denylist = decision.get("app_denylist") or ()
+        return StatePolicyDecision(
+            can_show_raw_media=bool(decision.get("can_show_raw_media", False)),
+            can_export_text=bool(decision.get("can_export_text", False)),
+            redact_text=bool(decision.get("redact_text", False)),
+            app_allowlist=tuple(str(item).lower() for item in allowlist if item),
+            app_denylist=tuple(str(item).lower() for item in denylist if item),
+        )
+    return StatePolicyDecision(
+        can_show_raw_media=False,
+        can_export_text=False,
+        redact_text=False,
+        app_allowlist=(),
+        app_denylist=(),
+    )

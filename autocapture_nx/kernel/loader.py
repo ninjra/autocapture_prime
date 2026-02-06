@@ -190,6 +190,20 @@ class Kernel:
 
         updated = self._apply_meta_plugins(self.config, plugins)
         if updated != self.config:
+            # Meta plugins can mutate config and require a re-load. The initial `load_plugins()`
+            # may have started subprocess plugin hosts; make sure we close those instances
+            # before we drop references and start the second load to avoid runaway RAM/processes.
+            for plugin in list(plugins):
+                instance = getattr(plugin, "instance", None)
+                if instance is None:
+                    continue
+                for method in ("stop", "close"):
+                    target = getattr(instance, method, None)
+                    if callable(target):
+                        try:
+                            target()
+                        except Exception:
+                            pass
             ensure_run_id(updated)
             apply_runtime_determinism(updated)
             validate_config(self.config_paths.schema_path, updated)
@@ -433,44 +447,53 @@ class Kernel:
     def shutdown(self) -> None:
         if self.system is None:
             return
-        if self._conductor is not None:
+        try:
+            if self._conductor is not None:
+                try:
+                    self._conductor.stop()
+                except Exception:
+                    pass
+            builder = self.system.get("event.builder")
+            ts_utc = datetime.now(timezone.utc).isoformat()
+            duration_ms = self._run_duration_ms(ts_utc)
+            summary = self._summarize_journal(builder.run_id)
+            self._record_storage_manifest_final(builder, summary, duration_ms, ts_utc)
+            payload = {
+                "event": "system.stop",
+                "run_id": builder.run_id,
+                "duration_ms": int(duration_ms),
+                "summary": summary,
+                "previous_ledger_head": builder.ledger_head(),
+            }
+            stop_hash = builder.ledger_entry(
+                "system",
+                inputs=[],
+                outputs=[],
+                payload=payload,
+                ts_utc=ts_utc,
+            )
+            self._write_run_state(
+                builder.run_id,
+                "stopped",
+                started_at=self._run_started_at,
+                stopped_at=ts_utc,
+                ledger_head=stop_hash,
+                locks=self._lock_hashes(),
+                config_hash=self.effective_config.effective_hash if self.effective_config else None,
+                safe_mode=self.safe_mode,
+                safe_mode_reason=self.safe_mode_reason,
+            )
+            if self._network_deny_prev is not None:
+                set_global_network_deny(self._network_deny_prev)
+                self._network_deny_prev = None
+        finally:
+            # Ensure subprocess plugin hosts and other plugin resources are released.
             try:
-                self._conductor.stop()
+                self.system.close()
             except Exception:
                 pass
-        builder = self.system.get("event.builder")
-        ts_utc = datetime.now(timezone.utc).isoformat()
-        duration_ms = self._run_duration_ms(ts_utc)
-        summary = self._summarize_journal(builder.run_id)
-        self._record_storage_manifest_final(builder, summary, duration_ms, ts_utc)
-        payload = {
-            "event": "system.stop",
-            "run_id": builder.run_id,
-            "duration_ms": int(duration_ms),
-            "summary": summary,
-            "previous_ledger_head": builder.ledger_head(),
-        }
-        stop_hash = builder.ledger_entry(
-            "system",
-            inputs=[],
-            outputs=[],
-            payload=payload,
-            ts_utc=ts_utc,
-        )
-        self._write_run_state(
-            builder.run_id,
-            "stopped",
-            started_at=self._run_started_at,
-            stopped_at=ts_utc,
-            ledger_head=stop_hash,
-            locks=self._lock_hashes(),
-            config_hash=self.effective_config.effective_hash if self.effective_config else None,
-            safe_mode=self.safe_mode,
-            safe_mode_reason=self.safe_mode_reason,
-        )
-        if self._network_deny_prev is not None:
-            set_global_network_deny(self._network_deny_prev)
-            self._network_deny_prev = None
+            self.system = None
+            self._conductor = None
 
     def _run_state_path(self) -> Path:
         return self._run_state_path_for_config(self.config)

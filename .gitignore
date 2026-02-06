@@ -8,6 +8,11 @@ data/
 data_anchor/
 config/user.json
 config/backup/
+config/cache/
+config/logs/
+config/*.sqlite3
+config/secret_key
+config/hypercorn.toml
 tools/hypervisor/runs/
 tools/hypervisor/variants/
 tools/run_all_tests.log

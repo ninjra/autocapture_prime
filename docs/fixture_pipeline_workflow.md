@@ -4,7 +4,7 @@ This workflow runs a single screenshot through the full Autocapture pipeline (OC
 
 ## Preconditions
 - Run from the repo root.
-- Use the repo virtual environment: `.venv/bin/python3`.
+- Use the repo virtual environment when available: `.venv/bin/python3`.
 - Use the fixture manifest: `docs/test sample/fixture_manifest.json`.
 - Use the multi-frame input dir: `/tmp/fixture_frames_jepa` (3 frames with timestamped filenames).
 - Ensure RapidOCR deps are installed in the venv: `rapidocr-onnxruntime`, `pillow`, `numpy`.
@@ -16,6 +16,7 @@ This workflow runs a single screenshot through the full Autocapture pipeline (OC
   - `Screenshot 2026-02-02 113529.png`
   - `Screenshot 2026-02-02 113539.png`
 - Copy those into `/tmp/fixture_frames_jepa`.
+  - The helper script `tools/run_fixture_pipeline_full.sh` will create these if missing.
 
 ## Step 1 (OCR-only smoke, optional)
 - Use `/tmp/fixture_config_ocr_only.json` to validate OCR + SST OCR tokens before full run.
@@ -39,7 +40,7 @@ Expected outputs:
   - PromptOps with citations
 
 Command:
-- `PYTHONPATH=. .venv/bin/python3 tools/run_fixture_pipeline.py --config-template tools/fixture_config_template.json --manifest 'docs/test sample/fixture_manifest.json' --input-dir /tmp/fixture_frames_jepa --force-idle`
+- `bash /mnt/d/projects/autocapture_prime/tools/run_fixture_pipeline_full.sh`
 
 Expected outputs:
 - `artifacts/fixture_runs/<run_id>/fixture_report.json`
@@ -47,6 +48,14 @@ Expected outputs:
 - `artifacts/fixture_runs/<run_id>/data/vector.db`
 - `artifacts/fixture_runs/<run_id>/data/state/` (JEPA artifacts and state vectors)
 - `artifacts/fixture_runs/<run_id>/data/promptops/` (query history + traces)
+
+## Step 3 (Autoloop + Watchdog)
+- Autoloop re-runs the full pipeline until queries pass, applying fixes between attempts.
+- Watchdog prints live progress from the latest run report.
+
+Commands:
+- `bash /mnt/d/projects/autocapture_prime/tools/run_fixture_autoloop.sh 60`
+- `bash /mnt/d/projects/autocapture_prime/tools/fixture_watchdog.sh 10`
 
 ## Querying
 - The fixture manifest uses `queries.mode: auto` and `require_state: ok`.

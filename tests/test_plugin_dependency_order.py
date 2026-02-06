@@ -13,6 +13,13 @@ def _default_config() -> dict:
 def _write_provider(root: Path, plugin_id: str, kind: str, provides: list[str] | None = None) -> None:
     plugin_dir = root / plugin_id.replace(".", "_")
     plugin_dir.mkdir(parents=True, exist_ok=True)
+    provides = provides or []
+    provide_lines = ""
+    for cap in provides:
+        cap_s = str(cap).strip()
+        if not cap_s:
+            continue
+        provide_lines += f"            caps[\"{cap_s}\"] = self\\n"
     (plugin_dir / "plugin.py").write_text(
         "class Provider:\n"
         "    def ping(self):\n"
@@ -22,7 +29,9 @@ def _write_provider(root: Path, plugin_id: str, kind: str, provides: list[str] |
         "        return {\"remaining_ms\": 0}\n"
         "\n"
         "    def capabilities(self):\n"
-        f"        return {{\"{kind}\": self}}\n"
+        f"        caps = {{\"{kind}\": self}}\n"
+        f"{provide_lines}"
+        "        return caps\n"
         "\n"
         "def create_plugin(plugin_id, context):\n"
         "    return Provider()\n",
@@ -35,7 +44,7 @@ def _write_provider(root: Path, plugin_id: str, kind: str, provides: list[str] |
         "entrypoints": [{"kind": kind, "id": "default", "path": "plugin.py", "callable": "create_plugin"}],
         "permissions": {"filesystem": "read", "gpu": False, "raw_input": False, "network": False},
         "required_capabilities": [],
-        "provides": provides or [],
+        "provides": provides,
         "compat": {"requires_kernel": ">=0.0.0", "requires_schema_versions": [1]},
         "depends_on": [],
         "hash_lock": {"manifest_sha256": "", "artifact_sha256": ""},

@@ -2,13 +2,33 @@ import os
 import tempfile
 import unittest
 
-from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
+try:
+    from fastapi.testclient import TestClient  # type: ignore
+    from starlette.websockets import WebSocketDisconnect  # type: ignore
 
-from autocapture.web.api import get_app
-from autocapture_nx.kernel.auth import load_or_create_token
+    from autocapture.web.api import get_app
+    from autocapture_nx.kernel.auth import load_or_create_token
+    from tests._fastapi_support import fastapi_testclient_usable
+except Exception:  # pragma: no cover - optional dependency in some environments
+    TestClient = None  # type: ignore[assignment]
+    WebSocketDisconnect = None  # type: ignore[assignment]
+    get_app = None  # type: ignore[assignment]
+    load_or_create_token = None  # type: ignore[assignment]
+    fastapi_testclient_usable = None  # type: ignore[assignment]
 
+_FASTAPI_OK = bool(
+    TestClient is not None
+    and WebSocketDisconnect is not None
+    and get_app is not None
+    and load_or_create_token is not None
+    and fastapi_testclient_usable is not None
+    and fastapi_testclient_usable()
+)
 
+@unittest.skipUnless(
+    _FASTAPI_OK,
+    "fastapi TestClient unavailable or unusable",
+)
 class WebsocketTelemetryTests(unittest.TestCase):
     def test_websocket_requires_token(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -9,6 +9,20 @@ from autocapture_nx.kernel.config import ConfigPaths, SchemaLiteValidator, load_
 from autocapture_nx.plugin_system.registry import PluginRegistry
 
 
+def _localhost_bind_available() -> bool:
+    import socket
+
+    try:
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        s.close()
+        return True
+    except OSError:
+        # Some sandboxed CI environments disallow socket syscalls entirely.
+        return False
+
+
+@unittest.skipUnless(_localhost_bind_available(), "localhost socket bind is not permitted in this environment")
 class EgressGatewayTests(unittest.TestCase):
     def test_reasoning_packet_schema(self):
         payloads: list[dict] = []

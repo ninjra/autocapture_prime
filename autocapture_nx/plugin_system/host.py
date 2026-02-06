@@ -6,10 +6,11 @@ import atexit
 import json
 import os
 import queue
+import signal
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict, is_dataclass
 from pathlib import Path
 from typing import Any, IO, TYPE_CHECKING
 
@@ -28,6 +29,10 @@ def _encode(obj: Any) -> Any:
         import base64
 
         return {"__bytes__": base64.b64encode(obj).decode("ascii")}
+    if obj.__class__.__name__ == "CapabilityProxy":
+        return {"__capability_proxy__": True, "repr": str(obj)}
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return _encode(asdict(obj))
     if isinstance(obj, Path):
         return str(obj)
     if isinstance(obj, tuple):
@@ -76,6 +81,12 @@ def _build_env(hosting: dict[str, Any], config: dict[str, Any]) -> dict[str, str
             env["AUTOCAPTURE_ROOT"] = str(resolve_repo_path("."))
         except Exception:
             env["AUTOCAPTURE_ROOT"] = str(Path(__file__).absolute().parents[2])
+    repo_root = env.get("AUTOCAPTURE_ROOT", "")
+    if repo_root:
+        existing = env.get("PYTHONPATH", "")
+        entries = [item for item in existing.split(os.pathsep) if item]
+        if repo_root not in entries:
+            env["PYTHONPATH"] = os.pathsep.join([repo_root, *entries]) if entries else repo_root
     for key in (
         "HTTP_PROXY",
         "HTTPS_PROXY",
@@ -164,10 +175,11 @@ def _adjust_job_limits_for_venv(python_exe: str, limits: dict[str, Any] | None) 
 class RemoteCapability:
     host: "SubprocessPlugin"
     name: str
-    methods: list[str]
+    methods: list[str] | None
 
     def __getattr__(self, item: str):
-        if item not in self.methods:
+        methods = self.methods
+        if methods is not None and item not in methods:
             raise AttributeError(item)
 
         def _call(*args, **kwargs):
@@ -175,8 +187,8 @@ class RemoteCapability:
 
         return _call
 
-    def update_methods(self, methods: list[str]) -> None:
-        self.methods = list(methods)
+    def update_methods(self, methods: list[str] | None) -> None:
+        self.methods = None if methods is None else list(methods)
 
 
 class PluginProcess:
@@ -378,14 +390,27 @@ class PluginProcess:
             self._set_reader_error("Plugin host shutting down")
             if proc.poll() is None:
                 try:
-                    proc.terminate()
+                    if os.name != "nt":
+                        # Prefer killing the whole process group so children don't linger.
+                        try:
+                            os.killpg(proc.pid, signal.SIGTERM)
+                        except Exception:
+                            proc.terminate()
+                    else:
+                        proc.terminate()
                 except Exception:
                     pass
                 try:
                     proc.wait(timeout=2)
                 except Exception:
                     try:
-                        proc.kill()
+                        if os.name != "nt":
+                            try:
+                                os.killpg(proc.pid, signal.SIGKILL)
+                            except Exception:
+                                proc.kill()
+                        else:
+                            proc.kill()
                     except Exception:
                         pass
                     try:
@@ -468,6 +493,8 @@ class SubprocessPlugin:
         capabilities: Any,
         allowed_capabilities: set[str] | None,
         filesystem_policy: dict[str, Any] | None = None,
+        entrypoint_kind: str | None = None,
+        provided_capabilities: list[str] | None = None,
         rng_seed: int | None = None,
         rng_seed_hex: str | None = None,
         rng_strict: bool = True,
@@ -508,10 +535,34 @@ class SubprocessPlugin:
         self._host: PluginProcess | None = None
         self._caps: dict[str, RemoteCapability] = {}
         self._cap_methods: dict[str, set[str]] = {}
-        self._start_host()
+
+        lazy_start_env = os.getenv("AUTOCAPTURE_PLUGINS_LAZY_START", "1").strip().lower()
+        self._lazy_start = lazy_start_env not in {"0", "false", "no"}
+        seed_entrypoint = str(entrypoint_kind).strip() if entrypoint_kind else ""
+        # Some entrypoint kinds are plugin "types" rather than actual RPC capability names.
+        # If we seed these, the registry will miss the real capability keys.
+        kind_denylist = {"storage.metadata_store"}
+        entrypoint_looks_like_cap = bool(seed_entrypoint and "." in seed_entrypoint and seed_entrypoint not in kind_denylist)
+
+        if self._lazy_start and provided_capabilities:
+            # Trust explicit `provides` as the set of capability keys the plugin exposes.
+            for name in (str(item).strip() for item in provided_capabilities):
+                if not name:
+                    continue
+                self._caps[name] = RemoteCapability(self, name, None)
+        elif self._lazy_start and entrypoint_looks_like_cap:
+            # Avoid spawning the subprocess host just to enumerate capabilities.
+            # We'll start the host on first use and refresh method lists then.
+            self._caps[seed_entrypoint] = RemoteCapability(self, seed_entrypoint, None)
+        else:
+            self._start_host()
         atexit.register(self.close)
 
     def capabilities(self) -> dict[str, Any]:
+        # Back-compat: if the manifest didn't specify `provides`, we must enumerate
+        # capabilities from the plugin itself, which requires starting the host.
+        if not self._caps and self._host is None:
+            self._start_host()
         return self._caps
 
     def close(self) -> None:
@@ -592,6 +643,13 @@ class SubprocessPlugin:
     def _call(self, capability: str, function: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
         if self._host is None:
             self._start_host()
+        elif self._lazy_start:
+            cap_obj = self._caps.get(capability)
+            if cap_obj is not None and cap_obj.methods is None:
+                try:
+                    self._refresh_caps()
+                except Exception:
+                    pass
         if self._in_cooldown():
             raise PluginError(f"Plugin circuit breaker open (plugin={self._plugin_id})")
         start = time.perf_counter()

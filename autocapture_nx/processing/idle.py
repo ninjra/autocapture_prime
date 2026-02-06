@@ -6,6 +6,7 @@ import io
 import json
 import zipfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,7 +16,6 @@ from autocapture_nx.kernel.derived_records import (
     build_derivation_edge,
     build_text_record,
     derivation_edge_id,
-    extract_text_payload,
 )
 from autocapture_nx.kernel.frame_evidence import ensure_frame_evidence
 from autocapture.indexing.factory import build_indexes
@@ -46,6 +46,20 @@ class IdleCheckpoint:
     last_record_id: str | None
     processed_total: int
     updated_utc: str
+
+
+@dataclass(frozen=True)
+class _IdleWorkItem:
+    source_id: str
+    record_id: str
+    record: dict[str, Any]
+    frame_bytes: bytes
+    run_id: str
+    ts_utc: str
+    encoded_source: str
+    parent_hash: str | None
+    missing_count: int
+    needs_pipeline: bool
 
 
 def _derive_run_id(config: dict[str, Any], record_id: str) -> str:
@@ -108,6 +122,42 @@ def _ts_key(ts: str | None) -> float:
         return datetime.fromisoformat(ts).timestamp()
     except ValueError:
         return 0.0
+
+
+def _dedupe_texts(texts: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for text in texts:
+        if not text:
+            continue
+        if text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
+def _response_texts(response: Any) -> list[str]:
+    if response is None:
+        return []
+    texts: list[str] = []
+    if isinstance(response, dict):
+        for key in ("text_plain", "caption", "text"):
+            value = response.get(key)
+            if value is None:
+                continue
+            if isinstance(value, str):
+                text = value.strip()
+            else:
+                text = str(value).strip()
+            if text:
+                texts.append(text)
+        return _dedupe_texts(texts)
+    if isinstance(response, str):
+        text = response.strip()
+        return [text] if text else []
+    text = str(response).strip()
+    return [text] if text else []
 
 
 class IdleProcessor:
@@ -212,7 +262,14 @@ class IdleProcessor:
             evidence.sort(key=lambda item: item[0])
         return [record_id for record_id, _ts in evidence]
 
-    def _needs_processing(self, record_id: str, record: dict[str, Any], allow_ocr: bool, allow_vlm: bool) -> bool:
+    def _needs_processing(
+        self,
+        record_id: str,
+        record: dict[str, Any],
+        allow_ocr: bool,
+        allow_vlm: bool,
+        pipeline_enabled: bool,
+    ) -> bool:
         if self._metadata is None:
             return False
         run_id = _derive_run_id(self._config, record_id)
@@ -226,6 +283,8 @@ class IdleProcessor:
             for provider_id, _extractor in _capability_providers(self._vlm, "vision.extractor"):
                 provider_component = encode_record_id_component(provider_id)
                 derived_ids.append(f"{run_id}/derived.text.vlm/{provider_component}/{encoded_source}")
+        if pipeline_enabled and self._pipeline is not None:
+            derived_ids.append(f"{run_id}/derived.sst.frame/{encoded_source}")
         if not derived_ids:
             return False
         for derived_id in derived_ids:
@@ -273,6 +332,311 @@ class IdleProcessor:
                 if self._logger is not None:
                     self._logger.log("index.vector_error", {"doc_id": doc_id, "error": str(exc)})
 
+    def _run_provider_batch(
+        self,
+        extractor: Any,
+        frames: list[bytes],
+        *,
+        max_workers: int,
+    ) -> list[Any]:
+        if not frames:
+            return []
+        batch_fn = None
+        for name in ("extract_batch", "batch_extract"):
+            attr = getattr(extractor, name, None)
+            if callable(attr):
+                batch_fn = attr
+                break
+        if batch_fn is not None:
+            try:
+                batch_outputs = batch_fn(frames)
+            except Exception:
+                batch_outputs = None
+            if isinstance(batch_outputs, list) and len(batch_outputs) == len(frames):
+                return batch_outputs
+        if max_workers <= 1 or len(frames) <= 1:
+            outputs: list[Any] = []
+            for frame in frames:
+                try:
+                    outputs.append(extractor.extract(frame))
+                except Exception:
+                    outputs.append(None)
+            return outputs
+        outputs = [None for _ in frames]
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(extractor.extract, frame): idx for idx, frame in enumerate(frames)}
+            for fut, idx in futures.items():
+                try:
+                    outputs[idx] = fut.result()
+                except Exception:
+                    outputs[idx] = None
+        return outputs
+
+    def _store_derived_text(
+        self,
+        *,
+        derived_id: str,
+        payload: dict[str, Any],
+        record_id: str,
+        record: dict[str, Any],
+        kind: str,
+        stats: IdleProcessStats,
+    ) -> bool:
+        if self._metadata is None:
+            return False
+        inserted = False
+        if hasattr(self._metadata, "put_new"):
+            try:
+                self._metadata.put_new(derived_id, payload)
+                inserted = True
+            except Exception:
+                inserted = False
+        else:
+            self._metadata.put(derived_id, payload)
+            inserted = True
+        if not inserted:
+            return False
+        self._index_text(derived_id, payload.get("text", ""))
+        stats.processed += 1
+        if kind == "ocr":
+            stats.ocr_ok += 1
+        if kind == "vlm":
+            stats.vlm_ok += 1
+        edge_id = None
+        try:
+            run_id = payload.get("run_id") or record_id.split("/", 1)[0]
+            edge_id = derivation_edge_id(run_id, record_id, derived_id)
+            edge_payload = build_derivation_edge(
+                run_id=run_id,
+                parent_id=record_id,
+                child_id=derived_id,
+                relation_type="derived_from",
+                span_ref=payload.get("span_ref", {}),
+                method=kind,
+            )
+            if hasattr(self._metadata, "put_new"):
+                try:
+                    self._metadata.put_new(edge_id, edge_payload)
+                except Exception:
+                    edge_id = None
+            else:
+                self._metadata.put(edge_id, edge_payload)
+        except Exception:
+            edge_id = None
+        if self._events is not None:
+            event_payload = dict(payload)
+            event_payload["derived_id"] = derived_id
+            if edge_id:
+                event_payload["derivation_edge_id"] = edge_id
+            parent_hash = record.get("content_hash")
+            if parent_hash:
+                event_payload["parent_content_hash"] = parent_hash
+            try:
+                self._events.journal_event("derived.extract", event_payload, event_id=derived_id, ts_utc=payload.get("ts_utc"))
+                self._events.ledger_entry(
+                    "derived.extract",
+                    inputs=[record_id],
+                    outputs=[derived_id] + ([edge_id] if edge_id else []),
+                    payload=event_payload,
+                    entry_id=derived_id,
+                    ts_utc=payload.get("ts_utc"),
+                )
+            except Exception:
+                pass
+        return inserted
+
+    def _collect_work_items(
+        self,
+        *,
+        pending_ids: list[str],
+        allow_ocr: bool,
+        allow_vlm: bool,
+        ocr_providers: list[tuple[str, Any]],
+        vlm_providers: list[tuple[str, Any]],
+        max_items: int,
+        should_abort: Callable[[], bool] | None,
+        expired: Callable[[], bool],
+        pipeline_enabled: bool,
+        stats: IdleProcessStats,
+    ) -> tuple[list[_IdleWorkItem], str | None, bool, int]:
+        metadata = self._metadata
+        if metadata is None:
+            return [], None, False, 0
+        items: list[_IdleWorkItem] = []
+        last_record_id: str | None = None
+        aborted = False
+        planned = 0
+        for record_id in pending_ids:
+            source_record_id = record_id
+            if should_abort and should_abort():
+                aborted = True
+                break
+            if expired():
+                break
+            record_raw = metadata.get(record_id, {})
+            record = record_raw if isinstance(record_raw, dict) else {}
+            record_type = str(record.get("record_type", ""))
+            if not record_type.startswith("evidence.capture."):
+                stats.skipped += 1
+                last_record_id = source_record_id
+                continue
+            if isinstance(record, dict):
+                privacy_excluded = bool(
+                    record.get("privacy_excluded")
+                    or (isinstance(record.get("privacy"), dict) and record.get("privacy", {}).get("excluded"))
+                )
+                if privacy_excluded:
+                    stats.skipped += 1
+                    last_record_id = source_record_id
+                    continue
+            stats.scanned += 1
+            if max_items > 0 and planned >= max_items:
+                break
+            blob = _get_media_blob(self._media, record_id)
+            if not blob:
+                stats.errors += 1
+                last_record_id = source_record_id
+                continue
+            frame = _extract_frame(blob, record)
+            if not frame:
+                stats.errors += 1
+                last_record_id = source_record_id
+                continue
+            record_id, record = ensure_frame_evidence(
+                config=self._config,
+                metadata=self._metadata,
+                media=self._media,
+                record_id=record_id,
+                record=record if isinstance(record, dict) else {},
+                frame_bytes=frame,
+                event_builder=self._events,
+                logger=self._logger,
+            )
+            missing_count = 0
+            if allow_ocr:
+                for provider_id, _extractor in ocr_providers:
+                    provider_component = encode_record_id_component(provider_id)
+                    derived_id = f"{_derive_run_id(self._config, record_id)}/derived.text.ocr/{provider_component}/{encode_record_id_component(record_id)}"
+                    if metadata.get(derived_id) is None:
+                        missing_count += 1
+            if allow_vlm:
+                for provider_id, _extractor in vlm_providers:
+                    provider_component = encode_record_id_component(provider_id)
+                    derived_id = f"{_derive_run_id(self._config, record_id)}/derived.text.vlm/{provider_component}/{encode_record_id_component(record_id)}"
+                    if metadata.get(derived_id) is None:
+                        missing_count += 1
+            needs_pipeline = False
+            if pipeline_enabled:
+                run_id = _derive_run_id(self._config, record_id)
+                frame_component = encode_record_id_component(record_id)
+                frame_id = f"{run_id}/derived.sst.frame/{frame_component}"
+                if metadata.get(frame_id) is None:
+                    needs_pipeline = True
+            if missing_count == 0 and not needs_pipeline:
+                last_record_id = source_record_id
+                continue
+            run_id = _derive_run_id(self._config, record_id)
+            ts_utc = record.get("ts_utc") or record.get("ts_start_utc") or datetime.now(timezone.utc).isoformat()
+            encoded_source = encode_record_id_component(record_id)
+            parent_hash = record.get("content_hash")
+            planned += max(1, missing_count) if max_items > 0 else 0
+            items.append(
+                _IdleWorkItem(
+                    source_id=source_record_id,
+                    record_id=record_id,
+                    record=record if isinstance(record, dict) else {},
+                    frame_bytes=frame,
+                    run_id=run_id,
+                    ts_utc=ts_utc,
+                    encoded_source=encoded_source,
+                    parent_hash=parent_hash,
+                    missing_count=missing_count,
+                    needs_pipeline=needs_pipeline,
+                )
+            )
+            last_record_id = source_record_id
+            if max_items > 0 and planned >= max_items:
+                break
+        return items, last_record_id, aborted, planned
+
+    def _batch_extract(
+        self,
+        *,
+        items: list[_IdleWorkItem],
+        kind: str,
+        providers: list[tuple[str, Any]],
+        allow: bool,
+        max_workers: int,
+        batch_size: int,
+        should_abort: Callable[[], bool] | None,
+        expired: Callable[[], bool],
+        stats: IdleProcessStats,
+        max_items: int,
+    ) -> int:
+        if not items or not allow or self._metadata is None:
+            return 0
+        processed = 0
+        for provider_id, extractor in providers:
+            if should_abort and should_abort():
+                break
+            if expired():
+                break
+            tasks: list[tuple[_IdleWorkItem, str]] = []
+            provider_component = encode_record_id_component(provider_id)
+            for item in items:
+                derived_id = f"{item.run_id}/derived.text.{kind}/{provider_component}/{item.encoded_source}"
+                if self._metadata.get(derived_id) is None:
+                    tasks.append((item, derived_id))
+            if not tasks:
+                continue
+            size = max(1, int(batch_size or 1))
+            for start in range(0, len(tasks), size):
+                if should_abort and should_abort():
+                    return processed
+                if expired():
+                    return processed
+                batch = tasks[start : start + size]
+                frames = [item.frame_bytes for item, _derived_id in batch]
+                outputs = self._run_provider_batch(extractor, frames, max_workers=max_workers)
+                if len(outputs) != len(batch):
+                    outputs = list(outputs) + [None] * max(0, len(batch) - len(outputs))
+                for (item, derived_id), response in zip(batch, outputs):
+                    if should_abort and should_abort():
+                        return processed
+                    if expired():
+                        return processed
+                    if max_items > 0 and stats.processed >= max_items:
+                        return processed
+                    if response is None:
+                        stats.errors += 1
+                        continue
+                    texts = _response_texts(response)
+                    if not texts:
+                        continue
+                    text = "\n\n".join(texts)
+                    payload = build_text_record(
+                        kind=kind,
+                        text=text,
+                        source_id=item.record_id,
+                        source_record=item.record,
+                        provider_id=provider_id,
+                        config=self._config,
+                        ts_utc=item.ts_utc,
+                    )
+                    if not payload:
+                        continue
+                    stored = self._store_derived_text(
+                        derived_id=derived_id,
+                        payload=payload,
+                        record_id=item.record_id,
+                        record=item.record,
+                        kind=kind,
+                        stats=stats,
+                    )
+                    if stored:
+                        processed += 1
+        return processed
+
     def process(self, *, should_abort: Callable[[], bool] | None = None) -> IdleProcessStats:
         done, stats = self.process_step(should_abort=should_abort, budget_ms=0, persist_checkpoint=False)
         _ = done
@@ -299,6 +663,7 @@ class IdleProcessor:
         checkpoint_mode = str(idle_cfg.get("checkpoint_mode", "record_id") or "record_id").lower()
         backfill_out_of_order = bool(idle_cfg.get("backfill_out_of_order", order_by == "ts_utc"))
         max_gpu = int(idle_cfg.get("max_concurrency_gpu", 1) or 0)
+        batch_size = int(idle_cfg.get("batch_size", 4) or 1)
         if max_gpu <= 0:
             allow_vlm = False
         sst_cfg = self._config.get("processing", {}).get("sst", {})
@@ -334,7 +699,13 @@ class IdleProcessor:
                 record_type = str(record.get("record_type", ""))
                 if not record_type.startswith("evidence.capture."):
                     continue
-                if self._needs_processing(record_id, record if isinstance(record, dict) else {}, allow_ocr, allow_vlm):
+                if self._needs_processing(
+                    record_id,
+                    record if isinstance(record, dict) else {},
+                    allow_ocr,
+                    allow_vlm,
+                    pipeline_enabled,
+                ):
                     backlog.append(record_id)
             if backlog:
                 pending_ids = list(dict.fromkeys(backlog + pending_ids))
@@ -342,225 +713,103 @@ class IdleProcessor:
         processed_total = checkpoint.processed_total if checkpoint else 0
         last_record_id: str | None = None
         aborted = False
-
-        for record_id in pending_ids:
-            source_record_id = record_id
-            if should_abort and should_abort():
-                aborted = True
-                break
-            if _expired():
-                break
-            record = self._metadata.get(record_id, {})
-            record_type = str(record.get("record_type", ""))
-            if not record_type.startswith("evidence.capture."):
-                stats.skipped += 1
-                last_record_id = source_record_id
-                continue
-            if isinstance(record, dict):
-                privacy_excluded = bool(
-                    record.get("privacy_excluded")
-                    or (isinstance(record.get("privacy"), dict) and record.get("privacy", {}).get("excluded"))
-                )
-                if privacy_excluded:
-                    stats.skipped += 1
-                    last_record_id = source_record_id
-                    continue
-            stats.scanned += 1
-
-            blob = _get_media_blob(self._media, record_id)
-            if not blob:
-                stats.errors += 1
-                last_record_id = source_record_id
-                continue
-            frame = _extract_frame(blob, record)
-            if not frame:
-                stats.errors += 1
-                last_record_id = source_record_id
-                continue
-
-            record_id, record = ensure_frame_evidence(
-                config=self._config,
-                metadata=self._metadata,
-                media=self._media,
-                record_id=record_id,
-                record=record if isinstance(record, dict) else {},
-                frame_bytes=frame,
-                event_builder=self._events,
-                logger=self._logger,
+        ocr_providers = _capability_providers(self._ocr, "ocr.engine") if (allow_ocr and self._ocr is not None) else []
+        vlm_providers = _capability_providers(self._vlm, "vision.extractor") if (allow_vlm and self._vlm is not None) else []
+        items, last_record_id, aborted, _planned = self._collect_work_items(
+            pending_ids=pending_ids,
+            allow_ocr=allow_ocr,
+            allow_vlm=allow_vlm,
+            ocr_providers=ocr_providers,
+            vlm_providers=vlm_providers,
+            max_items=max_items,
+            should_abort=should_abort,
+            expired=_expired,
+            pipeline_enabled=pipeline_enabled,
+            stats=stats,
+        )
+        if items and not aborted and not _expired():
+            max_cpu = int(idle_cfg.get("max_concurrency_cpu", 1) or 1)
+            processed_total += self._batch_extract(
+                items=items,
+                kind="ocr",
+                providers=ocr_providers,
+                allow=allow_ocr,
+                max_workers=max_cpu,
+                batch_size=batch_size,
+                should_abort=should_abort,
+                expired=_expired,
+                stats=stats,
+                max_items=max_items,
             )
-            run_id = _derive_run_id(self._config, record_id)
-            ts_utc = record.get("ts_utc") or record.get("ts_start_utc")
-            ts_utc = ts_utc or datetime.now(timezone.utc).isoformat()
-
-            derived_items: list[tuple[str, str, str, Any]] = []
-            encoded_source = encode_record_id_component(record_id)
-            if allow_ocr and self._ocr is not None:
-                for provider_id, extractor in _capability_providers(self._ocr, "ocr.engine"):
-                    provider_component = encode_record_id_component(provider_id)
-                    derived_items.append(
-                        (
-                            "ocr",
-                            provider_id,
-                            f"{run_id}/derived.text.ocr/{provider_component}/{encoded_source}",
-                            extractor,
-                        )
-                    )
-            if allow_vlm and self._vlm is not None:
-                for provider_id, extractor in _capability_providers(self._vlm, "vision.extractor"):
-                    provider_component = encode_record_id_component(provider_id)
-                    derived_items.append(
-                        (
-                            "vlm",
-                            provider_id,
-                            f"{run_id}/derived.text.vlm/{provider_component}/{encoded_source}",
-                            extractor,
-                        )
-                    )
-            if not derived_items:
-                stats.skipped += 1
-                last_record_id = source_record_id
-                continue
-            if self._metadata is not None:
-                if all(self._metadata.get(item[2]) is not None for item in derived_items):
-                    stats.skipped += 1
-                    last_record_id = source_record_id
-                    continue
-
+            processed_total += self._batch_extract(
+                items=items,
+                kind="vlm",
+                providers=vlm_providers,
+                allow=allow_vlm,
+                max_workers=max_gpu if max_gpu > 0 else 1,
+                batch_size=batch_size,
+                should_abort=should_abort,
+                expired=_expired,
+                stats=stats,
+                max_items=max_items,
+            )
             pipeline = self._pipeline
             if pipeline_enabled and pipeline is not None and hasattr(pipeline, "process_record"):
-                try:
-                    result = pipeline.process_record(
-                        record_id=record_id,
-                        record=record,
-                        frame_bytes=frame,
-                        allow_ocr=allow_ocr,
-                        allow_vlm=allow_vlm,
-                        should_abort=should_abort,
-                        deadline_ts=budget_wall if budget_wall is not None else deadline_wall,
-                    )
-                except Exception as exc:
-                    stats.errors += 1
-                    if self._logger is not None:
-                        self._logger.log("sst.pipeline_error", {"source_id": record_id, "error": str(exc)})
-                    last_record_id = source_record_id
-                    continue
-                if result.diagnostics and self._logger is not None:
-                    self._logger.log(
-                        "sst.pipeline_diagnostics",
-                        {"source_id": record_id, "diagnostics": list(result.diagnostics)},
-                    )
-                if result.diagnostics:
-                    try:
-                        runtime_cfg = self._config.get("runtime", {}) if isinstance(self._config, dict) else {}
-                        enforce_cfg = runtime_cfg.get("mode_enforcement", {}) if isinstance(runtime_cfg, dict) else {}
-                        fixture_override = bool(enforce_cfg.get("fixture_override", False))
-                        if fixture_override:
-                            data_dir = self._config.get("storage", {}).get("data_dir", "data")
-                            diag_path = Path(str(data_dir)) / "logs" / "sst_diagnostics.jsonl"
-                            diag_path.parent.mkdir(parents=True, exist_ok=True)
-                            with diag_path.open("a", encoding="utf-8") as handle:
-                                handle.write(
-                                    json.dumps(
-                                        {"source_id": record_id, "diagnostics": list(result.diagnostics)},
-                                        sort_keys=True,
-                                    )
-                                    + "\n"
-                                )
-                    except Exception:
-                        pass
-                stats.sst_runs += 1
-                stats.sst_heavy += int(result.heavy_ran)
-                stats.sst_tokens += int(result.ocr_tokens)
-                stats.processed += int(result.derived_records)
-                processed_total += int(result.derived_records)
-                last_record_id = source_record_id
-                if stats.processed >= max_items:
-                    break
-                continue
-
-            for kind, provider_id, derived_id, extractor in derived_items:
-                if should_abort and should_abort():
-                    aborted = True
-                    break
-                if _expired():
-                    break
-                if self._metadata.get(derived_id):
-                    continue
-                try:
-                    text = extract_text_payload(extractor.extract(frame))
-                except Exception as exc:
-                    stats.errors += 1
-                    if self._logger is not None:
-                        self._logger.log("derived.extract_error", {"source_id": record_id, "error": str(exc)})
-                    continue
-                payload = build_text_record(
-                    kind=kind,
-                    text=text,
-                    source_id=record_id,
-                    source_record=record,
-                    provider_id=provider_id,
-                    config=self._config,
-                    ts_utc=ts_utc,
-                )
-                if not payload:
-                    continue
-                if hasattr(self._metadata, "put_new"):
-                    try:
-                        self._metadata.put_new(derived_id, payload)
-                    except Exception:
+                for item in items:
+                    if not item.needs_pipeline:
                         continue
-                else:
-                    self._metadata.put(derived_id, payload)
-                self._index_text(derived_id, payload.get("text", ""))
-                stats.processed += 1
-                processed_total += 1
-                if kind == "ocr":
-                    stats.ocr_ok += 1
-                if kind == "vlm":
-                    stats.vlm_ok += 1
-                edge_id = None
-                try:
-                    run_id = payload.get("run_id") or record_id.split("/", 1)[0]
-                    edge_id = derivation_edge_id(run_id, record_id, derived_id)
-                    edge_payload = build_derivation_edge(
-                        run_id=run_id,
-                        parent_id=record_id,
-                        child_id=derived_id,
-                        relation_type="derived_from",
-                        span_ref=payload.get("span_ref", {}),
-                        method=kind,
-                    )
-                    if hasattr(self._metadata, "put_new"):
+                    if should_abort and should_abort():
+                        aborted = True
+                        break
+                    if _expired():
+                        break
+                    if max_items > 0 and stats.processed >= max_items:
+                        break
+                    try:
+                        result = pipeline.process_record(
+                            record_id=item.record_id,
+                            record=item.record,
+                            frame_bytes=item.frame_bytes,
+                            allow_ocr=allow_ocr,
+                            allow_vlm=allow_vlm,
+                            should_abort=should_abort,
+                            deadline_ts=budget_wall if budget_wall is not None else deadline_wall,
+                        )
+                    except Exception as exc:
+                        stats.errors += 1
+                        if self._logger is not None:
+                            self._logger.log("sst.pipeline_error", {"source_id": item.record_id, "error": str(exc)})
+                        continue
+                    if result.diagnostics and self._logger is not None:
+                        self._logger.log(
+                            "sst.pipeline_diagnostics",
+                            {"source_id": item.record_id, "diagnostics": list(result.diagnostics)},
+                        )
+                    if result.diagnostics:
                         try:
-                            self._metadata.put_new(edge_id, edge_payload)
+                            runtime_cfg = self._config.get("runtime", {}) if isinstance(self._config, dict) else {}
+                            enforce_cfg = runtime_cfg.get("mode_enforcement", {}) if isinstance(runtime_cfg, dict) else {}
+                            fixture_override = bool(enforce_cfg.get("fixture_override", False))
+                            if fixture_override:
+                                data_dir = self._config.get("storage", {}).get("data_dir", "data")
+                                diag_path = Path(str(data_dir)) / "logs" / "sst_diagnostics.jsonl"
+                                diag_path.parent.mkdir(parents=True, exist_ok=True)
+                                with diag_path.open("a", encoding="utf-8") as handle:
+                                    handle.write(
+                                        json.dumps(
+                                            {"source_id": item.record_id, "diagnostics": list(result.diagnostics)},
+                                            sort_keys=True,
+                                        )
+                                        + "\n"
+                                    )
                         except Exception:
-                            edge_id = None
-                    else:
-                        self._metadata.put(edge_id, edge_payload)
-                except Exception:
-                    edge_id = None
-                if self._events is not None:
-                    event_payload = dict(payload)
-                    event_payload["derived_id"] = derived_id
-                    if edge_id:
-                        event_payload["derivation_edge_id"] = edge_id
-                    parent_hash = record.get("content_hash")
-                    if parent_hash:
-                        event_payload["parent_content_hash"] = parent_hash
-                    self._events.journal_event("derived.extract", event_payload, event_id=derived_id, ts_utc=ts_utc)
-                    self._events.ledger_entry(
-                        "derived.extract",
-                        inputs=[record_id],
-                        outputs=[derived_id] + ([edge_id] if edge_id else []),
-                        payload=event_payload,
-                        entry_id=derived_id,
-                        ts_utc=ts_utc,
-                    )
-                if stats.processed >= max_items:
-                    break
-            last_record_id = source_record_id
-            if aborted or _expired() or stats.processed >= max_items:
-                break
+                            pass
+                    stats.sst_runs += 1
+                    stats.sst_heavy += int(result.heavy_ran)
+                    stats.sst_tokens += int(result.ocr_tokens)
+                    stats.processed += int(result.derived_records)
+                    processed_total += int(result.derived_records)
+            last_record_id = last_record_id or (items[-1].source_id if items else None)
 
         state_done = True
         state_cfg = self._config.get("processing", {}).get("state_layer", {}) if isinstance(self._config, dict) else {}

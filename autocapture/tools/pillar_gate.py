@@ -159,6 +159,12 @@ def run_all_gates(
             artifacts=[str(provenance_dir)],
         ),
         _run_check(
+            "acceptance_coverage",
+            [py, "tools/gate_acceptance_coverage.py"],
+            env=env,
+            artifacts=[str(provenance_dir)],
+        ),
+        _run_check(
             "doctor_anchor_boundary",
             [py, "-m", "unittest", "tests/test_doctor_anchor_boundary.py", "-q"],
             env=env,

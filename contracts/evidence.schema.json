@@ -136,6 +136,11 @@
     },
     {
       "type": "object",
+      "properties": {"record_type": {"enum": ["derived.state_tape.checkpoint"]}},
+      "required": ["ts_utc", "last_record_id", "processed_total", "payload_hash"]
+    },
+    {
+      "type": "object",
       "properties": {"record_type": {"enum": ["derived.test"]}},
       "required": []
     }

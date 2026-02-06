@@ -45,7 +45,7 @@ def model_identity(kind: str, provider_id: str, config: dict[str, Any]) -> dict[
             model_id = str(models_cfg.get("vlm_path"))
         if kind == "ocr" and models_cfg.get("ocr_path"):
             model_id = str(models_cfg.get("ocr_path"))
-    params = {"provider_id": provider_id}
+    params: dict[str, Any] = {"provider_id": provider_id}
     if override:
         if override.get("revision"):
             params["revision"] = override.get("revision")

@@ -7,6 +7,17 @@ from autocapture_nx.kernel.errors import PermissionError
 from autocapture_nx.kernel.loader import Kernel, default_config_paths
 
 
+def _socket_available() -> bool:
+    try:
+        s = socket.socket()
+        s.close()
+        return True
+    except OSError:
+        # Some sandboxed CI environments disallow socket syscalls entirely.
+        return False
+
+
+@unittest.skipUnless(_socket_available(), "socket syscalls are not permitted in this environment")
 class KernelNetworkDenyTests(unittest.TestCase):
     def test_kernel_blocks_network(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

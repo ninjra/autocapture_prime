@@ -259,6 +259,17 @@ def _check_fs(path: str | Path | int | None, *, write: bool, allow_ancestor: boo
         raise PermissionError("Filesystem access denied: invalid path")
     if write:
         allowed = policy.allow_write(candidate)
+        if not allowed and allow_ancestor:
+            # Allow directory creation along the path to an allowed readwrite root
+            # (e.g. `os.makedirs(data_dir)` needs to create intermediate parents).
+            cand_norm = _normalize_root(candidate)
+            for root in policy.readwrite_roots:
+                try:
+                    _normalize_root(root).relative_to(cand_norm)
+                    allowed = True
+                    break
+                except ValueError:
+                    continue
     else:
         allowed = policy.allow_read(candidate, allow_ancestor=allow_ancestor)
     if not allowed:
@@ -324,11 +335,11 @@ def _patch_filesystem() -> None:
             return _original_os_lstat(path, *args, **kwargs)
 
         def _os_mkdir(path, *args, **kwargs):
-            _check_fs(path, write=True)
+            _check_fs(path, write=True, allow_ancestor=True)
             return _original_os_mkdir(path, *args, **kwargs)
 
         def _os_makedirs(path, *args, **kwargs):
-            _check_fs(path, write=True)
+            _check_fs(path, write=True, allow_ancestor=True)
             return _original_os_makedirs(path, *args, **kwargs)
 
         def _os_remove(path, *args, **kwargs):

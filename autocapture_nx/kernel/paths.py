@@ -300,6 +300,9 @@ def normalize_config_paths(
         "vector_path",
         "metadata_path",
         "audit_db_path",
+        # State layer SQLite paths must follow data_dir overrides (e.g. temp dirs in tests).
+        "state_tape_path",
+        "state_vector_path",
     ):
         if key in storage and isinstance(storage[key], str):
             storage[key] = _normalize_storage_value(storage[key])

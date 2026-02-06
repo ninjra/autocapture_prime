@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -61,6 +61,29 @@ class StateTapeCounts:
     evidence_inserted: int = 0
 
 
+def _normalize_json(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, bytes):
+        return {"__bytes_len": len(value), "__bytes_sha256": sha256_text(value.hex())}
+    if isinstance(value, Path):
+        return str(value)
+    if is_dataclass(value) and not isinstance(value, type):
+        return _normalize_json(asdict(value))
+    if isinstance(value, dict):
+        return {str(key): _normalize_json(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_normalize_json(item) for item in value]
+    return str(value)
+
+
+def _json_dumps(value: Any) -> str:
+    try:
+        return json.dumps(value, sort_keys=True)
+    except TypeError:
+        return json.dumps(_normalize_json(value), sort_keys=True)
+
+
 class StateTapeStore:
     def __init__(
         self,
@@ -76,12 +99,13 @@ class StateTapeStore:
 
     def _connect(self) -> sqlite3.Connection:
         if self._key is None:
-            conn = sqlite3.connect(str(self._path))
+            conn = sqlite3.connect(str(self._path), check_same_thread=False)
         else:
             import sqlcipher3
 
-            conn = sqlcipher3.connect(str(self._path))
-            conn.execute("PRAGMA key = ?", (self._key.hex(),))
+            conn = sqlcipher3.connect(str(self._path), check_same_thread=False)
+            # sqlcipher3 does not support parameter binding for PRAGMA key.
+            conn.execute(f"PRAGMA key = \"x'{self._key.hex()}'\"")
         if self._fsync_policy == "critical":
             conn.execute("PRAGMA synchronous = FULL")
         elif self._fsync_policy == "bulk":
@@ -112,19 +136,27 @@ class StateTapeStore:
             for span in spans:
                 if not isinstance(span, dict):
                     continue
-                validate_state_span(span)
-                inserted = self._insert_span(conn, span)
+                # Normalize dataclasses/paths/bytes into JSON-safe structures
+                # before schema validation and persistence.
+                span_norm = _normalize_json(span)
+                if not isinstance(span_norm, dict):
+                    continue
+                validate_state_span(span_norm)
+                inserted = self._insert_span(conn, span_norm)
                 if inserted:
                     counts.spans_inserted += 1
-                    counts.evidence_inserted += self._insert_evidence_links(conn, "span", span)
+                    counts.evidence_inserted += self._insert_evidence_links(conn, "span", span_norm)
             for edge in edges:
                 if not isinstance(edge, dict):
                     continue
-                validate_state_edge(edge)
-                inserted = self._insert_edge(conn, edge)
+                edge_norm = _normalize_json(edge)
+                if not isinstance(edge_norm, dict):
+                    continue
+                validate_state_edge(edge_norm)
+                inserted = self._insert_edge(conn, edge_norm)
                 if inserted:
                     counts.edges_inserted += 1
-                    counts.evidence_inserted += self._insert_evidence_links(conn, "edge", edge)
+                    counts.evidence_inserted += self._insert_evidence_links(conn, "edge", edge_norm)
             conn.commit()
         except Exception:
             conn.rollback()
@@ -153,8 +185,8 @@ class StateTapeStore:
             str(emb.get("dtype", "")),
             str(summary.get("app", "")) if summary.get("app") is not None else None,
             str(summary.get("window_title_hash", "")) if summary.get("window_title_hash") is not None else None,
-            json.dumps(top_entities, sort_keys=True),
-            json.dumps(span.get("provenance", {}), sort_keys=True),
+            _json_dumps(top_entities),
+            _json_dumps(span.get("provenance", {})),
         )
         try:
             conn.execute(
@@ -181,7 +213,7 @@ class StateTapeStore:
             int(emb.get("dim", 0) or 0),
             str(emb.get("dtype", "")),
             float(edge.get("pred_error", 0.0)),
-            json.dumps(edge.get("provenance", {}), sort_keys=True),
+            _json_dumps(edge.get("provenance", {})),
         )
         try:
             conn.execute(
@@ -217,7 +249,7 @@ class StateTapeStore:
                         link_id,
                         obj_type,
                         obj.get("state_id") if obj_type == "span" else obj.get("edge_id"),
-                        json.dumps(ref, sort_keys=True),
+                    _json_dumps(ref),
                     ),
                 )
                 inserted += 1
