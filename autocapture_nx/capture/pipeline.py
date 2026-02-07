@@ -164,6 +164,9 @@ class FfmpegWriter:
         codec = "h264_nvenc" if encoder == "nvenc" else "libx264"
         cmd = [
             ffmpeg_path,
+            "-hide_banner",
+            "-loglevel",
+            "error",
             "-y",
             "-f",
             "mjpeg",
@@ -179,6 +182,7 @@ class FfmpegWriter:
             f"{max(1, int(bitrate_kbps))}k",
             path,
         ]
+        self._cmd = list(cmd)
         self._proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
@@ -219,7 +223,9 @@ class FfmpegWriter:
             stderr = b""
             if self._proc.stderr:
                 stderr = self._proc.stderr.read() or b""
-            raise RuntimeError(f"ffmpeg failed: {stderr[:200].decode(errors='ignore')}")
+            tail = stderr[-2000:].decode(errors="ignore")
+            cmd = " ".join(self._cmd)
+            raise RuntimeError(f"ffmpeg failed rc={self._proc.returncode}: {tail} (cmd={cmd})")
 
 
 class FfmpegRawWriter:
@@ -236,6 +242,9 @@ class FfmpegRawWriter:
         self._path = path
         cmd = [
             ffmpeg_path,
+            "-hide_banner",
+            "-loglevel",
+            "error",
             "-y",
             "-f",
             "rawvideo",
@@ -255,6 +264,7 @@ class FfmpegRawWriter:
             "1",
             path,
         ]
+        self._cmd = list(cmd)
         self._proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
@@ -295,7 +305,9 @@ class FfmpegRawWriter:
             stderr = b""
             if self._proc.stderr:
                 stderr = self._proc.stderr.read() or b""
-            raise RuntimeError(f"ffmpeg failed: {stderr[:200].decode(errors='ignore')}")
+            tail = stderr[-2000:].decode(errors="ignore")
+            cmd = " ".join(self._cmd)
+            raise RuntimeError(f"ffmpeg failed rc={self._proc.returncode}: {tail} (cmd={cmd})")
 
 
 class SegmentWriter:
@@ -349,10 +361,13 @@ class SegmentWriter:
     def _segment_path(self, *, final: bool) -> str:
         safe = encode_record_id_component(self.segment_id)
         ext = self.container_ext()
-        suffix = f".{ext}"
-        if not final:
-            suffix += ".tmp"
-        return os.path.join(self._spool_dir, f"{safe}{suffix}")
+        if final:
+            name = f"{safe}.{ext}"
+        else:
+            # Keep the real container extension at the end so external tools
+            # (ffmpeg) infer the muxer correctly.
+            name = f"{safe}.tmp.{ext}"
+        return os.path.join(self._spool_dir, name)
 
     def container_ext(self) -> str:
         if self._container_type == "avi_mjpeg":
@@ -564,6 +579,11 @@ class CapturePipeline:
                 encoder_reason = "ffmpeg_missing"
             else:
                 prefers_gpu = self._encoder_auto or encoder_request in {"nvenc", "h264_nvenc"}
+                # In WSL/Linux environments, ffmpeg may advertise nvenc support even when CUDA/NVENC
+                # isn't actually usable. Default "auto" to CPU unless explicitly requested.
+                if prefers_gpu and self._encoder_auto and os.name != "nt":
+                    prefers_gpu = False
+                    encoder_reason = encoder_reason or "gpu_auto_disabled_non_windows"
                 if prefers_gpu:
                     if _ffmpeg_supports_encoder(ffmpeg_path, "h264_nvenc"):
                         self._encoder_preferred = "nvenc"
