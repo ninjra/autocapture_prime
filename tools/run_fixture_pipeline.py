@@ -308,6 +308,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--idle-max-steps", type=int, default=20)
     parser.add_argument("--input-dir", default="")
     parser.add_argument("--force-idle", action="store_true")
+    parser.add_argument(
+        "--capture-container",
+        default="",
+        help="Override capture.video.container (e.g. zip, avi_mjpeg, ffmpeg_mp4)",
+    )
+    parser.add_argument(
+        "--stub-frame-format",
+        default="",
+        help="Override capture.stub.frame_format (e.g. png, jpeg)",
+    )
+    parser.add_argument(
+        "--video-frame-format",
+        default="",
+        help="Override capture.video.frame_format (e.g. png, jpeg, rgb)",
+    )
     args = parser.parse_args(argv)
 
     manifest_path = _resolve_path(args.manifest)
@@ -339,6 +354,19 @@ def main(argv: list[str] | None = None) -> int:
         max_frames=len(frame_files),
         run_id=run_id,
     )
+    if isinstance(user_config, dict):
+        capture_cfg = user_config.setdefault("capture", {})
+        if isinstance(capture_cfg, dict):
+            if args.stub_frame_format:
+                stub_cfg = capture_cfg.setdefault("stub", {})
+                if isinstance(stub_cfg, dict):
+                    stub_cfg["frame_format"] = str(args.stub_frame_format).strip()
+            video_cfg = capture_cfg.setdefault("video", {})
+            if isinstance(video_cfg, dict):
+                if args.capture_container:
+                    video_cfg["container"] = str(args.capture_container).strip()
+                if args.video_frame_format:
+                    video_cfg["frame_format"] = str(args.video_frame_format).strip()
     if isinstance(user_config, dict):
         storage_cfg = user_config.setdefault("storage", {})
         if isinstance(storage_cfg, dict):
@@ -471,7 +499,20 @@ def main(argv: list[str] | None = None) -> int:
         report["capture_elapsed_s"] = round(time.monotonic() - t_cap, 3)
         print(f"[fixture] capture_elapsed_s={report['capture_elapsed_s']} evidence_count={len(evidence_ids)}")
         sys.stdout.flush()
-        report["evidence"] = {"count": len(evidence_ids), "record_ids": evidence_ids[:20]}
+        evidence_sample = None
+        if evidence_ids and hasattr(metadata, "get"):
+            try:
+                rec = metadata.get(evidence_ids[0], {})
+                if isinstance(rec, dict):
+                    container = rec.get("container", {}) if isinstance(rec.get("container", {}), dict) else {}
+                    evidence_sample = {
+                        "record_id": evidence_ids[0],
+                        "record_type": rec.get("record_type"),
+                        "container_type": container.get("type"),
+                    }
+            except Exception:
+                evidence_sample = None
+        report["evidence"] = {"count": len(evidence_ids), "record_ids": evidence_ids[:20], "sample": evidence_sample}
         # Avoid re-running heavy OCR/VLM work just for "probe_plugins" bookkeeping.
         # Probes should validate wiring and sandboxing, not burn cycles on real media.
         sample_frame: bytes | None = b""

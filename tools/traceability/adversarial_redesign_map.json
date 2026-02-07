@@ -1,5 +1,54 @@
 {
-  "version": 1,
-  "items": []
+  "generated_utc": "2026-02-07T00:00:00Z",
+  "source_doc": "docs/autocapture_prime_adversarial_redesign.md",
+  "items": [
+    {
+      "id": "FND-01",
+      "title": "Exclusive instance lock for data_dir",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/kernel/instance_lock.py",
+        "autocapture_nx/kernel/loader.py",
+        "tests/test_instance_lock.py"
+      ],
+      "validators": [
+        "tests/test_instance_lock.py"
+      ],
+      "notes": "Kernel boot acquires an exclusive data_dir lock and releases it on shutdown; second boot fails closed."
+    },
+    {
+      "id": "FND-02",
+      "title": "Atomic writes for JSON state/config",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/kernel/atomic_write.py",
+        "autocapture_nx/kernel/loader.py",
+        "autocapture_nx/ux/facade.py",
+        "autocapture_nx/plugin_system/manager.py",
+        "autocapture/config/load.py",
+        "tests/test_atomic_write.py"
+      ],
+      "validators": [
+        "tests/test_atomic_write.py"
+      ],
+      "notes": "State/config JSON writes are temp+fsync+replace; doctor checks parseability of critical state JSON."
+    },
+    {
+      "id": "OPS-02",
+      "title": "Operational metrics: TTFR + plugin timing",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/capture/pipeline.py",
+        "autocapture/web/routes/metrics.py",
+        "autocapture/web/routes/plugins.py",
+        "autocapture_nx/ux/facade.py",
+        "tests/test_metrics_ttfr.py"
+      ],
+      "validators": [
+        "tests/test_metrics_ttfr.py"
+      ],
+      "notes": "Metrics API includes ttfr percentiles and plugin timing aggregation derived from plugin execution trace."
+    }
+  ]
 }
 

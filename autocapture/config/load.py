@@ -66,8 +66,9 @@ def backup_user_config(paths: ConfigPaths) -> None:
 def reset_user_config(paths: ConfigPaths) -> None:
     defaults = load_default_config(paths)
     backup_user_config(paths)
-    paths.user_path.parent.mkdir(parents=True, exist_ok=True)
-    paths.user_path.write_text(json.dumps(defaults, indent=2, sort_keys=True), encoding="utf-8")
+    from autocapture_nx.kernel.atomic_write import atomic_write_json
+
+    atomic_write_json(paths.user_path, defaults, sort_keys=True, indent=2)
 
 
 def restore_user_config(paths: ConfigPaths) -> None:

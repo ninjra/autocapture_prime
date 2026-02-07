@@ -23,6 +23,7 @@ from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.kernel.loader import Kernel, default_config_paths
 from autocapture_nx.kernel.query import run_query
 from autocapture_nx.kernel.telemetry import telemetry_snapshot, percentile
+from autocapture_nx.kernel.atomic_write import atomic_write_json
 from autocapture_nx.plugin_system.manager import PluginManager
 from autocapture_nx.processing.idle import _extract_frame, _get_media_blob
 
@@ -382,12 +383,11 @@ class UXFacade:
             user_cfg = json.loads(self._paths.user_path.read_text(encoding="utf-8"))
         prior_text = json.dumps(user_cfg, indent=2, sort_keys=True)
         _apply_revert_patch(user_cfg, previous)
-        self._paths.user_path.parent.mkdir(parents=True, exist_ok=True)
-        self._paths.user_path.write_text(json.dumps(user_cfg, indent=2, sort_keys=True), encoding="utf-8")
+        atomic_write_json(self._paths.user_path, user_cfg, sort_keys=True, indent=2)
         try:
             self.reload_config()
         except Exception as exc:
-            self._paths.user_path.write_text(prior_text, encoding="utf-8")
+            atomic_write_json(self._paths.user_path, json.loads(prior_text), sort_keys=True, indent=2)
             self.reload_config()
             raise exc
         revert_entry = {
@@ -419,8 +419,7 @@ class UXFacade:
             user_cfg = json.loads(self._paths.user_path.read_text(encoding="utf-8"))
         merged = _deep_merge(user_cfg, patch)
         validate_config(self._paths.schema_path, _deep_merge(self._config, patch))
-        self._paths.user_path.parent.mkdir(parents=True, exist_ok=True)
-        self._paths.user_path.write_text(json.dumps(merged, indent=2, sort_keys=True), encoding="utf-8")
+        atomic_write_json(self._paths.user_path, merged, sort_keys=True, indent=2)
         updated = self.reload_config()
         entry = {
             "id": f"cfg_{uuid.uuid4().hex}",
@@ -451,6 +450,61 @@ class UXFacade:
         return {
             "plugins": [asdict(p) for p in manager.list_plugins()],
         }
+
+    def plugins_timing(self) -> dict[str, Any]:
+        def _percentile(values: list[int], pct: float) -> int | None:
+            if not values:
+                return None
+            values = sorted(values)
+            if len(values) == 1:
+                return int(values[0])
+            pct = max(0.0, min(100.0, float(pct)))
+            rank = (pct / 100.0) * (len(values) - 1)
+            low = int(rank)
+            high = min(low + 1, len(values) - 1)
+            frac = rank - low
+            return int(round(values[low] + (values[high] - values[low]) * frac))
+
+        with self._kernel_mgr.session() as system:
+            trace = system.get("observability.plugin_trace") if system and hasattr(system, "get") else None
+            if trace is None or not hasattr(trace, "snapshot"):
+                return {"ok": True, "rows": [], "events": 0}
+            events = trace.snapshot()
+        by_key: dict[tuple[str, str, str], list[int]] = {}
+        err_by_key: dict[tuple[str, str, str], int] = {}
+        for ev in events if isinstance(events, list) else []:
+            if not isinstance(ev, dict):
+                continue
+            pid = str(ev.get("plugin_id") or "")
+            cap = str(ev.get("capability") or "")
+            method = str(ev.get("method") or "")
+            if not pid or not cap or not method:
+                continue
+            try:
+                dur = int(ev.get("duration_ms") or 0)
+            except Exception:
+                dur = 0
+            key = (pid, cap, method)
+            by_key.setdefault(key, []).append(max(0, dur))
+            if not bool(ev.get("ok", True)):
+                err_by_key[key] = int(err_by_key.get(key, 0) or 0) + 1
+        rows: list[dict[str, Any]] = []
+        for (pid, cap, method), durs in sorted(by_key.items()):
+            durs_sorted = sorted(durs)
+            rows.append(
+                {
+                    "plugin_id": pid,
+                    "capability": cap,
+                    "method": method,
+                    "calls": len(durs_sorted),
+                    "errors": int(err_by_key.get((pid, cap, method), 0) or 0),
+                    "total_ms": int(sum(durs_sorted)),
+                    "p50_ms": _percentile(durs_sorted, 50.0),
+                    "p95_ms": _percentile(durs_sorted, 95.0),
+                    "max_ms": int(durs_sorted[-1]) if durs_sorted else None,
+                }
+            )
+        return {"ok": True, "rows": rows, "events": int(len(events) if isinstance(events, list) else 0)}
 
     def plugins_settings_get(self, plugin_id: str) -> dict[str, Any]:
         manager = PluginManager(self._config, safe_mode=self._safe_mode)

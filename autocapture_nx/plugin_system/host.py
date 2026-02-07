@@ -60,8 +60,10 @@ def _subprocess_limits_from_config(config: dict[str, Any]) -> tuple[int, float]:
     env_ttl = os.getenv("AUTOCAPTURE_PLUGINS_SUBPROCESS_IDLE_TTL_S", "").strip()
     wsl = _is_wsl()
 
-    default_max = 6 if wsl else 64
-    default_ttl = 30.0 if wsl else 600.0
+    # WSL default: keep the ceiling low. A single host_runner can be hundreds of
+    # MB RSS depending on imported deps; spawning many in a burst can OOM WSL.
+    default_max = 2 if wsl else 64
+    default_ttl = 15.0 if wsl else 600.0
 
     max_hosts = int(hosting.get("subprocess_max_hosts", default_max) or default_max)
     idle_ttl_s = float(hosting.get("subprocess_idle_ttl_s", default_ttl) or default_ttl)
@@ -84,7 +86,12 @@ def _subprocess_limits_from_config(config: dict[str, Any]) -> tuple[int, float]:
     return max_hosts, idle_ttl_s
 
 
-def reap_subprocess_hosts(*, force: bool = False, now_mono: float | None = None) -> dict[str, Any]:
+def reap_subprocess_hosts(
+    *,
+    force: bool = False,
+    bypass_interval_gate: bool = False,
+    now_mono: float | None = None,
+) -> dict[str, Any]:
     """Best-effort reaper for subprocess plugin hosts.
 
     This prevents long-lived kernels from accumulating one host_runner process
@@ -94,7 +101,7 @@ def reap_subprocess_hosts(*, force: bool = False, now_mono: float | None = None)
 
     global _SUBPROCESS_LAST_REAP_MONO
     now = float(now_mono if now_mono is not None else time.monotonic())
-    if not force and (now - float(_SUBPROCESS_LAST_REAP_MONO or 0.0)) < 0.8:
+    if not (force or bypass_interval_gate) and (now - float(_SUBPROCESS_LAST_REAP_MONO or 0.0)) < 0.8:
         with _SUBPROCESS_INSTANCES_LOCK:
             remaining = sum(1 for inst in _SUBPROCESS_INSTANCES if getattr(inst, "_host", None) is not None)
         return {
@@ -104,6 +111,7 @@ def reap_subprocess_hosts(*, force: bool = False, now_mono: float | None = None)
             "max_hosts": 0,
             "idle_ttl_s": 0.0,
             "force": False,
+            "bypass_interval_gate": False,
             "skipped": True,
         }
     _SUBPROCESS_LAST_REAP_MONO = now
@@ -183,6 +191,7 @@ def reap_subprocess_hosts(*, force: bool = False, now_mono: float | None = None)
         "max_hosts": max_hosts,
         "idle_ttl_s": idle_ttl_s,
         "force": bool(force),
+        "bypass_interval_gate": bool(bypass_interval_gate),
     }
 
 
@@ -206,6 +215,18 @@ def _ensure_subprocess_reaper_started() -> None:
 
         _SUBPROCESS_REAPER_THREAD = threading.Thread(target=_loop, daemon=True, name="autocapture-subprocess-host-reaper")
         _SUBPROCESS_REAPER_THREAD.start()
+
+
+def close_all_subprocess_hosts(*, reason: str = "shutdown") -> dict[str, Any]:
+    """Close all idle subprocess hosts (best-effort).
+
+    Used by kernel shutdown paths and tests to avoid host_runner process leaks.
+    """
+
+    try:
+        return reap_subprocess_hosts(force=True, bypass_interval_gate=True)
+    except Exception:
+        return {"ok": False, "reason": str(reason)}
 
 
 def _encode(obj: Any) -> Any:
@@ -800,10 +821,11 @@ class SubprocessPlugin:
             pass
 
     def _start_host(self) -> None:
-        # Before spawning another host_runner, best-effort reap idle hosts so we
-        # don't accumulate one process per plugin forever on long-lived kernels.
+        # Before spawning another host_runner, ensure the reaper's cap/TTL logic
+        # actually runs. The background reaper uses an interval gate to keep
+        # overhead low, but bursty startup must not bypass the cap (WSL OOM).
         try:
-            reap_subprocess_hosts(force=False)
+            reap_subprocess_hosts(force=False, bypass_interval_gate=True)
         except Exception:
             pass
         with filesystem_guard_suspended():

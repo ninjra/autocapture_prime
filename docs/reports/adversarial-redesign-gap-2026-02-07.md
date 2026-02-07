@@ -1,11 +1,5 @@
-# Adversarial Redesign Coverage Gaps
-
-Generated: 2026-02-07
-
-- total: 92
-- implemented: 3
-- partial: 39
-- missing: 50
+gap_report=docs/reports/adversarial-redesign-gap-2026-02-07.md total=92 implemented=6 partial=37 missing=49
+ssing: 49
 
 | ID | Status | Title | Evidence | Validators |
 | --- | --- | --- | --- | --- |
@@ -31,8 +25,8 @@ Generated: 2026-02-07
 | EXT-10 | partial | Add plugin SBOM metadata (dependencies + hashes) to plugin lock entries | tools/hypervisor/scripts/update_plugin_locks.py<br>config/plugin_locks.json | tests/test_plugin_lock_contains_sbom.py |
 | EXT-11 | partial | Cryptographically sign plugin_locks.json and approvals with local key; verify before boot | autocapture_nx/kernel/keyring.py<br>autocapture_nx/plugin_system/registry.py<br>config/plugin_locks.json | tests/test_plugin_locks_signature_verified.py |
 | EXT-12 | partial | Implement a plugin “capabilities matrix” page: what provides what, conflicts, and current selection rationale | autocapture/web/ui/index.html<br>autocapture_nx/plugin_system/registry.py | tests/test_capabilities_matrix_endpoint.py |
-| FND-01 | partial | Add an exclusive instance lock for (config_dir, data_dir) to prevent concurrent writers | autocapture_nx/kernel/loader.py<br>autocapture_nx/kernel/paths.py | tests/test_instance_lock.py |
-| FND-02 | partial | Centralize atomic-write (temp+fsync+rename) for all JSON/NDJSON state writes (config, run_state, approvals, audit) | autocapture_nx/kernel/loader.py<br>autocapture_nx/plugin_system/manager.py<br>autocapture/config/load.py<br>autocapture_nx/kernel/audit.py | tests/test_atomic_write.py<br>tools/gate_doctor.py |
+| FND-01 | implemented | Add an exclusive instance lock for (config_dir, data_dir) to prevent concurrent writers | autocapture_nx/kernel/instance_lock.py<br>autocapture_nx/kernel/loader.py<br>tests/test_instance_lock.py | tests/test_instance_lock.py |
+| FND-02 | implemented | Centralize atomic-write (temp+fsync+rename) for all JSON/NDJSON state writes (config, run_state, approvals, audit) | autocapture_nx/kernel/atomic_write.py<br>autocapture_nx/kernel/loader.py<br>autocapture_nx/ux/facade.py<br>autocapture_nx/plugin_system/manager.py<br>autocapture/config/load.py<br>tests/test_atomic_write.py | tests/test_atomic_write.py |
 | FND-03 | partial | Add `autocapture integrity scan` to verify ledger chain, anchors, blob hashes, and metadata references | autocapture_nx/cli.py<br>autocapture/pillars/citable.py<br>autocapture_nx/kernel/proof_bundle.py<br>plugins/builtin/storage_* | tests/test_integrity_scan.py<br>tools/gate_doctor.py |
 | FND-04 | partial | Record run-recovery actions as first-class journal/ledger events (quarantine, seal, replay) with before/after hashes | autocapture_nx/kernel/loader.py<br>plugins/builtin/journal_basic/plugin.py<br>plugins/builtin/ledger_basic/plugin.py | tests/test_recovery_audit_entries.py |
 | FND-05 | missing | Introduce content-addressed ingest IDs for file-based inputs (sha256→input_id) and dedupe at ingest boundary | autocapture_nx/ingest/*<br>autocapture_nx/kernel/prefixed_id.py<br>plugins/builtin/storage_media_basic/plugin.py | tests/test_ingest_dedupe.py |
@@ -52,7 +46,7 @@ Generated: 2026-02-07
 | META-09 | missing | Record determinism inputs explicitly: RNG seeds, locale/TZ, model versions, and any sampling parameters used | autocapture_nx/kernel/determinism.py<br>autocapture_nx/plugin_system/registry.py (RNGScope)<br>contracts/run_manifest.schema.json (new) | tests/test_manifest_determinism_fields.py |
 | META-10 | missing | Define a canonical diagnostics bundle schema (bundle_manifest.json) for doctor + support artifacts | autocapture_nx/cli.py<br>tools/gate_doctor.py<br>contracts/diagnostics_bundle.schema.json (new) | tests/test_diagnostics_bundle_schema.py |
 | OPS-01 | missing | Adopt structured JSONL logging with correlation IDs (run_id, job_id, plugin_id) and log rotation | autocapture_nx/kernel/logging.py<br>autocapture/web/api.py<br>autocapture_nx/plugin_system/host_runner.py | tests/test_logs_have_correlation_ids.py |
-| OPS-02 | missing | Instrument frictionless workflow metrics: TTFR, query latency, misconfig errors, plugin crashes, blocked ops; expose /metrics + UI | autocapture/telemetry.py<br>autocapture/web/routes/metrics.py<br>autocapture_nx/ux/facade.py | tests/test_metrics_contains_ttfr.py<br>tools/gate_perf.py |
+| OPS-02 | implemented | Instrument frictionless workflow metrics: TTFR, query latency, misconfig errors, plugin crashes, blocked ops; expose /metrics + UI | autocapture_nx/capture/pipeline.py<br>autocapture/web/routes/metrics.py<br>autocapture/web/routes/plugins.py<br>autocapture_nx/ux/facade.py<br>tests/test_metrics_ttfr.py | tests/test_metrics_ttfr.py |
 | OPS-03 | missing | Provide a deterministic diagnostics bundle export (zip) with redaction: doctor report, config snapshot, locks, recent logs, telemetry | autocapture/web/routes/doctor.py<br>autocapture_nx/kernel/doctor.py<br>autocapture/web/ui/index.html | tests/test_diagnostics_bundle_redacts.py |
 | OPS-04 | missing | Expand /health to include component matrix + last error codes, while keeping a stable summary for monitoring | autocapture/web/routes/health.py<br>autocapture_nx/kernel/doctor.py | tests/test_health_has_stable_fields.py |
 | OPS-05 | partial | Add operator commands: `reindex`, `vacuum`, `quarantine`, `rollback-locks`, each producing ledgered actions | autocapture_nx/cli.py<br>autocapture_nx/kernel/loader.py<br>plugins/builtin/ledger_basic/plugin.py | tests/test_operator_commands_ledgered.py |

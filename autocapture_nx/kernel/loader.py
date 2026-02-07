@@ -27,8 +27,11 @@ from autocapture_nx.kernel.determinism import apply_runtime_determinism
 from autocapture_nx.kernel.telemetry import record_telemetry
 from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
 from autocapture_nx.kernel.metadata_store import persist_unavailable_record
+from autocapture_nx.kernel.atomic_write import atomic_write_json
+from autocapture_nx.kernel.instance_lock import acquire_instance_lock
 from autocapture_nx.plugin_system.registry import PluginRegistry
 from autocapture_nx.plugin_system.runtime import global_network_deny, set_global_network_deny
+from autocapture_nx.plugin_system.host import close_all_subprocess_hosts
 
 from .system import System
 
@@ -153,6 +156,7 @@ class Kernel:
         self._conductor: Any | None = None
         self._package_versions_cache: dict[str, str] | None = None
         self._network_deny_prev: bool | None = None
+        self._instance_lock: Any | None = None
 
     def boot(self, *, start_conductor: bool = True, fast_boot: bool | None = None) -> System:
         profiler = StartupProfiler(enabled=_startup_profile_enabled())
@@ -174,6 +178,12 @@ class Kernel:
         self.config = effective.data
         ensure_run_id(self.config)
         apply_runtime_determinism(self.config)
+        try:
+            data_dir = self.config.get("storage", {}).get("data_dir", "data")
+            self._instance_lock = acquire_instance_lock(data_dir)
+        except Exception:
+            # Fail closed: concurrent writers must be prevented.
+            raise
         computed_fast_boot = bool(
             self.safe_mode and self.config.get("kernel", {}).get("safe_mode_fast_boot", False)
         )
@@ -496,6 +506,18 @@ class Kernel:
                 self.system.close()
             except Exception:
                 pass
+            try:
+                if self._instance_lock is not None:
+                    self._instance_lock.close()
+            except Exception:
+                pass
+            self._instance_lock = None
+            try:
+                # Best-effort cleanup: prevents host_runner buildup when repeated
+                # CLI sessions/tests create kernels without a long-lived daemon.
+                close_all_subprocess_hosts(reason="kernel_shutdown")
+            except Exception:
+                pass
             self.system = None
             self._conductor = None
 
@@ -550,7 +572,7 @@ class Kernel:
             "safe_mode_until": history.get("safe_mode_until"),
             "last_clean_utc": history.get("last_clean_utc"),
         }
-        path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        atomic_write_json(path, payload, sort_keys=True, indent=None)
 
     def _crash_loop_policy(self, config: dict[str, Any]) -> dict[str, Any]:
         kernel_cfg = config.get("kernel", {}) if isinstance(config, dict) else {}
@@ -691,7 +713,7 @@ class Kernel:
             payload["safe_mode"] = bool(safe_mode)
         if safe_mode_reason:
             payload["safe_mode_reason"] = safe_mode_reason
-        path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        atomic_write_json(path, payload, sort_keys=True, indent=None)
 
     def _parse_ts(self, ts: str | None) -> datetime | None:
         if not ts:
@@ -1392,6 +1414,15 @@ class Kernel:
         config = self.system.config
         plugin_ids = {p.plugin_id for p in self.system.plugins}
 
+        # Instance lock should be held for the duration of the kernel process.
+        checks.append(
+            DoctorCheck(
+                name="instance_lock",
+                ok=self._instance_lock is not None,
+                detail="ok" if self._instance_lock is not None else "not held",
+            )
+        )
+
         paths_cfg = config.get("paths", {})
         if isinstance(paths_cfg, dict):
             for key in ("config_dir", "data_dir"):
@@ -1435,6 +1466,17 @@ class Kernel:
                         detail="ok" if writable else "not writable",
                     )
                 )
+
+        # Crash/power-loss hardening: state JSON must always be parseable.
+        for name, path in (("run_state_json", self._run_state_path()), ("crash_history_json", self._crash_history_path(config))):
+            if not path.exists():
+                checks.append(DoctorCheck(name=f"{name}_present", ok=True, detail="missing"))
+                continue
+            try:
+                json.loads(path.read_text(encoding="utf-8"))
+                checks.append(DoctorCheck(name=f"{name}_valid", ok=True, detail="ok"))
+            except Exception as exc:
+                checks.append(DoctorCheck(name=f"{name}_valid", ok=False, detail=f"invalid ({type(exc).__name__})"))
 
         default_pack = set(config.get("plugins", {}).get("default_pack", []))
         if config.get("plugins", {}).get("safe_mode", False):

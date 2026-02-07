@@ -21,6 +21,11 @@ def list_plugins(request: Request):
     return request.app.state.facade.plugins_list()
 
 
+@router.get("/api/plugins/timing")
+def plugins_timing(request: Request):
+    return request.app.state.facade.plugins_timing()
+
+
 @router.post("/api/plugins/approve")
 def approve_plugins(request: Request):
     return request.app.state.facade.plugins_approve()

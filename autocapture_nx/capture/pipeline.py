@@ -503,6 +503,7 @@ class CapturePipeline:
         self._drops_lock = threading.Lock()
         self._segment_seq = 0
         self._start_mono = time.monotonic()
+        self._ttfr_recorded = False
         self._last_output_mono: float | None = None
         self._last_output_lock = threading.Lock()
         self._last_segment_id: str | None = None
@@ -1574,6 +1575,16 @@ class CapturePipeline:
             record_telemetry("capture.output", telemetry_payload)
             if self._plugin_id:
                 record_telemetry(f"plugin.{self._plugin_id}", telemetry_payload)
+            if not self._ttfr_recorded:
+                self._ttfr_recorded = True
+                record_telemetry(
+                    "ttfr",
+                    {
+                        "ts_utc": artifact.ts_end_utc or artifact.ts_start_utc,
+                        "seconds": float(round(max(0.0, time.monotonic() - self._start_mono), 3)),
+                        "record_id": artifact.segment_id,
+                    },
+                )
         except Exception as exc:
             failure_payload = {
                 "segment_id": artifact.segment_id,

@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 from autocapture_nx.kernel.hashing import sha256_directory, sha256_file
 from autocapture_nx.kernel.config import SchemaLiteValidator
 from autocapture_nx.kernel.audit import PluginAuditLog
+from autocapture_nx.kernel.atomic_write import atomic_write_json
 
 from .manifest import PluginManifest
 from .registry import PluginRegistry
@@ -56,8 +57,7 @@ class PluginManager:
 
     def _write_user_config(self, payload: dict[str, Any]) -> None:
         path = self._user_config_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        atomic_write_json(path, payload, sort_keys=True, indent=2)
 
     def _manifest_for(self, plugin_id: str, manifests: list[PluginManifest]) -> PluginManifest | None:
         for manifest in manifests:

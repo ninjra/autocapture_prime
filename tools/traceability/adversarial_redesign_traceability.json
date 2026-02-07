@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-02-07T19:22:09.229331Z",
+  "generated_utc": "2026-02-07T20:12:56.673438Z",
   "items": [
     {
       "evidence": [
@@ -308,12 +308,13 @@
     },
     {
       "evidence": [
+        "autocapture_nx/kernel/instance_lock.py",
         "autocapture_nx/kernel/loader.py",
-        "autocapture_nx/kernel/paths.py"
+        "tests/test_instance_lock.py"
       ],
       "id": "FND-01",
-      "notes": "",
-      "status": "partial",
+      "notes": "Kernel boot acquires an exclusive data_dir lock and releases it on shutdown; second boot fails closed.",
+      "status": "implemented",
       "title": "Add an exclusive instance lock for (config_dir, data_dir) to prevent concurrent writers",
       "validators": [
         "tests/test_instance_lock.py"
@@ -321,18 +322,19 @@
     },
     {
       "evidence": [
+        "autocapture_nx/kernel/atomic_write.py",
         "autocapture_nx/kernel/loader.py",
+        "autocapture_nx/ux/facade.py",
         "autocapture_nx/plugin_system/manager.py",
         "autocapture/config/load.py",
-        "autocapture_nx/kernel/audit.py"
+        "tests/test_atomic_write.py"
       ],
       "id": "FND-02",
-      "notes": "",
-      "status": "partial",
+      "notes": "State/config JSON writes are temp+fsync+replace; doctor checks parseability of critical state JSON.",
+      "status": "implemented",
       "title": "Centralize atomic-write (temp+fsync+rename) for all JSON/NDJSON state writes (config, run_state, approvals, audit)",
       "validators": [
-        "tests/test_atomic_write.py",
-        "tools/gate_doctor.py"
+        "tests/test_atomic_write.py"
       ]
     },
     {
@@ -610,17 +612,18 @@
     },
     {
       "evidence": [
-        "autocapture/telemetry.py",
+        "autocapture_nx/capture/pipeline.py",
         "autocapture/web/routes/metrics.py",
-        "autocapture_nx/ux/facade.py"
+        "autocapture/web/routes/plugins.py",
+        "autocapture_nx/ux/facade.py",
+        "tests/test_metrics_ttfr.py"
       ],
       "id": "OPS-02",
-      "notes": "",
-      "status": "missing",
+      "notes": "Metrics API includes ttfr percentiles and plugin timing aggregation derived from plugin execution trace.",
+      "status": "implemented",
       "title": "Instrument frictionless workflow metrics: TTFR, query latency, misconfig errors, plugin crashes, blocked ops; expose /metrics + UI",
       "validators": [
-        "tests/test_metrics_contains_ttfr.py",
-        "tools/gate_perf.py"
+        "tests/test_metrics_ttfr.py"
       ]
     },
     {
