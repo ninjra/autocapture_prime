@@ -3,6 +3,7 @@
   "additionalProperties": false,
   "required": [
     "schema_version",
+    "locator",
     "span_id",
     "evidence_id",
     "evidence_hash",
@@ -15,6 +16,24 @@
   ],
   "properties": {
     "schema_version": {"type": "integer"},
+    "locator": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["kind", "record_id", "record_hash"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["text_offsets", "time_range", "record"]
+        },
+        "record_id": {"type": "string"},
+        "record_hash": {"type": "string"},
+        "offset_start": {"type": ["integer", "null"]},
+        "offset_end": {"type": ["integer", "null"]},
+        "span_sha256": {"type": ["string", "null"]},
+        "ts_start_ms": {"type": ["integer", "null"]},
+        "ts_end_ms": {"type": ["integer", "null"]}
+      }
+    },
     "span_id": {"type": "string"},
     "evidence_id": {"type": "string"},
     "evidence_hash": {"type": "string"},

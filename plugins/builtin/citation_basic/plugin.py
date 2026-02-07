@@ -39,6 +39,16 @@ class CitationValidator(PluginBase):
             if not isinstance(citation, dict):
                 errors.append({**ctx, "error": "citation_not_dict"})
                 continue
+            locator = citation.get("locator")
+            if not isinstance(locator, dict):
+                errors.append({**ctx, "error": "missing_locator"})
+                continue
+            locator_kind = str(locator.get("kind") or "").strip()
+            locator_record_id = str(locator.get("record_id") or "").strip()
+            locator_record_hash = str(locator.get("record_hash") or "").strip()
+            if not locator_kind or not locator_record_id or not locator_record_hash:
+                errors.append({**ctx, "error": "locator_missing_fields"})
+                continue
             evidence_id = citation.get("evidence_id") or citation.get("span_id")
             if not evidence_id:
                 errors.append({**ctx, "error": "missing_evidence_id"})
@@ -118,11 +128,22 @@ class CitationValidator(PluginBase):
                 if expected_derived_hash and str(derived_hash) != expected_derived_hash:
                     errors.append({**ctx, "error": "derived_hash_mismatch", "derived_id": derived_id})
                     continue
+            # Locator must point to the record whose span offsets apply.
+            target_id = str(derived_id or evidence_id)
+            target_hash = str(citation.get("derived_hash") if derived_id else evidence_hash)
+            if locator_record_id != target_id:
+                errors.append({**ctx, "error": "locator_record_id_mismatch"})
+                continue
+            if locator_record_hash != target_hash:
+                errors.append({**ctx, "error": "locator_record_hash_mismatch"})
+                continue
             span_ref = citation.get("span_ref")
+            span_ref_kind = None
             if span_ref is not None:
                 if not isinstance(span_ref, dict):
                     errors.append({**ctx, "error": "span_ref_invalid"})
                     continue
+                span_ref_kind = span_ref.get("kind")
                 target_record = derived_record if derived_id else evidence_record
                 expected_span = None
                 if isinstance(target_record, dict):
@@ -157,6 +178,33 @@ class CitationValidator(PluginBase):
                 if offset_end > len(source_text):
                     errors.append({**ctx, "error": "span_out_of_bounds"})
                     continue
+                # Stable locator: verify span hash matches text slice.
+                if locator_kind != "text_offsets":
+                    errors.append({**ctx, "error": "locator_kind_mismatch"})
+                    continue
+                try:
+                    loc_start = int(locator.get("offset_start"))
+                    loc_end = int(locator.get("offset_end"))
+                except Exception:
+                    errors.append({**ctx, "error": "locator_offsets_invalid"})
+                    continue
+                if loc_start != offset_start or loc_end != offset_end:
+                    errors.append({**ctx, "error": "locator_offsets_mismatch"})
+                    continue
+                span_sha = locator.get("span_sha256")
+                if not span_sha:
+                    errors.append({**ctx, "error": "locator_span_hash_missing"})
+                    continue
+                expected_span = sha256_text(source_text[offset_start:offset_end])
+                if str(span_sha) != expected_span:
+                    errors.append({**ctx, "error": "locator_span_hash_mismatch"})
+                    continue
+            else:
+                # Non-text spans still need a stable locator.
+                expected_locator_kind = "time_range" if span_ref_kind == "time" else "record"
+                if locator_kind != expected_locator_kind:
+                    errors.append({**ctx, "error": "locator_kind_mismatch"})
+                    continue
             if not self._verify_ledger(str(ledger_head)):
                 errors.append({**ctx, "error": "ledger_head_invalid"})
                 continue
@@ -166,6 +214,7 @@ class CitationValidator(PluginBase):
             resolved.append(
                 {
                     "schema_version": schema_version,
+                    "locator": locator,
                     "span_id": span_id,
                     "evidence_id": evidence_id,
                     "evidence_hash": evidence_hash,

@@ -405,6 +405,13 @@ def cmd_verify_evidence(args: argparse.Namespace) -> int:
     return 2
 
 
+def cmd_integrity_scan(args: argparse.Namespace) -> int:
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.integrity_scan()
+    _print_json(result)
+    return 0 if result.get("ok") else 2
+
+
 def cmd_verify_archive(args: argparse.Namespace) -> int:
     from autocapture.storage.archive import verify_archive
 
@@ -717,6 +724,11 @@ def build_parser() -> argparse.ArgumentParser:
     verify_archive = verify_sub.add_parser("archive")
     verify_archive.add_argument("--path", required=True)
     verify_archive.set_defaults(func=cmd_verify_archive)
+
+    integrity = sub.add_parser("integrity")
+    integrity_sub = integrity.add_subparsers(dest="integrity_cmd", required=True)
+    integrity_scan = integrity_sub.add_parser("scan")
+    integrity_scan.set_defaults(func=cmd_integrity_scan)
 
     research = sub.add_parser("research")
     research_sub = research.add_subparsers(dest="research_cmd", required=True)

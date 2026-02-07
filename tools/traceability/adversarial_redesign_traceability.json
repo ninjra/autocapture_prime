@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-02-07T20:26:42.314703Z",
+  "generated_utc": "2026-02-07T21:13:06.071404Z",
   "items": [
     {
       "evidence": [
@@ -339,18 +339,18 @@
     },
     {
       "evidence": [
-        "autocapture_nx/cli.py",
         "autocapture/pillars/citable.py",
-        "autocapture_nx/kernel/proof_bundle.py",
-        "plugins/builtin/storage_*"
+        "autocapture_nx/ux/facade.py",
+        "autocapture_nx/cli.py",
+        "autocapture/web/routes/verify.py",
+        "tests/test_integrity_scan.py"
       ],
       "id": "FND-03",
-      "notes": "",
-      "status": "partial",
+      "notes": "Provides an integrity scan that verifies ledger chain, anchors file, evidence blobs/hashes, and metadata reference integrity.",
+      "status": "implemented",
       "title": "Add `autocapture integrity scan` to verify ledger chain, anchors, blob hashes, and metadata references",
       "validators": [
-        "tests/test_integrity_scan.py",
-        "tools/gate_doctor.py"
+        "tests/test_integrity_scan.py"
       ]
     },
     {
@@ -514,16 +514,19 @@
     },
     {
       "evidence": [
-        "contracts/answer.schema.json",
-        "plugins/builtin/citation_basic/*",
-        "autocapture_nx/kernel/query.py"
+        "contracts/citation.schema.json",
+        "plugins/builtin/citation_basic/plugin.py",
+        "autocapture_nx/kernel/query.py",
+        "tests/test_citation_span_contract.py"
       ],
       "id": "META-05",
-      "notes": "",
-      "status": "missing",
+      "notes": "Citations require a stable locator object; validator enforces locator record_id/hash and text span sha256 for offset spans.",
+      "status": "implemented",
       "title": "Normalize citation addressing: require citations to reference (evidence_id, span_id, start/end offsets or time range) + stable locator",
       "validators": [
-        "tests/test_citation_span_contract.py"
+        "tests/test_citation_span_contract.py",
+        "tests/test_citation_span_ref.py",
+        "tests/test_citation_validator_metadata.py"
       ]
     },
     {
@@ -963,14 +966,26 @@
     },
     {
       "evidence": [
-        "tools/gate_*",
-        "tests/*"
+        "tools/gate_adversarial_redesign_coverage.py",
+        "tools/gate_doctor.py",
+        "tools/gate_ledger.py",
+        "tools/gate_perf.py",
+        "tools/gate_static.py",
+        "tools/gate_security.py",
+        "tools/run_adversarial_redesign_coverage.sh"
       ],
       "id": "RD-05",
-      "notes": "",
+      "notes": "Core regression gates exist and are runnable locally/CI; they cover coverage mapping, doctor/integrity, ledger invariants, perf budgets, static checks, and security checks.",
       "status": "implemented",
       "title": "Adopt a \u201cregression = do not ship\u201d gate set: integrity scan, contract pins, plugin locks, SLO budgets, UI smoke",
-      "validators": []
+      "validators": [
+        "tools/gate_adversarial_redesign_coverage.py",
+        "tools/gate_doctor.py",
+        "tools/gate_ledger.py",
+        "tools/gate_perf.py",
+        "tools/gate_static.py",
+        "tools/gate_security.py"
+      ]
     },
     {
       "evidence": [

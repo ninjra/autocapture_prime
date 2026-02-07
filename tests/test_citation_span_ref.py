@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from autocapture.core.hashing import hash_text, normalize_text
+from autocapture_nx.kernel.hashing import sha256_text
 from autocapture_nx.plugin_system.api import PluginContext
 from plugins.builtin.anchor_basic.plugin import AnchorWriter
 from plugins.builtin.citation_basic.plugin import CitationValidator
@@ -101,6 +102,14 @@ class CitationSpanRefTests(unittest.TestCase):
                 [
                     {
                         "schema_version": 1,
+                        "locator": {
+                            "kind": "text_offsets",
+                            "record_id": derived_id,
+                            "record_hash": derived_hash,
+                            "offset_start": 0,
+                            "offset_end": len(derived_text),
+                            "span_sha256": sha256_text(derived_text),
+                        },
                         "span_id": derived_id,
                         "evidence_id": evidence_id,
                         "evidence_hash": evidence_hash,
@@ -122,6 +131,14 @@ class CitationSpanRefTests(unittest.TestCase):
                 [
                     {
                         "schema_version": 1,
+                        "locator": {
+                            "kind": "text_offsets",
+                            "record_id": derived_id,
+                            "record_hash": derived_hash,
+                            "offset_start": 0,
+                            "offset_end": len(derived_text),
+                            "span_sha256": sha256_text(derived_text),
+                        },
                         "span_id": derived_id,
                         "evidence_id": evidence_id,
                         "evidence_hash": evidence_hash,

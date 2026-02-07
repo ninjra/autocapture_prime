@@ -970,6 +970,24 @@ class UXFacade:
             ok, errors = verify_evidence(metadata, media)
             return {"ok": ok, "errors": errors}
 
+    def integrity_scan(self) -> dict[str, Any]:
+        from autocapture.pillars.citable import integrity_scan
+
+        with self._kernel_mgr.session() as system:
+            config = system.config if hasattr(system, "config") else {}
+            storage_cfg = config.get("storage", {}) if isinstance(config, dict) else {}
+            data_dir = Path(storage_cfg.get("data_dir", "data"))
+            ledger_path = data_dir / "ledger.ndjson"
+            anchor_path = Path(storage_cfg.get("anchor", {}).get("path", "data_anchor/anchors.ndjson"))
+            keyring = system.get("storage.keyring") if system is not None and hasattr(system, "has") and system.has("storage.keyring") else None
+            return integrity_scan(
+                ledger_path=ledger_path,
+                anchor_path=anchor_path,
+                metadata=system.get("storage.metadata") if system is not None else None,
+                media=system.get("storage.media") if system is not None else None,
+                keyring=keyring,
+            )
+
     def citations_resolve(self, citations: list[dict[str, Any]]) -> dict[str, Any]:
         with self._kernel_mgr.session() as system:
             validator = system.get("citation.validator")

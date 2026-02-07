@@ -10,6 +10,7 @@ from typing import Any
 
 from autocapture.core.hashing import hash_text, normalize_text
 from autocapture_nx.kernel.hashing import sha256_canonical, sha256_file
+from autocapture_nx.kernel.hashing import sha256_text
 from autocapture_nx.kernel.loader import _canonicalize_config_for_hash
 from autocapture_nx.kernel.paths import resolve_repo_path
 from autocapture_nx.kernel.derived_records import (
@@ -93,6 +94,26 @@ def _resolve_single_provider(capability: Any | None) -> Any | None:
         if items:
             return items[0][1]
     return target
+
+
+def _citation_locator(
+    *,
+    kind: str,
+    record_id: str,
+    record_hash: str | None,
+    offset_start: int | None = None,
+    offset_end: int | None = None,
+    span_text: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "kind": str(kind),
+        "record_id": str(record_id),
+        "record_hash": str(record_hash or ""),
+        "offset_start": int(offset_start) if offset_start is not None else None,
+        "offset_end": int(offset_end) if offset_end is not None else None,
+        "span_sha256": sha256_text(str(span_text or "")) if span_text is not None else None,
+    }
+    return payload
 
 
 def extract_on_demand(
@@ -487,10 +508,26 @@ def run_state_query(system, query: str) -> dict[str, Any]:
                     derived_hash = derived_record.get("content_hash") or derived_record.get("payload_hash")
                 if not query_ledger_hash or not anchor_ref or not evidence_hash:
                     continue
+                offset_start = 0
                 offset_end = len(text) if span_kind == "text" else 0
+                if span_kind == "text" and isinstance(derived_record, dict) and derived_record.get("text"):
+                    full = str(derived_record.get("text") or "")
+                    idx = full.find(text)
+                    if idx >= 0:
+                        offset_start = idx
+                        offset_end = idx + len(text)
+                        text = full[offset_start:offset_end]
                 citations = [
                     {
                         "schema_version": 1,
+                        "locator": _citation_locator(
+                            kind="text_offsets" if span_kind == "text" else "record",
+                            record_id=str(derived_id or media_id),
+                            record_hash=str(derived_hash or evidence_hash),
+                            offset_start=offset_start if span_kind == "text" else None,
+                            offset_end=offset_end if span_kind == "text" else None,
+                            span_text=text if span_kind == "text" else None,
+                        ),
                         "span_id": media_id,
                         "evidence_id": media_id,
                         "evidence_hash": evidence_hash,
@@ -501,7 +538,7 @@ def run_state_query(system, query: str) -> dict[str, Any]:
                         "ledger_head": query_ledger_hash,
                         "anchor_ref": anchor_ref,
                         "source": "local",
-                        "offset_start": 0,
+                        "offset_start": offset_start,
                         "offset_end": offset_end,
                     }
                 ]
@@ -533,6 +570,11 @@ def run_state_query(system, query: str) -> dict[str, Any]:
             citations = [
                 {
                     "schema_version": 1,
+                    "locator": _citation_locator(
+                        kind="record",
+                        record_id=media_id,
+                        record_hash=str(evidence_hash),
+                    ),
                     "span_id": media_id,
                     "evidence_id": media_id,
                     "evidence_hash": evidence_hash,
@@ -786,13 +828,26 @@ def run_query_without_state(system, query: str) -> dict[str, Any]:
             if derived_hash is None and derived_record.get("text"):
                 derived_hash = hash_text(normalize_text(derived_record.get("text", "")))
         span_kind = "text" if text else "record"
+        offset_start = 0
         offset_end = len(text) if text else 0
+        locator_kind = "text_offsets" if span_kind == "text" else ("time_range" if isinstance(span_ref, dict) and span_ref.get("kind") == "time" else "record")
+        locator_record_id = str(derived_id or evidence_id)
+        locator_record_hash = str(derived_hash or evidence_hash or "")
+        locator: dict[str, Any] = _citation_locator(
+            kind=locator_kind,
+            record_id=locator_record_id,
+            record_hash=locator_record_hash,
+            offset_start=offset_start if span_kind == "text" else None,
+            offset_end=offset_end if span_kind == "text" else None,
+            span_text=text if span_kind == "text" else None,
+        )
         claims.append(
             {
                 "text": text or f"Matched record {evidence_id}",
                 "citations": [
                     {
                         "schema_version": 1,
+                        "locator": locator,
                         "span_id": evidence_id,
                         "evidence_id": evidence_id,
                         "evidence_hash": evidence_hash,
@@ -803,7 +858,7 @@ def run_query_without_state(system, query: str) -> dict[str, Any]:
                         "ledger_head": query_ledger_hash,
                         "anchor_ref": anchor_ref,
                         "source": "local",
-                        "offset_start": 0,
+                        "offset_start": offset_start,
                         "offset_end": offset_end,
                         "stale": bool(stale_reason),
                         "stale_reason": stale_reason,

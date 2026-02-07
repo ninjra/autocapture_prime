@@ -1,5 +1,11 @@
-gap_report=docs/reports/adversarial-redesign-gap-2026-02-07.md total=92 implemented=7 partial=37 missing=48
-ssing: 48
+# Adversarial Redesign Coverage Gaps
+
+Generated: 2026-02-07
+
+- total: 92
+- implemented: 9
+- partial: 36
+- missing: 47
 
 | ID | Status | Title | Evidence | Validators |
 | --- | --- | --- | --- | --- |
@@ -27,7 +33,7 @@ ssing: 48
 | EXT-12 | partial | Implement a plugin “capabilities matrix” page: what provides what, conflicts, and current selection rationale | autocapture/web/ui/index.html<br>autocapture_nx/plugin_system/registry.py | tests/test_capabilities_matrix_endpoint.py |
 | FND-01 | implemented | Add an exclusive instance lock for (config_dir, data_dir) to prevent concurrent writers | autocapture_nx/kernel/instance_lock.py<br>autocapture_nx/kernel/loader.py<br>tests/test_instance_lock.py | tests/test_instance_lock.py |
 | FND-02 | implemented | Centralize atomic-write (temp+fsync+rename) for all JSON/NDJSON state writes (config, run_state, approvals, audit) | autocapture_nx/kernel/atomic_write.py<br>autocapture_nx/kernel/loader.py<br>autocapture_nx/ux/facade.py<br>autocapture_nx/plugin_system/manager.py<br>autocapture/config/load.py<br>tests/test_atomic_write.py | tests/test_atomic_write.py |
-| FND-03 | partial | Add `autocapture integrity scan` to verify ledger chain, anchors, blob hashes, and metadata references | autocapture_nx/cli.py<br>autocapture/pillars/citable.py<br>autocapture_nx/kernel/proof_bundle.py<br>plugins/builtin/storage_* | tests/test_integrity_scan.py<br>tools/gate_doctor.py |
+| FND-03 | implemented | Add `autocapture integrity scan` to verify ledger chain, anchors, blob hashes, and metadata references | autocapture/pillars/citable.py<br>autocapture_nx/ux/facade.py<br>autocapture_nx/cli.py<br>autocapture/web/routes/verify.py<br>tests/test_integrity_scan.py | tests/test_integrity_scan.py |
 | FND-04 | partial | Record run-recovery actions as first-class journal/ledger events (quarantine, seal, replay) with before/after hashes | autocapture_nx/kernel/loader.py<br>plugins/builtin/journal_basic/plugin.py<br>plugins/builtin/ledger_basic/plugin.py | tests/test_recovery_audit_entries.py |
 | FND-05 | missing | Introduce content-addressed ingest IDs for file-based inputs (sha256→input_id) and dedupe at ingest boundary | autocapture_nx/ingest/*<br>autocapture_nx/kernel/prefixed_id.py<br>plugins/builtin/storage_media_basic/plugin.py | tests/test_ingest_dedupe.py |
 | FND-06 | missing | Make disk-pressure handling fail-safe: preflight free-space, throttle capture/processing, and surface “paused due to disk” state | autocapture_nx/capture/pipeline.py<br>autocapture_nx/storage/retention.py<br>autocapture/web/ui/index.html | tests/test_disk_pressure_pause.py<br>tools/gate_perf.py |
@@ -39,7 +45,7 @@ ssing: 48
 | META-02 | partial | Capture plugin provenance: store (plugin_id, version, manifest_sha256, artifact_sha256, permissions) for every loaded plugin in run_manifest | autocapture_nx/plugin_system/registry.py<br>autocapture_nx/kernel/loader.py<br>config/plugin_locks.json | tests/test_plugin_provenance_in_manifest.py |
 | META-03 | implemented | Add a standard `provenance` object to all user-visible outputs (CLI query, web query, exports) | autocapture_nx/kernel/query.py<br>autocapture_nx/cli.py<br>autocapture/web/routes/query.py<br>tests/test_query_provenance_header.py | tests/test_query_provenance_header.py |
 | META-04 | partial | Version all record schemas explicitly (schema_version field) and enforce validation at write boundaries | contracts/*.schema.json<br>autocapture_nx/kernel/evidence.py<br>plugins/builtin/* | tests/test_schema_version_enforced.py<br>tools/gate_contract_pins.py |
-| META-05 | missing | Normalize citation addressing: require citations to reference (evidence_id, span_id, start/end offsets or time range) + stable locator | contracts/answer.schema.json<br>plugins/builtin/citation_basic/*<br>autocapture_nx/kernel/query.py | tests/test_citation_span_contract.py |
+| META-05 | implemented | Normalize citation addressing: require citations to reference (evidence_id, span_id, start/end offsets or time range) + stable locator | contracts/citation.schema.json<br>plugins/builtin/citation_basic/plugin.py<br>autocapture_nx/kernel/query.py<br>tests/test_citation_span_contract.py | tests/test_citation_span_contract.py<br>tests/test_citation_span_ref.py<br>tests/test_citation_validator_metadata.py |
 | META-06 | missing | Persist full policy snapshots (privacy + plugin permissions + egress settings) by hash, and include in ledger + proof bundle | plugins/builtin/ledger_basic/plugin.py<br>autocapture_nx/kernel/policy_gate.py<br>autocapture_nx/kernel/proof_bundle.py | tests/test_policy_snapshot_exported.py |
 | META-07 | partial | Introduce a content-addressed artifact manifest for all derived artifacts (OCR text, embeddings, indexes) with lineage pointers | autocapture_nx/kernel/derived_records.py<br>autocapture_nx/kernel/metadata_store.py<br>autocapture_nx/kernel/proof_bundle.py | tests/test_artifact_manifest_lineage.py |
 | META-08 | missing | Add minimal evaluation-result records (quality, coverage, freshness) and surface them in query results and UI | contracts/evaluation.schema.json (new)<br>autocapture_nx/kernel/query.py<br>autocapture/web/ui/index.html | tests/test_query_evaluation_fields.py |
@@ -73,7 +79,7 @@ ssing: 48
 | RD-02 | missing | Phase 1 (2026-02-21→2026-03-31): plugin manager v2 core flows + config presets + metrics TTFR/query p95 | (planning) |  |
 | RD-03 | missing | Phase 2 (2026-04-01→2026-05-31): pipeline DAG + replay + signed proof bundles + egress approvals + PII redaction MVP | (planning) |  |
 | RD-04 | missing | Phase 3 (2026-06-01→2026-07-31): WSL2 worker round-trip + optional GPU acceleration + incremental indexing/caching | (planning) |  |
-| RD-05 | implemented | Adopt a “regression = do not ship” gate set: integrity scan, contract pins, plugin locks, SLO budgets, UI smoke | tools/gate_*<br>tests/* |  |
+| RD-05 | implemented | Adopt a “regression = do not ship” gate set: integrity scan, contract pins, plugin locks, SLO budgets, UI smoke | tools/gate_adversarial_redesign_coverage.py<br>tools/gate_doctor.py<br>tools/gate_ledger.py<br>tools/gate_perf.py<br>tools/gate_static.py<br>tools/gate_security.py<br>tools/run_adversarial_redesign_coverage.sh | tools/gate_adversarial_redesign_coverage.py<br>tools/gate_doctor.py<br>tools/gate_ledger.py<br>tools/gate_perf.py<br>tools/gate_static.py<br>tools/gate_security.py |
 | RD-06 | missing | Write an operator runbook: backup/restore, safe-mode triage, plugin rollback, disk pressure, and integrity verification | docs/runbook.md (new)<br>docs/safe_mode.md |  |
 | SEC-01 | missing | Harden filesystem_guard path normalization: resolve symlinks, normalize case/UNC, and deny path traversal consistently on Windows | autocapture_nx/plugin_system/runtime.py<br>autocapture_nx/windows/win_paths.py | tests/test_filesystem_guard_windows_edge_cases.py |
 | SEC-02 | partial | Ensure network_guard is applied early in subprocess plugins (sitecustomize) and covers common HTTP libs | autocapture_nx/plugin_system/host_runner.py<br>autocapture_nx/plugin_system/runtime.py | tests/test_network_guard_applies_before_imports.py |

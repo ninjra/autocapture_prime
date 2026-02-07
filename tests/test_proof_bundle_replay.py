@@ -74,6 +74,7 @@ class ProofBundleReplayTests(unittest.TestCase):
             citations = [
                 {
                     "schema_version": 1,
+                    "locator": {"kind": "record", "record_id": evidence_id, "record_hash": evidence_hash},
                     "span_id": evidence_id,
                     "evidence_id": evidence_id,
                     "evidence_hash": evidence_hash,
