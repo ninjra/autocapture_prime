@@ -204,7 +204,8 @@ class KernelManager:
     def session(self) -> Iterator[Any]:
         if not self._persistent:
             kernel = Kernel(self._paths, safe_mode=self._safe_mode)
-            system = kernel.boot(start_conductor=self._start_conductor)
+            # One-shot sessions should be lightweight and avoid heavy boot-time fanout.
+            system = kernel.boot(start_conductor=self._start_conductor, fast_boot=True)
             try:
                 yield system
             finally:

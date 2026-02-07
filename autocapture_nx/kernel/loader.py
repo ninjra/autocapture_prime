@@ -154,7 +154,7 @@ class Kernel:
         self._package_versions_cache: dict[str, str] | None = None
         self._network_deny_prev: bool | None = None
 
-    def boot(self, *, start_conductor: bool = True) -> System:
+    def boot(self, *, start_conductor: bool = True, fast_boot: bool | None = None) -> System:
         profiler = StartupProfiler(enabled=_startup_profile_enabled())
         profiler.mark("boot.start")
         effective = self.load_effective_config()
@@ -174,9 +174,13 @@ class Kernel:
         self.config = effective.data
         ensure_run_id(self.config)
         apply_runtime_determinism(self.config)
-        fast_boot = bool(
+        computed_fast_boot = bool(
             self.safe_mode and self.config.get("kernel", {}).get("safe_mode_fast_boot", False)
         )
+        # One-shot commands (CLI query/verify/etc) should avoid heavy boot steps that
+        # can fan out plugin work and destabilize WSL. Persistent runs (capture/web)
+        # can still opt into full boot by passing fast_boot=False.
+        fast_boot = computed_fast_boot if fast_boot is None else bool(fast_boot)
         self._verify_contract_lock()
         profiler.mark("verify_contract_lock")
         allow_kernel_net = os.getenv("AUTOCAPTURE_ALLOW_KERNEL_NETWORK", "").lower() in {"1", "true", "yes"}
