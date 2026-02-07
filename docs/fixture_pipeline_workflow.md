@@ -1,17 +1,18 @@
 # Fixture Pipeline Workflow
 
-This workflow runs a single screenshot through the full Autocapture pipeline (OCR, VLM, SST stages, indexing, state layer, JEPA training) and makes it queryable via PromptOps with citations.
+This workflow runs a single screenshot through the Autocapture pipeline (OCR + SST stages + indexing) and validates query answers with citations. It is designed to be deterministic and WSL-stable.
 
 ## Preconditions
-- Run from the repo root.
+- Prefer running from the repo root (scripts use absolute paths but logs/caches are easier to find).
 - Use the repo virtual environment when available: `.venv/bin/python3`.
 - Use the fixture manifest: `docs/test sample/fixture_manifest.json`.
 - Use the multi-frame input dir: `/tmp/fixture_frames_jepa` (3 frames with timestamped filenames).
 - Ensure RapidOCR deps are installed in the venv: `rapidocr-onnxruntime`, `pillow`, `numpy`.
+- Keep WSL stable: avoid setting `AUTOCAPTURE_PLUGINS_HOSTING_MODE=subprocess` unless you have a reason.
 
 ## Input Preparation
 - The screenshot is the only PNG in `docs/test sample/`.
-- Create 3 frames so JEPA training sees multiple time steps:
+- Create 3 frames so temporal SST stages see multiple time steps:
   - `Screenshot 2026-02-02 113519.png`
   - `Screenshot 2026-02-02 113529.png`
   - `Screenshot 2026-02-02 113539.png`
@@ -19,8 +20,8 @@ This workflow runs a single screenshot through the full Autocapture pipeline (OC
   - The helper script `tools/run_fixture_pipeline_full.sh` will create these if missing.
 
 ## Step 1 (OCR-only smoke, optional)
-- Use `/tmp/fixture_config_ocr_only.json` to validate OCR + SST OCR tokens before full run.
-- Run with `--force-idle` to bypass idle gating during overnight runs.
+- Use `/tmp/fixture_config_ocr_only.json` to validate OCR + SST OCR tokens before the full run (if you have one).
+- Run with `--force-idle` to bypass idle gating during deterministic harness runs.
 
 Command:
 - `PYTHONPATH=. .venv/bin/python3 tools/run_fixture_pipeline.py --config-template /tmp/fixture_config_ocr_only.json --manifest 'docs/test sample/fixture_manifest.json' --input-dir /tmp/fixture_frames_jepa --force-idle`
@@ -29,15 +30,14 @@ Expected outputs:
 - `artifacts/fixture_runs/<run_id>/fixture_report.json`
 - `artifacts/fixture_runs/<run_id>/data/lexical.db`
 - `artifacts/fixture_runs/<run_id>/data/vector.db`
-- `artifacts/fixture_runs/<run_id>/data/state/` (present but state-layer disabled in OCR-only)
 
 ## Step 2 (Full pipeline)
-- Use `tools/fixture_config_template.json` which enables:
-  - All SST stages and extractors
-  - OCR + VLM extractors
+- Use `tools/fixture_config_template.json` (the default) which enables:
+  - OCR extraction
+  - SST stages (preprocess/temporal/layout/persist/index)
   - Indexing (lexical + vector)
-  - State layer + JEPA training
-  - PromptOps with citations
+  - Query path that uses metadata only (no on-query media decoding)
+  - Citation-required answers
 
 Command:
 - `bash /mnt/d/projects/autocapture_prime/tools/run_fixture_pipeline_full.sh`
@@ -46,7 +46,6 @@ Expected outputs:
 - `artifacts/fixture_runs/<run_id>/fixture_report.json`
 - `artifacts/fixture_runs/<run_id>/data/lexical.db`
 - `artifacts/fixture_runs/<run_id>/data/vector.db`
-- `artifacts/fixture_runs/<run_id>/data/state/` (JEPA artifacts and state vectors)
 - `artifacts/fixture_runs/<run_id>/data/promptops/` (query history + traces)
 
 ## Step 3 (Autoloop + Watchdog)
@@ -58,15 +57,21 @@ Commands:
 - `bash /mnt/d/projects/autocapture_prime/tools/fixture_watchdog.sh 10`
 
 ## Querying
-- The fixture manifest uses `queries.mode: auto` and `require_state: ok`.
+- The fixture manifest defaults to `queries.mode: explicit` and `require_state: ok`.
 - Queries should return evidence-backed answers with citations once the full run completes.
-- Example query (from UI or PromptOps): "what song was playing"
+- Example query (from CLI runner): "what time is it on the vdi"
+
+## Optional: FFmpeg Segment Decode Validation
+- The system can capture segments in `ffmpeg_mp4` container when `ffmpeg` is available.
+- Idle processing now supports extracting the first frame from `ffmpeg_mp4` segments (to feed OCR/SST).
+- To validate end-to-end, ensure `ffmpeg` is installed and run a fixture with:
+  - `capture.video.container=ffmpeg_mp4`
+  - `capture.stub.frame_format=jpeg` (required for `ffmpeg_mp4`)
 
 ## Troubleshooting
 - If queries return `no_evidence`, check:
   - `derived.sst.*` records include `ts_utc`
   - `lexical.db` has indexed docs
-  - State layer enabled in config (`processing.state_layer.enabled: true`)
 - If OCR is missing:
   - Confirm `rapidocr-onnxruntime` is installed in `.venv`
   - Check `fixture_report.json` for `ocr.selected_backend`

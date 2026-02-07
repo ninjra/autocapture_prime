@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import shutil
+import subprocess
 import zipfile
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -68,7 +71,72 @@ def _derive_run_id(config: dict[str, Any], record_id: str) -> str:
     return str(config.get("runtime", {}).get("run_id", "run"))
 
 
-def _extract_frame(blob: bytes, record: dict[str, Any]) -> bytes | None:
+def _ffmpeg_path(config: dict[str, Any]) -> str | None:
+    capture_cfg = config.get("capture", {}) if isinstance(config, dict) else {}
+    video_cfg = capture_cfg.get("video", {}) if isinstance(capture_cfg, dict) else {}
+    candidates = [
+        str(video_cfg.get("ffmpeg_path", "") or "").strip(),
+        str(capture_cfg.get("ffmpeg_path", "") or "").strip(),
+        str(os.getenv("FFMPEG_PATH", "") or "").strip(),
+    ]
+    for raw in candidates:
+        if not raw:
+            continue
+        try:
+            if Path(raw).exists():
+                return raw
+        except Exception:
+            continue
+    return shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
+
+
+def _decode_first_frame_ffmpeg(blob: bytes, *, ffmpeg_path: str) -> bytes | None:
+    if not blob:
+        return None
+    args = [
+        ffmpeg_path,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-threads",
+        "1",
+        "-i",
+        "pipe:0",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "png",
+        "pipe:1",
+    ]
+    env = os.environ.copy()
+    # Keep decoding lightweight in WSL and avoid thread fanout.
+    env.setdefault("OMP_NUM_THREADS", "1")
+    env.setdefault("MKL_NUM_THREADS", "1")
+    env.setdefault("OPENBLAS_NUM_THREADS", "1")
+    env.setdefault("NUMEXPR_NUM_THREADS", "1")
+    try:
+        proc = subprocess.run(
+            args,
+            input=blob,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            timeout=10.0,
+            check=False,
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    out = proc.stdout or b""
+    if out.startswith(b"\x89PNG\r\n\x1a\n"):
+        return out
+    return None
+
+
+def _extract_frame(blob: bytes, record: dict[str, Any], *, config: dict[str, Any] | None = None) -> bytes | None:
     container = record.get("container", {})
     container_type = container.get("type")
     if container_type == "avi_mjpeg":
@@ -81,6 +149,11 @@ def _extract_frame(blob: bytes, record: dict[str, Any]) -> bytes | None:
             return frame
         except Exception:
             return None
+    if container_type in {"ffmpeg_mp4", "ffmpeg_lossless"}:
+        ffmpeg = _ffmpeg_path(config or {})
+        if not ffmpeg:
+            return None
+        return _decode_first_frame_ffmpeg(blob, ffmpeg_path=ffmpeg)
     if container_type and container_type not in ("zip", "avi_mjpeg"):
         return None
     try:
@@ -497,7 +570,7 @@ class IdleProcessor:
                 stats.errors += 1
                 last_record_id = source_record_id
                 continue
-            frame = _extract_frame(blob, record)
+            frame = _extract_frame(blob, record, config=self._config)
             if not frame:
                 stats.errors += 1
                 last_record_id = source_record_id

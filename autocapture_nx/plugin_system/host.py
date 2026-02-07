@@ -10,11 +10,18 @@ import signal
 import sys
 import threading
 import time
+import weakref
 from dataclasses import dataclass, asdict, is_dataclass
 from pathlib import Path
 from typing import Any, IO, TYPE_CHECKING
 
-from autocapture_nx.kernel.audit import PluginAuditLog, estimate_rows_read, estimate_rows_written, hash_payload
+from autocapture_nx.kernel.audit import (
+    PluginAuditLog,
+    append_audit_event,
+    estimate_rows_read,
+    estimate_rows_written,
+    hash_payload,
+)
 from autocapture_nx.kernel.errors import PermissionError, PluginError, PluginTimeoutError
 from autocapture_nx.kernel.paths import resolve_repo_path
 from autocapture_nx.plugin_system.runtime import filesystem_guard_suspended
@@ -22,6 +29,183 @@ from autocapture_nx.plugin_system.sandbox import spawn_plugin_process, validate_
 
 if TYPE_CHECKING:
     from subprocess import Popen
+
+
+def _is_wsl() -> bool:
+    if os.getenv("WSL_INTEROP") or os.getenv("WSL_DISTRO_NAME"):
+        return True
+    try:
+        return "microsoft" in Path("/proc/version").read_text(encoding="utf-8", errors="ignore").lower()
+    except Exception:
+        return False
+
+
+_SUBPROCESS_INSTANCES: "weakref.WeakSet[SubprocessPlugin]" = weakref.WeakSet()
+_SUBPROCESS_INSTANCES_LOCK = threading.Lock()
+_SUBPROCESS_REAPER_THREAD: threading.Thread | None = None
+_SUBPROCESS_REAPER_STOP = threading.Event()
+_SUBPROCESS_LAST_REAP_MONO = 0.0
+
+
+def _subprocess_limits_from_config(config: dict[str, Any]) -> tuple[int, float]:
+    """Return (max_hosts, idle_ttl_s) for subprocess plugin hosts.
+
+    Defaults prioritize WSL stability. Limits are best-effort: they must not
+    cause the kernel to crash, but may reduce performance under extreme plugin
+    fanout. Callers can override via config/env.
+    """
+
+    hosting = _hosting_cfg(config)
+    env_max = os.getenv("AUTOCAPTURE_PLUGINS_SUBPROCESS_MAX_HOSTS", "").strip()
+    env_ttl = os.getenv("AUTOCAPTURE_PLUGINS_SUBPROCESS_IDLE_TTL_S", "").strip()
+    wsl = _is_wsl()
+
+    default_max = 6 if wsl else 64
+    default_ttl = 30.0 if wsl else 600.0
+
+    max_hosts = int(hosting.get("subprocess_max_hosts", default_max) or default_max)
+    idle_ttl_s = float(hosting.get("subprocess_idle_ttl_s", default_ttl) or default_ttl)
+
+    if env_max:
+        try:
+            max_hosts = int(env_max)
+        except Exception:
+            pass
+    if env_ttl:
+        try:
+            idle_ttl_s = float(env_ttl)
+        except Exception:
+            pass
+
+    if max_hosts < 0:
+        max_hosts = 0
+    if idle_ttl_s < 0:
+        idle_ttl_s = 0.0
+    return max_hosts, idle_ttl_s
+
+
+def reap_subprocess_hosts(*, force: bool = False, now_mono: float | None = None) -> dict[str, Any]:
+    """Best-effort reaper for subprocess plugin hosts.
+
+    This prevents long-lived kernels from accumulating one host_runner process
+    per plugin forever (especially painful on WSL). It is deliberately
+    conservative: it only closes idle hosts (no in-flight RPC).
+    """
+
+    global _SUBPROCESS_LAST_REAP_MONO
+    now = float(now_mono if now_mono is not None else time.monotonic())
+    if not force and (now - float(_SUBPROCESS_LAST_REAP_MONO or 0.0)) < 0.8:
+        with _SUBPROCESS_INSTANCES_LOCK:
+            remaining = sum(1 for inst in _SUBPROCESS_INSTANCES if getattr(inst, "_host", None) is not None)
+        return {
+            "closed_ttl": 0,
+            "closed_cap": 0,
+            "remaining": remaining,
+            "max_hosts": 0,
+            "idle_ttl_s": 0.0,
+            "force": False,
+            "skipped": True,
+        }
+    _SUBPROCESS_LAST_REAP_MONO = now
+    closed_ttl = 0
+    closed_cap = 0
+    max_hosts = 0
+    idle_ttl_s = 0.0
+
+    with _SUBPROCESS_INSTANCES_LOCK:
+        instances = [inst for inst in list(_SUBPROCESS_INSTANCES) if inst is not None]
+
+    # Derive a conservative global limit across instances in this process.
+    # Different kernels/tests may load different configs; we bias toward safety.
+    for inst in instances:
+        try:
+            inst_max, inst_ttl = _subprocess_limits_from_config(getattr(inst, "_config", {}) or {})
+        except Exception:
+            continue
+        if inst_max > 0:
+            max_hosts = inst_max if max_hosts == 0 else min(max_hosts, inst_max)
+        if inst_ttl > 0:
+            idle_ttl_s = inst_ttl if idle_ttl_s == 0 else min(idle_ttl_s, inst_ttl)
+
+    # TTL close.
+    if idle_ttl_s > 0 or force:
+        for inst in instances:
+            host = getattr(inst, "_host", None)
+            if host is None:
+                continue
+            try:
+                in_flight = int(getattr(inst, "_in_flight", 0) or 0)
+            except Exception:
+                in_flight = 0
+            if in_flight > 0:
+                continue
+            last_used = float(getattr(inst, "_last_used_mono", 0.0) or 0.0)
+            if not force and idle_ttl_s > 0 and (now - last_used) <= idle_ttl_s:
+                continue
+            try:
+                inst._close_host_for_reap(reason="idle_ttl" if not force else "force_reap")  # type: ignore[attr-defined]
+                closed_ttl += 1
+            except Exception:
+                continue
+
+    # Cap enforcement: if still above cap, evict LRU idle hosts.
+    if max_hosts > 0:
+        active = []
+        for inst in instances:
+            host = getattr(inst, "_host", None)
+            if host is None:
+                continue
+            try:
+                in_flight = int(getattr(inst, "_in_flight", 0) or 0)
+            except Exception:
+                in_flight = 0
+            if in_flight > 0:
+                continue
+            last_used = float(getattr(inst, "_last_used_mono", 0.0) or 0.0)
+            active.append((last_used, inst))
+        if len(active) > max_hosts:
+            active.sort(key=lambda item: item[0])  # oldest first
+            to_close = max(0, len(active) - max_hosts)
+            for _i in range(to_close):
+                _last_used, inst = active[_i]
+                try:
+                    inst._close_host_for_reap(reason="host_cap")  # type: ignore[attr-defined]
+                    closed_cap += 1
+                except Exception:
+                    continue
+
+    with _SUBPROCESS_INSTANCES_LOCK:
+        remaining = sum(1 for inst in _SUBPROCESS_INSTANCES if getattr(inst, "_host", None) is not None)
+    return {
+        "closed_ttl": closed_ttl,
+        "closed_cap": closed_cap,
+        "remaining": remaining,
+        "max_hosts": max_hosts,
+        "idle_ttl_s": idle_ttl_s,
+        "force": bool(force),
+    }
+
+
+def _ensure_subprocess_reaper_started() -> None:
+    global _SUBPROCESS_REAPER_THREAD
+    if _SUBPROCESS_REAPER_THREAD and _SUBPROCESS_REAPER_THREAD.is_alive():
+        return
+    with _SUBPROCESS_INSTANCES_LOCK:
+        if _SUBPROCESS_REAPER_THREAD and _SUBPROCESS_REAPER_THREAD.is_alive():
+            return
+        _SUBPROCESS_REAPER_STOP.clear()
+
+        def _loop() -> None:
+            while not _SUBPROCESS_REAPER_STOP.is_set():
+                try:
+                    reap_subprocess_hosts(force=False)
+                except Exception:
+                    pass
+                # Keep overhead low but responsive enough for WSL.
+                _SUBPROCESS_REAPER_STOP.wait(timeout=1.0)
+
+        _SUBPROCESS_REAPER_THREAD = threading.Thread(target=_loop, daemon=True, name="autocapture-subprocess-host-reaper")
+        _SUBPROCESS_REAPER_THREAD.start()
 
 
 def _encode(obj: Any) -> Any:
@@ -542,9 +726,21 @@ class SubprocessPlugin:
         self._host: PluginProcess | None = None
         self._caps: dict[str, RemoteCapability] = {}
         self._cap_methods: dict[str, set[str]] = {}
+        self._in_flight = 0
+        self._last_used_mono = time.monotonic()
 
         lazy_start_env = os.getenv("AUTOCAPTURE_PLUGINS_LAZY_START", "1").strip().lower()
         self._lazy_start = lazy_start_env not in {"0", "false", "no"}
+        # WSL stability guard: spawning a subprocess for every plugin during load
+        # can exhaust RAM quickly. Default to lazy start on WSL even if the env var
+        # was set to disable it, unless explicitly opted out via config.
+        try:
+            hosting = _hosting_cfg(config)
+            wsl_force_lazy = bool(hosting.get("wsl_force_lazy_start", True))
+        except Exception:
+            wsl_force_lazy = True
+        if not self._lazy_start and wsl_force_lazy and _is_wsl():
+            self._lazy_start = True
         seed_entrypoint = str(entrypoint_kind).strip() if entrypoint_kind else ""
         # Some entrypoint kinds are plugin "types" rather than actual RPC capability names.
         # If we seed these, the registry will miss the real capability keys.
@@ -564,6 +760,9 @@ class SubprocessPlugin:
         else:
             self._start_host()
         atexit.register(self.close)
+        with _SUBPROCESS_INSTANCES_LOCK:
+            _SUBPROCESS_INSTANCES.add(self)
+        _ensure_subprocess_reaper_started()
 
     def capabilities(self) -> dict[str, Any]:
         # Back-compat: if the manifest didn't specify `provides`, we must enumerate
@@ -581,7 +780,32 @@ class SubprocessPlugin:
         finally:
             self._host = None
 
+    def _close_host_for_reap(self, *, reason: str) -> None:
+        host = getattr(self, "_host", None)
+        if host is None:
+            return
+        pid = getattr(getattr(host, "_proc", None), "pid", None)
+        try:
+            host.close()
+        finally:
+            self._host = None
+        try:
+            append_audit_event(
+                action="plugin.host.reap",
+                actor="plugin_system",
+                outcome="ok",
+                details={"plugin_id": self._plugin_id, "reason": str(reason), "pid": pid},
+            )
+        except Exception:
+            pass
+
     def _start_host(self) -> None:
+        # Before spawning another host_runner, best-effort reap idle hosts so we
+        # don't accumulate one process per plugin forever on long-lived kernels.
+        try:
+            reap_subprocess_hosts(force=False)
+        except Exception:
+            pass
         with filesystem_guard_suspended():
             self._host = PluginProcess(
                 self._plugin_path,
@@ -599,6 +823,16 @@ class SubprocessPlugin:
                 rng_enabled=self._rng_enabled,
             )
             self._refresh_caps()
+        try:
+            pid = getattr(getattr(self._host, "_proc", None), "pid", None) if self._host is not None else None
+            append_audit_event(
+                action="plugin.host.start",
+                actor="plugin_system",
+                outcome="ok",
+                details={"plugin_id": self._plugin_id, "pid": pid},
+            )
+        except Exception:
+            pass
 
     def _refresh_caps(self) -> None:
         if self._host is None:
@@ -648,67 +882,77 @@ class SubprocessPlugin:
         return "plugin host closed" in msg or "broken pipe" in msg or "host closed" in msg
 
     def _call(self, capability: str, function: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
-        if self._host is None:
-            self._start_host()
-        elif self._lazy_start:
-            cap_obj = self._caps.get(capability)
-            if cap_obj is not None and cap_obj.methods is None:
-                try:
-                    self._refresh_caps()
-                except Exception:
-                    pass
-        if self._in_cooldown():
-            raise PluginError(f"Plugin circuit breaker open (plugin={self._plugin_id})")
-        start = time.perf_counter()
-        mem_before = self._memory_snapshot_mb()
-        ok = False
-        result: Any = None
-        error_text: str | None = None
-        for attempt in range(2):
-            try:
-                assert self._host is not None
-                result = self._host.call(capability, function, args, kwargs)
-                self._failure_events.clear()
-                self._timeout_events.clear()
-                ok = True
-                return result
-            except PluginTimeoutError:
-                should_restart = self._record_timeout()
-                if should_restart:
-                    self._restart("rpc_timeout")
-                    if attempt == 0:
-                        continue
-                now = time.monotonic()
-                if self._record_failure():
-                    self._open_circuit(now)
-                error_text = "timeout"
-                raise
-            except PluginError as exc:
-                now = time.monotonic()
-                should_restart = self._record_failure()
-                if self._is_host_error(exc) and attempt == 0:
+        self._last_used_mono = time.monotonic()
+        self._in_flight += 1
+        try:
+            if self._host is None:
+                self._start_host()
+            elif self._lazy_start:
+                cap_obj = self._caps.get(capability)
+                if cap_obj is not None and cap_obj.methods is None:
                     try:
-                        self._restart("host_error")
-                        continue
+                        self._refresh_caps()
                     except Exception:
                         pass
-                if should_restart:
-                    self._open_circuit(now)
-                error_text = str(exc)
-                raise
-            finally:
-                if attempt == 0 and self._audit_log is not None:
-                    self._record_audit(
-                        capability=capability,
-                        function=function,
-                        args=args,
-                        kwargs=kwargs,
-                        result=result if ok else None,
-                        ok=ok,
-                        error_text=error_text,
-                        start=start,
-                        mem_before=mem_before,
-                    )
+            if self._in_cooldown():
+                raise PluginError(f"Plugin circuit breaker open (plugin={self._plugin_id})")
+            start = time.perf_counter()
+            mem_before = self._memory_snapshot_mb()
+            ok = False
+            result: Any = None
+            error_text: str | None = None
+            for attempt in range(2):
+                try:
+                    assert self._host is not None
+                    result = self._host.call(capability, function, args, kwargs)
+                    self._failure_events.clear()
+                    self._timeout_events.clear()
+                    ok = True
+                    return result
+                except PluginTimeoutError:
+                    should_restart = self._record_timeout()
+                    if should_restart:
+                        self._restart("rpc_timeout")
+                        if attempt == 0:
+                            continue
+                    now = time.monotonic()
+                    if self._record_failure():
+                        self._open_circuit(now)
+                    error_text = "timeout"
+                    raise
+                except PluginError as exc:
+                    now = time.monotonic()
+                    should_restart = self._record_failure()
+                    if self._is_host_error(exc) and attempt == 0:
+                        try:
+                            self._restart("host_error")
+                            continue
+                        except Exception:
+                            pass
+                    if should_restart:
+                        self._open_circuit(now)
+                    error_text = str(exc)
+                    raise
+                finally:
+                    if attempt == 0 and self._audit_log is not None:
+                        self._record_audit(
+                            capability=capability,
+                            function=function,
+                            args=args,
+                            kwargs=kwargs,
+                            result=result if ok else None,
+                            ok=ok,
+                            error_text=error_text,
+                            start=start,
+                            mem_before=mem_before,
+                        )
+        finally:
+            self._last_used_mono = time.monotonic()
+            self._in_flight = max(0, int(self._in_flight) - 1)
+            try:
+                reap_subprocess_hosts(force=False)
+            except Exception:
+                pass
 
     def __del__(self) -> None:
         try:
