@@ -1,5 +1,5 @@
-gap_report=docs/reports/adversarial-redesign-gap-2026-02-07.md total=92 implemented=6 partial=37 missing=49
-ssing: 49
+gap_report=docs/reports/adversarial-redesign-gap-2026-02-07.md total=92 implemented=7 partial=37 missing=48
+ssing: 48
 
 | ID | Status | Title | Evidence | Validators |
 | --- | --- | --- | --- | --- |
@@ -37,7 +37,7 @@ ssing: 49
 | FND-10 | missing | Make safe-mode and crash-loop reasons user-visible (CLI + web UI) with a deterministic “next safe action” checklist | autocapture_nx/kernel/loader.py<br>docs/safe_mode.md<br>autocapture/web/ui/index.html | tests/test_safe_mode_ui_banner.py |
 | META-01 | partial | Persist a canonical effective-config snapshot per run (config.effective.json + sha256) and link it from run_manifest | autocapture_nx/kernel/loader.py<br>autocapture/config/load.py<br>autocapture_nx/kernel/canonical_json.py | tests/test_run_config_snapshot.py |
 | META-02 | partial | Capture plugin provenance: store (plugin_id, version, manifest_sha256, artifact_sha256, permissions) for every loaded plugin in run_manifest | autocapture_nx/plugin_system/registry.py<br>autocapture_nx/kernel/loader.py<br>config/plugin_locks.json | tests/test_plugin_provenance_in_manifest.py |
-| META-03 | missing | Add a standard `provenance` object to all user-visible outputs (CLI query, web query, exports) | autocapture_nx/kernel/query.py<br>autocapture/web/routes/query.py<br>autocapture_nx/cli.py<br>contracts/answer.schema.json | tests/test_query_provenance_header.py |
+| META-03 | implemented | Add a standard `provenance` object to all user-visible outputs (CLI query, web query, exports) | autocapture_nx/kernel/query.py<br>autocapture_nx/cli.py<br>autocapture/web/routes/query.py<br>tests/test_query_provenance_header.py | tests/test_query_provenance_header.py |
 | META-04 | partial | Version all record schemas explicitly (schema_version field) and enforce validation at write boundaries | contracts/*.schema.json<br>autocapture_nx/kernel/evidence.py<br>plugins/builtin/* | tests/test_schema_version_enforced.py<br>tools/gate_contract_pins.py |
 | META-05 | missing | Normalize citation addressing: require citations to reference (evidence_id, span_id, start/end offsets or time range) + stable locator | contracts/answer.schema.json<br>plugins/builtin/citation_basic/*<br>autocapture_nx/kernel/query.py | tests/test_citation_span_contract.py |
 | META-06 | missing | Persist full policy snapshots (privacy + plugin permissions + egress settings) by hash, and include in ledger + proof bundle | plugins/builtin/ledger_basic/plugin.py<br>autocapture_nx/kernel/policy_gate.py<br>autocapture_nx/kernel/proof_bundle.py | tests/test_policy_snapshot_exported.py |

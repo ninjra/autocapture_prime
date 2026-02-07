@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-02-07T20:12:56.673438Z",
+  "generated_utc": "2026-02-07T20:26:42.314703Z",
   "items": [
     {
       "evidence": [
@@ -485,13 +485,13 @@
     {
       "evidence": [
         "autocapture_nx/kernel/query.py",
-        "autocapture/web/routes/query.py",
         "autocapture_nx/cli.py",
-        "contracts/answer.schema.json"
+        "autocapture/web/routes/query.py",
+        "tests/test_query_provenance_header.py"
       ],
       "id": "META-03",
-      "notes": "",
-      "status": "missing",
+      "notes": "Query responses include a standard provenance object with config+lock hashes and anchor/ledger pointers.",
+      "status": "implemented",
       "title": "Add a standard `provenance` object to all user-visible outputs (CLI query, web query, exports)",
       "validators": [
         "tests/test_query_provenance_header.py"

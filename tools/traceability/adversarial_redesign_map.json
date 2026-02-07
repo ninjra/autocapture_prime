@@ -48,7 +48,21 @@
         "tests/test_metrics_ttfr.py"
       ],
       "notes": "Metrics API includes ttfr percentiles and plugin timing aggregation derived from plugin execution trace."
+    },
+    {
+      "id": "META-03",
+      "title": "Provenance header on query outputs",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/kernel/query.py",
+        "autocapture_nx/cli.py",
+        "autocapture/web/routes/query.py",
+        "tests/test_query_provenance_header.py"
+      ],
+      "validators": [
+        "tests/test_query_provenance_header.py"
+      ],
+      "notes": "Query responses include a standard provenance object with config+lock hashes and anchor/ledger pointers."
     }
   ]
 }
-

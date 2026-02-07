@@ -9,6 +9,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from autocapture.core.hashing import hash_text, normalize_text
+from autocapture_nx.kernel.hashing import sha256_canonical, sha256_file
+from autocapture_nx.kernel.loader import _canonicalize_config_for_hash
+from autocapture_nx.kernel.paths import resolve_repo_path
 from autocapture_nx.kernel.derived_records import (
     build_derivation_edge,
     build_text_record,
@@ -851,7 +854,54 @@ def run_query_without_state(system, query: str) -> dict[str, Any]:
             "blocked_reason": extraction_blocked_reason or "",
         },
     )
+
+    config = system.config if hasattr(system, "config") else {}
+    data_dir = None
+    run_id = None
+    try:
+        storage_cfg = config.get("storage", {}) if isinstance(config, dict) else {}
+        if isinstance(storage_cfg, dict):
+            data_dir = storage_cfg.get("data_dir")
+        run_id = config.get("runtime", {}).get("run_id") if isinstance(config, dict) else None
+    except Exception:
+        data_dir = None
+        run_id = None
+
+    contracts_hash = None
+    plugins_hash = None
+    try:
+        contract_lock = resolve_repo_path("contracts/lock.json")
+        if contract_lock.exists():
+            contracts_hash = sha256_file(contract_lock)
+    except Exception:
+        contracts_hash = None
+    try:
+        locks_cfg = config.get("plugins", {}).get("locks", {}) if isinstance(config, dict) else {}
+        lockfile = locks_cfg.get("lockfile", "config/plugin_locks.json") if isinstance(locks_cfg, dict) else "config/plugin_locks.json"
+        lock_path = resolve_repo_path(lockfile)
+        if lock_path.exists():
+            plugins_hash = sha256_file(lock_path)
+    except Exception:
+        plugins_hash = None
+
+    config_hash = None
+    try:
+        config_hash = sha256_canonical(_canonicalize_config_for_hash(config if isinstance(config, dict) else {}))
+    except Exception:
+        config_hash = None
+
     return {
+        "provenance": {
+            "schema_version": 1,
+            "run_id": run_id,
+            "data_dir": data_dir,
+            "effective_config_sha256": config_hash,
+            "contracts_lock_sha256": contracts_hash,
+            "plugin_locks_sha256": plugins_hash,
+            "query_ledger_head": query_ledger_hash,
+            "anchor_ref": anchor_ref,
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        },
         "intent": intent,
         "results": results,
         "answer": answer_obj,

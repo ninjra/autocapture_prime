@@ -972,7 +972,8 @@ class SubprocessPlugin:
             self._last_used_mono = time.monotonic()
             self._in_flight = max(0, int(self._in_flight) - 1)
             try:
-                reap_subprocess_hosts(force=False)
+                # Avoid interval-gate skips on bursty workloads (tests/oneshots).
+                reap_subprocess_hosts(force=False, bypass_interval_gate=True)
             except Exception:
                 pass
 
