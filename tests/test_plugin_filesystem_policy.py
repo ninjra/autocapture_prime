@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from autocapture_nx.kernel.errors import PluginError
+from autocapture_nx.kernel.errors import PluginError, PermissionError
 from autocapture_nx.plugin_system.registry import PluginRegistry
 
 
@@ -81,7 +81,10 @@ class FilesystemPolicyTests(unittest.TestCase):
             _loaded, caps = registry.load_plugins()
             fs_cap = caps.get("fs.cap")
             self.assertEqual(fs_cap.read_text(str(allowed_file)), "ok")
-            with self.assertRaises(PluginError):
+            # In subprocess hosting, the permission failure is surfaced as PluginError
+            # (stringified exception across IPC). In in-proc hosting, it raises the
+            # kernel PermissionError directly.
+            with self.assertRaises((PluginError, PermissionError)):
                 fs_cap.read_text(str(denied_file))
 
     def test_filesystem_policy_expands_anchor_dir(self) -> None:

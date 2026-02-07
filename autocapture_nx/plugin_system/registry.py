@@ -74,6 +74,17 @@ def _parse_version(version: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
+def _is_wsl() -> bool:
+    # Best-effort detection for WSL2. This is used only for resource safety
+    # defaults and must not affect non-WSL behavior when explicitly configured.
+    if os.getenv("WSL_INTEROP") or os.getenv("WSL_DISTRO_NAME"):
+        return True
+    try:
+        return "microsoft" in Path("/proc/version").read_text(encoding="utf-8", errors="ignore").lower()
+    except Exception:
+        return False
+
+
 def _version_satisfies(current: str, requirement: str) -> bool:
     ops = (">=", "<=", ">", "<", "==")
     op = "=="
@@ -119,6 +130,57 @@ class LoadedPlugin:
     manifest_path: Path | None = None
 
 
+_TEMP_ENV_LOCK = None
+
+
+def _temporary_tempdir_env(temp_dir: str | None):
+    """Best-effort temporary TMPDIR/TMP/TEMP override.
+
+    Some OCR backends (notably pytesseract) write temp files and will fail under the
+    filesystem guard unless the temp directory is within the plugin's allowed roots.
+
+    Note: os.environ and tempfile.tempdir are process-global. We serialize to avoid
+    cross-plugin races. This trades concurrency for determinism and WSL stability.
+    """
+
+    import contextlib
+    import tempfile
+    import threading
+    from pathlib import Path
+
+    global _TEMP_ENV_LOCK
+    if _TEMP_ENV_LOCK is None:
+        # Capability calls can nest (capability A calls capability B). Use a
+        # re-entrant lock to avoid deadlocking when nested calls attempt to
+        # apply the same tempdir override.
+        _TEMP_ENV_LOCK = threading.RLock()
+
+    @contextlib.contextmanager
+    def _ctx():
+        td = str(temp_dir or "").strip()
+        if not td:
+            yield
+            return
+        with _TEMP_ENV_LOCK:
+            Path(td).mkdir(parents=True, exist_ok=True)
+            prev = {k: os.environ.get(k) for k in ("TMPDIR", "TMP", "TEMP")}
+            try:
+                os.environ["TMPDIR"] = td
+                os.environ["TMP"] = td
+                os.environ["TEMP"] = td
+                tempfile.tempdir = None
+                yield
+            finally:
+                for k, v in prev.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
+                tempfile.tempdir = None
+
+    return _ctx()
+
+
 class CapabilityProxy:
     def __init__(
         self,
@@ -134,6 +196,7 @@ class CapabilityProxy:
         rng_enabled: bool = False,
         plugin_id: str | None = None,
         trace_hook: Any | None = None,
+        temp_dir: str | None = None,
     ) -> None:
         self._target = target
         self._network_allowed = network_allowed
@@ -146,6 +209,7 @@ class CapabilityProxy:
         self._rng_enabled = rng_enabled
         self._plugin_id = str(plugin_id or "")
         self._trace_hook = trace_hook
+        self._temp_dir = str(temp_dir or "").strip()
 
     @property
     def network_allowed(self) -> bool:
@@ -194,8 +258,13 @@ class CapabilityProxy:
         try:
             with RNGScope(self._rng_seed, strict=self._rng_strict, enabled=self._rng_enabled):
                 with network_guard(self._network_allowed):
+                    # Apply filesystem policy before tempdir override. The override may
+                    # create the temp directory, and that must be evaluated against
+                    # the callee plugin's policy (not the caller's), especially for
+                    # nested capability calls.
                     with filesystem_guard(self._filesystem_policy):
-                        result = func(*args, **kwargs)
+                        with _temporary_tempdir_env(self._temp_dir):
+                            result = func(*args, **kwargs)
             self._validate_output(method, result)
         except Exception as exc:
             ok = False
@@ -404,6 +473,7 @@ class PluginRegistry:
         self._rng_service = RNGService.from_config(config)
         self._audit_log = PluginAuditLog.from_config(config)
         self._trace = PluginExecutionTrace()
+        self._plugin_tmp_dirs: dict[str, str] = {}
         self._load_reporter = PluginLoadReport(self.load_report)
         self._failure_summary_cache: dict[str, dict[str, Any]] | None = None
         self._load_report: dict[str, Any] = {"loaded": [], "failed": [], "skipped": [], "errors": []}
@@ -918,7 +988,10 @@ class PluginRegistry:
         # Expand simple template variables.
         config = self.config if isinstance(self.config, dict) else {}
         data_dir = str(config.get("storage", {}).get("data_dir", "data"))
-        cache_dir = str(config.get("plugins", {}).get("hosting", {}).get("cache_dir", "data/cache/plugins"))
+        plugins_cfg = config.get("plugins", {})
+        hosting_cfg = plugins_cfg.get("hosting", {}) if isinstance(plugins_cfg, dict) else {}
+        raw_cache_dir = hosting_cfg.get("cache_dir") if isinstance(hosting_cfg, dict) else None
+        cache_dir = str(raw_cache_dir) if raw_cache_dir else str(Path(data_dir) / "cache" / "plugins")
         config_dir = str(config.get("paths", {}).get("config_dir", "config"))
         run_id = str(config.get("runtime", {}).get("run_id", "run"))
         run_dir = str(Path(data_dir) / "runs" / run_id)
@@ -935,6 +1008,22 @@ class PluginRegistry:
         vector_db_path = str(config.get("storage", {}).get("vector_path", "data/vector.db"))
         state_tape_db_path = str(config.get("storage", {}).get("state_tape_path", "data/state/state_tape.db"))
         state_vector_db_path = str(config.get("storage", {}).get("state_vector_path", "data/state/state_vector.db"))
+
+        if fs_perm in {"read", "readwrite"}:
+            # Ensure every plugin has a narrow, deterministic scratch tmp dir for tempfiles.
+            # This keeps OCR engines functional under the filesystem guard without granting
+            # broad write access to /tmp.
+            def _sanitize(pid: str) -> str:
+                value = str(pid).strip() or "plugin"
+                value = value.replace("\\", "_").replace("/", "_")
+                return "".join(ch if (ch.isalnum() or ch in "._-") else "_" for ch in value)
+
+            sanitized_id = _sanitize(plugin_id)
+            plugin_cache_root = str(Path(cache_dir) / sanitized_id)
+            plugin_tmp_dir = str(Path(plugin_cache_root) / "tmp")
+            self._plugin_tmp_dirs[plugin_id] = plugin_tmp_dir
+            read_roots.append(plugin_cache_root)
+            write_roots.append(plugin_tmp_dir)
         anchor_path = ""
         anchor_dir = ""
         keyring_path = ""
@@ -1496,6 +1585,17 @@ class PluginRegistry:
         # Safe-mode minimal is used by perf/health gates; avoid paying the subprocess startup tax.
         if self.safe_mode and safe_mode_minimal:
             hosting_mode = "inproc"
+        # WSL2 is often memory-constrained; subprocess hosting can spawn many heavy
+        # Python processes (one per plugin) and destabilize the VM. Default to
+        # in-proc hosting on WSL unless explicitly overridden by env/config.
+        wsl_force_inproc = bool(hosting_cfg.get("wsl_force_inproc", True))
+        if (
+            hosting_mode_env == ""
+            and hosting_mode == "subprocess"
+            and wsl_force_inproc
+            and _is_wsl()
+        ):
+            hosting_mode = "inproc"
 
         manifests_by_id: dict[str, tuple[Path, dict[str, Any]]] = {}
         for manifest_path in manifests:
@@ -1718,6 +1818,7 @@ class PluginRegistry:
                             rng_enabled=self._rng_service.enabled,
                             plugin_id=plugin_id,
                             trace_hook=self._trace.record,
+                            temp_dir=self._plugin_tmp_dirs.get(plugin_id),
                         )
                         local_providers.setdefault(cap_name, []).append((plugin_id, proxy))
                     local_loaded.append(LoadedPlugin(plugin_id, manifest, instance, caps, filesystem_policy, manifest_path))

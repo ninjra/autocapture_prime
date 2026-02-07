@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-05T08:05:41.591081+00:00",
+  "generated_at": "2026-02-07T03:11:54.945842+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "9dbb34cf46de240ed0c86ff2597d80a48c08104a331cb63474278022053f0def",
@@ -78,7 +78,7 @@
       "manifest_sha256": "9f7a929dee7ebdd2ec16cb8752a5d18f91a8c52913d62268eebb30971f4f209e"
     },
     "builtin.ocr.rapid": {
-      "artifact_sha256": "209e2b1d2a830c93d401f343576c2676d23a78d788c49aff3fdeeffe34978172",
+      "artifact_sha256": "88916d423f8e86c1b906cb961236904ed8520e2c61f97fcbef2dcda82b0623fa",
       "manifest_sha256": "d3b4d279bdf7806c38c875fa4d9173242c9b56b12fe47f2fce9208ee009d63d1"
     },
     "builtin.privacy.egress_sanitizer": {
@@ -106,7 +106,7 @@
       "manifest_sha256": "453140ac899a6c4033ccbca4c844011ccf1f09b9fa6bdd0d4c61bd3ab4b07155"
     },
     "builtin.retrieval.basic": {
-      "artifact_sha256": "86438b22f41d72d3036286ce3990ab0cf879a3b2314ccb9e0c05f9122340539b",
+      "artifact_sha256": "1532847813f222c06acda971a8b05fb3268e61fd88dcd4752b08b2ffa474a250",
       "manifest_sha256": "3e990ffce9dab5f858324442fff11c22f4e5eb3d339b01d73d7db01748257332"
     },
     "builtin.runtime.governor": {
@@ -176,6 +176,10 @@
     "builtin.sst.preprocess.tile": {
       "artifact_sha256": "bf5fb6154774033a6580c4b95b2c3232b979496bbb920e81b24d3b2399de262c",
       "manifest_sha256": "e559fc8faf65ff0766b93c82de32f6530b9839613feaed1033688b34e8d1c624"
+    },
+    "builtin.sst.qa.answers": {
+      "artifact_sha256": "f49ec40cc70ba609569bcd005731a650d78b9ced015a3cc888de4fbac59c46d2",
+      "manifest_sha256": "76b707c412615291a9eb0fd0e846074b75e9698d3042b397bdfe911543b4a2d7"
     },
     "builtin.sst.temporal.segment": {
       "artifact_sha256": "653dec678268ae4359e045c3b8036a928ab09ab6aa704e0b77d342ed49e2b0d3",
@@ -262,7 +266,7 @@
       "manifest_sha256": "9d6569db49ca6c4de4245e0dfa032163dc37d6a8797afc92b9b16cde9fba2bee"
     },
     "builtin.vlm.basic": {
-      "artifact_sha256": "9dadefa602154e8d94a6d121d41cb2262163d54e3ff8d58d135da15a8c80bb20",
+      "artifact_sha256": "1e7bd073f575b59cc24167d969e4ab83544297004996cbdc0717abde3feffdc9",
       "manifest_sha256": "18d6c802bfbe78ece22d42905612879a92c27c450c78f131bfce356198575b99"
     },
     "builtin.vlm.deepseek_ocr2": {

@@ -63,6 +63,20 @@ def build_user_config(template_path: str | Path, *, frames_dir: Path, max_frames
         runtime = template.setdefault("runtime", {})
         if isinstance(runtime, dict):
             runtime["run_id"] = str(run_id)
+    # Fixture runs must be WSL-stable. Force in-process plugin hosting and avoid
+    # allowlist-restricted inproc mode (which would otherwise spawn subprocess
+    # plugin hosts and exhaust RAM).
+    plugins_cfg = template.setdefault("plugins", {})
+    if isinstance(plugins_cfg, dict):
+        hosting = plugins_cfg.setdefault("hosting", {})
+        if isinstance(hosting, dict):
+            hosting["mode"] = "inproc"
+            hosting["inproc_allowlist"] = []
+            hosting["inproc_justifications"] = {}
+            # Keep caches under the fixture's data_dir so all writes remain within
+            # the fixture filesystem policy, and so runs don't pollute repo-level
+            # cache directories.
+            hosting["cache_dir"] = "{data_dir}/cache/plugins"
     plugins_cfg = template.setdefault("plugins", {})
     if isinstance(plugins_cfg, dict):
         policies = plugins_cfg.setdefault("filesystem_policies", {})
@@ -281,6 +295,46 @@ def run_idle_processing(system: Any, *, max_steps: int = 20, timeout_s: float = 
 
 
 def evaluate_query(system: Any, spec: QuerySpec) -> dict[str, Any]:
+    result = run_query(system, spec.query)
+    answer = result.get("answer", {}) if isinstance(result, dict) else {}
+    claims = answer.get("claims", []) if isinstance(answer, dict) else []
+    answer_state = str(answer.get("state", ""))
+    require_state = str(spec.require_state or "ok")
+    if require_state and answer_state != require_state:
+        return {
+            "query": spec.query,
+            "ok": False,
+            "reason": f"answer_state:{answer_state}",
+            "answer_state": answer_state,
+            "claims": len(claims),
+            "results": len(result.get("results", []) if isinstance(result, dict) else []),
+        }
+    matched = False
+    matched_text = None
+    matched_citations = False
+    matched_citations_payload: list[dict[str, Any]] | None = None
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        text = str(claim.get("text", "") or "")
+        citations = claim.get("citations", [])
+        if _match_text(spec.expected, text, mode=spec.match_mode, casefold=spec.casefold):
+            matched = True
+            matched_text = text
+            matched_citations = bool(citations) if isinstance(citations, list) else False
+            matched_citations_payload = citations if isinstance(citations, list) else None
+            break
+
+    if not matched:
+        return {
+            "query": spec.query,
+            "ok": False,
+            "reason": "no_match",
+            "answer_state": answer_state,
+            "claims": len(claims),
+            "results": len(result.get("results", []) if isinstance(result, dict) else []),
+        }
+
     if spec.require_citations:
         # Fixture runs treat anchors as a hard prerequisite for citeable answers.
         # If the anchor chain isn't being produced (e.g., anchor cadence too sparse),
@@ -314,44 +368,17 @@ def evaluate_query(system: Any, spec: QuerySpec) -> dict[str, Any]:
         except Exception:
             return {"query": spec.query, "ok": False, "reason": "anchor_check_error"}
 
-    result = run_query(system, spec.query)
-    answer = result.get("answer", {}) if isinstance(result, dict) else {}
-    claims = answer.get("claims", []) if isinstance(answer, dict) else []
-    answer_state = str(answer.get("state", ""))
-    require_state = str(spec.require_state or "ok")
-    if require_state and answer_state != require_state:
-        return {
-            "query": spec.query,
-            "ok": False,
-            "reason": f"answer_state:{answer_state}",
-            "answer_state": answer_state,
-            "claims": len(claims),
-            "results": len(result.get("results", []) if isinstance(result, dict) else []),
-        }
-    matched = False
-    matched_text = None
-    matched_citations = False
-    matched_citations_payload: list[dict[str, Any]] | None = None
-    for claim in claims:
-        if not isinstance(claim, dict):
-            continue
-        text = str(claim.get("text", "") or "")
-        citations = claim.get("citations", [])
-        if _match_text(spec.expected, text, mode=spec.match_mode, casefold=spec.casefold):
-            matched = True
-            matched_text = text
-            matched_citations = bool(citations) if isinstance(citations, list) else False
-            matched_citations_payload = citations if isinstance(citations, list) else None
-            break
-    if spec.require_citations and not matched_citations:
-        return {
-            "query": spec.query,
-            "ok": False,
-            "reason": "missing_citations",
-            "answer_state": answer_state,
-            "claims": len(claims),
-            "results": len(result.get("results", []) if isinstance(result, dict) else []),
-        }
+        if not matched_citations:
+            return {
+                "query": spec.query,
+                "ok": False,
+                "reason": "missing_citations",
+                "answer_state": answer_state,
+                "claims": len(claims),
+                "results": len(result.get("results", []) if isinstance(result, dict) else []),
+                "matched_text": matched_text,
+            }
+
     if spec.require_citations and matched_citations_payload is not None:
         # Enforce that citations are actually resolvable to evidence paths.
         # This catches cases where the answer includes citation-shaped objects
@@ -395,15 +422,6 @@ def evaluate_query(system: Any, spec: QuerySpec) -> dict[str, Any]:
                 "claims": len(claims),
                 "results": len(result.get("results", []) if isinstance(result, dict) else []),
             }
-    if not matched:
-        return {
-            "query": spec.query,
-            "ok": False,
-            "reason": "no_match",
-            "answer_state": answer_state,
-            "claims": len(claims),
-            "results": len(result.get("results", []) if isinstance(result, dict) else []),
-        }
     return {
         "query": spec.query,
         "ok": True,

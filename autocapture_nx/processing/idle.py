@@ -773,7 +773,13 @@ class IdleProcessor:
                             allow_ocr=allow_ocr,
                             allow_vlm=allow_vlm,
                             should_abort=should_abort,
-                            deadline_ts=budget_wall if budget_wall is not None else deadline_wall,
+                            # Enforce both the per-run max_seconds_per_run deadline and any
+                            # governor lease budget deadline, whichever is sooner.
+                            deadline_ts=(
+                                min(deadline_wall, budget_wall)
+                                if budget_wall is not None
+                                else deadline_wall
+                            ),
                         )
                     except Exception as exc:
                         stats.errors += 1

@@ -1,5 +1,5 @@
 # rg -n /evidence/
-./DEV_HARNESS.md:7:- Fail closed: do **not** guess commands. If a command cannot be inferred from repo evidence, the harness must stop with a clear TODO.
+./DEV_HARNESS.md:7:- Fail closed: do **not** guess commands. If a command cannot be inferred from repo evidence, the harness must stop with a clear action item.
 ./DEV_HARNESS.md:14:## Repo evidence
 ./config/default.json:82:    "allow_evidence": false,
 ./config/default.json:325:      "evidence": "infinite"

@@ -292,18 +292,26 @@ class VectorHit:
 
 
 class VectorIndex:
-    def __init__(self, path: str | Path, embedder: LocalEmbedder) -> None:
+    def __init__(self, path: str | Path, embedder: LocalEmbedder, *, read_only: bool = False) -> None:
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.path)
-        self._conn.execute("CREATE TABLE IF NOT EXISTS vectors (doc_id TEXT PRIMARY KEY, vector TEXT)")
-        self._conn.commit()
+        self._read_only = bool(read_only)
+        if self._read_only:
+            if not self.path.exists():
+                raise FileNotFoundError(str(self.path))
+            self._conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(self.path)
+            self._conn.execute("CREATE TABLE IF NOT EXISTS vectors (doc_id TEXT PRIMARY KEY, vector TEXT)")
+            self._conn.commit()
         self._embedder = embedder
         self._identity_cache: dict[str, Any] | None = None
         self._identity_mtime: float | None = None
         self._manifest_mtime: float | None = None
 
     def index(self, doc_id: str, text: str) -> None:
+        if self._read_only:
+            raise PermissionError("VectorIndex is read-only")
         vec = self._embedder.embed(text)
         self._conn.execute("REPLACE INTO vectors (doc_id, vector) VALUES (?, ?)", (doc_id, json.dumps(vec)))
         self._conn.commit()
@@ -346,6 +354,8 @@ class VectorIndex:
         return payload
 
     def import_json(self, path: str | Path) -> None:
+        if self._read_only:
+            raise PermissionError("VectorIndex is read-only")
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
         scale = float(payload.get("scale", 1.0) or 1.0)
         doc_ids = payload.get("doc_ids", [])

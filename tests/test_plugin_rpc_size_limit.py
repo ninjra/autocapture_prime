@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -65,12 +66,20 @@ class RpcSizeLimitTests(unittest.TestCase):
             hosting["sanitize_env"] = True
             hosting["cache_dir"] = str(root / "cache")
 
-            registry = PluginRegistry(config, safe_mode=False)
-            _loaded, caps = registry.load_plugins()
-            echo = caps.get("echo.cap")
-            big_payload = "x" * 400
-            with self.assertRaises(PluginError):
-                echo.echo(big_payload)
+            original_hosting_mode = os.environ.get("AUTOCAPTURE_PLUGINS_HOSTING_MODE")
+            os.environ["AUTOCAPTURE_PLUGINS_HOSTING_MODE"] = "subprocess"
+            try:
+                registry = PluginRegistry(config, safe_mode=False)
+                _loaded, caps = registry.load_plugins()
+                echo = caps.get("echo.cap")
+                big_payload = "x" * 400
+                with self.assertRaises(PluginError):
+                    echo.echo(big_payload)
+            finally:
+                if original_hosting_mode is None:
+                    os.environ.pop("AUTOCAPTURE_PLUGINS_HOSTING_MODE", None)
+                else:
+                    os.environ["AUTOCAPTURE_PLUGINS_HOSTING_MODE"] = original_hosting_mode
 
 
 if __name__ == "__main__":

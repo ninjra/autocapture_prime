@@ -143,6 +143,11 @@ def main() -> int:
     base_env = os.environ.copy()
     root = Path(__file__).resolve().parents[1]
     base_env.setdefault("PYTHONPATH", str(root))
+    # WSL stability: default to in-proc plugin hosting for test runs to avoid
+    # spawning one host_runner subprocess per plugin (high RSS + OOM risk).
+    if root.as_posix().startswith("/mnt/") and os.name != "nt":
+        base_env.setdefault("AUTOCAPTURE_PLUGINS_HOSTING_MODE", "inproc")
+        base_env.setdefault("AUTOCAPTURE_PLUGINS_LAZY_START", "1")
     # Prefer the repo venv for deterministic deps when it exists.
     venv_python = root / ".venv" / "bin" / "python3"
     project_python = str(venv_python) if venv_python.exists() else str(sys.executable)

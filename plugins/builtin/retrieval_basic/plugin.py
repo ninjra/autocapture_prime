@@ -83,7 +83,9 @@ class RetrievalStrategy(PluginBase):
         if not self._config:
             return
         logger = self.context.logger if callable(getattr(self.context, "logger", None)) else None
-        self._lexical, self._vector = build_indexes(self._config, logger=logger)
+        # Retrieval runs under a read-only filesystem sandbox (see plugin manifest).
+        # Index creation and writes happen in the SST pipeline; retrieval only reads.
+        self._lexical, self._vector = build_indexes(self._config, logger=logger, read_only=True)
         self._index_meta = {}
         if self._lexical is not None and hasattr(self._lexical, "identity"):
             try:
@@ -104,6 +106,15 @@ class RetrievalStrategy(PluginBase):
         trace: list[dict[str, Any]],
         candidate_ids: set[str] | None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        def _source_id_for(doc_id: str) -> str:
+            try:
+                record = store.get(doc_id, {})
+            except Exception:
+                record = {}
+            if isinstance(record, dict):
+                return str(record.get("source_id") or doc_id)
+            return str(doc_id)
+
         self._ensure_indexes()
         if self._lexical is None and self._vector is None:
             return [], trace
@@ -119,7 +130,16 @@ class RetrievalStrategy(PluginBase):
             except Exception:
                 lexical_hits = []
         if candidate_ids is not None:
-            lexical_hits = [hit for hit in lexical_hits if hit.get("doc_id") in candidate_ids]
+            # Candidate IDs are evidence/source IDs; lexical index doc_ids are often
+            # derived doc IDs. Filter by the derived doc's source_id mapping.
+            filtered = []
+            for hit in lexical_hits:
+                doc_id = hit.get("doc_id")
+                if not doc_id:
+                    continue
+                if _source_id_for(str(doc_id)) in candidate_ids:
+                    filtered.append(hit)
+            lexical_hits = filtered
         trace.append({"tier": "LEXICAL", "result_count": len(lexical_hits), "index": self._index_meta.get("lexical")})
         if self._vector is not None:
             vector_ok, reason = _allow_vector(self.context, self._config)
@@ -130,7 +150,14 @@ class RetrievalStrategy(PluginBase):
                 except Exception:
                     vector_hits = []
                 if candidate_ids is not None:
-                    vector_hits = [hit for hit in vector_hits if hit.get("doc_id") in candidate_ids]
+                    filtered = []
+                    for hit in vector_hits:
+                        doc_id = hit.get("doc_id")
+                        if not doc_id:
+                            continue
+                        if _source_id_for(str(doc_id)) in candidate_ids:
+                            filtered.append(hit)
+                    vector_hits = filtered
                 trace.append({"tier": "VECTOR", "result_count": len(vector_hits), "index": self._index_meta.get("vector")})
             else:
                 trace.append({"tier": "VECTOR_SKIPPED", "reason": reason})
@@ -254,7 +281,11 @@ def _map_candidates(
     store: Any,
     time_window: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
-    mapped: dict[str, dict[str, Any]] = {}
+    # Keep multiple derived hits per evidence. Collapsing to one-per-source can
+    # hide important derived docs (e.g., deterministic QA extra docs) that answer
+    # different facets of the same screenshot.
+    results: list[dict[str, Any]] = []
+    seen: set[tuple[str, str | None]] = set()
     for item in candidates:
         doc_id = item.get("doc_id") or item.get("record_id")
         if not doc_id:
@@ -269,22 +300,19 @@ def _map_candidates(
             continue
         score = float(item.get("score", 0.0))
         record_type = str(source_record.get("record_type", ""))
-        result = {"record_id": source_id, "score": score, "ts_utc": ts, "record_type": record_type}
-        if source_id != doc_id:
-            result["derived_id"] = doc_id
+        derived_id = str(doc_id) if source_id != doc_id else None
+        key = (str(source_id), derived_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        result = {"record_id": str(source_id), "score": score, "ts_utc": ts, "record_type": record_type}
+        if derived_id is not None:
+            result["derived_id"] = derived_id
         snippet = item.get("snippet")
         if snippet:
             result["snippet"] = snippet
-        existing = mapped.get(source_id)
-        if existing is None:
-            mapped[source_id] = result
-        else:
-            existing_score = float(existing.get("score", 0.0))
-            if score > existing_score:
-                mapped[source_id] = result
-            elif score == existing_score and result.get("derived_id") and not existing.get("derived_id"):
-                mapped[source_id] = result
-    return list(mapped.values())
+        results.append(result)
+    return results
 
 
 def _ts_key(ts: str | None) -> float | None:

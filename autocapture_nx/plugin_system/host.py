@@ -64,15 +64,22 @@ def _hosting_cfg(config: dict[str, Any]) -> dict[str, Any]:
     return hosting if isinstance(hosting, dict) else {}
 
 
-def _cache_dir(hosting: dict[str, Any], config: dict[str, Any]) -> Path:
+def _sanitize_plugin_id(plugin_id: str) -> str:
+    # Prevent path traversal and keep per-plugin cache directories predictable.
+    value = str(plugin_id).strip() or "plugin"
+    value = value.replace("\\", "_").replace("/", "_")
+    return "".join(ch if (ch.isalnum() or ch in "._-") else "_" for ch in value)
+
+
+def _cache_dir(hosting: dict[str, Any], config: dict[str, Any], plugin_id: str) -> Path:
     raw = hosting.get("cache_dir")
-    if raw:
-        return Path(str(raw))
-    data_dir = config.get("storage", {}).get("data_dir", "data")
-    return Path(str(data_dir)) / "cache" / "plugins"
+    base = Path(str(raw)) if raw else Path(str(config.get("storage", {}).get("data_dir", "data"))) / "cache" / "plugins"
+    # Split caches by plugin to avoid cross-plugin interference and to let the
+    # filesystem policy grant a narrow scratch write root.
+    return base / _sanitize_plugin_id(plugin_id)
 
 
-def _build_env(hosting: dict[str, Any], config: dict[str, Any]) -> dict[str, str] | None:
+def _build_env(hosting: dict[str, Any], config: dict[str, Any], plugin_id: str) -> dict[str, str] | None:
     if not bool(hosting.get("sanitize_env", True)):
         return None
     env = os.environ.copy()
@@ -99,7 +106,7 @@ def _build_env(hosting: dict[str, Any], config: dict[str, Any]) -> dict[str, str
     ):
         env.pop(key, None)
 
-    cache_dir = _cache_dir(hosting, config)
+    cache_dir = _cache_dir(hosting, config, plugin_id)
     tmp_dir = cache_dir / "tmp"
     cache_dir.mkdir(parents=True, exist_ok=True)
     tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -236,7 +243,7 @@ class PluginProcess:
                 plugin_id,
                 "true" if network_allowed else "false",
             ],
-            env=_build_env(hosting, host_config),
+            env=_build_env(hosting, host_config, plugin_id),
             limits=_adjust_job_limits_for_venv(python_exe, hosting.get("job_limits", {})),
             ipc_max_bytes=self._rpc_max_message_bytes,
         )

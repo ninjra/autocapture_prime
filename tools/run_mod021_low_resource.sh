@@ -13,6 +13,8 @@ export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-}"
 # Avoid spawning subprocess plugin hosts during plugin enumeration (WSL stability).
 export AUTOCAPTURE_PLUGINS_LAZY_START="${AUTOCAPTURE_PLUGINS_LAZY_START:-1}"
+# Avoid spawning a subprocess host per plugin while running the full MOD-021 suite.
+export AUTOCAPTURE_PLUGINS_HOSTING_MODE="${AUTOCAPTURE_PLUGINS_HOSTING_MODE:-inproc}"
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$ROOT"

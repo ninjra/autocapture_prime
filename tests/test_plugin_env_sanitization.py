@@ -68,16 +68,23 @@ class EnvSanitizationTests(unittest.TestCase):
             hosting["offline_env"] = True
             hosting["cache_dir"] = str(root / "cache")
 
+            original_hosting_mode = os.environ.get("AUTOCAPTURE_PLUGINS_HOSTING_MODE")
             original_proxy = os.environ.get("HTTP_PROXY")
             os.environ["HTTP_PROXY"] = "http://example.invalid"
+            os.environ["AUTOCAPTURE_PLUGINS_HOSTING_MODE"] = "subprocess"
             try:
                 registry = PluginRegistry(config, safe_mode=False)
                 _loaded, caps = registry.load_plugins()
                 env_cap = caps.get("env.cap")
                 self.assertIsNone(env_cap.get("HTTP_PROXY"))
-                self.assertEqual(env_cap.get("XDG_CACHE_HOME"), str(root / "cache"))
+                # Subprocess hosts use per-plugin cache dirs under the configured base.
+                self.assertEqual(env_cap.get("XDG_CACHE_HOME"), str(root / "cache" / plugin_id))
                 self.assertEqual(env_cap.get("HF_HUB_OFFLINE"), "1")
             finally:
+                if original_hosting_mode is None:
+                    os.environ.pop("AUTOCAPTURE_PLUGINS_HOSTING_MODE", None)
+                else:
+                    os.environ["AUTOCAPTURE_PLUGINS_HOSTING_MODE"] = original_hosting_mode
                 if original_proxy is None:
                     os.environ.pop("HTTP_PROXY", None)
                 else:

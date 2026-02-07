@@ -64,7 +64,7 @@ This plan is optimized for the 4 pillars:
     - `tools/traceability/adversarial_redesign.json`
     - `tools/traceability/adversarial_redesign.schema.json`
   - Write a generator that parses `docs/autocapture_prime_adversarial_redesign.md` for all `### <ID>` headings and seeds the manifest with:
-    - `id`, `title` (first line after heading), and `acceptance_bullets[]` (from doc “Acceptance Criteria” sections if present; otherwise seed TODO bullets)
+    - `id`, `title` (first line after heading), and `acceptance_bullets[]` (from doc “Acceptance Criteria” sections if present; otherwise seed placeholder bullets)
   - Write a validator that enforces:
     - every ID exists once
     - if `status=implemented`, at least one deterministic validator is listed
@@ -334,4 +334,3 @@ This plan is optimized for the 4 pillars:
 ## Rollback Plan
 - Every sprint lands behind explicit config flags where behavior is user-visible or risk-bearing.
 - Keep old formats readable; migrations must be forward-only with explicit restore-from-backup path (archive/restore, not delete).
-

@@ -358,6 +358,7 @@
       "builtin.embedder.basic",
       "builtin.journal.basic",
       "builtin.ledger.basic",
+      "builtin.sst.qa.answers",
       "builtin.meta.configurator.noop",
       "builtin.meta.policy.noop",
       "builtin.observability.basic",

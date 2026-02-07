@@ -171,6 +171,7 @@ def _build_plugin_status(
     load_report: dict[str, Any],
     probe_results: list[dict[str, Any]],
     trace: dict[str, Any],
+    expected_plugin_ids: set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     loaded = set(load_report.get("loaded", []) if isinstance(load_report, dict) else [])
     failed = set(load_report.get("failed", []) if isinstance(load_report, dict) else [])
@@ -198,8 +199,11 @@ def _build_plugin_status(
 
     statuses: list[dict[str, Any]] = []
     skipped_without_reason: list[str] = []
+    expected = set(expected_plugin_ids or [])
     for item in manifests:
         pid = item["plugin_id"]
+        if expected and pid not in expected:
+            continue
         status = "unknown"
         if pid in loaded:
             status = "loaded"
@@ -226,9 +230,75 @@ def _build_plugin_status(
     return statuses, skipped_without_reason
 
 
+def _expected_plugin_ids(user_config: dict[str, Any]) -> set[str]:
+    plugins_cfg = user_config.get("plugins", {}) if isinstance(user_config, dict) else {}
+    if not isinstance(plugins_cfg, dict):
+        return set()
+    if bool(plugins_cfg.get("safe_mode", False)):
+        raw = plugins_cfg.get("default_pack", [])
+        if isinstance(raw, list):
+            return {str(pid).strip() for pid in raw if str(pid).strip()}
+        return set()
+    enabled = plugins_cfg.get("enabled", {})
+    if not isinstance(enabled, dict):
+        return set()
+    return {str(pid).strip() for pid, on in enabled.items() if bool(on) and str(pid).strip()}
+
+
+def _percentile(values: list[int], pct: float) -> int | None:
+    if not values:
+        return None
+    values = sorted(values)
+    if len(values) == 1:
+        return int(values[0])
+    pct = max(0.0, min(100.0, float(pct)))
+    rank = (pct / 100.0) * (len(values) - 1)
+    low = int(rank)
+    high = min(low + 1, len(values) - 1)
+    frac = rank - low
+    return int(round(values[low] + (values[high] - values[low]) * frac))
+
+
+def _plugin_timing_summary(trace: dict[str, Any]) -> dict[str, Any]:
+    events = trace.get("events", []) if isinstance(trace.get("events", []), list) else []
+    by_key: dict[tuple[str, str, str], list[int]] = {}
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        pid = str(ev.get("plugin_id") or "")
+        cap = str(ev.get("capability") or "")
+        method = str(ev.get("method") or "")
+        if not pid or not cap or not method:
+            continue
+        try:
+            dur = int(ev.get("duration_ms") or 0)
+        except Exception:
+            dur = 0
+        by_key.setdefault((pid, cap, method), []).append(max(0, dur))
+    rows: list[dict[str, Any]] = []
+    for (pid, cap, method), durs in sorted(by_key.items()):
+        durs_sorted = sorted(durs)
+        rows.append(
+            {
+                "plugin_id": pid,
+                "capability": cap,
+                "method": method,
+                "calls": len(durs_sorted),
+                "total_ms": int(sum(durs_sorted)),
+                "p50_ms": _percentile(durs_sorted, 50.0),
+                "p95_ms": _percentile(durs_sorted, 95.0),
+                "max_ms": int(durs_sorted[-1]) if durs_sorted else None,
+            }
+        )
+    return {"rows": rows, "unique_keys": len(rows), "events": len(events)}
+
+
 def main(argv: list[str] | None = None) -> int:
     if not os.environ.get("AUTOCAPTURE_PYTHON_EXE"):
         os.environ["AUTOCAPTURE_PYTHON_EXE"] = sys.executable
+    # Fixture runs must stay WSL-stable: force in-process plugin hosting to avoid
+    # spawning many subprocess plugin hosts (each with a large RSS).
+    os.environ.setdefault("AUTOCAPTURE_PLUGINS_HOSTING_MODE", "inproc")
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", default="docs/test sample/fixture_manifest.json")
     parser.add_argument("--output-dir", default="artifacts/fixture_runs")
@@ -305,7 +375,11 @@ def main(argv: list[str] | None = None) -> int:
     plugins_cfg = user_config.setdefault("plugins", {})
     if isinstance(plugins_cfg, dict):
         plugins_cfg["allowlist"] = list(plugin_ids)
-        plugins_cfg["enabled"] = {pid: True for pid in plugin_ids}
+        # Keep the fixture template's explicit enable/disable set to avoid loading
+        # every plugin in the repo (WSL RAM blowups + noisy failures).
+        enabled_cfg = plugins_cfg.get("enabled")
+        if not isinstance(enabled_cfg, dict):
+            plugins_cfg["enabled"] = {}
     config_dir.mkdir(parents=True, exist_ok=True)
     user_path = (config_dir / "user.json")
     user_path.write_text(json.dumps(user_config, indent=2, sort_keys=True), encoding="utf-8")
@@ -352,6 +426,8 @@ def main(argv: list[str] | None = None) -> int:
     exit_code = 0
     kernel = None
     try:
+        print(f"[fixture] run_dir={run_dir}")
+        sys.stdout.flush()
         audit_fixture_event(
             "fixture.run.start",
             outcome="ok",
@@ -362,8 +438,18 @@ def main(argv: list[str] | None = None) -> int:
                 "config_hash": config_hash,
             },
         )
+        t0 = time.monotonic()
+        import faulthandler
+
+        # If boot stalls (e.g., lock hashing or plugin init), emit a traceback for
+        # stepwise debugging without attaching a debugger.
+        faulthandler.dump_traceback_later(30.0, repeat=False, file=sys.stderr)
         kernel = Kernel(default_config_paths(), safe_mode=False)
         system = kernel.boot(start_conductor=False)
+        faulthandler.cancel_dump_traceback_later()
+        report["boot_elapsed_s"] = round(time.monotonic() - t0, 3)
+        print(f"[fixture] boot_elapsed_s={report['boot_elapsed_s']}")
+        sys.stdout.flush()
         report["ocr"] = _ocr_report(system)
         report["plugins"] = {"load_report": collect_plugin_load_report(system)}
 
@@ -371,6 +457,7 @@ def main(argv: list[str] | None = None) -> int:
         if capture is None or not hasattr(capture, "start"):
             print("ERROR: capture.source unavailable")
             return 2
+        t_cap = time.monotonic()
         capture.start()
         metadata = system.get("storage.metadata")
         if metadata is None:
@@ -381,25 +468,32 @@ def main(argv: list[str] | None = None) -> int:
             print("ERROR: no evidence captured")
             exit_code = 3
         capture.stop()
+        report["capture_elapsed_s"] = round(time.monotonic() - t_cap, 3)
+        print(f"[fixture] capture_elapsed_s={report['capture_elapsed_s']} evidence_count={len(evidence_ids)}")
+        sys.stdout.flush()
         report["evidence"] = {"count": len(evidence_ids), "record_ids": evidence_ids[:20]}
-        sample_frame = None
-        try:
-            if frame_files:
-                sample_frame = frame_files[0].read_bytes()
-        except Exception:
-            sample_frame = None
+        # Avoid re-running heavy OCR/VLM work just for "probe_plugins" bookkeeping.
+        # Probes should validate wiring and sandboxing, not burn cycles on real media.
+        sample_frame: bytes | None = b""
 
         if exit_code == 0:
+            t_idle = time.monotonic()
             idle_result = run_idle_processing(
                 system,
                 max_steps=int(args.idle_max_steps),
                 timeout_s=float(args.idle_timeout_s),
             )
+            report["idle_elapsed_s"] = round(time.monotonic() - t_idle, 3)
             report["idle"] = idle_result
+            print(
+                f"[fixture] idle_elapsed_s={report['idle_elapsed_s']} done={idle_result.get('done')} blocked={bool(idle_result.get('blocked'))}"
+            )
+            sys.stdout.flush()
             if not idle_result.get("done") and idle_result.get("blocked"):
                 exit_code = 4
 
         if exit_code == 0:
+            t_queries = time.monotonic()
             specs = build_query_specs(manifest, metadata)
             query_results = []
             failures = 0
@@ -415,17 +509,32 @@ def main(argv: list[str] | None = None) -> int:
                 report["queries"] = {"count": len(specs), "failures": failures, "results": query_results}
                 if failures:
                     exit_code = 5
+            report["queries_elapsed_s"] = round(time.monotonic() - t_queries, 3)
+            print(
+                f"[fixture] queries_elapsed_s={report['queries_elapsed_s']} count={report['queries']['count']} failures={report['queries']['failures']}"
+            )
+            sys.stdout.flush()
+        t_probe = time.monotonic()
         report["plugin_probe"] = probe_plugins(
             system,
             sample_frame=sample_frame,
             sample_record_id=(evidence_ids[0] if evidence_ids else None),
         )
+        report["probe_elapsed_s"] = round(time.monotonic() - t_probe, 3)
+        print(f"[fixture] probe_elapsed_s={report['probe_elapsed_s']}")
+        sys.stdout.flush()
+        t_trace = time.monotonic()
         report["plugin_trace"] = collect_plugin_trace(system)
+        report["trace_elapsed_s"] = round(time.monotonic() - t_trace, 3)
+        report["plugin_timing"] = _plugin_timing_summary(report["plugin_trace"] if isinstance(report.get("plugin_trace"), dict) else {})
+        print(f"[fixture] trace_elapsed_s={report['trace_elapsed_s']}")
+        sys.stdout.flush()
         plugin_status, skipped_without_reason = _build_plugin_status(
             manifests=manifests,
             load_report=report["plugins"]["load_report"],
             probe_results=report["plugin_probe"],
             trace=report["plugin_trace"],
+            expected_plugin_ids=_expected_plugin_ids(user_config) if isinstance(user_config, dict) else None,
         )
         report["plugin_status"] = plugin_status
         report["skipped_without_reason"] = skipped_without_reason
@@ -442,6 +551,8 @@ def main(argv: list[str] | None = None) -> int:
             output_path = run_dir / "fixture_report.json"
             output_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
             report["report_path"] = str(output_path)
+            print(f"[fixture] report_path={output_path}")
+            sys.stdout.flush()
         except Exception:
             pass
         if kernel is not None:

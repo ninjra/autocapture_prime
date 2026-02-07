@@ -20,6 +20,7 @@ def build_indexes(
     config: dict[str, Any],
     *,
     logger: Callable[[str], None] | None = None,
+    read_only: bool = False,
 ) -> tuple[LexicalIndex | None, VectorIndex | QdrantVectorIndex | None]:
     storage_cfg = config.get("storage", {}) if isinstance(config, dict) else {}
     indexing_cfg = config.get("indexing", {}) if isinstance(config, dict) else {}
@@ -34,7 +35,7 @@ def build_indexes(
     lexical: LexicalIndex | None
     vector: VectorIndex | QdrantVectorIndex | None
     try:
-        lexical = LexicalIndex(lexical_path)
+        lexical = LexicalIndex(lexical_path, read_only=bool(read_only))
     except Exception as exc:
         lexical = None
         if logger:
@@ -46,7 +47,7 @@ def build_indexes(
         if vector_backend == "qdrant":
             vector = QdrantVectorIndex(qdrant_url, qdrant_collection, LocalEmbedder(model_name))
         else:
-            vector = VectorIndex(vector_path, LocalEmbedder(model_name))
+            vector = VectorIndex(vector_path, LocalEmbedder(model_name), read_only=bool(read_only))
     except Exception as exc:
         vector = None
         if logger:

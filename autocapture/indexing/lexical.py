@@ -10,17 +10,26 @@ from autocapture.indexing.manifest import bump_manifest, update_manifest_digest,
 
 
 class LexicalIndex:
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, read_only: bool = False) -> None:
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.path)
-        self._conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(doc_id, content)")
-        self._conn.commit()
+        self._read_only = bool(read_only)
+        if self._read_only:
+            if not self.path.exists():
+                raise FileNotFoundError(str(self.path))
+            # Open read-only so sandboxed plugin hosts with filesystem=read can query.
+            self._conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(self.path)
+            self._conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(doc_id, content)")
+            self._conn.commit()
         self._identity_cache: dict[str, Any] | None = None
         self._identity_mtime: float | None = None
         self._manifest_mtime: float | None = None
 
     def index(self, doc_id: str, content: str) -> None:
+        if self._read_only:
+            raise PermissionError("LexicalIndex is read-only")
         self._conn.execute("DELETE FROM fts WHERE doc_id = ?", (doc_id,))
         self._conn.execute("INSERT INTO fts(doc_id, content) VALUES (?, ?)", (doc_id, content))
         self._conn.commit()

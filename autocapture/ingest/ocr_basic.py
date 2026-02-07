@@ -121,12 +121,14 @@ def _tesseract_tokens(
         if oem is not None:
             config_parts.append(f"--oem {int(oem)}")
         config = " ".join(config_parts) if config_parts else None
-        data = pytesseract.image_to_data(
-            image,
-            output_type=pytesseract.Output.DICT,
-            lang=str(lang) if lang else None,
-            config=config,
-        )
+        kwargs = {"output_type": pytesseract.Output.DICT}
+        # Do not pass `lang=None` or `config=None`: pytesseract will forward those
+        # to the tesseract CLI and break the default language handling.
+        if lang:
+            kwargs["lang"] = str(lang)
+        if config:
+            kwargs["config"] = config
+        data = pytesseract.image_to_data(image, **kwargs)
     except Exception:
         return None
     results: list[OCRToken] = []
