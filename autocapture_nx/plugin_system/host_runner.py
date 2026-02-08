@@ -319,6 +319,20 @@ def main() -> None:
     set_global_filesystem_policy(fs_policy)
     _debug("filesystem policy installed")
     _log_host_error(config, plugin_id, f"host_runner start: pid={os.getpid()} python={sys.executable}")
+    # OPS-01: structured JSONL logging with correlation IDs (best-effort).
+    try:
+        from autocapture_nx.kernel.logging import JsonlLogger
+
+        logger = JsonlLogger.from_config(config, name="plugin_host")
+        logger.event(
+            event="plugin.host_runner.start",
+            run_id=str(config.get("runtime", {}).get("run_id") or ""),
+            plugin_id=str(plugin_id),
+            pid=os.getpid(),
+            python=sys.executable,
+        )
+    except Exception:
+        logger = None
 
     rng_enabled = bool(rng_info.get("enabled", False))
     rng_seed_value = rng_info.get("seed")
@@ -388,6 +402,17 @@ def main() -> None:
     except Exception as exc:
         tb = traceback.format_exc()
         _log_host_error(config, plugin_id, f"plugin init error: {type(exc).__name__}: {exc}\n{tb}")
+        try:
+            if logger is not None:
+                logger.event(
+                    event="plugin.host_runner.init_error",
+                    level="error",
+                    run_id=str(config.get("runtime", {}).get("run_id") or ""),
+                    plugin_id=str(plugin_id),
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+        except Exception:
+            pass
         raise
 
     cap_map = {name: cap for name, cap in caps.items()}

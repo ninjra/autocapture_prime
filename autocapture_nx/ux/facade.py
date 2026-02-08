@@ -24,6 +24,8 @@ from autocapture_nx.kernel.loader import Kernel, default_config_paths
 from autocapture_nx.kernel.query import run_query
 from autocapture_nx.kernel.telemetry import telemetry_snapshot, percentile
 from autocapture_nx.kernel.atomic_write import atomic_write_json
+from autocapture_nx.kernel.doctor import build_health_report
+from autocapture_nx.kernel.logging import JsonlLogger
 from autocapture_nx.plugin_system.manager import PluginManager
 from autocapture_nx.processing.idle import _extract_frame, _get_media_blob
 
@@ -296,20 +298,42 @@ class UXFacade:
         return dict(self._config)
 
     def doctor_report(self) -> dict[str, Any]:
+        logger = None
+        try:
+            logger = JsonlLogger.from_config(self._config, name="core")
+        except Exception:
+            logger = None
         kernel = self._kernel_mgr.kernel()
         if kernel is None:
             kernel = Kernel(self._paths, safe_mode=self._safe_mode)
             kernel.boot(start_conductor=False)
             checks = kernel.doctor()
+            try:
+                system = kernel.system
+                report = build_health_report(system=system, checks=checks) if system is not None else None
+            except Exception:
+                report = None
             kernel.shutdown()
         else:
             checks = kernel.doctor()
-        ok = all(check.ok for check in checks)
-        return {
-            "ok": ok,
-            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-            "checks": [check.__dict__ for check in checks],
-        }
+            try:
+                system = kernel.system
+                report = build_health_report(system=system, checks=checks) if system is not None else None
+            except Exception:
+                report = None
+        if not isinstance(report, dict):
+            ok = all(check.ok for check in checks)
+            report = {
+                "ok": ok,
+                "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+                "checks": [check.__dict__ for check in checks],
+            }
+        if logger is not None:
+            try:
+                report.setdefault("logs", {})["core_jsonl"] = logger.path
+            except Exception:
+                pass
+        return report
 
     def resolve_citations(self, citations: list[dict[str, Any]]) -> dict[str, Any]:
         with self._kernel_mgr.session() as system:

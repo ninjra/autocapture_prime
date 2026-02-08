@@ -1123,6 +1123,18 @@
             "mode": {
               "type": "string"
             },
+            "wsl_force_lazy_start": {
+              "type": "boolean"
+            },
+            "subprocess_spawn_concurrency": {
+              "type": "integer"
+            },
+            "subprocess_max_hosts": {
+              "type": "integer"
+            },
+            "subprocess_idle_ttl_s": {
+              "type": "number"
+            },
             "offline_env": {
               "type": "boolean"
             },

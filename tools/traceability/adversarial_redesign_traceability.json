@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-02-08T17:52:47.929157Z",
+  "generated_utc": "2026-02-08T18:40:25.069372Z",
   "items": [
     {
       "evidence": [
@@ -108,7 +108,7 @@
       ],
       "id": "EXEC-08",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Add standardized health checks for each pipeline capability (capture, OCR, VLM, indexing, retrieval, answer)",
       "validators": [
         "tests/test_component_health_matrix.py"
@@ -607,7 +607,7 @@
       ],
       "id": "OPS-01",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Adopt structured JSONL logging with correlation IDs (run_id, job_id, plugin_id) and log rotation",
       "validators": [
         "tests/test_logs_have_correlation_ids.py"
@@ -650,7 +650,7 @@
       ],
       "id": "OPS-04",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Expand /health to include component matrix + last error codes, while keeping a stable summary for monitoring",
       "validators": [
         "tests/test_health_has_stable_fields.py"
@@ -677,7 +677,7 @@
       ],
       "id": "OPS-06",
       "notes": "",
-      "status": "missing",
+      "status": "partial",
       "title": "Expose migration status (DB versions, last migration timestamp, checksum) in doctor + UI",
       "validators": [
         "tests/test_doctor_reports_db_versions.py"

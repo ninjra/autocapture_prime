@@ -3,9 +3,9 @@
 Generated: 2026-02-08
 
 - total: 92
-- implemented: 16
-- partial: 32
-- missing: 44
+- implemented: 19
+- partial: 33
+- missing: 40
 
 | ID | Status | Title | Evidence | Validators |
 | --- | --- | --- | --- | --- |
@@ -16,7 +16,7 @@ Generated: 2026-02-08
 | EXEC-05 | partial | Eliminate nondeterminism sources (time.now, unordered dict iteration, RNG) from critical pipelines; enforce stable sort everywhere | autocapture_nx/kernel/query.py<br>plugins/builtin/retrieval_basic/*<br>autocapture_nx/kernel/canonical_json.py | tests/test_deterministic_retrieval_order.py<br>tools/gate_perf.py |
 | EXEC-06 | partial | Introduce staged multi-store writes for evidence: write blob→write metadata→append journal→append ledger, with rollback markers | plugins/builtin/storage_*<br>plugins/builtin/journal_basic/plugin.py<br>plugins/builtin/ledger_basic/plugin.py | tests/test_two_phase_commit_recovery.py |
 | EXEC-07 | partial | Make on-query extraction an explicit scheduled job: show blocked reasons and offer “schedule extraction now” | autocapture_nx/kernel/query.py<br>autocapture_nx/processing/idle.py<br>autocapture/web/ui/index.html | tests/test_schedule_extract_from_query.py |
-| EXEC-08 | missing | Add standardized health checks for each pipeline capability (capture, OCR, VLM, indexing, retrieval, answer) | autocapture_nx/kernel/doctor.py<br>autocapture/web/routes/health.py<br>plugins/builtin/* | tests/test_component_health_matrix.py |
+| EXEC-08 | implemented | Add standardized health checks for each pipeline capability (capture, OCR, VLM, indexing, retrieval, answer) | autocapture_nx/kernel/doctor.py<br>autocapture/web/routes/health.py<br>plugins/builtin/* | tests/test_component_health_matrix.py |
 | EXEC-09 | implemented | Tighten subprocess plugin runtime limits: enforce RPC timeouts, kill-on-timeout, and record termination in audit log | autocapture_nx/plugin_system/host_runner.py<br>autocapture_nx/kernel/audit.py<br>autocapture_nx/windows/win_sandbox.py | tests/test_plugin_timeout_killed.py |
 | EXEC-10 | missing | Deterministic retrieval tie-breaking: score→evidence_id→span_id ordering, documented as contract | plugins/builtin/retrieval_basic/plugin.py<br>contracts/retrieval.schema.json | tests/test_retrieval_tie_breaking.py |
 | EXT-01 | partial | Define explicit plugin lifecycle states (installed→locked→approved→enabled→healthy) and enforce transitions | autocapture_nx/plugin_system/manager.py<br>autocapture_nx/plugin_system/registry.py<br>autocapture/web/routes/plugins.py | tests/test_plugin_lifecycle_state_machine.py |
@@ -51,12 +51,12 @@ Generated: 2026-02-08
 | META-08 | missing | Add minimal evaluation-result records (quality, coverage, freshness) and surface them in query results and UI | contracts/evaluation.schema.json<br>autocapture_nx/kernel/query.py<br>autocapture/web/ui/index.html | tests/test_query_evaluation_fields.py |
 | META-09 | missing | Record determinism inputs explicitly: RNG seeds, locale/TZ, model versions, and any sampling parameters used | autocapture_nx/kernel/determinism.py<br>autocapture_nx/plugin_system/registry.py<br>contracts/run_manifest.schema.json | tests/test_manifest_determinism_fields.py |
 | META-10 | missing | Define a canonical diagnostics bundle schema (bundle_manifest.json) for doctor + support artifacts | autocapture_nx/cli.py<br>tools/gate_doctor.py<br>contracts/diagnostics_bundle.schema.json | tests/test_diagnostics_bundle_schema.py |
-| OPS-01 | missing | Adopt structured JSONL logging with correlation IDs (run_id, job_id, plugin_id) and log rotation | autocapture_nx/kernel/logging.py<br>autocapture/web/api.py<br>autocapture_nx/plugin_system/host_runner.py | tests/test_logs_have_correlation_ids.py |
+| OPS-01 | implemented | Adopt structured JSONL logging with correlation IDs (run_id, job_id, plugin_id) and log rotation | autocapture_nx/kernel/logging.py<br>autocapture/web/api.py<br>autocapture_nx/plugin_system/host_runner.py | tests/test_logs_have_correlation_ids.py |
 | OPS-02 | implemented | Instrument frictionless workflow metrics: TTFR, query latency, misconfig errors, plugin crashes, blocked ops; expose /metrics + UI | autocapture_nx/capture/pipeline.py<br>autocapture/web/routes/metrics.py<br>autocapture/web/routes/plugins.py<br>autocapture_nx/ux/facade.py<br>tests/test_metrics_ttfr.py | tests/test_metrics_ttfr.py |
 | OPS-03 | missing | Provide a deterministic diagnostics bundle export (zip) with redaction: doctor report, config snapshot, locks, recent logs, telemetry | autocapture/web/routes/doctor.py<br>autocapture_nx/kernel/doctor.py<br>autocapture/web/ui/index.html | tests/test_diagnostics_bundle_redacts.py |
-| OPS-04 | missing | Expand /health to include component matrix + last error codes, while keeping a stable summary for monitoring | autocapture/web/routes/health.py<br>autocapture_nx/kernel/doctor.py | tests/test_health_has_stable_fields.py |
+| OPS-04 | implemented | Expand /health to include component matrix + last error codes, while keeping a stable summary for monitoring | autocapture/web/routes/health.py<br>autocapture_nx/kernel/doctor.py | tests/test_health_has_stable_fields.py |
 | OPS-05 | partial | Add operator commands: `reindex`, `vacuum`, `quarantine`, `rollback-locks`, each producing ledgered actions | autocapture_nx/cli.py<br>autocapture_nx/kernel/loader.py<br>plugins/builtin/ledger_basic/plugin.py | tests/test_operator_commands_ledgered.py |
-| OPS-06 | missing | Expose migration status (DB versions, last migration timestamp, checksum) in doctor + UI | autocapture_nx/kernel/doctor.py<br>autocapture/web/ui/index.html | tests/test_doctor_reports_db_versions.py |
+| OPS-06 | partial | Expose migration status (DB versions, last migration timestamp, checksum) in doctor + UI | autocapture_nx/kernel/doctor.py<br>autocapture/web/ui/index.html | tests/test_doctor_reports_db_versions.py |
 | OPS-07 | missing | Add a self-test harness runnable from tray: capture 5s, extract 1 segment, query 1 prompt, verify ledger | autocapture/web/routes/doctor.py<br>autocapture_nx/kernel/query.py<br>autocapture/pillars/citable.py | tests/test_self_test_harness.py |
 | OPS-08 | partial | Make SLO/error budget first-class: surface budgets in UI and fail gates when regression exceeds thresholds | autocapture_nx/ux/facade.py<br>tools/gate_perf.py<br>autocapture/web/ui/index.html | tests/test_slo_budget_regression_gate.py |
 | PERF-01 | partial | Batch and pipeline capture encoding/writes to reduce per-frame overhead; measure CPU and I/O per segment | plugins/builtin/capture_windows/plugin.py<br>autocapture_nx/capture/pipeline.py | tests/test_capture_throughput_baseline.py<br>tools/gate_perf.py |

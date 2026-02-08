@@ -971,6 +971,10 @@
         "max_processes": 1
       },
       "mode": "subprocess",
+      "wsl_force_lazy_start": true,
+      "subprocess_spawn_concurrency": 1,
+      "subprocess_max_hosts": 2,
+      "subprocess_idle_ttl_s": 10.0,
       "rpc_max_message_bytes": 20000000,
       "rpc_failure_limit": 3,
       "rpc_failure_window_s": 60,
