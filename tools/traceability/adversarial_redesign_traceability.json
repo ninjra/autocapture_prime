@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-02-08T18:40:25.069372Z",
+  "generated_utc": "2026-02-08T19:11:49.890424Z",
   "items": [
     {
       "evidence": [
@@ -637,7 +637,7 @@
       ],
       "id": "OPS-03",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Provide a deterministic diagnostics bundle export (zip) with redaction: doctor report, config snapshot, locks, recent logs, telemetry",
       "validators": [
         "tests/test_diagnostics_bundle_redacts.py"
@@ -691,7 +691,7 @@
       ],
       "id": "OPS-07",
       "notes": "",
-      "status": "missing",
+      "status": "partial",
       "title": "Add a self-test harness runnable from tray: capture 5s, extract 1 segment, query 1 prompt, verify ledger",
       "validators": [
         "tests/test_self_test_harness.py"
@@ -1005,7 +1005,7 @@
       ],
       "id": "SEC-01",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Harden filesystem_guard path normalization: resolve symlinks, normalize case/UNC, and deny path traversal consistently on Windows",
       "validators": [
         "tests/test_filesystem_guard_windows_edge_cases.py"
@@ -1046,7 +1046,7 @@
       ],
       "id": "SEC-04",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Default to approval_required=true for any egress, and require explicit per-destination allowlists; ledger every egress event",
       "validators": [
         "tests/test_egress_requires_approval_by_default.py"
@@ -1239,7 +1239,7 @@
       ],
       "id": "UX-08",
       "notes": "",
-      "status": "missing",
+      "status": "partial",
       "title": "Standardize error UX: actionable messages, \u201ccopy diagnostics\u201d, and \u201copen doctor bundle\u201d on failures",
       "validators": [
         "tests/test_error_to_diagnostics_flow.py"

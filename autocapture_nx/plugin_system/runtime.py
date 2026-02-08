@@ -13,6 +13,12 @@ from typing import Any, Iterable, cast
 
 from autocapture_nx.kernel.errors import PermissionError
 
+try:  # SEC-01 (Windows path hardening)
+    from autocapture_nx.windows.win_paths import normalize_windows_path_str, windows_is_within
+except Exception:  # pragma: no cover
+    normalize_windows_path_str = None  # type: ignore[assignment]
+    windows_is_within = None  # type: ignore[assignment]
+
 _original_socket = socket.socket
 _original_create_connection = socket.create_connection
 _guard_local = threading.local()
@@ -135,7 +141,15 @@ def _ensure_patched() -> None:
 
 def _normalize_root(path: Path) -> Path:
     try:
-        return path.expanduser().absolute()
+        expanded = path.expanduser()
+        # Resolve symlinks where supported to prevent allowlist bypass via symlink traversal.
+        # On Windows, prefer `ntpath`-based normalization for deterministic comparisons.
+        if os.name == "nt" and normalize_windows_path_str is not None:
+            return Path(normalize_windows_path_str(str(expanded)))
+        try:
+            return Path(os.path.realpath(str(expanded))).absolute()
+        except Exception:
+            return expanded.absolute()
     except Exception:
         return path
 
@@ -180,11 +194,18 @@ class FilesystemPolicy:
             return False
         candidate = _normalize_root(path)
         for root in roots:
-            try:
-                candidate.relative_to(root)
-                return True
-            except ValueError:
-                continue
+            if os.name == "nt" and windows_is_within is not None:
+                try:
+                    if windows_is_within(str(root), str(candidate)):
+                        return True
+                except Exception:
+                    continue
+            else:
+                try:
+                    candidate.relative_to(root)
+                    return True
+                except ValueError:
+                    continue
         return False
 
     def allow_read(self, path: Path, *, allow_ancestor: bool = False) -> bool:
@@ -194,11 +215,18 @@ class FilesystemPolicy:
             return False
         candidate = _normalize_root(path)
         for root in self.read_roots:
-            try:
-                root.relative_to(candidate)
-                return True
-            except ValueError:
-                continue
+            if os.name == "nt" and windows_is_within is not None:
+                try:
+                    if windows_is_within(str(candidate), str(root)):
+                        return True
+                except Exception:
+                    continue
+            else:
+                try:
+                    root.relative_to(candidate)
+                    return True
+                except ValueError:
+                    continue
         return False
 
     def allow_write(self, path: Path) -> bool:

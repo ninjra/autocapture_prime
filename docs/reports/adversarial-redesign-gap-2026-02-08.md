@@ -3,9 +3,9 @@
 Generated: 2026-02-08
 
 - total: 92
-- implemented: 19
-- partial: 33
-- missing: 40
+- implemented: 22
+- partial: 35
+- missing: 35
 
 | ID | Status | Title | Evidence | Validators |
 | --- | --- | --- | --- | --- |
@@ -53,11 +53,11 @@ Generated: 2026-02-08
 | META-10 | missing | Define a canonical diagnostics bundle schema (bundle_manifest.json) for doctor + support artifacts | autocapture_nx/cli.py<br>tools/gate_doctor.py<br>contracts/diagnostics_bundle.schema.json | tests/test_diagnostics_bundle_schema.py |
 | OPS-01 | implemented | Adopt structured JSONL logging with correlation IDs (run_id, job_id, plugin_id) and log rotation | autocapture_nx/kernel/logging.py<br>autocapture/web/api.py<br>autocapture_nx/plugin_system/host_runner.py | tests/test_logs_have_correlation_ids.py |
 | OPS-02 | implemented | Instrument frictionless workflow metrics: TTFR, query latency, misconfig errors, plugin crashes, blocked ops; expose /metrics + UI | autocapture_nx/capture/pipeline.py<br>autocapture/web/routes/metrics.py<br>autocapture/web/routes/plugins.py<br>autocapture_nx/ux/facade.py<br>tests/test_metrics_ttfr.py | tests/test_metrics_ttfr.py |
-| OPS-03 | missing | Provide a deterministic diagnostics bundle export (zip) with redaction: doctor report, config snapshot, locks, recent logs, telemetry | autocapture/web/routes/doctor.py<br>autocapture_nx/kernel/doctor.py<br>autocapture/web/ui/index.html | tests/test_diagnostics_bundle_redacts.py |
+| OPS-03 | implemented | Provide a deterministic diagnostics bundle export (zip) with redaction: doctor report, config snapshot, locks, recent logs, telemetry | autocapture/web/routes/doctor.py<br>autocapture_nx/kernel/doctor.py<br>autocapture/web/ui/index.html | tests/test_diagnostics_bundle_redacts.py |
 | OPS-04 | implemented | Expand /health to include component matrix + last error codes, while keeping a stable summary for monitoring | autocapture/web/routes/health.py<br>autocapture_nx/kernel/doctor.py | tests/test_health_has_stable_fields.py |
 | OPS-05 | partial | Add operator commands: `reindex`, `vacuum`, `quarantine`, `rollback-locks`, each producing ledgered actions | autocapture_nx/cli.py<br>autocapture_nx/kernel/loader.py<br>plugins/builtin/ledger_basic/plugin.py | tests/test_operator_commands_ledgered.py |
 | OPS-06 | partial | Expose migration status (DB versions, last migration timestamp, checksum) in doctor + UI | autocapture_nx/kernel/doctor.py<br>autocapture/web/ui/index.html | tests/test_doctor_reports_db_versions.py |
-| OPS-07 | missing | Add a self-test harness runnable from tray: capture 5s, extract 1 segment, query 1 prompt, verify ledger | autocapture/web/routes/doctor.py<br>autocapture_nx/kernel/query.py<br>autocapture/pillars/citable.py | tests/test_self_test_harness.py |
+| OPS-07 | partial | Add a self-test harness runnable from tray: capture 5s, extract 1 segment, query 1 prompt, verify ledger | autocapture/web/routes/doctor.py<br>autocapture_nx/kernel/query.py<br>autocapture/pillars/citable.py | tests/test_self_test_harness.py |
 | OPS-08 | partial | Make SLO/error budget first-class: surface budgets in UI and fail gates when regression exceeds thresholds | autocapture_nx/ux/facade.py<br>tools/gate_perf.py<br>autocapture/web/ui/index.html | tests/test_slo_budget_regression_gate.py |
 | PERF-01 | partial | Batch and pipeline capture encoding/writes to reduce per-frame overhead; measure CPU and I/O per segment | plugins/builtin/capture_windows/plugin.py<br>autocapture_nx/capture/pipeline.py | tests/test_capture_throughput_baseline.py<br>tools/gate_perf.py |
 | PERF-02 | missing | Incremental indexing: process only new/changed evidence by ID+hash; avoid full reindex on boot | autocapture/indexing/factory.py<br>autocapture/indexing/lexical_index.py<br>autocapture/indexing/vector_index.py | tests/test_incremental_indexing.py |
@@ -81,10 +81,10 @@ Generated: 2026-02-08
 | RD-04 | missing | Phase 3 (2026-06-01→2026-07-31): WSL2 worker round-trip + optional GPU acceleration + incremental indexing/caching | (planning) |  |
 | RD-05 | implemented | Adopt a “regression = do not ship” gate set: integrity scan, contract pins, plugin locks, SLO budgets, UI smoke | tools/gate_adversarial_redesign_coverage.py<br>tools/gate_doctor.py<br>tools/gate_ledger.py<br>tools/gate_perf.py<br>tools/gate_static.py<br>tools/gate_security.py<br>tools/run_adversarial_redesign_coverage.sh | tools/gate_adversarial_redesign_coverage.py<br>tools/gate_doctor.py<br>tools/gate_ledger.py<br>tools/gate_perf.py<br>tools/gate_static.py<br>tools/gate_security.py |
 | RD-06 | missing | Write an operator runbook: backup/restore, safe-mode triage, plugin rollback, disk pressure, and integrity verification | docs/runbook.md<br>docs/safe_mode.md |  |
-| SEC-01 | missing | Harden filesystem_guard path normalization: resolve symlinks, normalize case/UNC, and deny path traversal consistently on Windows | autocapture_nx/plugin_system/runtime.py<br>autocapture_nx/windows/win_paths.py | tests/test_filesystem_guard_windows_edge_cases.py |
+| SEC-01 | implemented | Harden filesystem_guard path normalization: resolve symlinks, normalize case/UNC, and deny path traversal consistently on Windows | autocapture_nx/plugin_system/runtime.py<br>autocapture_nx/windows/win_paths.py | tests/test_filesystem_guard_windows_edge_cases.py |
 | SEC-02 | partial | Ensure network_guard is applied early in subprocess plugins (sitecustomize) and covers common HTTP libs | autocapture_nx/plugin_system/host_runner.py<br>autocapture_nx/plugin_system/runtime.py | tests/test_network_guard_applies_before_imports.py |
 | SEC-03 | partial | Make loopback binding enforceable: validate config + runtime bind address; tray launcher must respect config or refuse to start | config/default.json<br>autocapture/web/api.py<br>ops/dev/launch_tray.ps1 | tests/test_tray_launcher_respects_bind.py |
-| SEC-04 | missing | Default to approval_required=true for any egress, and require explicit per-destination allowlists; ledger every egress event | config/default.json<br>autocapture/egress/client.py<br>autocapture/web/routes/egress.py | tests/test_egress_requires_approval_by_default.py |
+| SEC-04 | implemented | Default to approval_required=true for any egress, and require explicit per-destination allowlists; ledger every egress event | config/default.json<br>autocapture/egress/client.py<br>autocapture/web/routes/egress.py | tests/test_egress_requires_approval_by_default.py |
 | SEC-05 | missing | Add PII detection/redaction at export/egress boundaries using configured recognizers; record redaction map in metadata | autocapture/privacy/redaction.py<br>autocapture/egress/sanitize.py<br>config/default.json | tests/test_redaction_deterministic.py |
 | SEC-06 | missing | Key rotation hardening: store key_id with every encrypted blob/record; support staged rewrap and verify mixed-key reads | autocapture/crypto/keyring.py<br>plugins/builtin/storage_encrypted/plugin.py<br>autocapture/web/routes/keys.py | tests/test_key_rotation_rewrap_plan.py |
 | SEC-07 | missing | Sign proof bundle manifest locally and verify on import/replay; include sha256 for all bundle files | autocapture_nx/kernel/proof_bundle.py<br>autocapture/crypto/dpapi.py | tests/test_proof_bundle_signature_verifies.py |
@@ -98,6 +98,6 @@ Generated: 2026-02-08
 | UX-05 | partial | Extension Manager UI v2 (IA + flows): Installed / Available / Updates / Approvals / Health / Policies | autocapture/web/ui/index.html<br>autocapture/web/routes/plugins.py<br>autocapture_nx/plugin_system/manager.py | tests/test_extension_manager_core_flows.py |
 | UX-06 | partial | Make dangerous toggles misclick-resistant (egress enable, allow_raw_egress, allow_images): require typed confirmation + undo window | autocapture/web/ui/index.html<br>autocapture/web/routes/settings.py<br>config/default.json | tests/test_dangerous_toggle_requires_confirm.py |
 | UX-07 | missing | Accessibility hardening: add ARIA labels, focus order, skip links, and keyboard shortcuts; run automated a11y checks | autocapture/web/ui/index.html<br>autocapture/web/ui/static/* | tests/test_accessibility_smoke.py |
-| UX-08 | missing | Standardize error UX: actionable messages, “copy diagnostics”, and “open doctor bundle” on failures | autocapture/web/ui/index.html<br>autocapture/web/routes/doctor.py | tests/test_error_to_diagnostics_flow.py |
+| UX-08 | partial | Standardize error UX: actionable messages, “copy diagnostics”, and “open doctor bundle” on failures | autocapture/web/ui/index.html<br>autocapture/web/routes/doctor.py | tests/test_error_to_diagnostics_flow.py |
 | UX-09 | partial | Add config presets and a diff viewer (effective vs user overrides) with search and safe defaults | autocapture/web/ui/index.html<br>autocapture/config/load.py<br>contracts/config_schema.json | tests/test_config_diff_viewer.py |
 | UX-10 | partial | Terminology cleanup: unify NX/MX naming in UI + docs; add a single “Core runtime: autocapture_nx” statement | README.md<br>contracts/user_surface.md<br>autocapture/web/ui/index.html | tests/test_docs_consistency_smoke.py |

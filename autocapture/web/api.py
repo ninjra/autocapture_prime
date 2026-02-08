@@ -33,6 +33,7 @@ from autocapture.web.routes import (
     media,
     trace,
     state,
+    doctor,
 )
 
 
@@ -91,6 +92,7 @@ def get_app() -> FastAPI:
         return resp
 
     app.include_router(health.router)
+    app.include_router(doctor.router)
     app.include_router(status.router)
     app.include_router(run.router)
     app.include_router(query.router)

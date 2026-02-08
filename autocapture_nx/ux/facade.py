@@ -335,6 +335,14 @@ class UXFacade:
                 pass
         return report
 
+    def diagnostics_bundle_create(self) -> dict[str, Any]:
+        from autocapture_nx.kernel.diagnostics_bundle import create_diagnostics_bundle
+
+        # Avoid heavy work: reuse doctor_report and export with redaction.
+        report = self.doctor_report()
+        result = create_diagnostics_bundle(config=self._config, doctor_report=report)
+        return {"ok": True, "path": result.path, "sha256": result.bundle_sha256, "manifest": result.manifest}
+
     def resolve_citations(self, citations: list[dict[str, Any]]) -> dict[str, Any]:
         with self._kernel_mgr.session() as system:
             validator = system.get("citation.validator")

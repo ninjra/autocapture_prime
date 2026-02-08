@@ -1019,9 +1019,10 @@
     },
     "egress": {
       "allow_raw_egress": false,
-      "approval_required": false,
+      "approval_required": true,
       "approval_store_path": "data/egress/approvals.json",
       "approval_ttl_s": 300,
+      "destination_allowlist": [],
       "default_sanitize": true,
       "enabled": true,
       "policy_id": "",
