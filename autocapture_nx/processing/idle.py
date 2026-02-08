@@ -93,23 +93,41 @@ def _ffmpeg_path(config: dict[str, Any]) -> str | None:
 def _decode_first_frame_ffmpeg(blob: bytes, *, ffmpeg_path: str) -> bytes | None:
     if not blob:
         return None
-    args = [
-        ffmpeg_path,
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-threads",
-        "1",
-        "-i",
-        "pipe:0",
-        "-frames:v",
-        "1",
-        "-f",
-        "image2pipe",
-        "-vcodec",
-        "png",
-        "pipe:1",
-    ]
+    # MP4/MKV containers are not reliably streamable from stdin (ffmpeg may treat
+    # the input as a "partial file" because it cannot seek to find moov/indices).
+    # Write to a temp file for deterministic, low-friction decoding.
+    import tempfile
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix="autocapture_ffmpeg_", suffix=".bin", delete=False) as handle:
+            tmp_path = handle.name
+            handle.write(blob)
+            handle.flush()
+        args = [
+            ffmpeg_path,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-threads",
+            "1",
+            "-i",
+            tmp_path,
+            "-frames:v",
+            "1",
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "png",
+            "pipe:1",
+        ]
+    except Exception:
+        try:
+            if tmp_path:
+                os.unlink(tmp_path)
+        except Exception:
+            pass
+        return None
     env = os.environ.copy()
     # Keep decoding lightweight in WSL and avoid thread fanout.
     env.setdefault("OMP_NUM_THREADS", "1")
@@ -119,15 +137,27 @@ def _decode_first_frame_ffmpeg(blob: bytes, *, ffmpeg_path: str) -> bytes | None
     try:
         proc = subprocess.run(
             args,
-            input=blob,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=env,
-            timeout=10.0,
+            # Large frames (e.g., high-res screen recordings) can take longer to
+            # decode even when extracting a single frame. Keep this bounded but
+            # not so tight that ffmpeg_mp4 fixtures always time out on WSL.
+            timeout=20.0,
             check=False,
         )
     except Exception:
+        try:
+            if tmp_path:
+                os.unlink(tmp_path)
+        except Exception:
+            pass
         return None
+    try:
+        if tmp_path:
+            os.unlink(tmp_path)
+    except Exception:
+        pass
     if proc.returncode != 0:
         return None
     out = proc.stdout or b""

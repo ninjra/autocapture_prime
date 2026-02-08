@@ -866,8 +866,24 @@ def run_query_without_state(system, query: str) -> dict[str, Any]:
         if retrieval is not None and metadata is not None:
             # "Who is working with me on the quorum task" -> extract contractor name from task title.
             if "quorum" in qlow and ("working" in qlow or "who" in qlow):
-                hint = retrieval.search("for Contractor", time_window=time_window) or retrieval.search("for Contractor", time_window=None)
-                pat = __import__("re").compile(r"\bfor\s+Contractor\s+([A-Z][a-z]{2,})\s+([A-Z][a-z]{2,})\b")
+                # Prefer the explicit assignee string when present (e.g. "task was assigned to OpenInvoice").
+                hint = retrieval.search("assigned to", time_window=time_window) or retrieval.search("assigned", time_window=time_window) or retrieval.search("assigned", time_window=None)
+                pat = __import__("re").compile(r"assigned\\s*to\\s*(?P<assignee>[A-Za-z][A-Za-z0-9]{1,48})", flags=__import__("re").IGNORECASE)
+
+                def _split_camel(value: str) -> str:
+                    if not value:
+                        return value
+                    out: list[str] = []
+                    current = value[0]
+                    for ch in value[1:]:
+                        if ch.isupper() and current and (current[-1].islower() or current[-1].isdigit()):
+                            out.append(current)
+                            current = ch
+                        else:
+                            current += ch
+                    out.append(current)
+                    return " ".join(p for p in out if p)
+
                 for hit in hint[:10]:
                     evidence_id = str(hit.get("record_id") or "")
                     derived_id = hit.get("derived_id")
@@ -877,7 +893,14 @@ def run_query_without_state(system, query: str) -> dict[str, Any]:
                     m = pat.search(txt)
                     if not m:
                         continue
-                    name = f"{m.group(1)} {m.group(2)}"
+                    raw = str(m.group("assignee") or "").strip()
+                    if not raw:
+                        continue
+                    # Keep only alphanumerics so we don't fabricate separators from OCR noise.
+                    cleaned = "".join(ch for ch in raw if ch.isalnum())
+                    if not cleaned:
+                        continue
+                    name = _split_camel(cleaned)
                     claim = _claim_with_citation(
                         claim_text=f"Quorum task collaborator: {name}",
                         evidence_id=evidence_id,

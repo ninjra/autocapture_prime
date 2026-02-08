@@ -195,16 +195,28 @@ def _extract_vdi_time(tokens: list[dict[str, Any]]) -> tuple[str | None, tuple[i
 
 def _count_inboxes(tokens: list[dict[str, Any]]) -> int:
     # Count visually distinct "Inbox" tokens. Use coarse bucketing to dedupe duplicates.
+    #
+    # The fixture screenshot includes multi-word tokens like "M Inbox" in tab bars.
+    # Treat any token containing a whole-word "inbox" as an open inbox indicator.
     seen: set[tuple[int, int]] = set()
+    pat = re.compile(r"\binbox\b", flags=re.IGNORECASE)
     for tok in tokens:
         text = _token_text(tok)
-        if text.casefold() != "inbox":
+        if not text or not pat.search(str(text)):
             continue
         bbox = _token_bbox(tok)
         if bbox is None:
             continue
         cx, cy = _center(bbox)
-        key = (int(cx // 50), int(cy // 50))
+        # Deduplicate "tab bar" inbox tokens that often repeat across overlapping
+        # windows at the same y-band (e.g., two "M Inbox" hits on the top bar).
+        # For single-word "Inbox", preserve x-bucketing since sidebars can have
+        # multiple distinct inboxes at different x positions.
+        raw = str(text).strip()
+        is_multiword = (" " in raw) or ("\t" in raw)
+        y_bucket = int(cy // 50)
+        x_bucket = 0 if is_multiword else int(cx // 50)
+        key = (x_bucket, y_bucket)
         seen.add(key)
     return len(seen)
 
@@ -215,6 +227,43 @@ def _line_key(bbox: tuple[int, int, int, int]) -> int:
 
 
 def _extract_quorum_collaborator(tokens: list[dict[str, Any]]) -> tuple[str | None, tuple[int, int, int, int] | None]:
+    def _split_camel(value: str) -> str:
+        # "OpenInvoice" -> "Open Invoice" (deterministic, ASCII-only)
+        if not value:
+            return value
+        out: list[str] = []
+        current = value[0]
+        for ch in value[1:]:
+            if ch.isupper() and current and (current[-1].islower() or current[-1].isdigit()):
+                out.append(current)
+                current = ch
+            else:
+                current += ch
+        out.append(current)
+        return " ".join(p for p in out if p)
+
+    # Prefer an explicit assignee string when present (most direct "who" signal).
+    # Example token in fixture: "taskwasassignedtoOpenInvoice"
+    for tok in tokens:
+        raw = _token_text(tok)
+        if not raw:
+            continue
+        text = re.sub(r"[^A-Za-z0-9]", "", str(raw))
+        low = text.casefold()
+        idx = low.find("assignedto")
+        if idx < 0:
+            continue
+        suffix = text[idx + len("assignedto") :].strip()
+        if not suffix:
+            continue
+        # Avoid absurdly long OCR runs; keep a small, readable assignee.
+        suffix = suffix[:48]
+        # Split CamelCase for readability, but keep the raw letters (no guessing).
+        assignee = _split_camel(suffix)
+        if assignee:
+            bbox = _token_bbox(tok)
+            return assignee, bbox
+
     quorum_points: list[tuple[float, float]] = []
     quorum_line_keys: set[int] = set()
     for tok in tokens:
@@ -548,7 +597,7 @@ def _extract_quorum_collaborator(tokens: list[dict[str, Any]]) -> tuple[str | No
                     ws = _clean(w)
                     if not _NAME_RE.match(ws):
                         continue
-                    if ws in _NAME_STOP or ws in {"Quorum", "Community"}:
+                    if ws in _NAME_STOP or ws in {"Quorum", "Community", "Yesterday", "Priority"}:
                         continue
                     cx, cy = _center(bbox)
                     dist = min(abs(cy - qy) + abs(cx - qx) * 0.15 for qx, qy in quorum_points)

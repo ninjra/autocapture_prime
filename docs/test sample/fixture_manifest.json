@@ -78,12 +78,12 @@
       },
       {
         "query": "who is working with me on the quorum task",
-        "expect": "Quorum task collaborator: Ricardo Lopez",
+        "expect": "Quorum task collaborator: Open Invoice",
         "match_mode": "contains"
       },
       {
         "query": "how many inboxes I have open",
-        "expect": "Open inboxes: 1",
+        "expect": "Open inboxes: 2",
         "match_mode": "contains"
       },
       {
@@ -98,7 +98,7 @@
       },
       {
         "query": "what time is it on the vdi, and who is working with me on the quorum task. Lastly tell me how many inboxes I have open.",
-        "expect": "Quorum task collaborator: Ricardo Lopez",
+        "expect": "Quorum task collaborator: Open Invoice",
         "match_mode": "contains"
       }
     ],

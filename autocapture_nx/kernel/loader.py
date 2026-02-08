@@ -6,6 +6,7 @@ import json
 import hashlib
 import math
 import os
+import atexit
 import platform
 import getpass
 import time
@@ -157,6 +158,15 @@ class Kernel:
         self._package_versions_cache: dict[str, str] | None = None
         self._network_deny_prev: bool | None = None
         self._instance_lock: Any | None = None
+        self._atexit_registered = False
+
+    def _atexit_shutdown(self) -> None:
+        # Best-effort cleanup for callers that forget to call Kernel.shutdown().
+        # Avoid leaving run_state=running (which triggers crash-loop safe mode).
+        try:
+            self.shutdown()
+        except Exception:
+            pass
 
     def boot(self, *, start_conductor: bool = True, fast_boot: bool | None = None) -> System:
         profiler = StartupProfiler(enabled=_startup_profile_enabled())
@@ -281,6 +291,9 @@ class Kernel:
             self._run_integrity_sweep(builder, capabilities)
         profiler.mark("integrity_sweep")
         self.system = System(config=self.config, plugins=plugins, capabilities=capabilities)
+        if not self._atexit_registered:
+            atexit.register(self._atexit_shutdown)
+            self._atexit_registered = True
         if start_conductor and not fast_boot:
             try:
                 from autocapture.runtime.conductor import create_conductor
