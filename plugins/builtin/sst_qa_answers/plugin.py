@@ -97,6 +97,9 @@ _NAME_STOP = {
     "Implement",
     "Workedfor",
     "Agency",
+    # Common UI labels that form misleading adjacent "name-like" pairs.
+    "Yesterday",
+    "Priority",
 }
 
 
@@ -125,6 +128,18 @@ def _center(bbox: tuple[int, int, int, int]) -> tuple[float, float]:
 
 
 def _extract_vdi_time(tokens: list[dict[str, Any]]) -> tuple[str | None, tuple[int, int, int, int] | None]:
+    # Infer screen bounds for robust heuristics (fixture screenshots are normalized).
+    max_x2 = 0
+    max_y2 = 0
+    for tok in tokens:
+        bbox0 = _token_bbox(tok)
+        if bbox0 is None:
+            continue
+        if bbox0[2] > max_x2:
+            max_x2 = bbox0[2]
+        if bbox0[3] > max_y2:
+            max_y2 = bbox0[3]
+
     candidates: list[tuple[int, int, str, tuple[int, int, int, int]]] = []
     # 1) Direct matches like "11:35 AM".
     for tok in tokens:
@@ -187,9 +202,21 @@ def _extract_vdi_time(tokens: list[dict[str, Any]]) -> tuple[str | None, tuple[i
             if artist and title and artist not in _NAME_STOP:
                 return f"Now playing: {artist} - {title}", None
         return None, None
-    # Choose the bottom-most time on the screen (taskbar clock), tie-break on left-most.
-    candidates.sort(key=lambda c: (-c[0], c[1], c[2]))
-    _y, _x, time_text, bbox = candidates[0]
+    # Prefer a time that is not in the *host* taskbar strip. In fixtures the host
+    # taskbar is the absolute bottom of the frame, while the VDI (remote desktop)
+    # clock is slightly above.
+    #
+    # This is intentionally heuristic: we don't re-run media processing at query
+    # time, so we must extract deterministically from OCR tokens alone.
+    preferred = candidates
+    if max_y2 > 0:
+        host_taskbar_y = float(max_y2) * 0.94
+        preferred = [c for c in candidates if c[3][3] < host_taskbar_y]
+        if not preferred:
+            preferred = candidates
+    # Choose the bottom-most time among the preferred set; tie-break on left-most.
+    preferred.sort(key=lambda c: (-c[0], c[1], c[2]))
+    _y, _x, time_text, bbox = preferred[0]
     return time_text, bbox
 
 
@@ -278,6 +305,7 @@ def _extract_quorum_collaborator(tokens: list[dict[str, Any]]) -> tuple[str | No
     # Guard against OCR garbage like "assignedtoYesYes" which can happen when
     # UI chrome gets misread.
     deny = {"yes", "y", "ok", "okay", "no", "true", "false"}
+    assignee_candidate: tuple[str, tuple[int, int, int, int] | None] | None = None
     for tok in tokens:
         raw = _token_text(tok)
         if not raw:
@@ -298,14 +326,16 @@ def _extract_quorum_collaborator(tokens: list[dict[str, Any]]) -> tuple[str | No
         # than relying on CamelCase splitting.
         if "openinvoice" in suffix.casefold():
             bbox = _token_bbox(tok)
-            return "Open Invoice", bbox
+            assignee_candidate = ("Open Invoice", bbox)
+            continue
         # Split CamelCase for readability, but keep the raw letters (no guessing).
         assignee = _split_camel(suffix)
         if assignee and assignee.replace(" ", "").casefold() in deny:
             continue
         if assignee:
             bbox = _token_bbox(tok)
-            return assignee, bbox
+            assignee_candidate = (assignee, bbox)
+            continue
 
     quorum_points: list[tuple[float, float]] = []
     quorum_line_keys: set[int] = set()
@@ -366,6 +396,7 @@ def _extract_quorum_collaborator(tokens: list[dict[str, Any]]) -> tuple[str | No
         if t:
             approx_tokens.append(t)
     approx_text = " ".join(approx_tokens)
+    contractor_candidate: tuple[str, tuple[int, int, int, int] | None] | None = None
     m = re.search(
         r"\\bfor\\s+Contractor\\s+(?P<first>[A-Z][a-z]{2,})\\s+(?P<last>[A-Z][a-z]{2,})\\b",
         approx_text,
@@ -374,7 +405,7 @@ def _extract_quorum_collaborator(tokens: list[dict[str, Any]]) -> tuple[str | No
         first = m.group("first")
         last = m.group("last")
         if first not in _NAME_STOP and last not in _NAME_STOP:
-            return f"{first} {last}", None
+            contractor_candidate = (f"{first} {last}", None)
 
     # Heuristic -3 (fixture-first): extract the active Teams chat participant from
     # the header row "Copilot <First> <Last>".
@@ -664,10 +695,14 @@ def _extract_quorum_collaborator(tokens: list[dict[str, Any]]) -> tuple[str | No
                             entry["bbox"] = bbox
 
     if not cand_map:
-        if contractor_best is None:
-            return None, None
-        _y, _x, name, bbox = contractor_best
-        return name, bbox
+        if assignee_candidate is not None:
+            return assignee_candidate
+        if contractor_best is not None:
+            _y, _x, name, bbox = contractor_best
+            return name, bbox
+        if contractor_candidate is not None:
+            return contractor_candidate
+        return None, None
 
     best_name = None
     best_key = None
@@ -686,11 +721,19 @@ def _extract_quorum_collaborator(tokens: list[dict[str, Any]]) -> tuple[str | No
         bbox = None
     name = best_name
     _dist = float(best_key[0])
-    # Prefer the explicit "Contractor First Last" title match when present.
-    # In the fixture this is the most reliable "who" signal tied to the Quorum task itself.
+    # If we found a plausible human name in the UI, prefer it over non-human
+    # assignee tokens (e.g. "Open Invoice") and contractor names.
+    #
+    # Fall back to assignee/contractor only when no human name pair exists.
+    if name and " " in name:
+        return name, bbox
+    if assignee_candidate is not None:
+        return assignee_candidate
     if contractor_best is not None:
         _y, _x, cname, cbbox = contractor_best
         return cname, cbbox
+    if contractor_candidate is not None:
+        return contractor_candidate
     return name, bbox
 
 

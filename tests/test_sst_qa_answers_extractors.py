@@ -2,6 +2,18 @@ import unittest
 
 
 class SSTQAAnswersExtractorsTests(unittest.TestCase):
+    def test_extract_vdi_time_prefers_non_host_taskbar_clock(self) -> None:
+        from plugins.builtin.sst_qa_answers import plugin as qa
+
+        # Two clocks: a host taskbar clock at the absolute bottom, and a VDI
+        # clock slightly above. The extractor should pick the VDI clock.
+        tokens = [
+            {"text": "12:55 PM", "bbox": [1800, 980, 1900, 1000]},  # host taskbar
+            {"text": "11:55 AM", "bbox": [1700, 860, 1780, 880]},  # VDI taskbar
+        ]
+        value, _bbox = qa._extract_vdi_time(tokens)
+        self.assertEqual(value, "11:55 AM")
+
     def test_count_inboxes_counts_multiword_tokens(self) -> None:
         from plugins.builtin.sst_qa_answers import plugin as qa
 
@@ -31,6 +43,19 @@ class SSTQAAnswersExtractorsTests(unittest.TestCase):
         collaborator, bbox = qa._extract_quorum_collaborator(tokens)
         self.assertEqual(collaborator, "Open Invoice")
         self.assertEqual(bbox, (10, 120, 320, 140))
+
+    def test_extract_quorum_collaborator_prefers_human_over_open_invoice_group(self) -> None:
+        from plugins.builtin.sst_qa_answers import plugin as qa
+
+        tokens = [
+            {"text": "taskwasassignedtoOpenInvoice", "bbox": [10, 120, 320, 140]},
+            # Teams header row: "Copilot Alice Smith"
+            {"text": "Copilot", "bbox": [10, 10, 80, 30]},
+            {"text": "Alice", "bbox": [90, 10, 140, 30]},
+            {"text": "Smith", "bbox": [150, 10, 210, 30]},
+        ]
+        collaborator, _bbox = qa._extract_quorum_collaborator(tokens)
+        self.assertEqual(collaborator, "Alice Smith")
 
     def test_extract_quorum_collaborator_ignores_yesyes_garbage(self) -> None:
         from plugins.builtin.sst_qa_answers import plugin as qa
