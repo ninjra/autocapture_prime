@@ -808,6 +808,12 @@ class SubprocessPlugin:
         self._last_used_mono = time.monotonic()
         self._capabilities_probe_only = False
 
+        # Register early so the reaper/cap logic can observe this instance even
+        # during init-time host startups (important for WSL stability).
+        with _SUBPROCESS_INSTANCES_LOCK:
+            _SUBPROCESS_INSTANCES.add(self)
+        _ensure_subprocess_reaper_started()
+
         lazy_start_env = os.getenv("AUTOCAPTURE_PLUGINS_LAZY_START", "1").strip().lower()
         self._lazy_start = lazy_start_env not in {"0", "false", "no"}
         # WSL stability guard: spawning a subprocess for every plugin during load
@@ -839,9 +845,6 @@ class SubprocessPlugin:
         else:
             self._start_host()
         atexit.register(self.close)
-        with _SUBPROCESS_INSTANCES_LOCK:
-            _SUBPROCESS_INSTANCES.add(self)
-        _ensure_subprocess_reaper_started()
 
     def capabilities(self) -> dict[str, Any]:
         # Back-compat: if the manifest didn't specify `provides`, we must enumerate
@@ -882,6 +885,9 @@ class SubprocessPlugin:
             pass
 
     def _start_host(self) -> None:
+        # Treat starting a host as "use" so LRU eviction does not immediately
+        # reap the fresh host under cap pressure.
+        self._last_used_mono = time.monotonic()
         # Before spawning another host_runner, ensure the reaper's cap/TTL logic
         # actually runs. The background reaper uses an interval gate to keep
         # overhead low, but bursty startup must not bypass the cap (WSL OOM).
@@ -911,6 +917,12 @@ class SubprocessPlugin:
                 self._refresh_caps()
         finally:
             _release_spawn_slot()
+        # Enforce the host cap promptly after a spawn to prevent slow buildup
+        # in bursty startup scenarios (especially WSL).
+        try:
+            reap_subprocess_hosts(force=False, bypass_interval_gate=True)
+        except Exception:
+            pass
         try:
             pid = getattr(getattr(self._host, "_proc", None), "pid", None) if self._host is not None else None
             append_audit_event(
