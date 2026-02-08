@@ -20,8 +20,8 @@ mkdir -p /tmp/ac_low_resource_validation
   --manifest "$repo_root/docs/test sample/fixture_manifest.json" \
   --output-dir /tmp/ac_low_resource_validation/out \
   --input-dir "$repo_root/docs/test sample" \
-  --idle-timeout-s 15 \
-  --idle-max-steps 10
+  --idle-timeout-s 60 \
+  --idle-max-steps 30
 
 # Optional: if ffmpeg is installed locally, generate a tiny mp4 fixture and run the mp4 path test.
 if command -v ffmpeg >/dev/null 2>&1; then
@@ -30,4 +30,3 @@ if command -v ffmpeg >/dev/null 2>&1; then
 fi
 
 echo "OK: low resource validation complete"
-

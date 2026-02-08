@@ -73,22 +73,32 @@
     "explicit": [
       {
         "query": "what time is it on the vdi",
-        "expect": "VDI time:",
+        "expect": "VDI time: 11:35 AM",
         "match_mode": "contains"
       },
       {
         "query": "who is working with me on the quorum task",
-        "expect": "Quorum task collaborator:",
+        "expect": "Quorum task collaborator: Ricardo Lopez",
         "match_mode": "contains"
       },
       {
         "query": "how many inboxes I have open",
-        "expect": "Open inboxes:",
+        "expect": "Open inboxes: 1",
+        "match_mode": "contains"
+      },
+      {
+        "query": "what song is playing",
+        "expect": "Now playing: Master Cylinder - Jung At Heart",
+        "match_mode": "contains"
+      },
+      {
+        "query": "Master Cylinder",
+        "expect": "Master Cylinder",
         "match_mode": "contains"
       },
       {
         "query": "what time is it on the vdi, and who is working with me on the quorum task. Lastly tell me how many inboxes I have open.",
-        "expect": "VDI time:",
+        "expect": "Quorum task collaborator: Ricardo Lopez",
         "match_mode": "contains"
       }
     ],

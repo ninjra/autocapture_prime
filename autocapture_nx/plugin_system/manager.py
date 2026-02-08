@@ -240,9 +240,28 @@ class PluginManager:
         self._write_user_config(user_cfg)
 
     def approve_hashes(self) -> Dict[str, Any]:
-        from tools.hypervisor.scripts.update_plugin_locks import update_plugin_locks
+        # `tools/` is not guaranteed to be importable when autocapture is installed
+        # as a package (e.g., running `.venv/bin/autocapture` outside repo PYTHONPATH).
+        # Fall back to loading the updater by path.
+        try:
+            from tools.hypervisor.scripts.update_plugin_locks import update_plugin_locks  # type: ignore
 
-        return update_plugin_locks()
+            return update_plugin_locks()
+        except Exception:
+            import importlib.util
+
+            from autocapture_nx.kernel.paths import resolve_repo_path
+
+            path = resolve_repo_path("tools/hypervisor/scripts/update_plugin_locks.py")
+            spec = importlib.util.spec_from_file_location("autocapture_update_plugin_locks", str(path))
+            if spec is None or spec.loader is None:
+                raise RuntimeError("plugin_locks_updater_unavailable")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            updater = getattr(module, "update_plugin_locks", None)
+            if not callable(updater):
+                raise RuntimeError("plugin_locks_updater_missing")
+            return updater()
 
     def settings_get(self, plugin_id: str) -> dict[str, Any]:
         manifests = self._registry.discover_manifests()
