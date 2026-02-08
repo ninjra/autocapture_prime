@@ -45,6 +45,61 @@ _SUBPROCESS_INSTANCES_LOCK = threading.Lock()
 _SUBPROCESS_REAPER_THREAD: threading.Thread | None = None
 _SUBPROCESS_REAPER_STOP = threading.Event()
 _SUBPROCESS_LAST_REAP_MONO = 0.0
+_SUBPROCESS_SPAWN_CV = threading.Condition()
+_SUBPROCESS_SPAWN_ACTIVE = 0
+
+
+def _notify_subprocess_host_slot_change() -> None:
+    # Wake any threads waiting to spawn a new host due to cap pressure.
+    try:
+        with _SUBPROCESS_SPAWN_CV:
+            _SUBPROCESS_SPAWN_CV.notify_all()
+    except Exception:
+        return
+
+
+def _spawn_concurrency_from_config(config: dict[str, Any]) -> int:
+    hosting = _hosting_cfg(config)
+    env = os.getenv("AUTOCAPTURE_PLUGINS_SUBPROCESS_SPAWN_CONCURRENCY", "").strip()
+    wsl = _is_wsl()
+    default = 1 if wsl else 8
+    cap = int(hosting.get("subprocess_spawn_concurrency", default) or default)
+    if env:
+        try:
+            cap = int(env)
+        except Exception:
+            pass
+    if cap < 1:
+        cap = 1
+    return cap
+
+
+def _acquire_spawn_slot(*, config: dict[str, Any], wait_timeout_s: float) -> None:
+    """Limit concurrent host_runner spawns to avoid WSL OOM spikes."""
+    global _SUBPROCESS_SPAWN_ACTIVE
+    cap = _spawn_concurrency_from_config(config)
+    deadline = time.monotonic() + max(0.0, float(wait_timeout_s))
+    while True:
+        with _SUBPROCESS_SPAWN_CV:
+            if _SUBPROCESS_SPAWN_ACTIVE < cap:
+                _SUBPROCESS_SPAWN_ACTIVE += 1
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise PluginTimeoutError(
+                    f"subprocess spawn concurrency cap reached (active={_SUBPROCESS_SPAWN_ACTIVE} cap={cap})"
+                )
+            _SUBPROCESS_SPAWN_CV.wait(timeout=min(0.25, remaining))
+
+
+def _release_spawn_slot() -> None:
+    global _SUBPROCESS_SPAWN_ACTIVE
+    try:
+        with _SUBPROCESS_SPAWN_CV:
+            _SUBPROCESS_SPAWN_ACTIVE = max(0, int(_SUBPROCESS_SPAWN_ACTIVE) - 1)
+            _SUBPROCESS_SPAWN_CV.notify_all()
+    except Exception:
+        return
 
 
 def _subprocess_limits_from_config(config: dict[str, Any]) -> tuple[int, float]:
@@ -181,6 +236,8 @@ def reap_subprocess_hosts(
                     closed_cap += 1
                 except Exception:
                     continue
+            if closed_cap:
+                _notify_subprocess_host_slot_change()
 
     with _SUBPROCESS_INSTANCES_LOCK:
         remaining = sum(1 for inst in _SUBPROCESS_INSTANCES if getattr(inst, "_host", None) is not None)
@@ -749,6 +806,7 @@ class SubprocessPlugin:
         self._cap_methods: dict[str, set[str]] = {}
         self._in_flight = 0
         self._last_used_mono = time.monotonic()
+        self._capabilities_probe_only = False
 
         lazy_start_env = os.getenv("AUTOCAPTURE_PLUGINS_LAZY_START", "1").strip().lower()
         self._lazy_start = lazy_start_env not in {"0", "false", "no"}
@@ -789,6 +847,7 @@ class SubprocessPlugin:
         # Back-compat: if the manifest didn't specify `provides`, we must enumerate
         # capabilities from the plugin itself, which requires starting the host.
         if not self._caps and self._host is None:
+            self._capabilities_probe_only = True
             self._start_host()
         return self._caps
 
@@ -800,6 +859,7 @@ class SubprocessPlugin:
             self._host.close()
         finally:
             self._host = None
+            _notify_subprocess_host_slot_change()
 
     def _close_host_for_reap(self, *, reason: str) -> None:
         host = getattr(self, "_host", None)
@@ -810,6 +870,7 @@ class SubprocessPlugin:
             host.close()
         finally:
             self._host = None
+            _notify_subprocess_host_slot_change()
         try:
             append_audit_event(
                 action="plugin.host.reap",
@@ -828,23 +889,28 @@ class SubprocessPlugin:
             reap_subprocess_hosts(force=False, bypass_interval_gate=True)
         except Exception:
             pass
-        with filesystem_guard_suspended():
-            self._host = PluginProcess(
-                self._plugin_path,
-                self._callable_name,
-                self._plugin_id,
-                self._network_allowed,
-                self._config,
-                self._plugin_config,
-                capabilities=self._capabilities,
-                allowed_capabilities=self._allowed_capabilities,
-                filesystem_policy=self._filesystem_policy,
-                rng_seed=self._rng_seed,
-                rng_seed_hex=self._rng_seed_hex,
-                rng_strict=self._rng_strict,
-                rng_enabled=self._rng_enabled,
-            )
-            self._refresh_caps()
+        wait_s = float(os.getenv("AUTOCAPTURE_PLUGINS_SUBPROCESS_SPAWN_WAIT_S", "10") or 10)
+        _acquire_spawn_slot(config=self._config, wait_timeout_s=wait_s)
+        try:
+            with filesystem_guard_suspended():
+                self._host = PluginProcess(
+                    self._plugin_path,
+                    self._callable_name,
+                    self._plugin_id,
+                    self._network_allowed,
+                    self._config,
+                    self._plugin_config,
+                    capabilities=self._capabilities,
+                    allowed_capabilities=self._allowed_capabilities,
+                    filesystem_policy=self._filesystem_policy,
+                    rng_seed=self._rng_seed,
+                    rng_seed_hex=self._rng_seed_hex,
+                    rng_strict=self._rng_strict,
+                    rng_enabled=self._rng_enabled,
+                )
+                self._refresh_caps()
+        finally:
+            _release_spawn_slot()
         try:
             pid = getattr(getattr(self._host, "_proc", None), "pid", None) if self._host is not None else None
             append_audit_event(

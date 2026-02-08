@@ -82,6 +82,19 @@ def main() -> int:
         "source_doc": str(doc_path.relative_to(_REPO_ROOT)),
         "items": sorted(out_items, key=lambda row: row["id"]),
     }
+    # Keep this file stable across runs unless the underlying content changes.
+    # The gate reads this artifact but the repo should not churn on timestamps.
+    if out_path.exists():
+        try:
+            existing = _load_json(out_path)
+            existing_sans_ts = dict(existing)
+            existing_sans_ts.pop("generated_utc", None)
+            payload_sans_ts = dict(payload)
+            payload_sans_ts.pop("generated_utc", None)
+            if existing_sans_ts == payload_sans_ts:
+                payload["generated_utc"] = str(existing.get("generated_utc") or payload["generated_utc"])
+        except Exception:
+            pass
     out_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     print(f"OK: wrote {out_path.relative_to(_REPO_ROOT)} items={len(out_items)}")
     return 0

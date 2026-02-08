@@ -1797,6 +1797,14 @@ class PluginRegistry:
                     except Exception:
                         self._shutdown_instance(instance)
                         raise
+                    # WSL stability: if we had to spin up a subprocess host just to
+                    # enumerate capabilities at boot, close it immediately. The
+                    # SubprocessPlugin will restart lazily on first real use.
+                    try:
+                        if bool(getattr(instance, "_capabilities_probe_only", False)):
+                            instance.close()
+                    except Exception:
+                        pass
                     if isinstance(caps, dict):
                         manifest_provides = manifest.get("provides", [])
                         if isinstance(manifest_provides, list) and caps:
