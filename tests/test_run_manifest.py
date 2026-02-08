@@ -61,6 +61,8 @@ class RunManifestTests(unittest.TestCase):
     def test_run_manifest_written(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            data_dir = root / "data"
+            data_dir.mkdir(parents=True, exist_ok=True)
             default_path = root / "default.json"
             user_path = root / "user.json"
             schema_path = root / "schema.json"
@@ -78,11 +80,17 @@ class RunManifestTests(unittest.TestCase):
             kernel.config = effective.data
             kernel.effective_config = effective
             ensure_run_id(kernel.config)
+            kernel.config.setdefault("storage", {})["data_dir"] = str(data_dir)
 
             store = _DictStore()
             caps = _Caps(store, object())
             builder = EventBuilder(kernel.config, _DummyJournal(), _DummyLedger(), _DummyAnchor())
-            plugins = [SimpleNamespace(plugin_id="builtin.storage.encrypted")]
+            plugins = [
+                SimpleNamespace(
+                    plugin_id="builtin.storage.encrypted",
+                    manifest={"plugin_id": "builtin.storage.encrypted", "version": "0.1.0", "permissions": {"network": False}},
+                )
+            ]
 
             kernel._record_storage_manifest(builder, caps, plugins)
 
@@ -96,10 +104,15 @@ class RunManifestTests(unittest.TestCase):
             self.assertIn("packages", payload)
             self.assertIsInstance(payload.get("packages"), dict)
             self.assertIn("package_fingerprint", payload)
+            self.assertIn("plugin_provenance", payload)
+            self.assertIn("effective_path", payload.get("config", {}))
+            self.assertIn("policy_snapshot", payload)
 
     def test_run_manifest_final_written(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            data_dir = root / "data"
+            data_dir.mkdir(parents=True, exist_ok=True)
             default_path = root / "default.json"
             user_path = root / "user.json"
             schema_path = root / "schema.json"
@@ -117,11 +130,17 @@ class RunManifestTests(unittest.TestCase):
             kernel.config = effective.data
             kernel.effective_config = effective
             ensure_run_id(kernel.config)
+            kernel.config.setdefault("storage", {})["data_dir"] = str(data_dir)
 
             store = _DictStore()
             system = SimpleNamespace(
                 config=kernel.config,
-                plugins=[SimpleNamespace(plugin_id="builtin.storage.encrypted")],
+                plugins=[
+                    SimpleNamespace(
+                        plugin_id="builtin.storage.encrypted",
+                        manifest={"plugin_id": "builtin.storage.encrypted", "version": "0.1.0", "permissions": {"network": False}},
+                    )
+                ],
                 get=lambda name: store if name == "storage.metadata" else None,
             )
             kernel.system = system
@@ -137,6 +156,8 @@ class RunManifestTests(unittest.TestCase):
             self.assertIn("packages", payload)
             self.assertIsInstance(payload.get("packages"), dict)
             self.assertIn("package_fingerprint", payload)
+            self.assertIn("config", payload)
+            self.assertIn("plugin_provenance", payload)
 
 
 if __name__ == "__main__":

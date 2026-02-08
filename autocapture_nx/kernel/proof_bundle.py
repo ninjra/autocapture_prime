@@ -15,6 +15,7 @@ from typing import Any, Iterable
 from autocapture_nx.kernel.canonical_json import dumps
 from autocapture_nx.kernel.hashing import sha256_text
 from autocapture_nx.kernel.ids import encode_record_id_component
+from autocapture_nx.kernel.policy_snapshot import policy_snapshot_hash as _policy_hash
 from autocapture_nx.plugin_system.api import PluginContext
 from plugins.builtin.citation_basic.plugin import CitationValidator
 
@@ -122,6 +123,36 @@ def export_proof_bundle(
         anchor_out = tmp_root / "anchors.ndjson"
         _write_jsonl(anchor_out, anchors)
 
+        # META-06: include full policy snapshots referenced by the ledger entries.
+        policy_hashes = sorted(
+            {
+                str(entry.get("policy_snapshot_hash"))
+                for entry in ledger_entries
+                if isinstance(entry, dict) and entry.get("policy_snapshot_hash")
+            }
+        )
+        policy_dir = tmp_root / "policy_snapshots"
+        if policy_hashes:
+            policy_dir.mkdir(parents=True, exist_ok=True)
+        for policy_hash in policy_hashes:
+            record_id = f"policy_snapshot/{policy_hash}"
+            record = None
+            try:
+                record = metadata.get(record_id)
+            except Exception:
+                record = None
+            if not isinstance(record, dict):
+                warnings.append(f"policy_snapshot_missing:{policy_hash}")
+                continue
+            payload = record.get("payload") if isinstance(record.get("payload"), dict) else None
+            if payload is None:
+                warnings.append(f"policy_snapshot_invalid:{policy_hash}")
+                continue
+            (policy_dir / f"{policy_hash}.json").write_text(
+                json.dumps(payload, sort_keys=True, indent=2),
+                encoding="utf-8",
+            )
+
         if blob_manifest:
             (blobs_dir / "manifest.json").write_text(
                 json.dumps({"schema_version": 1, "files": blob_manifest}, sort_keys=True, indent=2),
@@ -156,6 +187,7 @@ def export_proof_bundle(
             "ledger_entries": len(ledger_entries),
             "anchors": len(anchors),
             "blobs": blob_count,
+            "policy_snapshot_hashes": policy_hashes,
             "files": {
                 "metadata": "metadata.jsonl",
                 "ledger": "ledger.ndjson",
@@ -163,6 +195,7 @@ def export_proof_bundle(
                 "verification": "verification.json",
                 "blobs_manifest": "blobs/manifest.json" if blob_manifest else None,
                 "citations": "citations.json" if citations is not None else None,
+                "policy_snapshots_dir": "policy_snapshots" if policy_hashes else None,
             },
         }
         (tmp_root / "manifest.json").write_text(
@@ -346,6 +379,36 @@ def _build_verification_report(
         result = validator.resolve(citations)
         report["citations_ok"] = bool(result.get("ok"))
         report["citations_errors"] = result.get("errors", [])
+
+    # META-06: verify policy snapshots exist and match the hashes referenced in the ledger.
+    missing: list[str] = []
+    mismatched: list[str] = []
+    try:
+        for line in ledger_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            entry = json.loads(line)
+            ph = entry.get("policy_snapshot_hash")
+            if not ph:
+                continue
+            record_id = f"policy_snapshot/{ph}"
+            rec = metadata.get(record_id) if hasattr(metadata, "get") else None
+            if not isinstance(rec, dict) or not isinstance(rec.get("payload"), dict):
+                missing.append(str(ph))
+                continue
+            payload = rec["payload"]
+            expected = _policy_hash(payload)
+            if expected != str(ph):
+                mismatched.append(str(ph))
+    except Exception:
+        # Best-effort: keep verification report stable even if policy snapshot checks fail.
+        missing = missing
+        mismatched = mismatched
+    report["policy_snapshot"] = {
+        "ok": (not missing and not mismatched),
+        "missing": sorted(set(missing)),
+        "mismatched": sorted(set(mismatched)),
+    }
     return report
 
 

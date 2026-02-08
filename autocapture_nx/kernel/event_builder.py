@@ -12,6 +12,7 @@ from autocapture_nx.kernel.errors import ConfigError
 from autocapture_nx.kernel.evidence import validate_evidence_record
 from autocapture_nx.kernel.hashing import sha256_text
 from autocapture_nx.kernel.ids import prefixed_id
+from autocapture_nx.kernel.policy_snapshot import policy_snapshot_hash, policy_snapshot_payload
 from autocapture_nx.kernel.timebase import normalize_time, utc_iso_z, tz_offset_minutes
 
 
@@ -47,7 +48,8 @@ class EventBuilder:
 
     def policy_snapshot_hash(self) -> str:
         if self._policy_hash is None:
-            self._policy_hash = sha256_text(dumps(_canonicalize_config_for_hash(self._config)))
+            payload = policy_snapshot_payload(self._config)
+            self._policy_hash = policy_snapshot_hash(payload)
         return self._policy_hash
 
     def journal_event(

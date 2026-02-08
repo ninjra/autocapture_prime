@@ -28,10 +28,11 @@ from autocapture_nx.kernel.determinism import apply_runtime_determinism
 from autocapture_nx.kernel.telemetry import record_telemetry
 from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
 from autocapture_nx.kernel.metadata_store import persist_unavailable_record
-from autocapture_nx.kernel.atomic_write import atomic_write_json
+from autocapture_nx.kernel.atomic_write import atomic_write_json, atomic_write_text
 from autocapture_nx.kernel.instance_lock import acquire_instance_lock
 from autocapture_nx.kernel.run_state import build_run_state_payload, write_run_state
 from autocapture_nx.kernel.timebase import utc_now_z
+from autocapture_nx.kernel.policy_snapshot import persist_policy_snapshot
 from autocapture_nx.plugin_system.registry import PluginRegistry
 from autocapture_nx.plugin_system.runtime import global_network_deny, set_global_network_deny
 from autocapture_nx.plugin_system.host import close_all_subprocess_hosts
@@ -162,6 +163,55 @@ class Kernel:
         self._network_deny_prev: bool | None = None
         self._instance_lock: Any | None = None
         self._atexit_registered = False
+
+    def _archive_if_different(self, path: Path, new_text: str, *, ts_utc: str) -> None:
+        """Archive existing file before overwriting (no deletion policy)."""
+        if not path.exists():
+            return
+        try:
+            current = path.read_text(encoding="utf-8")
+        except Exception:
+            current = ""
+        if current == new_text:
+            return
+        suffix = str(ts_utc).replace(":", "").replace("-", "").replace(".", "")
+        archived = path.with_name(f"{path.name}.bak.{suffix}")
+        try:
+            if not archived.exists():
+                path.replace(archived)
+        except Exception:
+            return
+
+    def _persist_effective_config_snapshot(self, *, ts_utc: str) -> dict[str, Any]:
+        effective = self.effective_config
+        if effective is None:
+            return {}
+        storage_cfg = self.config.get("storage", {}) if isinstance(self.config, dict) else {}
+        data_dir = Path(str(storage_cfg.get("data_dir", "data")))
+        out_path = data_dir / "config.effective.json"
+        payload = _canonicalize_config_for_hash(effective.data)
+        text = json.dumps(payload, sort_keys=True, indent=2)
+        self._archive_if_different(out_path, text, ts_utc=str(ts_utc))
+        atomic_write_text(out_path, text, fsync=True)
+        return {"path": str(out_path), "sha256": effective.effective_hash}
+
+    def _persist_policy_snapshot(self, *, ts_utc: str, metadata: Any | None = None) -> dict[str, Any]:
+        storage_cfg = self.config.get("storage", {}) if isinstance(self.config, dict) else {}
+        data_dir = Path(str(storage_cfg.get("data_dir", "data")))
+        try:
+            result = persist_policy_snapshot(
+                config=self.config,
+                data_dir=data_dir,
+                metadata=metadata,
+                ts_utc=str(ts_utc),
+            )
+        except Exception:
+            return {}
+        return {
+            "hash": result.snapshot_hash,
+            "record_id": result.record_id,
+            "path": result.path,
+        }
 
     def _atexit_shutdown(self) -> None:
         # Best-effort cleanup for callers that forget to call Kernel.shutdown().
@@ -826,6 +876,8 @@ class Kernel:
         start_ts = utc_now_z()
         self._run_started_at = start_ts
         self._run_started_mono = time.monotonic()
+        snapshot_info = self._persist_effective_config_snapshot(ts_utc=start_ts)
+        policy_info = self._persist_policy_snapshot(ts_utc=start_ts, metadata=None)
         payload: dict[str, Any] = {
             "event": "system.start",
             "run_id": builder.run_id,
@@ -833,8 +885,12 @@ class Kernel:
             "config": {
                 "schema_hash": effective.schema_hash if effective else None,
                 "effective_hash": effective.effective_hash if effective else None,
+                "effective_path": snapshot_info.get("path"),
+                "effective_sha256": snapshot_info.get("sha256"),
             },
             "locks": lock_hashes,
+            "policy_snapshot_hash": builder.policy_snapshot_hash(),
+            "policy_snapshot_path": policy_info.get("path"),
         }
         payload["safe_mode"] = bool(self.safe_mode)
         if self.safe_mode_reason:
@@ -869,6 +925,15 @@ class Kernel:
         effective = self.effective_config
         plugin_ids: list[str] = []
         plugin_versions: dict[str, str] = {}
+        plugin_provenance: dict[str, dict[str, Any]] = {}
+        plugin_lock: dict[str, Any] = {}
+        try:
+            locks_cfg = self.config.get("plugins", {}).get("locks", {})
+            lockfile_path = resolve_repo_path(locks_cfg.get("lockfile", "config/plugin_locks.json"))
+            if lockfile_path.exists():
+                plugin_lock = json.loads(lockfile_path.read_text(encoding="utf-8")).get("plugins", {}) or {}
+        except Exception:
+            plugin_lock = {}
         for plugin in plugins:
             pid = getattr(plugin, "plugin_id", None) or plugin.manifest.get("plugin_id")
             if not pid:
@@ -879,12 +944,25 @@ class Kernel:
                 version = plugin.manifest.get("version")
             if version:
                 plugin_versions[pid] = str(version)
+            perms: dict[str, Any] = {}
+            if hasattr(plugin, "manifest") and isinstance(plugin.manifest, dict):
+                perms = dict(plugin.manifest.get("permissions", {}) or {})
+            lock_entry = plugin_lock.get(pid, {}) if isinstance(plugin_lock, dict) else {}
+            plugin_provenance[pid] = {
+                "plugin_id": str(pid),
+                "version": str(version) if version else None,
+                "manifest_sha256": lock_entry.get("manifest_sha256") if isinstance(lock_entry, dict) else None,
+                "artifact_sha256": lock_entry.get("artifact_sha256") if isinstance(lock_entry, dict) else None,
+                "permissions": perms,
+            }
         metadata_backend = type(getattr(metadata, "_store", metadata)).__name__
         media = capabilities.get("storage.media")
         media_backend = type(media).__name__
         storage_cfg = self.config.get("storage", {})
         packages = self._package_versions() if include_packages else {}
         counts = self._store_counts(metadata, media) if include_counts else None
+        snapshot_info = self._persist_effective_config_snapshot(ts_utc=str(ts_utc))
+        policy_info = self._persist_policy_snapshot(ts_utc=str(ts_utc), metadata=metadata)
         manifest = {
             "record_type": "system.run_manifest",
             "run_id": run_id,
@@ -893,11 +971,19 @@ class Kernel:
             "config": {
                 "schema_hash": effective.schema_hash if effective else None,
                 "effective_hash": effective.effective_hash if effective else None,
+                "effective_path": snapshot_info.get("path"),
+                "effective_sha256": snapshot_info.get("sha256"),
             },
             "policy_snapshot_hash": builder.policy_snapshot_hash(),
+            "policy_snapshot": {
+                "hash": policy_info.get("hash"),
+                "record_id": policy_info.get("record_id"),
+                "path": policy_info.get("path"),
+            },
             "locks": lock_hashes,
             "plugins": sorted(set(plugin_ids)),
             "plugin_versions": plugin_versions,
+            "plugin_provenance": plugin_provenance,
             "packages": packages,
             "package_fingerprint": sha256_text(dumps(packages)) if packages else None,
             "storage": {
@@ -953,6 +1039,15 @@ class Kernel:
             media = None
         plugin_ids: list[str] = []
         plugin_versions: dict[str, str] = {}
+        plugin_provenance: dict[str, dict[str, Any]] = {}
+        plugin_lock: dict[str, Any] = {}
+        try:
+            locks_cfg = self.config.get("plugins", {}).get("locks", {})
+            lockfile_path = resolve_repo_path(locks_cfg.get("lockfile", "config/plugin_locks.json"))
+            if lockfile_path.exists():
+                plugin_lock = json.loads(lockfile_path.read_text(encoding="utf-8")).get("plugins", {}) or {}
+        except Exception:
+            plugin_lock = {}
         for plugin in self.system.plugins:
             pid = getattr(plugin, "plugin_id", None) or getattr(plugin, "manifest", {}).get("plugin_id")
             if not pid:
@@ -963,11 +1058,24 @@ class Kernel:
                 version = plugin.manifest.get("version")
             if version:
                 plugin_versions[pid] = str(version)
+            perms: dict[str, Any] = {}
+            if hasattr(plugin, "manifest") and isinstance(plugin.manifest, dict):
+                perms = dict(plugin.manifest.get("permissions", {}) or {})
+            lock_entry = plugin_lock.get(pid, {}) if isinstance(plugin_lock, dict) else {}
+            plugin_provenance[pid] = {
+                "plugin_id": str(pid),
+                "version": str(version) if version else None,
+                "manifest_sha256": lock_entry.get("manifest_sha256") if isinstance(lock_entry, dict) else None,
+                "artifact_sha256": lock_entry.get("artifact_sha256") if isinstance(lock_entry, dict) else None,
+                "permissions": perms,
+            }
         storage_cfg = self.config.get("storage", {})
         packages = self._package_versions()
         metadata_backend = type(getattr(metadata, "_store", metadata)).__name__
         media_backend = type(media).__name__ if media is not None else None
         counts = self._store_counts(metadata, media)
+        snapshot_info = self._persist_effective_config_snapshot(ts_utc=str(ts_utc))
+        policy_info = self._persist_policy_snapshot(ts_utc=str(ts_utc), metadata=metadata)
         manifest = {
             "record_type": "system.run_manifest.final",
             "run_id": builder.run_id,
@@ -977,9 +1085,15 @@ class Kernel:
             "duration_ms": int(duration_ms),
             "summary": summary,
             "policy_snapshot_hash": builder.policy_snapshot_hash(),
+            "policy_snapshot": {
+                "hash": policy_info.get("hash"),
+                "record_id": policy_info.get("record_id"),
+                "path": policy_info.get("path"),
+            },
             "locks": self._lock_hashes(),
             "plugins": sorted(set(plugin_ids)),
             "plugin_versions": plugin_versions,
+            "plugin_provenance": plugin_provenance,
             "packages": packages,
             "package_fingerprint": sha256_text(dumps(packages)) if packages else None,
             "storage": {
@@ -992,6 +1106,12 @@ class Kernel:
                 "metadata_backend": metadata_backend,
                 "media_backend": media_backend,
                 "counts": counts,
+            },
+            "config": {
+                "schema_hash": self.effective_config.schema_hash if self.effective_config else None,
+                "effective_hash": self.effective_config.effective_hash if self.effective_config else None,
+                "effective_path": snapshot_info.get("path"),
+                "effective_sha256": snapshot_info.get("sha256"),
             },
         }
         record_id = prefixed_id(builder.run_id, "system.run_manifest.final", 0)
@@ -1017,15 +1137,39 @@ class Kernel:
         blob_dir = self.config.get("storage", {}).get("blob_dir", "data/blobs")
         metadata_dir = self.config.get("storage", {}).get("metadata_dir", "data/metadata")
         candidates = {data_dir, spool_dir, media_dir, blob_dir, metadata_dir}
-        removed: list[str] = []
+        archived: list[dict[str, Any]] = []
+        archive_root = Path(str(data_dir)) / "recovery" / "archived_tmp"
+        ts_utc = datetime.now(timezone.utc).isoformat()
         for root in sorted({str(Path(path)) for path in candidates if path}):
             root_path = Path(root)
             if not root_path.exists():
                 continue
             for file_path in sorted(root_path.rglob("*.tmp")):
                 try:
-                    file_path.unlink()
-                    removed.append(str(file_path))
+                    # No local deletion: quarantine temp files instead of deleting.
+                    # Preserve relative path to aid debugging + deterministic replay.
+                    rel = None
+                    try:
+                        rel = file_path.relative_to(root_path)
+                    except Exception:
+                        rel = Path(file_path.name)
+                    dest = archive_root / ts_utc.replace(":", "").replace("-", "").replace(".", "") / rel
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    before_hash = None
+                    try:
+                        before_hash = sha256_file(file_path)
+                    except Exception:
+                        before_hash = None
+                    file_path.replace(dest)
+                    after_hash = before_hash
+                    archived.append(
+                        {
+                            "from": str(file_path),
+                            "to": str(dest),
+                            "sha256": before_hash,
+                            "sha256_after": after_hash,
+                        }
+                    )
                 except Exception:
                     continue
         sealed_now: list[str] = []
@@ -1099,18 +1243,17 @@ class Kernel:
                 )
                 sealed_now.append(record_id)
 
-        if removed or sealed_now or missing_media:
+        if archived or sealed_now or missing_media:
             payload = {"event": "storage.recovery"}
-            if removed:
-                payload["removed_count"] = int(len(removed))
-                payload["removed_samples"] = removed[:5]
+            if archived:
+                payload["archived_tmp_count"] = int(len(archived))
+                payload["archived_tmp_samples"] = archived[:5]
             if sealed_now:
                 payload["sealed_count"] = int(len(sealed_now))
                 payload["sealed_samples"] = sealed_now[:5]
             if missing_media:
                 payload["missing_media_count"] = int(len(missing_media))
                 payload["missing_media_samples"] = missing_media[:5]
-            ts_utc = datetime.now(timezone.utc).isoformat()
             builder.journal_event("storage.recovery", payload, ts_utc=ts_utc)
             builder.ledger_entry(
                 "storage.recovery",

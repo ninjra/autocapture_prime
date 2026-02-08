@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-02-08T16:09:05.862705Z",
+  "generated_utc": "2026-02-08T17:52:47.929157Z",
   "items": [
     {
       "evidence": [
@@ -122,7 +122,7 @@
       ],
       "id": "EXEC-09",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Tighten subprocess plugin runtime limits: enforce RPC timeouts, kill-on-timeout, and record termination in audit log",
       "validators": [
         "tests/test_plugin_timeout_killed.py"
@@ -361,7 +361,7 @@
       ],
       "id": "FND-04",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Record run-recovery actions as first-class journal/ledger events (quarantine, seal, replay) with before/after hashes",
       "validators": [
         "tests/test_recovery_audit_entries.py"
@@ -462,7 +462,7 @@
       ],
       "id": "META-01",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Persist a canonical effective-config snapshot per run (config.effective.json + sha256) and link it from run_manifest",
       "validators": [
         "tests/test_run_config_snapshot.py"
@@ -476,7 +476,7 @@
       ],
       "id": "META-02",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Capture plugin provenance: store (plugin_id, version, manifest_sha256, artifact_sha256, permissions) for every loaded plugin in run_manifest",
       "validators": [
         "tests/test_plugin_provenance_in_manifest.py"
@@ -537,7 +537,7 @@
       ],
       "id": "META-06",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Persist full policy snapshots (privacy + plugin permissions + egress settings) by hash, and include in ledger + proof bundle",
       "validators": [
         "tests/test_policy_snapshot_exported.py"
@@ -1130,7 +1130,7 @@
       ],
       "id": "SEC-10",
       "notes": "",
-      "status": "missing",
+      "status": "partial",
       "title": "Harden cloud/gateway pathways: require explicit privacy.cloud.enabled AND egress approval; block by default and test",
       "validators": [
         "tests/test_cloud_enable_requires_two_step.py"
