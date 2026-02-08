@@ -164,7 +164,26 @@ def parse_redesign_doc(doc_path: Path) -> list[RedesignItemFields]:
 def split_enforcement_locations(value: str) -> list[str]:
     raw = str(value or "")
     parts = [p.strip() for p in raw.split(",")]
-    return [p for p in parts if p]
+    cleaned: list[str] = []
+    for part in parts:
+        item = part.strip()
+        if not item:
+            continue
+        # The redesign doc may annotate paths with parentheses, e.g. "foo.py (new)".
+        # Treat the first whitespace-delimited token as the actual path/glob.
+        token = item.split()[0].strip()
+        token = token.rstrip(".")
+        if token:
+            cleaned.append(token)
+    # Stable de-dup.
+    seen: set[str] = set()
+    out: list[str] = []
+    for entry in cleaned:
+        if entry in seen:
+            continue
+        seen.add(entry)
+        out.append(entry)
+    return out
 
 
 _REGRESS_SPLIT_RE = re.compile(r";|,")

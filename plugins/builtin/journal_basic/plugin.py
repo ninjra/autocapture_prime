@@ -11,6 +11,7 @@ from typing import Any
 
 from autocapture_nx.kernel.canonical_json import dumps
 from autocapture_nx.kernel.ids import ensure_prefixed, prefixed_id
+from autocapture_nx.kernel.timebase import utc_now_z, tz_offset_minutes
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 
 
@@ -61,9 +62,15 @@ class JournalWriter(PluginBase):
                 entry["sequence"] = self._sequence
                 self._sequence += 1
             if not entry.get("ts_utc"):
-                entry["ts_utc"] = datetime.now(timezone.utc).isoformat()
+                entry["ts_utc"] = utc_now_z()
             if not entry.get("tzid"):
                 entry["tzid"] = self._tzid
+            if "offset_minutes" not in entry or entry.get("offset_minutes") is None:
+                try:
+                    dt = datetime.fromisoformat(str(entry["ts_utc"]).replace("Z", "+00:00"))
+                except Exception:
+                    dt = datetime.now(timezone.utc)
+                entry["offset_minutes"] = tz_offset_minutes(str(entry.get("tzid") or self._tzid), at_utc=dt.astimezone(timezone.utc))
             if not entry.get("event_id"):
                 entry["event_id"] = prefixed_id(entry["run_id"], entry.get("event_type", "event"), entry["sequence"])
             else:
@@ -106,9 +113,18 @@ class JournalWriter(PluginBase):
                         entry["sequence"] = self._sequence
                         self._sequence += 1
                     if not entry.get("ts_utc"):
-                        entry["ts_utc"] = datetime.now(timezone.utc).isoformat()
+                        entry["ts_utc"] = utc_now_z()
                     if not entry.get("tzid"):
                         entry["tzid"] = self._tzid
+                    if "offset_minutes" not in entry or entry.get("offset_minutes") is None:
+                        try:
+                            dt = datetime.fromisoformat(str(entry["ts_utc"]).replace("Z", "+00:00"))
+                        except Exception:
+                            dt = datetime.now(timezone.utc)
+                        entry["offset_minutes"] = tz_offset_minutes(
+                            str(entry.get("tzid") or self._tzid),
+                            at_utc=dt.astimezone(timezone.utc),
+                        )
                     if not entry.get("event_id"):
                         entry["event_id"] = prefixed_id(entry["run_id"], entry.get("event_type", "event"), entry["sequence"])
                     else:

@@ -12,6 +12,7 @@ from autocapture_nx.kernel.errors import ConfigError
 from autocapture_nx.kernel.evidence import validate_evidence_record
 from autocapture_nx.kernel.hashing import sha256_text
 from autocapture_nx.kernel.ids import prefixed_id
+from autocapture_nx.kernel.timebase import normalize_time, utc_iso_z, tz_offset_minutes
 
 
 class EventBuilder:
@@ -24,6 +25,7 @@ class EventBuilder:
         self._policy_hash: str | None = None
         self._ledger_seq = 0
         self._lock = threading.Lock()
+        self._tzid = str(config.get("runtime", {}).get("timezone") or "UTC")
         anchor_cfg = config.get("storage", {}).get("anchor", {}) if isinstance(config, dict) else {}
         self._anchor_every_entries = int(anchor_cfg.get("every_entries", 0)) if anchor is not None else 0
         self._anchor_every_minutes = float(anchor_cfg.get("every_minutes", 0)) if anchor is not None else 0.0
@@ -56,8 +58,21 @@ class EventBuilder:
         event_id: str | None = None,
         ts_utc: str | None = None,
         tzid: str | None = None,
-        offset_minutes: int = 0,
+        offset_minutes: int | None = None,
     ) -> str:
+        tzid = str(tzid or self._tzid or "UTC")
+        if not ts_utc:
+            normalized = normalize_time(tzid=tzid)
+            ts_utc = normalized.ts_utc
+            if offset_minutes is None:
+                offset_minutes = normalized.offset_minutes
+        if offset_minutes is None:
+            # Preserve caller-supplied ts_utc while ensuring offset is set.
+            try:
+                dt = datetime.fromisoformat(str(ts_utc).replace("Z", "+00:00"))
+            except Exception:
+                dt = datetime.now(timezone.utc)
+            offset_minutes = tz_offset_minutes(tzid, at_utc=dt.astimezone(timezone.utc))
         if isinstance(payload, dict):
             payload = dict(payload)
             if "run_id" not in payload and self._run_id:
@@ -70,7 +85,7 @@ class EventBuilder:
             event_id=event_id,
             ts_utc=ts_utc,
             tzid=tzid,
-            offset_minutes=offset_minutes,
+            offset_minutes=int(offset_minutes),
         )
 
     def capture_stage(
@@ -129,7 +144,13 @@ class EventBuilder:
         if isinstance(payload, dict) and "record_type" in payload and "run_id" in payload:
             validate_evidence_record(payload, entry_id)
         if not ts_utc:
-            ts_utc = datetime.now(timezone.utc).isoformat()
+            ts_utc = utc_iso_z(datetime.now(timezone.utc))
+        else:
+            # Normalize to a stable Z suffix.
+            try:
+                ts_utc = utc_iso_z(datetime.fromisoformat(str(ts_utc).replace("Z", "+00:00")))
+            except Exception:
+                ts_utc = str(ts_utc)
         if not entry_id:
             entry_id = prefixed_id(self._run_id, f"ledger.{stage}", seq)
         entry = {
@@ -137,6 +158,8 @@ class EventBuilder:
             "schema_version": 1,
             "entry_id": entry_id,
             "ts_utc": ts_utc,
+            "tzid": self._tzid,
+            "offset_minutes": tz_offset_minutes(self._tzid),
             "stage": stage,
             "inputs": inputs,
             "outputs": outputs,
@@ -179,7 +202,7 @@ class EventBuilder:
         retryable: bool | None = None,
     ) -> str:
         if not ts_utc:
-            ts_utc = datetime.now(timezone.utc).isoformat()
+            ts_utc = utc_iso_z(datetime.now(timezone.utc))
         failure_payload = {
             "event": event_type,
             "stage": stage,

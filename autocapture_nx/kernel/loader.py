@@ -30,6 +30,8 @@ from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
 from autocapture_nx.kernel.metadata_store import persist_unavailable_record
 from autocapture_nx.kernel.atomic_write import atomic_write_json
 from autocapture_nx.kernel.instance_lock import acquire_instance_lock
+from autocapture_nx.kernel.run_state import build_run_state_payload, write_run_state
+from autocapture_nx.kernel.timebase import utc_now_z
 from autocapture_nx.plugin_system.registry import PluginRegistry
 from autocapture_nx.plugin_system.runtime import global_network_deny, set_global_network_deny
 from autocapture_nx.plugin_system.host import close_all_subprocess_hosts
@@ -154,6 +156,7 @@ class Kernel:
         self.safe_mode_reason: str | None = None
         self._crash_loop_status: CrashLoopStatus | None = None
         self._run_started_at: str | None = None
+        self._run_started_mono: float | None = None
         self._conductor: Any | None = None
         self._package_versions_cache: dict[str, str] | None = None
         self._network_deny_prev: bool | None = None
@@ -481,7 +484,7 @@ class Kernel:
                 except Exception:
                     pass
             builder = self.system.get("event.builder")
-            ts_utc = datetime.now(timezone.utc).isoformat()
+            ts_utc = utc_now_z()
             duration_ms = self._run_duration_ms(ts_utc)
             summary = self._summarize_journal(builder.run_id)
             self._record_storage_manifest_final(builder, summary, duration_ms, ts_utc)
@@ -706,27 +709,20 @@ class Kernel:
         safe_mode_reason: str | None = None,
     ) -> None:
         path = self._run_state_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload: dict[str, Any] = {
-            "run_id": run_id,
-            "state": state,
-            "ts_utc": datetime.now(timezone.utc).isoformat(),
-        }
-        if started_at:
-            payload["started_at"] = started_at
-        if stopped_at:
-            payload["stopped_at"] = stopped_at
-        if ledger_head:
-            payload["ledger_head"] = ledger_head
-        if locks is not None:
-            payload["locks"] = locks
-        if config_hash:
-            payload["config_hash"] = config_hash
-        if safe_mode is not None:
-            payload["safe_mode"] = bool(safe_mode)
-        if safe_mode_reason:
-            payload["safe_mode_reason"] = safe_mode_reason
-        atomic_write_json(path, payload, sort_keys=True, indent=None)
+        tzid = str(self.config.get("runtime", {}).get("timezone") or "UTC")
+        payload = build_run_state_payload(
+            run_id=run_id,
+            state=state,
+            tzid=tzid,
+            started_at=started_at,
+            stopped_at=stopped_at,
+            ledger_head=ledger_head,
+            locks=locks,
+            config_hash=config_hash,
+            safe_mode=safe_mode,
+            safe_mode_reason=safe_mode_reason,
+        )
+        write_run_state(path, payload)
 
     def _parse_ts(self, ts: str | None) -> datetime | None:
         if not ts:
@@ -739,6 +735,11 @@ class Kernel:
             return None
 
     def _run_duration_ms(self, now_ts: str) -> int:
+        if self._run_started_mono is not None:
+            try:
+                return max(0, int((time.monotonic() - float(self._run_started_mono)) * 1000))
+            except Exception:
+                pass
         start_ts = self._run_started_at
         if not start_ts:
             state = self._load_run_state() or {}
@@ -822,8 +823,9 @@ class Kernel:
                         "current": curr_config,
                     },
                 )
-        start_ts = datetime.now(timezone.utc).isoformat()
+        start_ts = utc_now_z()
         self._run_started_at = start_ts
+        self._run_started_mono = time.monotonic()
         payload: dict[str, Any] = {
             "event": "system.start",
             "run_id": builder.run_id,

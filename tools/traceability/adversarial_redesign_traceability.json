@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-02-08T16:02:17.859942Z",
+  "generated_utc": "2026-02-08T16:09:05.862705Z",
   "items": [
     {
       "evidence": [
@@ -131,7 +131,7 @@
     {
       "evidence": [
         "plugins/builtin/retrieval_basic/plugin.py",
-        "contracts/retrieval.schema.json (new)"
+        "contracts/retrieval.schema.json"
       ],
       "id": "EXEC-10",
       "notes": "",
@@ -415,7 +415,7 @@
       "evidence": [
         "autocapture_nx/storage/*",
         "autocapture/indexing/*",
-        "tools/gate_contract_pins.py (extend)"
+        "tools/gate_contract_pins.py"
       ],
       "id": "FND-08",
       "notes": "",
@@ -429,12 +429,12 @@
     {
       "evidence": [
         "autocapture_nx/kernel/determinism.py",
-        "plugins/builtin/* (event timestamps)",
+        "plugins/builtin/*",
         "autocapture_nx/kernel/run_state.py"
       ],
       "id": "FND-09",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Standardize timestamp handling: store UTC in records, include tz_offset, and use monotonic clocks for durations",
       "validators": [
         "tests/test_time_normalization.py"
@@ -559,7 +559,7 @@
     },
     {
       "evidence": [
-        "contracts/evaluation.schema.json (new)",
+        "contracts/evaluation.schema.json",
         "autocapture_nx/kernel/query.py",
         "autocapture/web/ui/index.html"
       ],
@@ -574,8 +574,8 @@
     {
       "evidence": [
         "autocapture_nx/kernel/determinism.py",
-        "autocapture_nx/plugin_system/registry.py (RNGScope)",
-        "contracts/run_manifest.schema.json (new)"
+        "autocapture_nx/plugin_system/registry.py",
+        "contracts/run_manifest.schema.json"
       ],
       "id": "META-09",
       "notes": "",
@@ -589,7 +589,7 @@
       "evidence": [
         "autocapture_nx/cli.py",
         "tools/gate_doctor.py",
-        "contracts/diagnostics_bundle.schema.json (new)"
+        "contracts/diagnostics_bundle.schema.json"
       ],
       "id": "META-10",
       "notes": "",
@@ -824,7 +824,7 @@
     {
       "evidence": [
         "tests/fixtures/*",
-        "tests/test_query_golden.py (new)",
+        "tests/test_query_golden.py",
         "plugins/builtin/answer_basic/plugin.py"
       ],
       "id": "QA-01",
@@ -837,7 +837,7 @@
     },
     {
       "evidence": [
-        "tests/test_crash_recovery_chaos.py (new)",
+        "tests/test_crash_recovery_chaos.py",
         "autocapture_nx/kernel/loader.py"
       ],
       "id": "QA-02",
@@ -864,7 +864,7 @@
     },
     {
       "evidence": [
-        "tests/test_security_guards.py (new)"
+        "tests/test_security_guards.py"
       ],
       "id": "QA-04",
       "notes": "",
@@ -876,7 +876,7 @@
     },
     {
       "evidence": [
-        "tests/test_db_migrations.py (expanded)"
+        "tests/test_db_migrations.py"
       ],
       "id": "QA-05",
       "notes": "",
@@ -888,7 +888,7 @@
     },
     {
       "evidence": [
-        "tests/test_ui_smoke.py (new)"
+        "tests/test_ui_smoke.py"
       ],
       "id": "QA-06",
       "notes": "",
@@ -913,7 +913,7 @@
     },
     {
       "evidence": [
-        "tests/test_proof_bundle_verify.py (expanded)",
+        "tests/test_proof_bundle_verify.py",
         "autocapture_nx/kernel/proof_bundle.py"
       ],
       "id": "QA-08",
@@ -989,7 +989,7 @@
     },
     {
       "evidence": [
-        "docs/runbook.md (new)",
+        "docs/runbook.md",
         "docs/safe_mode.md"
       ],
       "id": "RD-06",
@@ -1111,7 +1111,7 @@
       "evidence": [
         "autocapture_nx/plugin_system/host_runner.py",
         "autocapture_nx/kernel/logging.py",
-        "tools/gate_secrets.py (new)"
+        "tools/gate_secrets.py"
       ],
       "id": "SEC-09",
       "notes": "",
