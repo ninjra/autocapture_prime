@@ -3,8 +3,8 @@
 Generated: 2026-02-08
 
 - total: 92
-- implemented: 9
-- partial: 36
+- implemented: 10
+- partial: 35
 - missing: 47
 
 | ID | Status | Title | Evidence | Validators |
@@ -37,7 +37,7 @@ Generated: 2026-02-08
 | FND-04 | partial | Record run-recovery actions as first-class journal/ledger events (quarantine, seal, replay) with before/after hashes | autocapture_nx/kernel/loader.py<br>plugins/builtin/journal_basic/plugin.py<br>plugins/builtin/ledger_basic/plugin.py | tests/test_recovery_audit_entries.py |
 | FND-05 | missing | Introduce content-addressed ingest IDs for file-based inputs (sha256→input_id) and dedupe at ingest boundary | autocapture_nx/ingest/*<br>autocapture_nx/kernel/prefixed_id.py<br>plugins/builtin/storage_media_basic/plugin.py | tests/test_ingest_dedupe.py |
 | FND-06 | missing | Make disk-pressure handling fail-safe: preflight free-space, throttle capture/processing, and surface “paused due to disk” state | autocapture_nx/capture/pipeline.py<br>autocapture_nx/storage/retention.py<br>autocapture/web/ui/index.html | tests/test_disk_pressure_pause.py<br>tools/gate_perf.py |
-| FND-07 | partial | Add `autocapture backup create/restore` for config + locks + anchors (and optional data) with integrity checks | autocapture_nx/cli.py<br>autocapture_nx/kernel/paths.py<br>plugins/builtin/ledger_basic/plugin.py<br>plugins/builtin/anchor_basic/plugin.py | tests/test_backup_restore.py |
+| FND-07 | implemented | Add `autocapture backup create/restore` for config + locks + anchors (and optional data) with integrity checks | autocapture_nx/cli.py<br>autocapture_nx/kernel/paths.py<br>plugins/builtin/ledger_basic/plugin.py<br>plugins/builtin/anchor_basic/plugin.py | tests/test_backup_restore.py |
 | FND-08 | missing | Add explicit DB migration framework with version pinning + rollback plan for all sqlite/state stores | autocapture_nx/storage/*<br>autocapture/indexing/*<br>tools/gate_contract_pins.py (extend) | tests/test_db_migrations.py<br>tools/gate_doctor.py |
 | FND-09 | missing | Standardize timestamp handling: store UTC in records, include tz_offset, and use monotonic clocks for durations | autocapture_nx/kernel/determinism.py<br>plugins/builtin/* (event timestamps)<br>autocapture_nx/kernel/run_state.py | tests/test_time_normalization.py |
 | FND-10 | missing | Make safe-mode and crash-loop reasons user-visible (CLI + web UI) with a deterministic “next safe action” checklist | autocapture_nx/kernel/loader.py<br>docs/safe_mode.md<br>autocapture/web/ui/index.html | tests/test_safe_mode_ui_banner.py |

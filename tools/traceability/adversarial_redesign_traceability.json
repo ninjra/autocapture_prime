@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-02-08T04:31:32.718929Z",
+  "generated_utc": "2026-02-08T16:02:17.859942Z",
   "items": [
     {
       "evidence": [
@@ -405,7 +405,7 @@
       ],
       "id": "FND-07",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Add `autocapture backup create/restore` for config + locks + anchors (and optional data) with integrity checks",
       "validators": [
         "tests/test_backup_restore.py"

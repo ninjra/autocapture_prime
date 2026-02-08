@@ -18,6 +18,7 @@ from autocapture_nx.kernel.keyring import KeyRing, export_keyring_bundle, import
 from autocapture_nx.kernel.loader import default_config_paths
 from autocapture_nx.ux.facade import create_facade
 
+from autocapture_nx.kernel.backup_bundle import create_backup_bundle, restore_backup_bundle
 
 def _print_json(data: object) -> None:
     print(json.dumps(data, indent=2, sort_keys=True))
@@ -359,6 +360,91 @@ def cmd_keys_import(args: argparse.Namespace) -> int:
         return 1
 
 
+def _load_config_for_backup(data_dir: str, config_dir: str, *, safe_mode: bool) -> tuple[dict, Any]:
+    if data_dir:
+        os.environ["AUTOCAPTURE_DATA_DIR"] = data_dir
+    if config_dir:
+        os.environ["AUTOCAPTURE_CONFIG_DIR"] = config_dir
+    paths = default_config_paths()
+    config = load_config(paths, safe_mode=safe_mode)
+    return config, paths
+
+
+def cmd_backup_create(args: argparse.Namespace) -> int:
+    details: dict[str, Any] = {"bundle_path": str(args.out), "include_data": bool(args.include_data)}
+    try:
+        config, paths = _load_config_for_backup(args.data_dir, args.config_dir, safe_mode=args.safe_mode)
+        storage = config.get("storage", {}) if isinstance(config, dict) else {}
+        crypto = storage.get("crypto", {}) if isinstance(storage, dict) else {}
+        data_dir = str(storage.get("data_dir", "data"))
+        cfg_dir = str(Path(paths.user_path).resolve().parent)
+        encryption_required = bool(storage.get("encryption_required", False))
+
+        include_keys = args.keys
+        if include_keys is None:
+            include_keys = bool(encryption_required)
+        include_keys = bool(include_keys)
+
+        passphrase = ""
+        if include_keys:
+            passphrase = _prompt_passphrase(args.passphrase)
+
+        report = create_backup_bundle(
+            output_path=args.out,
+            config_dir=cfg_dir,
+            data_dir=data_dir,
+            include_data=bool(args.include_data),
+            include_keyring_bundle=include_keys,
+            keyring_bundle_passphrase=passphrase if include_keys else None,
+            keyring_backend=str(crypto.get("keyring_backend", "auto") or "auto"),
+            keyring_credential_name=str(crypto.get("keyring_credential_name", "autocapture.keyring") or "autocapture.keyring"),
+            require_key_protection=bool(encryption_required and os.name == "nt"),
+            keyring_path=str(crypto.get("keyring_path", Path(data_dir) / "vault" / "keyring.json")),
+            legacy_root_key_path=str(crypto.get("root_key_path", Path(data_dir) / "vault" / "root.key")),
+            overwrite=bool(args.overwrite),
+        )
+        details.update({"ok": bool(report.get("ok")), "entries": int(report.get("entries", 0) or 0)})
+        append_audit_event(action="backup.create", actor="cli.backup", outcome="success" if report.get("ok") else "error", details=details)
+        _print_json(report)
+        return 0 if report.get("ok") else 2
+    except Exception as exc:
+        details["error"] = str(exc)
+        append_audit_event(action="backup.create", actor="cli.backup", outcome="error", details=details)
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+
+def cmd_backup_restore(args: argparse.Namespace) -> int:
+    details: dict[str, Any] = {"bundle_path": str(args.bundle)}
+    try:
+        config, paths = _load_config_for_backup(args.data_dir, args.config_dir, safe_mode=args.safe_mode)
+        storage = config.get("storage", {}) if isinstance(config, dict) else {}
+        data_dir = str(storage.get("data_dir", "data"))
+        cfg_dir = str(Path(paths.user_path).resolve().parent)
+
+        passphrase = args.passphrase or ""
+        if args.restore_keys:
+            passphrase = _prompt_passphrase(passphrase)
+
+        report = restore_backup_bundle(
+            bundle_path=args.bundle,
+            config_dir=cfg_dir,
+            data_dir=data_dir,
+            keyring_bundle_passphrase=passphrase if args.restore_keys else None,
+            restore_keyring_bundle=bool(args.restore_keys),
+            overwrite=bool(args.overwrite),
+        )
+        details.update({"ok": bool(report.get("ok")), "extracted": int(report.get("extracted", 0) or 0)})
+        append_audit_event(action="backup.restore", actor="cli.backup", outcome="success" if report.get("ok") else "error", details=details)
+        _print_json(report)
+        return 0 if report.get("ok") else 2
+    except Exception as exc:
+        details["error"] = str(exc)
+        append_audit_event(action="backup.restore", actor="cli.backup", outcome="error", details=details)
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+
 def cmd_provenance_verify(args: argparse.Namespace) -> int:
     facade = create_facade(safe_mode=args.safe_mode)
     result = facade.verify_ledger(args.path)
@@ -693,6 +779,26 @@ def build_parser() -> argparse.ArgumentParser:
     keys_import.add_argument("--data-dir", default="", help="Override AUTOCAPTURE_DATA_DIR")
     keys_import.add_argument("--config-dir", default="", help="Override AUTOCAPTURE_CONFIG_DIR")
     keys_import.set_defaults(func=cmd_keys_import)
+
+    backup = sub.add_parser("backup")
+    backup_sub = backup.add_subparsers(dest="backup_cmd", required=True)
+    backup_create = backup_sub.add_parser("create")
+    backup_create.add_argument("--out", required=True, help="Output bundle path (zip)")
+    backup_create.add_argument("--include-data", action=argparse.BooleanOptionalAction, default=False)
+    backup_create.add_argument("--keys", action=argparse.BooleanOptionalAction, default=None, help="Include portable keyring bundle")
+    backup_create.add_argument("--passphrase", default="", help="Keyring bundle passphrase (prompted if empty)")
+    backup_create.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=False)
+    backup_create.add_argument("--data-dir", default="", help="Override AUTOCAPTURE_DATA_DIR")
+    backup_create.add_argument("--config-dir", default="", help="Override AUTOCAPTURE_CONFIG_DIR")
+    backup_create.set_defaults(func=cmd_backup_create)
+    backup_restore = backup_sub.add_parser("restore")
+    backup_restore.add_argument("--bundle", required=True, help="Input bundle path (zip)")
+    backup_restore.add_argument("--restore-keys", action=argparse.BooleanOptionalAction, default=True)
+    backup_restore.add_argument("--passphrase", default="", help="Keyring bundle passphrase (prompted if empty)")
+    backup_restore.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=False)
+    backup_restore.add_argument("--data-dir", default="", help="Override AUTOCAPTURE_DATA_DIR")
+    backup_restore.add_argument("--config-dir", default="", help="Override AUTOCAPTURE_CONFIG_DIR")
+    backup_restore.set_defaults(func=cmd_backup_restore)
 
     provenance = sub.add_parser("provenance")
     provenance_sub = provenance.add_subparsers(dest="provenance_cmd", required=True)
