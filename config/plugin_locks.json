@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-08T04:12:38.216323+00:00",
+  "generated_at": "2026-02-08T16:37:16.270936+00:00",
   "plugins": {
     "builtin.anchor.basic": {
       "artifact_sha256": "9dbb34cf46de240ed0c86ff2597d80a48c08104a331cb63474278022053f0def",
@@ -54,7 +54,7 @@
       "manifest_sha256": "1398a797cf5a8dbbb265041940b34f28dce29aca82636a522866d78ef40f7d1d"
     },
     "builtin.journal.basic": {
-      "artifact_sha256": "b14762f893e2bb83a53c852644b35b964e2e5a5d9e91295a60d050e7f7c8bc63",
+      "artifact_sha256": "c6b3eaa76cd4ce45dd9557aec1e016a7b36bb6ec6d2e2698045177f6f708c913",
       "manifest_sha256": "b1033160ff5b545dba9628c9ebf74bf397938b65bbddef142120ba5899d78cd2"
     },
     "builtin.ledger.basic": {
@@ -178,7 +178,7 @@
       "manifest_sha256": "e559fc8faf65ff0766b93c82de32f6530b9839613feaed1033688b34e8d1c624"
     },
     "builtin.sst.qa.answers": {
-      "artifact_sha256": "dc7d494c6c5e8fb139e01a1d568cdc1852d79a476e78c18c4a39f5964d6968cd",
+      "artifact_sha256": "026099e37d97b788cd7d60c185b9f7d7b24c9ad085b98cf94a8d7482b0eb5c67",
       "manifest_sha256": "76b707c412615291a9eb0fd0e846074b75e9698d3042b397bdfe911543b4a2d7"
     },
     "builtin.sst.temporal.segment": {
