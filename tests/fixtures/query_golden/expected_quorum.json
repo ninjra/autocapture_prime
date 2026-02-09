@@ -1,0 +1,86 @@
+{
+  "answer": {
+    "claims": [
+      {
+        "citations": [
+          {
+            "anchor_ref": "anchor:test",
+            "derived_hash": null,
+            "derived_id": null,
+            "evidence_hash": "hash_quorum",
+            "evidence_id": "run_test/derived.text.ocr/test_provider/quorum",
+            "ledger_head": "ledger:test",
+            "locator": {
+              "kind": "text_offsets",
+              "offset_end": 34,
+              "offset_start": 11,
+              "record_hash": "",
+              "record_id": "run_test/derived.text.ocr/test_provider/quorum",
+              "span_sha256": "819542c958b627814429a79918031114946835f2cb10419dc9241d699375bb04"
+            },
+            "offset_end": 34,
+            "offset_start": 11,
+            "schema_version": 1,
+            "source": "local",
+            "span_id": "run_test/derived.text.ocr/test_provider/quorum",
+            "span_kind": "text",
+            "span_ref": null
+          }
+        ],
+        "text": "Quorum task collaborator: Open Invoice"
+      }
+    ],
+    "errors": [],
+    "policy": {
+      "require_citations": true
+    },
+    "state": "ok"
+  },
+  "custom_claims": {
+    "count": 1,
+    "debug": {
+      "quorum_found_count": 1,
+      "quorum_hint_count": 1
+    },
+    "error": null
+  },
+  "evaluation": {
+    "blocked_extract": true,
+    "blocked_reason": "disabled",
+    "candidate_count": 0,
+    "coverage_ratio": 0.0,
+    "freshness_newest_ts_utc": null,
+    "missing_spans_count": 0,
+    "result_count": 0,
+    "schema_version": 1
+  },
+  "intent": {
+    "query": "who is working with me on the quorum task",
+    "time_window": null
+  },
+  "processing": {
+    "extraction": {
+      "allowed": false,
+      "blocked": true,
+      "blocked_reason": "disabled",
+      "candidate_count": 0,
+      "extracted_count": 0,
+      "idle_seconds": null,
+      "idle_window_s": null,
+      "ran": false,
+      "require_idle": true
+    }
+  },
+  "provenance": {
+    "anchor_ref": "anchor:test",
+    "contracts_lock_sha256": "b622d0456b87d5174a259d51980cf017e90995066b3edf9168d3abae4074515a",
+    "data_dir": null,
+    "effective_config_sha256": "507b87323850ec2c16548d8afe8a51785843904c6b2bc83a6e02e25107cfa29b",
+    "generated_at_utc": "<ts>",
+    "plugin_locks_sha256": "f0c9abb2de30442b6b8e3a11b97a81efaedbe0d0814c98175318ce7c844221c4",
+    "query_ledger_head": "ledger:test",
+    "run_id": null,
+    "schema_version": 1
+  },
+  "results": []
+}

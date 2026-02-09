@@ -16,6 +16,7 @@ from autocapture_nx.kernel.paths import resolve_repo_path
 from autocapture_nx.kernel.derived_records import (
     build_derivation_edge,
     build_text_record,
+    derived_text_record_id,
     derivation_edge_id,
     extract_text_payload,
 )
@@ -213,20 +214,30 @@ def extract_on_demand(
         derived_ids: list[tuple[str, Any, str, str]] = []
         encoded_source = encode_record_id_component(record_id)
         for provider_id, extractor in _capability_providers(ocr, "ocr.engine"):
-            provider_component = encode_record_id_component(provider_id)
             derived_ids.append(
                 (
-                    f"{run_id}/derived.text.ocr/{provider_component}/{encoded_source}",
+                    derived_text_record_id(
+                        kind="ocr",
+                        run_id=run_id,
+                        provider_id=str(provider_id),
+                        source_id=record_id,
+                        config=config if isinstance(config, dict) else {},
+                    ),
                     extractor,
                     "ocr",
                     provider_id,
                 )
             )
         for provider_id, extractor in _capability_providers(vlm, "vision.extractor"):
-            provider_component = encode_record_id_component(provider_id)
             derived_ids.append(
                 (
-                    f"{run_id}/derived.text.vlm/{provider_component}/{encoded_source}",
+                    derived_text_record_id(
+                        kind="vlm",
+                        run_id=run_id,
+                        provider_id=str(provider_id),
+                        source_id=record_id,
+                        config=config if isinstance(config, dict) else {},
+                    ),
                     extractor,
                     "vlm",
                     provider_id,
@@ -907,13 +918,50 @@ def run_query_without_state(system, query: str) -> dict[str, Any]:
     # best supporting evidence (e.g. "what song is playing").
     qlow = str(query or "").casefold()
     custom_claims: list[dict[str, Any]] = []
+    custom_claims_error: str | None = None
+    custom_claims_debug: dict[str, Any] = {}
     try:
         if retrieval is not None and metadata is not None:
+            def _scan_metadata_for(pattern, *, limit: int = 500):  # type: ignore[no-untyped-def]
+                """Fallback text scan over already-extracted metadata (no media decode).
+
+                Used when retrieval indexes don't surface the right evidence for
+                natural-language questions.
+                """
+
+                import re as _re
+
+                pat = pattern if hasattr(pattern, "search") else _re.compile(str(pattern))
+                found: list[tuple[str, Any, Any]] = []
+                try:
+                    keys = list(getattr(metadata, "keys", lambda: [])())
+                except Exception:
+                    keys = []
+                # Prefer derived text records first.
+                for rid in keys:
+                    rec = metadata.get(rid, {})
+                    if not isinstance(rec, dict):
+                        continue
+                    rtype = str(rec.get("record_type") or "")
+                    if not rtype.startswith("derived.text."):
+                        continue
+                    txt = rec.get("text", "")
+                    if not isinstance(txt, str) or not txt:
+                        continue
+                    m = pat.search(txt)
+                    if not m:
+                        continue
+                    found.append((str(rid), rec, m))
+                    if len(found) >= int(limit):
+                        break
+                return found
+
             # "Who is working with me on the quorum task" -> extract contractor name from task title.
             if "quorum" in qlow and ("working" in qlow or "who" in qlow):
                 # Prefer the explicit assignee string when present (e.g. "task was assigned to OpenInvoice").
                 hint = retrieval.search("assigned to", time_window=time_window) or retrieval.search("assigned", time_window=time_window) or retrieval.search("assigned", time_window=None)
-                pat = __import__("re").compile(r"assigned\\s*to\\s*(?P<assignee>[A-Za-z][A-Za-z0-9]{1,48})", flags=__import__("re").IGNORECASE)
+                custom_claims_debug["quorum_hint_count"] = int(len(hint)) if isinstance(hint, list) else 0
+                pat = __import__("re").compile(r"assigned\s*to\s*(?P<assignee>[A-Za-z][A-Za-z0-9]{1,48})", flags=__import__("re").IGNORECASE)
 
                 def _split_camel(value: str) -> str:
                     if not value:
@@ -929,15 +977,21 @@ def run_query_without_state(system, query: str) -> dict[str, Any]:
                     out.append(current)
                     return " ".join(p for p in out if p)
 
-                for hit in hint[:10]:
-                    evidence_id = str(hit.get("record_id") or "")
-                    derived_id = hit.get("derived_id")
-                    record_id = derived_id or evidence_id
-                    rec = metadata.get(record_id, {})
-                    txt = rec.get("text", "") if isinstance(rec, dict) else ""
-                    m = pat.search(txt)
-                    if not m:
-                        continue
+                matches = []
+                try:
+                    matches = [(str(hit.get("record_id") or ""), hit.get("derived_id"), pat.search((metadata.get(hit.get("derived_id") or hit.get("record_id") or "", {}) or {}).get("text", ""))) for hit in (hint[:10] if isinstance(hint, list) else [])]
+                except Exception:
+                    matches = []
+                found = []
+                for evidence_id, derived_id, m in matches:
+                    if evidence_id and m:
+                        found.append((evidence_id, derived_id, m))
+                if not found:
+                    for rid, _rec, m in _scan_metadata_for(pat, limit=200):
+                        found.append((rid, None, m))
+                        break
+                custom_claims_debug["quorum_found_count"] = int(len(found))
+                for evidence_id, derived_id, m in found[:10]:
                     raw = str(m.group("assignee") or "").strip()
                     if not raw:
                         continue
@@ -961,21 +1015,30 @@ def run_query_without_state(system, query: str) -> dict[str, Any]:
             # "What song is playing" -> extract from SiriusXM "Chill Instrumental ..." line.
             if "song" in qlow and ("play" in qlow or "playing" in qlow):
                 hint = retrieval.search("Chill Instrumental", time_window=time_window) or retrieval.search("Chill Instrumental", time_window=None)
+                custom_claims_debug["song_hint_count"] = int(len(hint)) if isinstance(hint, list) else 0
                 pat = __import__("re").compile(
                     r"Chill\s+Instrumental\s+"
                     r"(?P<artist>[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})"
                     r"\s*[-–—−]\s*"
                     r"(?P<title>[A-Z][A-Za-z]+(?:\s+(?:[A-Z][A-Za-z]+|At|Of|In|On|To|And|&)){0,6})"
                 )
-                for hit in hint[:10]:
-                    evidence_id = str(hit.get("record_id") or "")
-                    derived_id = hit.get("derived_id")
-                    record_id = derived_id or evidence_id
-                    rec = metadata.get(record_id, {})
-                    txt = rec.get("text", "") if isinstance(rec, dict) else ""
-                    m = pat.search(txt)
-                    if not m:
-                        continue
+                found = []
+                if isinstance(hint, list):
+                    for hit in hint[:10]:
+                        evidence_id = str(hit.get("record_id") or "")
+                        derived_id = hit.get("derived_id")
+                        record_id = derived_id or evidence_id
+                        rec = metadata.get(record_id, {})
+                        txt = rec.get("text", "") if isinstance(rec, dict) else ""
+                        m = pat.search(txt)
+                        if evidence_id and m:
+                            found.append((evidence_id, derived_id, m))
+                if not found:
+                    for rid, _rec, m in _scan_metadata_for(pat, limit=200):
+                        found.append((rid, None, m))
+                        break
+                custom_claims_debug["song_found_count"] = int(len(found))
+                for evidence_id, derived_id, m in found[:10]:
                     artist = m.group("artist").strip()
                     title = m.group("title").strip()
                     if not artist or not title:
@@ -993,6 +1056,12 @@ def run_query_without_state(system, query: str) -> dict[str, Any]:
                         break
     except Exception:
         # Fail closed: query should still return normal retrieval results.
+        try:
+            import traceback
+
+            custom_claims_error = traceback.format_exc(limit=2).strip()
+        except Exception:
+            custom_claims_error = "custom_claims_exception"
         custom_claims = list(custom_claims)
 
     claims = []
@@ -1166,6 +1235,11 @@ def run_query_without_state(system, query: str) -> dict[str, Any]:
                 "candidate_count": len(candidate_ids),
                 "extracted_count": len(extracted_ids),
             }
+        },
+        "custom_claims": {
+            "count": int(len(custom_claims)),
+            "error": custom_claims_error,
+            "debug": custom_claims_debug,
         },
     }
 

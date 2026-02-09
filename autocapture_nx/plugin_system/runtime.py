@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import ipaddress
+import io
 import os
 import socket
 import threading
@@ -31,6 +32,7 @@ _fs_patch_lock = threading.Lock()
 _fs_policy_local = threading.local()
 _fs_policy_global = None
 _original_open = None
+_original_io_open = None
 _original_os_open = None
 _original_os_listdir = None
 _original_os_scandir = None
@@ -165,7 +167,22 @@ def _normalize_root_str(raw: str, os_name: str) -> str:
 def _normalize_root(path: Path) -> Path:
     try:
         normalized = _normalize_root_str(str(path), os.name)
-        return Path(normalized).absolute()
+        candidate = Path(normalized).absolute()
+        # SEC-01: resolve symlinks to prevent traversal via symlinked paths that
+        # appear inside an allowed root but escape to a different target.
+        #
+        # IMPORTANT: `Path.resolve()` calls `os.stat`, which we patch below to
+        # enforce policies. To avoid recursion, temporarily suspend the policy
+        # while computing `realpath`.
+        try:
+            previous = _current_fs_policy()
+            _set_fs_policy(None)
+            try:
+                return Path(os.path.realpath(str(candidate))).absolute()
+            finally:
+                _set_fs_policy(previous)
+        except Exception:
+            return candidate
     except Exception:
         return path
 
@@ -330,12 +347,13 @@ def _patch_filesystem() -> None:
             return
         import builtins
 
-        global _original_open, _original_os_open, _original_os_listdir, _original_os_scandir
+        global _original_open, _original_io_open, _original_os_open, _original_os_listdir, _original_os_scandir
         global _original_os_stat, _original_os_lstat, _original_os_mkdir, _original_os_makedirs
         global _original_os_remove, _original_os_unlink, _original_os_rename, _original_os_replace
         global _original_os_rmdir
 
         _original_open = builtins.open
+        _original_io_open = io.open
         _original_os_open = os.open
         _original_os_listdir = os.listdir
         _original_os_scandir = os.scandir
@@ -357,6 +375,15 @@ def _patch_filesystem() -> None:
                 mode = kwargs.get("mode", "r")
             _check_fs(path, write=_write_mode_from_open(str(mode)))
             return _original_open(path, *args, **kwargs)
+
+        def _io_open(path, *args, **kwargs):
+            mode = None
+            if args:
+                mode = args[0] if args else None
+            if mode is None:
+                mode = kwargs.get("mode", "r")
+            _check_fs(path, write=_write_mode_from_open(str(mode)))
+            return _original_io_open(path, *args, **kwargs)
 
         def _os_open(path, flags, *args, **kwargs):
             _check_fs(path, write=_write_mode_from_flags(int(flags)))
@@ -409,6 +436,7 @@ def _patch_filesystem() -> None:
             return _original_os_rmdir(path, *args, **kwargs)
 
         builtins.open = cast(Any, _open)
+        io.open = cast(Any, _io_open)
         os.open = _os_open
         os.listdir = _os_listdir
         os.scandir = _os_scandir

@@ -62,6 +62,28 @@ def model_identity(kind: str, provider_id: str, config: dict[str, Any]) -> dict[
     }
 
 
+def derived_text_record_id(
+    *,
+    kind: str,
+    run_id: str,
+    provider_id: str,
+    source_id: str,
+    config: dict[str, Any],
+) -> str:
+    """Compute a stable derived-text record id keyed by model identity.
+
+    PERF-03: include extractor/model identity in the derived id so config/model
+    changes do not incorrectly "hit cache" on an old derived record.
+    """
+
+    identity = model_identity(kind, provider_id, config)
+    digest = str(identity.get("model_digest") or "")
+    digest_component = encode_record_id_component(digest[:16] if digest else "model")
+    provider_component = encode_record_id_component(provider_id)
+    encoded_source = encode_record_id_component(source_id)
+    return f"{run_id}/derived.text.{kind}/{provider_component}/{digest_component}/{encoded_source}"
+
+
 def extract_text_payload(response: Any) -> str:
     if isinstance(response, dict):
         for key in ("text_plain", "caption", "text"):

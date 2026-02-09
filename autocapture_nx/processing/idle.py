@@ -18,6 +18,7 @@ from typing import Any, Callable
 from autocapture_nx.kernel.derived_records import (
     build_derivation_edge,
     build_text_record,
+    derived_text_record_id,
     derivation_edge_id,
 )
 from autocapture_nx.kernel.frame_evidence import ensure_frame_evidence
@@ -399,12 +400,26 @@ class IdleProcessor:
         derived_ids: list[str] = []
         if allow_ocr and self._ocr is not None:
             for provider_id, _extractor in _capability_providers(self._ocr, "ocr.engine"):
-                provider_component = encode_record_id_component(provider_id)
-                derived_ids.append(f"{run_id}/derived.text.ocr/{provider_component}/{encoded_source}")
+                derived_ids.append(
+                    derived_text_record_id(
+                        kind="ocr",
+                        run_id=run_id,
+                        provider_id=str(provider_id),
+                        source_id=record_id,
+                        config=self._config,
+                    )
+                )
         if allow_vlm and self._vlm is not None:
             for provider_id, _extractor in _capability_providers(self._vlm, "vision.extractor"):
-                provider_component = encode_record_id_component(provider_id)
-                derived_ids.append(f"{run_id}/derived.text.vlm/{provider_component}/{encoded_source}")
+                derived_ids.append(
+                    derived_text_record_id(
+                        kind="vlm",
+                        run_id=run_id,
+                        provider_id=str(provider_id),
+                        source_id=record_id,
+                        config=self._config,
+                    )
+                )
         if pipeline_enabled and self._pipeline is not None:
             derived_ids.append(f"{run_id}/derived.sst.frame/{encoded_source}")
         if not derived_ids:
@@ -687,14 +702,24 @@ class IdleProcessor:
             missing_count = 0
             if allow_ocr:
                 for provider_id, _extractor in ocr_providers:
-                    provider_component = encode_record_id_component(provider_id)
-                    derived_id = f"{_derive_run_id(self._config, record_id)}/derived.text.ocr/{provider_component}/{encode_record_id_component(record_id)}"
+                    derived_id = derived_text_record_id(
+                        kind="ocr",
+                        run_id=_derive_run_id(self._config, record_id),
+                        provider_id=str(provider_id),
+                        source_id=record_id,
+                        config=self._config,
+                    )
                     if _is_missing_metadata_record(metadata.get(derived_id)):
                         missing_count += 1
             if allow_vlm:
                 for provider_id, _extractor in vlm_providers:
-                    provider_component = encode_record_id_component(provider_id)
-                    derived_id = f"{_derive_run_id(self._config, record_id)}/derived.text.vlm/{provider_component}/{encode_record_id_component(record_id)}"
+                    derived_id = derived_text_record_id(
+                        kind="vlm",
+                        run_id=_derive_run_id(self._config, record_id),
+                        provider_id=str(provider_id),
+                        source_id=record_id,
+                        config=self._config,
+                    )
                     if _is_missing_metadata_record(metadata.get(derived_id)):
                         missing_count += 1
             needs_pipeline = False

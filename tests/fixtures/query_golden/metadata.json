@@ -1,0 +1,19 @@
+{
+  "run_test/derived.text.ocr/test_provider/song": {
+    "record_type": "derived.text.ocr",
+    "run_id": "run_test",
+    "ts_utc": "2026-02-09T00:00:00Z",
+    "text": "Chill Instrumental Jennifer Doherty - Sunlight",
+    "content_hash": "hash_song",
+    "payload_hash": "ph_song"
+  },
+  "run_test/derived.text.ocr/test_provider/quorum": {
+    "record_type": "derived.text.ocr",
+    "run_id": "run_test",
+    "ts_utc": "2026-02-09T00:00:01Z",
+    "text": "A task was assigned to OpenInvoice",
+    "content_hash": "hash_quorum",
+    "payload_hash": "ph_quorum"
+  }
+}
+
