@@ -401,8 +401,35 @@ class ScreenshotCaptureWindows(PluginBase):
                     def _spool() -> bool:
                         if not overflow.enabled:
                             return False
-                        png_bytes, payload, _encode_ms, _write_ms = _encode_and_build(job, event_builder=event_builder)
-                        overflow.write_item(record_id=record_id, payload=payload, blob=png_bytes)
+                        # Ultralight backpressure path: do NOT PNG-encode in the capture thread.
+                        # Spool raw RGB bytes and let the drain/worker encode to canonical PNG.
+                        try:
+                            width = int(getattr(img, "width", 0) or 0)
+                            height = int(getattr(img, "height", 0) or 0)
+                            if width <= 0 or height <= 0:
+                                return False
+                            rgb_bytes = img.tobytes()
+                        except Exception:
+                            return False
+                        spool_payload = {
+                            "record_type": "spool.capture.screenshot.v1",
+                            "run_id": run_id,
+                            "ts_utc": ts_utc,
+                            "width": int(width),
+                            "height": int(height),
+                            "pixel_format": "RGB",
+                            "backend": "mss",
+                            "monitor_index": int(idx),
+                            "dedupe": dict(job.get("dedupe") or {}),
+                            "cursor": cursor_payload,
+                            "monitor_layout": monitor_layout,
+                            "window_ref": job.get("window_ref"),
+                            "input_ref": job.get("input_ref"),
+                            "render_cursor": bool(render_cursor),
+                            "png_level": int(png_level),
+                            "media_fsync_policy": media_fsync_policy,
+                        }
+                        overflow.write_item(record_id=record_id, payload=spool_payload, blob=rgb_bytes, blob_ext="rgb")
                         try:
                             deduper.mark_saved(fingerprint, now=time.monotonic())
                         except Exception:
@@ -739,7 +766,7 @@ def _store_job_overflow(
     # If primary disk is hard-halt, go straight to overflow spool.
     if primary_hard_halt and overflow.enabled:
         try:
-            overflow.write_item(record_id=record_id, payload=payload, blob=png_bytes)
+            overflow.write_item(record_id=record_id, payload=payload, blob=png_bytes, blob_ext="png")
             record_telemetry("capture.screenshot.overflow_write", {"ts_utc": ts_utc, "record_id": record_id})
         except Exception:
             return False
@@ -765,7 +792,7 @@ def _store_job_overflow(
         # If overflow is configured, spool and continue capturing.
         if overflow.enabled:
             try:
-                overflow.write_item(record_id=record_id, payload=payload, blob=png_bytes)
+                overflow.write_item(record_id=record_id, payload=payload, blob=png_bytes, blob_ext="png")
                 record_telemetry("capture.screenshot.overflow_write", {"ts_utc": ts_utc, "record_id": record_id})
             except Exception:
                 return False
@@ -922,6 +949,54 @@ def _drain_overflow_item(
     payload = meta.get("payload")
     if not record_id or not isinstance(payload, dict):
         return False
+    # Spool entries may store raw pixels; convert to canonical PNG before commit.
+    if str(payload.get("record_type") or "") == "spool.capture.screenshot.v1":
+        try:
+            from PIL import Image  # type: ignore
+        except Exception:
+            return False
+        try:
+            width = int(payload.get("width") or 0)
+            height = int(payload.get("height") or 0)
+            if width <= 0 or height <= 0:
+                return False
+            pixel_format = str(payload.get("pixel_format") or "RGB").upper()
+            if pixel_format != "RGB":
+                return False
+            img = Image.frombytes("RGB", (width, height), blob)
+            job = {
+                "record_id": record_id,
+                "run_id": str(payload.get("run_id") or ""),
+                "ts_utc": str(payload.get("ts_utc") or ""),
+                "monitor_index": int(payload.get("monitor_index") or 0),
+                "backend": str(payload.get("backend") or "mss"),
+                "img": img,
+                "png_level": int(payload.get("png_level") or 0),
+                "cursor_payload": payload.get("cursor"),
+                "monitor_layout": payload.get("monitor_layout"),
+                "window_ref": payload.get("window_ref"),
+                "input_ref": payload.get("input_ref"),
+                "dedupe": payload.get("dedupe") if isinstance(payload.get("dedupe"), dict) else {},
+                "render_cursor": bool(payload.get("render_cursor", False)),
+                "media_fsync_policy": payload.get("media_fsync_policy"),
+            }
+            png_bytes, canonical_payload, encode_ms, _write_ms = _encode_and_build(job, event_builder=event_builder)
+            _commit_payload(
+                record_id,
+                canonical_payload,
+                png_bytes,
+                storage_media=storage_media,
+                storage_meta=storage_meta,
+                event_builder=event_builder,
+                logger=logger,
+                encode_ms=int(encode_ms),
+                write_ms=int(canonical_payload.get("write_ms", 0) or 0),
+            )
+            return True
+        except FileExistsError:
+            return True
+        except Exception:
+            return False
     try:
         _commit_payload(
             record_id,

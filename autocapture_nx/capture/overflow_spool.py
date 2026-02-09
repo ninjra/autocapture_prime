@@ -74,29 +74,34 @@ class OverflowSpool:
         except Exception:
             return 0
 
-    def write_item(self, *, record_id: str, payload: dict[str, Any], blob: bytes) -> None:
+    def write_item(self, *, record_id: str, payload: dict[str, Any], blob: bytes, blob_ext: str = "png") -> None:
         """Write a pending spool item atomically.
 
         Layout:
         - pending/<record_id>.json : payload + pointers
-        - pending/<record_id>.png  : blob bytes
+        - pending/<record_id>.<ext> : blob bytes
         """
         if not self.enabled:
             raise RuntimeError("overflow_spool_disabled")
         self.ensure_dirs()
 
         safe = _safe_name(record_id)
-        png_name = f"{safe}.png"
+        ext = str(blob_ext or "png").strip().lower()
+        if not ext:
+            ext = "png"
+        # Keep this conservative: blob files are data, not executables.
+        ext = "".join(ch for ch in ext if ch.isalnum() or ch in ("_", "-"))[:8] or "png"
+        blob_name = f"{safe}.{ext}"
         json_name = f"{safe}.json"
-        png_path = self._pending / png_name
+        blob_path = self._pending / blob_name
         json_path = self._pending / json_name
 
-        # Write PNG first; metadata references it.
-        atomic_write_bytes(png_path, blob)
+        # Write blob first; metadata references it.
+        atomic_write_bytes(blob_path, blob)
         meta = {
             "record_id": str(record_id),
             "created_ts": time.time(),
-            "blob_path": png_name,
+            "blob_path": blob_name,
             "payload": payload,
         }
         atomic_write_text(json_path, json.dumps(meta, sort_keys=True))
