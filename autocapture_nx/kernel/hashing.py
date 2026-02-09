@@ -15,12 +15,63 @@ _HASH_CACHE_ENABLED = os.getenv("AUTOCAPTURE_HASH_CACHE", "1").lower() not in {"
 _DIR_HASH_CACHE: dict[str, tuple[str, str]] = {}
 _DIR_HASH_LOCK = threading.Lock()
 
+_TEXT_LF_NORMALIZE_SUFFIXES = {
+    ".py",
+    ".pyi",
+    ".json",
+    ".md",
+    ".txt",
+    ".toml",
+    ".yaml",
+    ".yml",
+    ".ini",
+    ".cfg",
+    ".ps1",
+    ".sh",
+    ".csv",
+    ".tsv",
+}
+
+
+def _iter_bytes_for_hash(path: Path):
+    """Yield bytes for hashing.
+
+    For common text formats we normalize CRLF/CR to LF so plugin/contracts lock
+    hashes remain stable across Windows/WSL even when git autocrlf is enabled.
+    """
+
+    suffix = path.suffix.lower()
+    normalize_newlines = suffix in _TEXT_LF_NORMALIZE_SUFFIXES
+    prev_cr = False
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(8192), b""):
+            if not normalize_newlines:
+                yield chunk
+                continue
+            if prev_cr:
+                if chunk.startswith(b"\n"):
+                    yield b"\n"
+                    chunk = chunk[1:]
+                else:
+                    yield b"\n"
+                prev_cr = False
+            if chunk.endswith(b"\r"):
+                prev_cr = True
+                chunk = chunk[:-1]
+            if chunk:
+                # Replace CRLF -> LF within the chunk, then normalize any remaining CR.
+                chunk = chunk.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+                if chunk:
+                    yield chunk
+        if prev_cr:
+            yield b"\n"
+
 
 def sha256_file(path: str | Path) -> str:
     digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(8192), b""):
-            digest.update(chunk)
+    file_path = Path(path)
+    for chunk in _iter_bytes_for_hash(file_path):
+        digest.update(chunk)
     return digest.hexdigest()
 
 
@@ -90,9 +141,8 @@ def sha256_directory(path: str | Path) -> str:
 
     for rel, file_path, _stat in sorted(entries, key=_sort_key):
         digest.update(rel.encode("utf-8"))
-        with open(file_path, "rb") as handle:
-            for chunk in iter(lambda: handle.read(8192), b""):
-                digest.update(chunk)
+        for chunk in _iter_bytes_for_hash(file_path):
+            digest.update(chunk)
     result = digest.hexdigest()
     if _HASH_CACHE_ENABLED:
         with _DIR_HASH_LOCK:
