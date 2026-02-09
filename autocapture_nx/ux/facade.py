@@ -1133,7 +1133,9 @@ class UXFacade:
     def replay_proof_bundle(self, bundle_path: str) -> dict[str, Any]:
         from autocapture_nx.kernel.replay import replay_bundle
 
-        return asdict(replay_bundle(bundle_path))
+        with self._kernel_mgr.session() as system:
+            keyring = system.get("storage.keyring") if system.has("storage.keyring") else None
+            return asdict(replay_bundle(bundle_path, keyring=keyring))
 
     def storage_compact(self, *, dry_run: bool = False) -> dict[str, Any]:
         from autocapture.storage.compaction import compact_derived

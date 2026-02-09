@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import hmac
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from autocapture_nx.kernel.canonical_json import dumps
+from autocapture_nx.kernel.crypto import derive_key
 from autocapture_nx.kernel.hashing import sha256_text
 from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.kernel.policy_snapshot import policy_snapshot_hash as _policy_hash
@@ -177,6 +179,7 @@ def export_proof_bundle(
             encoding="utf-8",
         )
 
+        bundle_files = _bundle_files_manifest(tmp_root)
         manifest = {
             "schema_version": 1,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -188,6 +191,7 @@ def export_proof_bundle(
             "anchors": len(anchors),
             "blobs": blob_count,
             "policy_snapshot_hashes": policy_hashes,
+            "bundle_files": bundle_files,
             "files": {
                 "metadata": "metadata.jsonl",
                 "ledger": "ledger.ndjson",
@@ -202,6 +206,12 @@ def export_proof_bundle(
             json.dumps(manifest, sort_keys=True, indent=2),
             encoding="utf-8",
         )
+        sig = _sign_manifest(tmp_root / "manifest.json", keyring)
+        if sig is not None:
+            (tmp_root / "manifest.sig.json").write_text(
+                json.dumps(sig, sort_keys=True, indent=2),
+                encoding="utf-8",
+            )
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -504,3 +514,125 @@ def _decode_anchor_line(line: str) -> dict[str, Any] | None:
         return json.loads(line)
     except Exception:
         return None
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(8192), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _bundle_files_manifest(root: Path) -> list[dict[str, Any]]:
+    """Deterministic file list for tamper detection (SEC-07/QA-08)."""
+
+    files: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("*")):
+        if path.is_dir():
+            continue
+        rel = path.relative_to(root).as_posix()
+        try:
+            files.append({"path": rel, "sha256": _sha256_file(path), "bytes": int(path.stat().st_size)})
+        except Exception:
+            continue
+    files.sort(key=lambda row: (str(row.get("path") or ""), str(row.get("sha256") or "")))
+    return files
+
+
+def _sign_manifest(manifest_path: Path, keyring: Any | None) -> dict[str, Any] | None:
+    """Sign manifest.json with an HMAC derived from the anchor key."""
+
+    if keyring is None:
+        return None
+    try:
+        key_id, root = keyring.active_key("anchor")
+        key = derive_key(root, "proof_bundle_manifest")
+    except Exception:
+        return None
+    try:
+        manifest_bytes = manifest_path.read_bytes()
+    except Exception:
+        return None
+    manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+    signature_hex = hmac.new(key, manifest_sha.encode("utf-8"), hashlib.sha256).hexdigest()
+    return {
+        "schema_version": 1,
+        "algo": "hmac-sha256",
+        "key_id": str(key_id),
+        "manifest_sha256": str(manifest_sha),
+        "signature_hex": str(signature_hex),
+    }
+
+
+def verify_proof_bundle(bundle_path: str | Path, *, keyring: Any | None) -> dict[str, Any]:
+    """Verify proof bundle integrity (SEC-07/QA-08)."""
+
+    path = Path(bundle_path)
+    if not path.exists():
+        return {"ok": False, "error": "bundle_missing"}
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            manifest_bytes = zf.read("manifest.json")
+            sig_raw = zf.read("manifest.sig.json")
+    except KeyError:
+        return {"ok": False, "error": "signature_missing"}
+    except Exception as exc:
+        return {"ok": False, "error": f"bundle_read_failed:{type(exc).__name__}"}
+    try:
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+    except Exception:
+        return {"ok": False, "error": "manifest_invalid_json"}
+    if not isinstance(manifest, dict):
+        return {"ok": False, "error": "manifest_invalid_shape"}
+    try:
+        sig = json.loads(sig_raw.decode("utf-8"))
+    except Exception:
+        return {"ok": False, "error": "signature_invalid_json"}
+    if not isinstance(sig, dict):
+        return {"ok": False, "error": "signature_invalid_shape"}
+    if sig.get("algo") != "hmac-sha256":
+        return {"ok": False, "error": "signature_algo_unsupported"}
+    manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+    if str(sig.get("manifest_sha256") or "") != manifest_sha:
+        return {"ok": False, "error": "manifest_sha256_mismatch"}
+    if keyring is None:
+        return {"ok": False, "error": "keyring_missing"}
+    key_id = str(sig.get("key_id") or "").strip()
+    signature_hex = str(sig.get("signature_hex") or "").strip()
+    if not key_id or not signature_hex:
+        return {"ok": False, "error": "signature_missing_fields"}
+    try:
+        root = keyring.key_for("anchor", key_id)
+        key = derive_key(root, "proof_bundle_manifest")
+    except Exception:
+        return {"ok": False, "error": "signature_key_unavailable"}
+    expected = hmac.new(key, manifest_sha.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature_hex):
+        return {"ok": False, "error": "signature_mismatch"}
+
+    expected_files = manifest.get("bundle_files", [])
+    if not isinstance(expected_files, list):
+        return {"ok": False, "error": "bundle_files_missing"}
+    expected_map: dict[str, dict[str, Any]] = {}
+    for row in expected_files:
+        if not isinstance(row, dict):
+            continue
+        rel = str(row.get("path") or "")
+        if rel:
+            expected_map[rel] = row
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            for rel, row in sorted(expected_map.items()):
+                try:
+                    data = zf.read(rel)
+                except KeyError:
+                    return {"ok": False, "error": f"bundle_file_missing:{rel}"}
+                sha = hashlib.sha256(data).hexdigest()
+                if sha != str(row.get("sha256") or ""):
+                    return {"ok": False, "error": f"bundle_file_sha256_mismatch:{rel}"}
+                if int(len(data)) != int(row.get("bytes") or 0):
+                    return {"ok": False, "error": f"bundle_file_size_mismatch:{rel}"}
+    except Exception as exc:
+        return {"ok": False, "error": f"bundle_verify_failed:{type(exc).__name__}"}
+    return {"ok": True, "manifest_sha256": manifest_sha, "key_id": key_id}

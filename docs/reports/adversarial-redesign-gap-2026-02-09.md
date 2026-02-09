@@ -3,9 +3,9 @@
 Generated: 2026-02-09
 
 - total: 92
-- implemented: 43
+- implemented: 45
 - partial: 33
-- missing: 16
+- missing: 14
 
 | ID | Status | Title | Evidence | Validators |
 | --- | --- | --- | --- | --- |
@@ -48,8 +48,8 @@ Generated: 2026-02-09
 | META-05 | implemented | Normalize citation addressing: require citations to reference (evidence_id, span_id, start/end offsets or time range) + stable locator | contracts/citation.schema.json<br>plugins/builtin/citation_basic/plugin.py<br>autocapture_nx/kernel/query.py<br>tests/test_citation_span_contract.py | tests/test_citation_span_contract.py<br>tests/test_citation_span_ref.py<br>tests/test_citation_validator_metadata.py |
 | META-06 | implemented | Persist full policy snapshots (privacy + plugin permissions + egress settings) by hash, and include in ledger + proof bundle | plugins/builtin/ledger_basic/plugin.py<br>autocapture_nx/kernel/policy_gate.py<br>autocapture_nx/kernel/proof_bundle.py | tests/test_policy_snapshot_exported.py |
 | META-07 | partial | Introduce a content-addressed artifact manifest for all derived artifacts (OCR text, embeddings, indexes) with lineage pointers | autocapture_nx/kernel/derived_records.py<br>autocapture_nx/kernel/metadata_store.py<br>autocapture_nx/kernel/proof_bundle.py | tests/test_artifact_manifest_lineage.py |
-| META-08 | missing | Add minimal evaluation-result records (quality, coverage, freshness) and surface them in query results and UI | contracts/evaluation.schema.json<br>autocapture_nx/kernel/query.py<br>autocapture/web/ui/index.html | tests/test_query_evaluation_fields.py |
-| META-09 | missing | Record determinism inputs explicitly: RNG seeds, locale/TZ, model versions, and any sampling parameters used | autocapture_nx/kernel/determinism.py<br>autocapture_nx/plugin_system/registry.py<br>contracts/run_manifest.schema.json | tests/test_manifest_determinism_fields.py |
+| META-08 | implemented | Add minimal evaluation-result records (quality, coverage, freshness) and surface them in query results and UI | contracts/evaluation.schema.json<br>autocapture_nx/kernel/query.py<br>autocapture/web/ui/index.html | tests/test_query_evaluation_fields.py |
+| META-09 | implemented | Record determinism inputs explicitly: RNG seeds, locale/TZ, model versions, and any sampling parameters used | autocapture_nx/kernel/determinism.py<br>autocapture_nx/plugin_system/registry.py<br>contracts/run_manifest.schema.json | tests/test_manifest_determinism_fields.py |
 | META-10 | implemented | Define a canonical diagnostics bundle schema (bundle_manifest.json) for doctor + support artifacts | autocapture_nx/cli.py<br>tools/gate_doctor.py<br>contracts/diagnostics_bundle.schema.json | tests/test_diagnostics_bundle_schema.py |
 | OPS-01 | implemented | Adopt structured JSONL logging with correlation IDs (run_id, job_id, plugin_id) and log rotation | autocapture_nx/kernel/logging.py<br>autocapture/web/api.py<br>autocapture_nx/plugin_system/host_runner.py | tests/test_logs_have_correlation_ids.py |
 | OPS-02 | implemented | Instrument frictionless workflow metrics: TTFR, query latency, misconfig errors, plugin crashes, blocked ops; expose /metrics + UI | autocapture_nx/capture/pipeline.py<br>autocapture/web/routes/metrics.py<br>autocapture/web/routes/plugins.py<br>autocapture_nx/ux/facade.py<br>tests/test_metrics_ttfr.py | tests/test_metrics_ttfr.py |
