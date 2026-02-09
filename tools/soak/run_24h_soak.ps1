@@ -59,6 +59,19 @@ if (-not $env:AUTOCAPTURE_DATA_DIR) { $env:AUTOCAPTURE_DATA_DIR = (Join-Path $Ro
 New-Item -ItemType Directory -Force -Path $env:AUTOCAPTURE_CONFIG_DIR | Out-Null
 New-Item -ItemType Directory -Force -Path $env:AUTOCAPTURE_DATA_DIR | Out-Null
 
+$LogDir = Join-Path $env:AUTOCAPTURE_DATA_DIR "logs"
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+$LogPath = Join-Path $LogDir ("soak_" + $Stamp + ".log")
+
+function Write-Log([string]$Text) {
+  try { Add-Content -Path $LogPath -Value $Text -Encoding UTF8 } catch { }
+}
+
+Write-Log ("=== autocapture soak start ts_utc=" + $Stamp + " ===")
+Write-Log ("root=" + $Root)
+Write-Log ("config_dir=" + $env:AUTOCAPTURE_CONFIG_DIR)
+Write-Log ("data_dir=" + $env:AUTOCAPTURE_DATA_DIR)
+
 # Keep the soak stable (avoid host-runner subprocess explosions during capture+ingest).
 $env:OMP_NUM_THREADS = "1"
 $env:MKL_NUM_THREADS = "1"
@@ -77,7 +90,8 @@ try {
   $py = (Ensure-VenvWin $Root)
 
   # Write smoke profile (force at least one screenshot blob for validation).
-  & $py "$Root\\tools\\soak\\write_user_json.py" --config-dir "$env:AUTOCAPTURE_CONFIG_DIR" --profile smoke_screenshot_ingest | Out-Null
+  Write-Log "=== write_user_json smoke_screenshot_ingest ==="
+  & $py "$Root\\tools\\soak\\write_user_json.py" --config-dir "$env:AUTOCAPTURE_CONFIG_DIR" --profile smoke_screenshot_ingest *>> $LogPath
 
   # Stable per-machine consent: reuse the most recently accepted consent file from prior
   # soak runs under .data/soak/ so operators don't need to re-accept for every new
@@ -95,11 +109,16 @@ try {
   }
 
   # Consent preflight (fail closed).
-  $consent = & $py -m autocapture_nx consent status --data-dir "$env:AUTOCAPTURE_DATA_DIR" --config-dir "$env:AUTOCAPTURE_CONFIG_DIR" | Out-String
+  Write-Log "=== consent status ==="
+  $consent = & $py -m autocapture_nx consent status --data-dir "$env:AUTOCAPTURE_DATA_DIR" --config-dir "$env:AUTOCAPTURE_CONFIG_DIR" 2>&1 | Out-String
+  Write-Log $consent
   if ($consent -match '"accepted"\s*:\s*false') {
-    Write-Host "ERROR: capture consent not accepted for AUTOCAPTURE_DATA_DIR=$($env:AUTOCAPTURE_DATA_DIR)"
+    $cmd = "$py -m autocapture_nx consent accept --data-dir `"$($env:AUTOCAPTURE_DATA_DIR)`" --config-dir `"$($env:AUTOCAPTURE_CONFIG_DIR)`""
+    Write-Log "ERROR: capture consent not accepted"
+    Write-Log ("consent_accept_cmd=" + $cmd)
+    Write-Host ("ERROR: capture consent not accepted. log=" + $LogPath)
     Write-Host "Run:"
-    Write-Host "  $py -m autocapture_nx consent accept --data-dir `"$($env:AUTOCAPTURE_DATA_DIR)`" --config-dir `"$($env:AUTOCAPTURE_CONFIG_DIR)`""
+    Write-Host ("  " + $cmd)
     exit 2
   }
 
@@ -107,43 +126,51 @@ try {
   $env:PYTHONFAULTHANDLER = "1"
   $prevEAP = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
+  Write-Log "=== smoke run autocapture_nx run ==="
   $smokeOut = & $py -m autocapture_nx run --duration-s $SmokeS --status-interval-s 1 2>&1 | Out-String
   $smokeExit = $LASTEXITCODE
   $ErrorActionPreference = $prevEAP
+  Write-Log $smokeOut
   if ($smokeExit -ne 0) {
-    Write-Host "ERROR: autocapture_nx run failed during smoke run (exit=$LASTEXITCODE). Output:"
-    Write-Host $smokeOut
+    Write-Log ("ERROR: smoke run failed exit=" + $smokeExit)
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    & $py -m autocapture_nx status 2>&1 | Out-Host
-    Write-Host "[debug] plugins load-report:"
-    & $py -m autocapture_nx plugins load-report 2>&1 | Out-Host
+    Write-Log "=== debug status ==="
+    & $py -m autocapture_nx status *>> $LogPath
+    Write-Log "=== debug plugins load-report ==="
+    & $py -m autocapture_nx plugins load-report *>> $LogPath
     $ErrorActionPreference = $prevEAP
+    Write-Host ("ERROR: smoke run failed (exit=" + $smokeExit + "). log=" + $LogPath)
     exit 3
   }
   $prevEAP = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
+  Write-Log "=== smoke evidence check ==="
   $evidenceOut = & $py "$Root\\tools\\soak\\check_evidence.py" --record-type evidence.capture.frame 2>&1 | Out-String
   $evidenceExit = $LASTEXITCODE
   $ErrorActionPreference = $prevEAP
+  Write-Log $evidenceOut
   if ($evidenceOut.Trim().Length -gt 0) { Write-Host ("[smoke] evidence_check=" + $evidenceOut.Trim()) }
   if ($evidenceExit -ne 0) {
-    Write-Host "ERROR: no screenshot evidence was ingested during smoke run. Ensure you are on Windows and mss/Pillow can capture the desktop."
-    Write-Host "[debug] status:"
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    & $py -m autocapture_nx status 2>&1 | Out-Host
-    Write-Host "[debug] plugins list:"
-    & $py -m autocapture_nx plugins list --json 2>&1 | Out-Host
+    Write-Log "ERROR: no screenshot evidence ingested during smoke run"
+    Write-Log "=== debug status ==="
+    & $py -m autocapture_nx status *>> $LogPath
+    Write-Log "=== debug plugins list ==="
+    & $py -m autocapture_nx plugins list --json *>> $LogPath
     $ErrorActionPreference = $prevEAP
+    Write-Host ("ERROR: no screenshot evidence ingested during smoke run. log=" + $LogPath)
     exit 3
   }
 
   # Switch to soak profile (dedupe back on, screenshots-only, processing disabled).
-  & $py "$Root\\tools\\soak\\write_user_json.py" --config-dir "$env:AUTOCAPTURE_CONFIG_DIR" --profile soak_screenshot_only | Out-Null
+  Write-Log "=== write_user_json soak_screenshot_only ==="
+  & $py "$Root\\tools\\soak\\write_user_json.py" --config-dir "$env:AUTOCAPTURE_CONFIG_DIR" --profile soak_screenshot_only *>> $LogPath
 
-  Write-Host "Capture+ingest soak running for up to $DurationS seconds. Ctrl+C to stop."
-  & $py -m autocapture_nx run --duration-s $DurationS --status-interval-s 60
+  Write-Host ("OK: capture+ingest soak starting. log=" + $LogPath)
+  Write-Log ("=== soak run start duration_s=" + $DurationS + " ===")
+  & $py -m autocapture_nx run --duration-s $DurationS --status-interval-s 60 *>> $LogPath
 } finally {
   Pop-Location
 }
