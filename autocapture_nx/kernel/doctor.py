@@ -138,13 +138,22 @@ def build_health_report(*, system: Any, checks: list[Any]) -> dict[str, Any]:
     generated = _utc_now_iso()
     matrix = build_component_matrix(system=system, checks=checks)
     ok = all(bool(item.ok) for item in matrix) and all(bool(getattr(c, "ok", True)) for c in (checks or []))
+    failed_components = [item.name for item in matrix if not bool(item.ok)]
+    failed_checks = [str(getattr(c, "name", "")) for c in (checks or []) if getattr(c, "ok", True) is False]
     summary = {
         "ok": bool(ok),
+        "code": "ok" if ok else "degraded",
         "components_total": int(len(matrix)),
         "components_ok": int(sum(1 for item in matrix if item.ok)),
         "checks_total": int(len(checks or [])),
         "checks_failed": int(sum(1 for c in (checks or []) if getattr(c, "ok", True) is False)),
     }
+    summary["message"] = (
+        f"components_ok={summary['components_ok']}/{summary['components_total']} "
+        f"checks_failed={summary['checks_failed']}/{summary['checks_total']}"
+        + (f" failed_components={failed_components[:5]}" if failed_components else "")
+        + (f" failed_checks={failed_checks[:5]}" if failed_checks else "")
+    )
     return {
         "ok": bool(ok),
         "generated_at_utc": generated,
@@ -153,4 +162,3 @@ def build_health_report(*, system: Any, checks: list[Any]) -> dict[str, Any]:
         # Preserve raw checks for backwards compatibility.
         "checks": [getattr(check, "__dict__", {"name": getattr(check, "name", ""), "ok": getattr(check, "ok", False)}) for check in (checks or [])],
     }
-

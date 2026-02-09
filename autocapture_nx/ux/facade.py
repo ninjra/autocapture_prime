@@ -335,9 +335,17 @@ class UXFacade:
                 report = None
         if not isinstance(report, dict):
             ok = all(check.ok for check in checks)
+            failed = [str(getattr(c, "name", "")) for c in (checks or []) if getattr(c, "ok", True) is False]
             report = {
                 "ok": ok,
                 "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+                "summary": {
+                    "ok": bool(ok),
+                    "code": "ok" if ok else "degraded",
+                    "message": "ok" if ok else f"failed_checks={failed[:5]}",
+                    "checks_total": int(len(checks or [])),
+                    "checks_failed": int(len(failed)),
+                },
                 "checks": [check.__dict__ for check in checks],
             }
         if logger is not None:
