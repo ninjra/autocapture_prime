@@ -1204,52 +1204,67 @@ class UXFacade:
         controls_cfg = runtime_cfg.get("capture_controls", {}) if isinstance(runtime_cfg, dict) else {}
         return bool(controls_cfg.get("enabled", False))
 
-    def _start_components(self) -> None:
-        started = False
+    def _start_components(self) -> dict[str, Any]:
+        """Start capture-related components.
+
+        Fail closed for soak/ops: if required components can't start or the kernel
+        can't boot, bubble up a structured error so scripts don't "fake run".
+        """
+
+        errors: list[dict[str, Any]] = []
+        started_names: list[str] = []
+        kernel_error = None
         with self._kernel_mgr.session() as system:
-            capture = system.get("capture.source") if system and hasattr(system, "get") else None
-            screenshot = (
-                system.get("capture.screenshot")
-                if system and hasattr(system, "has") and system.has("capture.screenshot")
-                else None
-            )
-            audio = system.get("capture.audio") if system and hasattr(system, "get") else None
-            input_tracker = system.get("tracking.input") if system and hasattr(system, "get") else None
-            window_meta = system.get("window.metadata") if system and hasattr(system, "get") else None
-            cursor_tracker = (
-                system.get("tracking.cursor")
-                if system and hasattr(system, "has") and system.has("tracking.cursor")
-                else None
-            )
-            clipboard = (
-                system.get("tracking.clipboard")
-                if system and hasattr(system, "has") and system.has("tracking.clipboard")
-                else None
-            )
-            file_activity = (
-                system.get("tracking.file_activity")
-                if system and hasattr(system, "has") and system.has("tracking.file_activity")
-                else None
-            )
-            for component in (
-                capture,
-                screenshot,
-                audio,
-                input_tracker,
-                window_meta,
-                cursor_tracker,
-                clipboard,
-                file_activity,
-            ):
+            if system is None:
+                kernel_error = self._kernel_mgr.last_error()
+                return {"ok": False, "error": "kernel_boot_failed", "kernel_error": kernel_error, "started": [], "errors": []}
+
+            capture = system.get("capture.source") if hasattr(system, "get") else None
+            screenshot = system.get("capture.screenshot") if hasattr(system, "has") and system.has("capture.screenshot") else None
+            audio = system.get("capture.audio") if hasattr(system, "get") else None
+            input_tracker = system.get("tracking.input") if hasattr(system, "get") else None
+            window_meta = system.get("window.metadata") if hasattr(system, "get") else None
+            cursor_tracker = system.get("tracking.cursor") if hasattr(system, "has") and system.has("tracking.cursor") else None
+            clipboard = system.get("tracking.clipboard") if hasattr(system, "has") and system.has("tracking.clipboard") else None
+            file_activity = system.get("tracking.file_activity") if hasattr(system, "has") and system.has("tracking.file_activity") else None
+
+            want_screenshot = bool((self._config.get("capture") or {}).get("screenshot", {}).get("enabled", False))
+            want_audio = bool((self._config.get("capture") or {}).get("audio", {}).get("enabled", False))
+            want_source = bool((self._config.get("capture") or {}).get("video", {}).get("enabled", False))
+
+            components: list[tuple[str, Any, bool]] = [
+                ("capture.source", capture, want_source),
+                ("capture.screenshot", screenshot, want_screenshot),
+                ("capture.audio", audio, want_audio),
+                ("tracking.input", input_tracker, False),
+                ("window.metadata", window_meta, False),
+                ("tracking.cursor", cursor_tracker, False),
+                ("tracking.clipboard", clipboard, False),
+                ("tracking.file_activity", file_activity, False),
+            ]
+
+            for name, component, required in components:
                 if component is None:
+                    if required:
+                        errors.append({"component": name, "error": "missing"})
                     continue
-                if hasattr(component, "start"):
-                    try:
-                        component.start()
-                        started = True
-                    except Exception:
-                        continue
+                if not hasattr(component, "start"):
+                    continue
+                try:
+                    component.start()
+                    started_names.append(name)
+                except Exception as exc:
+                    if required:
+                        errors.append({"component": name, "error": f"{type(exc).__name__}: {exc}"})
+                    continue
+
+        started = bool(started_names)
         self._run_active = started
+        if errors:
+            return {"ok": False, "error": "component_start_failed", "started": started_names, "errors": errors}
+        if not started:
+            return {"ok": False, "error": "no_components_started", "started": [], "errors": []}
+        return {"ok": True, "started": started_names, "errors": []}
 
     def _stop_components(self) -> None:
         with self._kernel_mgr.session() as system:
@@ -1302,7 +1317,9 @@ class UXFacade:
         except Exception:
             return {"ok": False, "error": "consent_check_failed", "running": False}
 
-        self._start_components()
+        start_result = self._start_components()
+        if not bool(start_result.get("ok", False)):
+            return {"ok": False, "error": str(start_result.get("error") or "capture_start_failed"), "details": start_result, "running": False}
         # Ledger an operator capture start event (append-only).
         with self._kernel_mgr.session() as system:
             builder = system.get("event.builder") if system and hasattr(system, "get") else None
@@ -1316,7 +1333,7 @@ class UXFacade:
                     )
                 except Exception:
                     pass
-        return {"ok": True, "running": True}
+        return {"ok": True, "running": True, "started": start_result.get("started")}
 
     def run_stop(self, *, preserve_pause: bool = False) -> dict[str, Any]:
         if not self._capture_controls_enabled():
@@ -1371,7 +1388,9 @@ class UXFacade:
             self._clear_pause_locked()
         if self._run_active:
             return {"ok": True, "running": True, "resumed": False}
-        self._start_components()
+        start_result = self._start_components()
+        if not bool(start_result.get("ok", False)):
+            return {"ok": False, "error": str(start_result.get("error") or "capture_start_failed"), "details": start_result, "running": False}
         with self._kernel_mgr.session() as system:
             builder = system.get("event.builder") if system and hasattr(system, "get") else None
             if builder is not None and hasattr(builder, "ledger_entry"):

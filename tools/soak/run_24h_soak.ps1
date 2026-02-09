@@ -104,10 +104,22 @@ try {
   }
 
   # Smoke run to prove capture+ingest works (does not imply dedupe behavior).
-  & $py -m autocapture_nx run --duration-s $SmokeS --status-interval-s 0 | Out-Null
-  & $py "$Root\\tools\\soak\\check_evidence.py" --record-type evidence.capture.frame | Out-Null
+  $env:PYTHONFAULTHANDLER = "1"
+  $smokeOut = & $py -m autocapture_nx run --duration-s $SmokeS --status-interval-s 1 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: autocapture_nx run failed during smoke run (exit=$LASTEXITCODE). Output:"
+    Write-Host $smokeOut
+    & $py -m autocapture_nx status 2>&1 | Out-Host
+    exit 3
+  }
+  $evidenceOut = & $py "$Root\\tools\\soak\\check_evidence.py" --record-type evidence.capture.frame 2>&1 | Out-String
+  if ($evidenceOut.Trim().Length -gt 0) { Write-Host ("[smoke] evidence_check=" + $evidenceOut.Trim()) }
   if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: no screenshot evidence was ingested during smoke run. Ensure you are on Windows and mss/Pillow can capture the desktop."
+    Write-Host "[debug] status:"
+    & $py -m autocapture_nx status 2>&1 | Out-Host
+    Write-Host "[debug] plugins list:"
+    & $py -m autocapture_nx plugins list --json 2>&1 | Out-Host
     exit 3
   }
 
