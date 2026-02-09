@@ -291,6 +291,33 @@ class Kernel:
             plugins, capabilities = registry.load_plugins()
             profiler.mark("load_plugins_meta")
 
+        # Fail closed with actionable context if core capabilities are missing.
+        required_caps = ("journal.writer", "ledger.writer", "anchor.writer")
+        caps_all = capabilities.all()
+        missing = [cap for cap in required_caps if cap not in caps_all]
+        if missing:
+            report = None
+            try:
+                report = registry.load_report()
+            except Exception:
+                report = None
+            failed = []
+            if isinstance(report, dict):
+                for item in (report.get("failed") or [])[:8]:
+                    if not isinstance(item, dict):
+                        continue
+                    failed.append(
+                        {
+                            "plugin_id": item.get("plugin_id"),
+                            "phase": item.get("phase"),
+                            "error": item.get("error"),
+                        }
+                    )
+            detail = ""
+            if failed:
+                detail = f" plugin_load_failures={failed!r}"
+            raise PluginError(f"Missing capability: {', '.join(missing)}.{detail}")
+
         builder = EventBuilder(
             self.config,
             capabilities.get("journal.writer"),
