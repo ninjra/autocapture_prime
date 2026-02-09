@@ -104,6 +104,54 @@
       "notes": "Core regression gates exist and are runnable locally/CI; they cover coverage mapping, doctor/integrity, ledger invariants, perf budgets, static checks, and security checks."
     },
     {
+      "id": "RD-01",
+      "title": "Roadmap Phase 0 published with verifiable milestones",
+      "status": "implemented",
+      "evidence": [
+        "docs/roadmap.md"
+      ],
+      "validators": [
+        "tests/test_roadmap_sections_present.py"
+      ],
+      "notes": "This repo ships the roadmap as a versioned artifact; UI work is out of scope, but milestones are explicitly documented."
+    },
+    {
+      "id": "RD-02",
+      "title": "Roadmap Phase 1 published with verifiable milestones",
+      "status": "implemented",
+      "evidence": [
+        "docs/roadmap.md"
+      ],
+      "validators": [
+        "tests/test_roadmap_sections_present.py"
+      ],
+      "notes": "See docs/roadmap.md Phase 1 section."
+    },
+    {
+      "id": "RD-03",
+      "title": "Roadmap Phase 2 published with verifiable milestones",
+      "status": "implemented",
+      "evidence": [
+        "docs/roadmap.md"
+      ],
+      "validators": [
+        "tests/test_roadmap_sections_present.py"
+      ],
+      "notes": "See docs/roadmap.md Phase 2 section."
+    },
+    {
+      "id": "RD-04",
+      "title": "Roadmap Phase 3 published with verifiable milestones",
+      "status": "implemented",
+      "evidence": [
+        "docs/roadmap.md"
+      ],
+      "validators": [
+        "tests/test_roadmap_sections_present.py"
+      ],
+      "notes": "See docs/roadmap.md Phase 3 section."
+    },
+    {
       "id": "META-05",
       "title": "Stable citation locator contract (record+offsets/time-range)",
       "status": "implemented",
