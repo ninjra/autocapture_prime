@@ -1324,16 +1324,16 @@ class UXFacade:
                 ("capture.source", capture, want_source),
                 ("capture.screenshot", screenshot, want_screenshot),
                 ("capture.audio", audio, want_audio),
-                ("tracking.input", input_tracker, want_input),
-                ("window.metadata", window_meta, want_window_meta),
-                ("tracking.cursor", cursor_tracker, want_cursor),
-                ("tracking.clipboard", clipboard, want_clipboard),
-                ("tracking.file_activity", file_activity, want_file_activity),
+                # Trackers are optional for capture+ingest: capture must never be
+                # blocked due to missing peripheral metadata providers.
+                ("tracking.input", input_tracker, False),
+                ("window.metadata", window_meta, False),
+                ("tracking.cursor", cursor_tracker, False),
+                ("tracking.clipboard", clipboard, False),
+                ("tracking.file_activity", file_activity, False),
             ]
 
             for name, component, required in components:
-                if not required:
-                    continue
                 if component is None:
                     if required:
                         errors.append({"component": name, "error": "missing"})

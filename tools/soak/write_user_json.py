@@ -47,6 +47,7 @@ def _profile_payload(profile: str) -> dict[str, Any]:
                 "audio": {"enabled": False},
                 "video": {"enabled": False},
                 "input_tracking": {"mode": "win32_idle"},
+                "cursor": {"enabled": False},
                 "window_metadata": {"enabled": True},
                 "screenshot": {
                     "enabled": True,
@@ -75,6 +76,7 @@ def _profile_payload(profile: str) -> dict[str, Any]:
                 "audio": {"enabled": False},
                 "video": {"enabled": False},
                 "input_tracking": {"mode": "win32_idle"},
+                "cursor": {"enabled": False},
                 "window_metadata": {"enabled": True},
                 "screenshot": {
                     "enabled": True,

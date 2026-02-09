@@ -752,8 +752,14 @@
       }
     },
     "builtin.window.metadata.windows": {
-      "artifact_sha256": "4c6c72a3beb78d08eb8b815f204ec814a643312e322799459caa0d823aea9ae6",
-      "manifest_sha256": "672eb65b901af7724bcafa2f9cda3e19842cf4e9911bfb4bd3c7c0e850eedad1"
+      "artifact_sha256": "b3ca3416882e99e56bfc220b9eb125387c874f07ec5ea8f0cfdcb2804967e3f4",
+      "contract_lock_hash": "5db1c4337c95f1450c2d625d1579d6a06d5f00a8ad3ee2dcae2d02badd2e7df7",
+      "kernel_api_version": "0.1.0",
+      "manifest_sha256": "672eb65b901af7724bcafa2f9cda3e19842cf4e9911bfb4bd3c7c0e850eedad1",
+      "sbom": {
+        "requirements": [],
+        "requirements_sha256": null
+      }
     }
   },
   "version": 1
