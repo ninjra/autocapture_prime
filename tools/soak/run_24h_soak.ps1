@@ -105,21 +105,35 @@ try {
 
   # Smoke run to prove capture+ingest works (does not imply dedupe behavior).
   $env:PYTHONFAULTHANDLER = "1"
+  $prevEAP = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
   $smokeOut = & $py -m autocapture_nx run --duration-s $SmokeS --status-interval-s 1 2>&1 | Out-String
-  if ($LASTEXITCODE -ne 0) {
+  $smokeExit = $LASTEXITCODE
+  $ErrorActionPreference = $prevEAP
+  if ($smokeExit -ne 0) {
     Write-Host "ERROR: autocapture_nx run failed during smoke run (exit=$LASTEXITCODE). Output:"
     Write-Host $smokeOut
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     & $py -m autocapture_nx status 2>&1 | Out-Host
+    $ErrorActionPreference = $prevEAP
     exit 3
   }
+  $prevEAP = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
   $evidenceOut = & $py "$Root\\tools\\soak\\check_evidence.py" --record-type evidence.capture.frame 2>&1 | Out-String
+  $evidenceExit = $LASTEXITCODE
+  $ErrorActionPreference = $prevEAP
   if ($evidenceOut.Trim().Length -gt 0) { Write-Host ("[smoke] evidence_check=" + $evidenceOut.Trim()) }
-  if ($LASTEXITCODE -ne 0) {
+  if ($evidenceExit -ne 0) {
     Write-Host "ERROR: no screenshot evidence was ingested during smoke run. Ensure you are on Windows and mss/Pillow can capture the desktop."
     Write-Host "[debug] status:"
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     & $py -m autocapture_nx status 2>&1 | Out-Host
     Write-Host "[debug] plugins list:"
     & $py -m autocapture_nx plugins list --json 2>&1 | Out-Host
+    $ErrorActionPreference = $prevEAP
     exit 3
   }
 
