@@ -119,6 +119,20 @@
         "tests/test_citation_validator_metadata.py"
       ],
       "notes": "Citations require a stable locator object; validator enforces locator record_id/hash and text span sha256 for offset spans."
+    },
+    {
+      "id": "RD-06",
+      "title": "Write an operator runbook: backup/restore, safe-mode triage, plugin rollback, disk pressure, and integrity verification",
+      "status": "implemented",
+      "evidence": [
+        "docs/runbook.md",
+        "docs/safe_mode.md",
+        "tests/test_runbook_docs.py"
+      ],
+      "validators": [
+        "tests/test_runbook_docs.py"
+      ],
+      "notes": "Docs are versioned artifacts; a deterministic test asserts required sections exist."
     }
   ]
 }
