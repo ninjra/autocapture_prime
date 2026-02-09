@@ -23,6 +23,7 @@ from autocapture_nx.kernel.frame_evidence import ensure_frame_evidence
 from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.kernel.providers import capability_providers
+from autocapture_nx.kernel.schema_registry import SchemaRegistry
 from autocapture_nx.kernel.telemetry import record_telemetry
 from autocapture_nx.state_layer.policy_gate import StatePolicyGate, normalize_state_policy_decision
 from autocapture_nx.state_layer.evidence_compiler import EvidenceCompiler
@@ -768,6 +769,50 @@ def run_query_without_state(system, query: str) -> dict[str, Any]:
         extraction_blocked = True
         extraction_blocked_reason = "disabled"
 
+    # META-08: minimal evaluation fields to make missing extraction measurable.
+    # Keep this deterministic: compute only from returned results/candidates.
+    seen_ids: set[str] = set()
+    unique_results: list[dict[str, Any]] = []
+    newest_ts: str | None = None
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        rid = str(item.get("record_id") or "")
+        if not rid or rid in seen_ids:
+            continue
+        seen_ids.add(rid)
+        unique_results.append(item)
+        ts = item.get("ts_utc") or item.get("ts_end_utc") or item.get("ts_start_utc")
+        if isinstance(ts, str) and ts:
+            if newest_ts is None or ts > newest_ts:
+                newest_ts = ts
+    result_count = int(len(unique_results))
+    candidate_count = int(len(candidate_ids))
+    if candidate_count > 0:
+        coverage_ratio = min(1.0, float(result_count) / float(candidate_count))
+        missing_spans = max(0, candidate_count - result_count)
+    else:
+        coverage_ratio = 1.0 if result_count > 0 else 0.0
+        missing_spans = 0
+    evaluation: dict[str, Any] = {
+        "schema_version": 1,
+        "coverage_ratio": float(round(coverage_ratio, 6)),
+        "missing_spans_count": int(missing_spans),
+        "blocked_extract": bool(extraction_blocked),
+        "blocked_reason": str(extraction_blocked_reason or ""),
+        "result_count": int(result_count),
+        "candidate_count": int(candidate_count),
+        "freshness_newest_ts_utc": newest_ts,
+    }
+    try:
+        registry = SchemaRegistry()
+        schema = registry.load_schema_path("contracts/evaluation.schema.json")
+        issues = registry.validate(schema, evaluation)
+        if issues:
+            evaluation["schema_error"] = registry.format_issues(issues)
+    except Exception:
+        pass
+
     query_ledger_hash = None
     anchor_ref = None
     retrieval_trace = retrieval.trace() if hasattr(retrieval, "trace") else []
@@ -1107,6 +1152,7 @@ def run_query_without_state(system, query: str) -> dict[str, Any]:
         },
         "intent": intent,
         "results": results,
+        "evaluation": evaluation,
         "answer": answer_obj,
         "processing": {
             "extraction": {

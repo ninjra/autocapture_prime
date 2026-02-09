@@ -33,6 +33,8 @@ from autocapture_nx.kernel.instance_lock import acquire_instance_lock
 from autocapture_nx.kernel.run_state import build_run_state_payload, write_run_state
 from autocapture_nx.kernel.timebase import utc_now_z
 from autocapture_nx.kernel.policy_snapshot import persist_policy_snapshot
+from autocapture_nx.kernel.run_manifest import determinism_inputs
+from autocapture_nx.kernel.schema_registry import SchemaRegistry
 from autocapture_nx.plugin_system.registry import PluginRegistry
 from autocapture_nx.plugin_system.runtime import global_network_deny, set_global_network_deny
 from autocapture_nx.plugin_system.host import close_all_subprocess_hosts
@@ -965,9 +967,11 @@ class Kernel:
         policy_info = self._persist_policy_snapshot(ts_utc=str(ts_utc), metadata=metadata)
         manifest = {
             "record_type": "system.run_manifest",
+            "schema_version": 1,
             "run_id": run_id,
             "ts_utc": ts_utc,
             "kernel_version": kernel_version,
+            "determinism": determinism_inputs(self.config if isinstance(self.config, dict) else {}),
             "config": {
                 "schema_hash": effective.schema_hash if effective else None,
                 "effective_hash": effective.effective_hash if effective else None,
@@ -1004,6 +1008,15 @@ class Kernel:
                 "python_version": platform.python_version(),
             },
         }
+        try:
+            registry = SchemaRegistry()
+            schema = registry.load_schema_path("contracts/run_manifest.schema.json")
+            issues = registry.validate(schema, manifest)
+            if issues:
+                raise RuntimeError(f"run_manifest_schema_invalid:{registry.format_issues(issues)}")
+        except Exception as exc:
+            # Fail closed: manifest is a provenance root.
+            raise RuntimeError(str(exc))
         record_id = prefixed_id(run_id, "system.run_manifest", 0)
         try:
             if hasattr(metadata, "put_new"):
@@ -1078,12 +1091,14 @@ class Kernel:
         policy_info = self._persist_policy_snapshot(ts_utc=str(ts_utc), metadata=metadata)
         manifest = {
             "record_type": "system.run_manifest.final",
+            "schema_version": 1,
             "run_id": builder.run_id,
             "ts_utc": ts_utc,
             "started_at": self._run_started_at,
             "stopped_at": ts_utc,
             "duration_ms": int(duration_ms),
             "summary": summary,
+            "determinism": determinism_inputs(self.config if isinstance(self.config, dict) else {}),
             "policy_snapshot_hash": builder.policy_snapshot_hash(),
             "policy_snapshot": {
                 "hash": policy_info.get("hash"),
@@ -1114,6 +1129,14 @@ class Kernel:
                 "effective_sha256": snapshot_info.get("sha256"),
             },
         }
+        try:
+            registry = SchemaRegistry()
+            schema = registry.load_schema_path("contracts/run_manifest.schema.json")
+            issues = registry.validate(schema, manifest)
+            if issues:
+                raise RuntimeError(f"run_manifest_schema_invalid:{registry.format_issues(issues)}")
+        except Exception as exc:
+            raise RuntimeError(str(exc))
         record_id = prefixed_id(builder.run_id, "system.run_manifest.final", 0)
         try:
             if hasattr(metadata, "put_new"):

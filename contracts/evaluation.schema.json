@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Query Evaluation",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "coverage_ratio": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "missing_spans_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "blocked_extract": {
+      "type": "boolean"
+    },
+    "blocked_reason": {
+      "type": "string"
+    },
+    "result_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "candidate_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "freshness_newest_ts_utc": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "coverage_ratio",
+    "missing_spans_count",
+    "blocked_extract",
+    "blocked_reason",
+    "result_count",
+    "candidate_count",
+    "freshness_newest_ts_utc"
+  ]
+}
+
