@@ -37,6 +37,16 @@ export AUTOCAPTURE_PLUGINS_SUBPROCESS_MAX_HOSTS="${AUTOCAPTURE_PLUGINS_SUBPROCES
 # long-lived host_runner subprocesses for capture/tracking plugins.
 export AUTOCAPTURE_PLUGINS_HOSTING_MODE="${AUTOCAPTURE_PLUGINS_HOSTING_MODE:-inproc}"
 
+# Consent preflight: soak runs use a run-scoped data dir, so consent must be
+# accepted for that dir (fail closed with a clear fix command).
+consent_json="$("$ROOT/.venv/bin/python" -m autocapture_nx consent status 2>/dev/null || echo '')"
+if [[ -n "$consent_json" ]] && echo "$consent_json" | grep -q '"accepted"[[:space:]]*:[[:space:]]*false'; then
+  echo "ERROR: capture consent not accepted for AUTOCAPTURE_DATA_DIR=$AUTOCAPTURE_DATA_DIR" >&2
+  echo "Run:" >&2
+  echo "  $ROOT/.venv/bin/python -m autocapture_nx consent accept --data-dir \"$AUTOCAPTURE_DATA_DIR\" --config-dir \"$AUTOCAPTURE_CONFIG_DIR\"" >&2
+  exit 2
+fi
+
 # Preflight (offline): fail fast before starting the 24h run.
 "$ROOT/.venv/bin/python" -m autocapture_nx doctor --self-test >/dev/null
 
