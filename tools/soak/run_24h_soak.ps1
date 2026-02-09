@@ -91,7 +91,8 @@ try {
 
   # Write smoke profile (force at least one screenshot blob for validation).
   Write-Log "=== write_user_json smoke_screenshot_ingest ==="
-  & $py "$Root\\tools\\soak\\write_user_json.py" --config-dir "$env:AUTOCAPTURE_CONFIG_DIR" --profile smoke_screenshot_ingest *>> $LogPath
+  & $py "$Root\\tools\\soak\\write_user_json.py" --config-dir "$env:AUTOCAPTURE_CONFIG_DIR" --profile smoke_screenshot_ingest 2>&1 `
+    | Out-File -FilePath $LogPath -Append -Encoding utf8
 
   # Stable per-machine consent: reuse the most recently accepted consent file from prior
   # soak runs under .data/soak/ so operators don't need to re-accept for every new
@@ -136,9 +137,9 @@ try {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     Write-Log "=== debug status ==="
-    & $py -m autocapture_nx status *>> $LogPath
+    & $py -m autocapture_nx status 2>&1 | Out-File -FilePath $LogPath -Append -Encoding utf8
     Write-Log "=== debug plugins load-report ==="
-    & $py -m autocapture_nx plugins load-report *>> $LogPath
+    & $py -m autocapture_nx plugins load-report 2>&1 | Out-File -FilePath $LogPath -Append -Encoding utf8
     $ErrorActionPreference = $prevEAP
     Write-Host ("ERROR: smoke run failed (exit=" + $smokeExit + "). log=" + $LogPath)
     exit 3
@@ -156,9 +157,9 @@ try {
     $ErrorActionPreference = "Continue"
     Write-Log "ERROR: no screenshot evidence ingested during smoke run"
     Write-Log "=== debug status ==="
-    & $py -m autocapture_nx status *>> $LogPath
+    & $py -m autocapture_nx status 2>&1 | Out-File -FilePath $LogPath -Append -Encoding utf8
     Write-Log "=== debug plugins list ==="
-    & $py -m autocapture_nx plugins list --json *>> $LogPath
+    & $py -m autocapture_nx plugins list --json 2>&1 | Out-File -FilePath $LogPath -Append -Encoding utf8
     $ErrorActionPreference = $prevEAP
     Write-Host ("ERROR: no screenshot evidence ingested during smoke run. log=" + $LogPath)
     exit 3
@@ -166,11 +167,13 @@ try {
 
   # Switch to soak profile (dedupe back on, screenshots-only, processing disabled).
   Write-Log "=== write_user_json soak_screenshot_only ==="
-  & $py "$Root\\tools\\soak\\write_user_json.py" --config-dir "$env:AUTOCAPTURE_CONFIG_DIR" --profile soak_screenshot_only *>> $LogPath
+  & $py "$Root\\tools\\soak\\write_user_json.py" --config-dir "$env:AUTOCAPTURE_CONFIG_DIR" --profile soak_screenshot_only 2>&1 `
+    | Out-File -FilePath $LogPath -Append -Encoding utf8
 
   Write-Host ("OK: capture+ingest soak starting. log=" + $LogPath)
   Write-Log ("=== soak run start duration_s=" + $DurationS + " ===")
-  & $py -m autocapture_nx run --duration-s $DurationS --status-interval-s 60 *>> $LogPath
+  & $py -m autocapture_nx run --duration-s $DurationS --status-interval-s 60 2>&1 `
+    | Out-File -FilePath $LogPath -Append -Encoding utf8
 } finally {
   Pop-Location
 }

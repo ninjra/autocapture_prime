@@ -760,7 +760,20 @@ def _store_job_overflow(
     ts_utc = str(job.get("ts_utc") or "")
     try:
         png_bytes, payload, encode_ms, write_ms = _encode_and_build(job, event_builder=event_builder)
-    except Exception:
+    except Exception as exc:
+        try:
+            event_builder.failure_event(
+                "capture.screenshot_store_failed",
+                stage="encode",
+                error=exc,
+                inputs=[],
+                outputs=[record_id] if record_id else [],
+                payload={"record_id": record_id, "backend": str(job.get("backend") or "mss")},
+                ts_utc=ts_utc,
+                retryable=True,
+            )
+        except Exception:
+            pass
         return False
 
     # If primary disk is hard-halt, go straight to overflow spool.
@@ -788,7 +801,7 @@ def _store_job_overflow(
         return True
     except FileExistsError:
         return True
-    except OSError:
+    except OSError as exc:
         # If overflow is configured, spool and continue capturing.
         if overflow.enabled:
             try:
@@ -796,8 +809,34 @@ def _store_job_overflow(
                 record_telemetry("capture.screenshot.overflow_write", {"ts_utc": ts_utc, "record_id": record_id})
             except Exception:
                 return False
+        try:
+            event_builder.failure_event(
+                "capture.screenshot_store_failed",
+                stage="storage.oserror",
+                error=exc,
+                inputs=[],
+                outputs=[record_id] if record_id else [],
+                payload={"record_id": record_id, "backend": str(payload.get("backend") or "mss")},
+                ts_utc=ts_utc,
+                retryable=True,
+            )
+        except Exception:
+            pass
         return False
-    except Exception:
+    except Exception as exc:
+        try:
+            event_builder.failure_event(
+                "capture.screenshot_store_failed",
+                stage="commit",
+                error=exc,
+                inputs=[],
+                outputs=[record_id] if record_id else [],
+                payload={"record_id": record_id, "backend": str(payload.get("backend") or "mss")},
+                ts_utc=ts_utc,
+                retryable=True,
+            )
+        except Exception:
+            pass
         return False
 
 
@@ -882,19 +921,25 @@ def _commit_payload(
     media_fsync_policy = payload.get("media_fsync_policy")
 
     write_start = time.perf_counter()
-    if hasattr(storage_media, "put_new"):
-        storage_media.put_new(record_id, png_bytes, ts_utc=ts_utc, fsync_policy=media_fsync_policy)
-    else:
-        storage_media.put(record_id, png_bytes, ts_utc=ts_utc, fsync_policy=media_fsync_policy)
+    try:
+        if hasattr(storage_media, "put_new"):
+            storage_media.put_new(record_id, png_bytes, ts_utc=ts_utc, fsync_policy=media_fsync_policy)
+        else:
+            storage_media.put(record_id, png_bytes, ts_utc=ts_utc, fsync_policy=media_fsync_policy)
+    except Exception as exc:
+        raise RuntimeError(f"storage.media: {type(exc).__name__}: {exc}") from exc
     write_ms = int(max(0.0, (time.perf_counter() - write_start) * 1000.0))
     payload["write_ms"] = int(write_ms)
     payload["encode_ms"] = int(encode_ms)
     payload["content_size"] = int(len(png_bytes))
 
-    if hasattr(storage_meta, "put_new"):
-        storage_meta.put_new(record_id, payload)
-    else:
-        storage_meta.put(record_id, payload)
+    try:
+        if hasattr(storage_meta, "put_new"):
+            storage_meta.put_new(record_id, payload)
+        else:
+            storage_meta.put(record_id, payload)
+    except Exception as exc:
+        raise RuntimeError(f"storage.metadata: {type(exc).__name__}: {exc}") from exc
     event_builder.journal_event("capture.frame", payload, event_id=record_id, ts_utc=ts_utc)
     event_builder.ledger_entry(
         "capture.frame",
