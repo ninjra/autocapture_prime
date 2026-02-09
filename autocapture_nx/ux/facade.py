@@ -1217,7 +1217,13 @@ class UXFacade:
         with self._kernel_mgr.session() as system:
             if system is None:
                 kernel_error = self._kernel_mgr.last_error()
-                return {"ok": False, "error": "kernel_boot_failed", "kernel_error": kernel_error, "started": [], "errors": []}
+                return {
+                    "ok": False,
+                    "error": "kernel_boot_failed",
+                    "kernel_error": kernel_error,
+                    "started": [],
+                    "errors": [],
+                }
 
             capture = system.get("capture.source") if hasattr(system, "get") else None
             screenshot = system.get("capture.screenshot") if hasattr(system, "has") and system.has("capture.screenshot") else None
@@ -1228,9 +1234,26 @@ class UXFacade:
             clipboard = system.get("tracking.clipboard") if hasattr(system, "has") and system.has("tracking.clipboard") else None
             file_activity = system.get("tracking.file_activity") if hasattr(system, "has") and system.has("tracking.file_activity") else None
 
-            want_screenshot = bool((self._config.get("capture") or {}).get("screenshot", {}).get("enabled", False))
-            want_audio = bool((self._config.get("capture") or {}).get("audio", {}).get("enabled", False))
-            want_source = bool((self._config.get("capture") or {}).get("video", {}).get("enabled", False))
+            capture_cfg = self._config.get("capture") if isinstance(self._config.get("capture"), dict) else {}
+            want_screenshot = bool((capture_cfg.get("screenshot") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_audio = bool((capture_cfg.get("audio") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_source = bool((capture_cfg.get("video") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+
+            present = {
+                "capture.source": capture is not None,
+                "capture.screenshot": screenshot is not None,
+                "capture.audio": audio is not None,
+                "tracking.input": input_tracker is not None,
+                "window.metadata": window_meta is not None,
+                "tracking.cursor": cursor_tracker is not None,
+                "tracking.clipboard": clipboard is not None,
+                "tracking.file_activity": file_activity is not None,
+            }
+            wanted = {
+                "capture.source": want_source,
+                "capture.screenshot": want_screenshot,
+                "capture.audio": want_audio,
+            }
 
             components: list[tuple[str, Any, bool]] = [
                 ("capture.source", capture, want_source),
@@ -1261,10 +1284,24 @@ class UXFacade:
         started = bool(started_names)
         self._run_active = started
         if errors:
-            return {"ok": False, "error": "component_start_failed", "started": started_names, "errors": errors}
+            return {
+                "ok": False,
+                "error": "component_start_failed",
+                "started": started_names,
+                "errors": errors,
+                "present": present,
+                "wanted": wanted,
+            }
         if not started:
-            return {"ok": False, "error": "no_components_started", "started": [], "errors": []}
-        return {"ok": True, "started": started_names, "errors": []}
+            return {
+                "ok": False,
+                "error": "no_components_started",
+                "started": [],
+                "errors": [],
+                "present": present,
+                "wanted": wanted,
+            }
+        return {"ok": True, "started": started_names, "errors": [], "present": present, "wanted": wanted}
 
     def _stop_components(self) -> None:
         with self._kernel_mgr.session() as system:
