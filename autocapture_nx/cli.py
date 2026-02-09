@@ -149,6 +149,34 @@ def cmd_tray(_args: argparse.Namespace) -> int:
     return tray_main()
 
 
+def cmd_consent_status(args: argparse.Namespace) -> int:
+    config, _paths = _load_config_for_backup(args.data_dir, args.config_dir, safe_mode=args.safe_mode)
+    storage = config.get("storage", {}) if isinstance(config, dict) else {}
+    data_dir = str(storage.get("data_dir", "data"))
+    from autocapture_nx.kernel.consent import load_capture_consent
+
+    consent = load_capture_consent(data_dir=data_dir)
+    _print_json({"ok": True, "data_dir": data_dir, "capture": consent.to_dict()})
+    return 0
+
+
+def cmd_consent_accept(args: argparse.Namespace) -> int:
+    config, _paths = _load_config_for_backup(args.data_dir, args.config_dir, safe_mode=args.safe_mode)
+    storage = config.get("storage", {}) if isinstance(config, dict) else {}
+    data_dir = str(storage.get("data_dir", "data"))
+    from autocapture_nx.kernel.consent import accept_capture_consent
+
+    consent = accept_capture_consent(data_dir=data_dir)
+    append_audit_event(
+        action="consent.capture.accept",
+        actor="cli.consent",
+        outcome="success",
+        details={"data_dir": data_dir, "accepted_ts_utc": consent.accepted_ts_utc},
+    )
+    _print_json({"ok": True, "data_dir": data_dir, "capture": consent.to_dict()})
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     facade = create_facade(persistent=True, safe_mode=args.safe_mode, auto_start_capture=False)
     facade.run_start()
@@ -748,6 +776,17 @@ def build_parser() -> argparse.ArgumentParser:
     plugins_approve.set_defaults(func=cmd_plugins_approve)
     plugins_verify = plugins_sub.add_parser("verify-defaults")
     plugins_verify.set_defaults(func=cmd_plugins_verify_defaults)
+
+    consent = sub.add_parser("consent")
+    consent_sub = consent.add_subparsers(dest="consent_cmd", required=True)
+    consent_status = consent_sub.add_parser("status")
+    consent_status.add_argument("--data-dir", default="", help="Override AUTOCAPTURE_DATA_DIR")
+    consent_status.add_argument("--config-dir", default="", help="Override AUTOCAPTURE_CONFIG_DIR")
+    consent_status.set_defaults(func=cmd_consent_status)
+    consent_accept = consent_sub.add_parser("accept")
+    consent_accept.add_argument("--data-dir", default="", help="Override AUTOCAPTURE_DATA_DIR")
+    consent_accept.add_argument("--config-dir", default="", help="Override AUTOCAPTURE_CONFIG_DIR")
+    consent_accept.set_defaults(func=cmd_consent_accept)
 
     tray = sub.add_parser("tray")
     tray.set_defaults(func=cmd_tray)

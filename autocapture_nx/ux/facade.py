@@ -912,7 +912,35 @@ class UXFacade:
     def run_start(self) -> dict[str, Any]:
         with self._pause_lock:
             self._clear_pause_locked()
+        # Fail closed: require explicit capture consent if configured.
+        try:
+            privacy_cfg = self._config.get("privacy", {}) if isinstance(self._config, dict) else {}
+            capture_cfg = privacy_cfg.get("capture", {}) if isinstance(privacy_cfg, dict) else {}
+            require_consent = bool(capture_cfg.get("require_consent", True))
+            if require_consent:
+                from autocapture_nx.kernel.consent import load_capture_consent
+
+                data_dir = str(self._config.get("storage", {}).get("data_dir", "data"))
+                consent = load_capture_consent(data_dir=data_dir)
+                if not consent.accepted:
+                    return {"ok": False, "error": "consent_required", "running": False}
+        except Exception:
+            return {"ok": False, "error": "consent_check_failed", "running": False}
+
         self._start_components()
+        # Ledger an operator capture start event (append-only).
+        with self._kernel_mgr.session() as system:
+            builder = system.get("event.builder") if system and hasattr(system, "get") else None
+            if builder is not None and hasattr(builder, "ledger_entry"):
+                try:
+                    builder.ledger_entry(
+                        "operator.capture.start",
+                        inputs=[],
+                        outputs=[],
+                        payload={"event": "capture.start"},
+                    )
+                except Exception:
+                    pass
         return {"ok": True, "running": True}
 
     def run_stop(self, *, preserve_pause: bool = False) -> dict[str, Any]:
@@ -922,6 +950,18 @@ class UXFacade:
             with self._pause_lock:
                 self._clear_pause_locked()
         self._stop_components()
+        with self._kernel_mgr.session() as system:
+            builder = system.get("event.builder") if system and hasattr(system, "get") else None
+            if builder is not None and hasattr(builder, "ledger_entry"):
+                try:
+                    builder.ledger_entry(
+                        "operator.capture.stop",
+                        inputs=[],
+                        outputs=[],
+                        payload={"event": "capture.stop"},
+                    )
+                except Exception:
+                    pass
         return {"ok": True, "running": False}
 
     def run_pause(self, minutes: float) -> dict[str, Any]:

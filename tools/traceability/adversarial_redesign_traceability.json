@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-02-09T02:52:02.095270Z",
+  "generated_utc": "2026-02-09T03:25:35.751760Z",
   "items": [
     {
       "evidence": [
@@ -926,43 +926,51 @@
     },
     {
       "evidence": [
-        "(planning)"
+        "docs/roadmap.md"
       ],
       "id": "RD-01",
-      "notes": "",
-      "status": "missing",
+      "notes": "This repo ships the roadmap as a versioned artifact; UI work is out of scope, but milestones are explicitly documented.",
+      "status": "implemented",
       "title": "Phase 0 (2026-02-06\u21922026-02-20): ship instance lock, atomic writes, provenance header, and dangerous-toggle protections",
-      "validators": []
+      "validators": [
+        "tests/test_roadmap_sections_present.py"
+      ]
     },
     {
       "evidence": [
-        "(planning)"
+        "docs/roadmap.md"
       ],
       "id": "RD-02",
-      "notes": "",
-      "status": "missing",
+      "notes": "See docs/roadmap.md Phase 1 section.",
+      "status": "implemented",
       "title": "Phase 1 (2026-02-21\u21922026-03-31): plugin manager v2 core flows + config presets + metrics TTFR/query p95",
-      "validators": []
+      "validators": [
+        "tests/test_roadmap_sections_present.py"
+      ]
     },
     {
       "evidence": [
-        "(planning)"
+        "docs/roadmap.md"
       ],
       "id": "RD-03",
-      "notes": "",
-      "status": "missing",
+      "notes": "See docs/roadmap.md Phase 2 section.",
+      "status": "implemented",
       "title": "Phase 2 (2026-04-01\u21922026-05-31): pipeline DAG + replay + signed proof bundles + egress approvals + PII redaction MVP",
-      "validators": []
+      "validators": [
+        "tests/test_roadmap_sections_present.py"
+      ]
     },
     {
       "evidence": [
-        "(planning)"
+        "docs/roadmap.md"
       ],
       "id": "RD-04",
-      "notes": "",
-      "status": "missing",
+      "notes": "See docs/roadmap.md Phase 3 section.",
+      "status": "implemented",
       "title": "Phase 3 (2026-06-01\u21922026-07-31): WSL2 worker round-trip + optional GPU acceleration + incremental indexing/caching",
-      "validators": []
+      "validators": [
+        "tests/test_roadmap_sections_present.py"
+      ]
     },
     {
       "evidence": [

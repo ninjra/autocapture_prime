@@ -1352,6 +1352,18 @@
     "privacy": {
       "additionalProperties": false,
       "properties": {
+        "capture": {
+          "additionalProperties": false,
+          "properties": {
+            "require_consent": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "require_consent"
+          ],
+          "type": "object"
+        },
         "cloud": {
           "additionalProperties": false,
           "properties": {
@@ -1472,7 +1484,8 @@
       },
       "required": [
         "egress",
-        "cloud"
+        "cloud",
+        "capture"
       ],
       "type": "object"
     },

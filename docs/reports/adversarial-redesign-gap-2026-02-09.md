@@ -3,9 +3,9 @@
 Generated: 2026-02-09
 
 - total: 92
-- implemented: 33
+- implemented: 37
 - partial: 37
-- missing: 22
+- missing: 18
 
 | ID | Status | Title | Evidence | Validators |
 | --- | --- | --- | --- | --- |
@@ -75,10 +75,10 @@ Generated: 2026-02-09
 | QA-06 | missing | UI smoke + accessibility tests executed in CI (headless) for critical screens | tests/test_ui_smoke.py | tests/test_ui_smoke.py |
 | QA-07 | implemented | Performance regression harness for Windows: capture 1m, run 5 queries, export proof bundle; track p95 | tools/gate_perf.py<br>ops/dev/* | tools/gate_perf.py |
 | QA-08 | missing | Proof-bundle replay verification tests: tamper detection, missing files, and cross-version imports | tests/test_proof_bundle_verify.py<br>autocapture_nx/kernel/proof_bundle.py | tests/test_proof_bundle_verify.py |
-| RD-01 | missing | Phase 0 (2026-02-06→2026-02-20): ship instance lock, atomic writes, provenance header, and dangerous-toggle protections | (planning) |  |
-| RD-02 | missing | Phase 1 (2026-02-21→2026-03-31): plugin manager v2 core flows + config presets + metrics TTFR/query p95 | (planning) |  |
-| RD-03 | missing | Phase 2 (2026-04-01→2026-05-31): pipeline DAG + replay + signed proof bundles + egress approvals + PII redaction MVP | (planning) |  |
-| RD-04 | missing | Phase 3 (2026-06-01→2026-07-31): WSL2 worker round-trip + optional GPU acceleration + incremental indexing/caching | (planning) |  |
+| RD-01 | implemented | Phase 0 (2026-02-06→2026-02-20): ship instance lock, atomic writes, provenance header, and dangerous-toggle protections | docs/roadmap.md | tests/test_roadmap_sections_present.py |
+| RD-02 | implemented | Phase 1 (2026-02-21→2026-03-31): plugin manager v2 core flows + config presets + metrics TTFR/query p95 | docs/roadmap.md | tests/test_roadmap_sections_present.py |
+| RD-03 | implemented | Phase 2 (2026-04-01→2026-05-31): pipeline DAG + replay + signed proof bundles + egress approvals + PII redaction MVP | docs/roadmap.md | tests/test_roadmap_sections_present.py |
+| RD-04 | implemented | Phase 3 (2026-06-01→2026-07-31): WSL2 worker round-trip + optional GPU acceleration + incremental indexing/caching | docs/roadmap.md | tests/test_roadmap_sections_present.py |
 | RD-05 | implemented | Adopt a “regression = do not ship” gate set: integrity scan, contract pins, plugin locks, SLO budgets, UI smoke | tools/gate_adversarial_redesign_coverage.py<br>tools/gate_doctor.py<br>tools/gate_ledger.py<br>tools/gate_perf.py<br>tools/gate_static.py<br>tools/gate_security.py<br>tools/run_adversarial_redesign_coverage.sh | tools/gate_adversarial_redesign_coverage.py<br>tools/gate_doctor.py<br>tools/gate_ledger.py<br>tools/gate_perf.py<br>tools/gate_static.py<br>tools/gate_security.py |
 | RD-06 | implemented | Write an operator runbook: backup/restore, safe-mode triage, plugin rollback, disk pressure, and integrity verification | docs/runbook.md<br>docs/safe_mode.md<br>tests/test_runbook_docs.py | tests/test_runbook_docs.py |
 | SEC-01 | implemented | Harden filesystem_guard path normalization: resolve symlinks, normalize case/UNC, and deny path traversal consistently on Windows | autocapture_nx/plugin_system/runtime.py<br>autocapture_nx/windows/win_paths.py | tests/test_filesystem_guard_windows_edge_cases.py |

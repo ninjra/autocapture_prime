@@ -1023,6 +1023,9 @@
     ]
   },
   "privacy": {
+    "capture": {
+      "require_consent": true
+    },
     "cloud": {
       "allow_images": false,
       "enabled": false

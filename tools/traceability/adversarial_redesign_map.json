@@ -152,6 +152,21 @@
       "notes": "See docs/roadmap.md Phase 3 section."
     },
     {
+      "id": "SEC-08",
+      "title": "Make capture consent explicit: persistent indicator + start/stop events ledgered; prevent silent background capture",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/kernel/consent.py",
+        "autocapture_nx/ux/facade.py",
+        "config/default.json",
+        "contracts/config_schema.json"
+      ],
+      "validators": [
+        "tests/test_capture_consent.py"
+      ],
+      "notes": "This repo enforces explicit capture consent via a persistent state file and ledgers capture start/stop events. Tray indicator is implemented in the separate tray/UI repo; CLI/API remain authoritative."
+    },
+    {
       "id": "META-05",
       "title": "Stable citation locator contract (record+offsets/time-range)",
       "status": "implemented",
