@@ -1214,6 +1214,9 @@ class UXFacade:
         errors: list[dict[str, Any]] = []
         started_names: list[str] = []
         kernel_error = None
+        # Ensure these are always defined even if the session block errors early.
+        present: dict[str, bool] = {}
+        wanted: dict[str, bool] = {}
         with self._kernel_mgr.session() as system:
             if system is None:
                 kernel_error = self._kernel_mgr.last_error()
