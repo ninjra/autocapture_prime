@@ -31,6 +31,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.capture.basic",
+  "provides": [
+    "capture.source"
+  ],
   "replaces": [
     "builtin.capture.stub"
   ],

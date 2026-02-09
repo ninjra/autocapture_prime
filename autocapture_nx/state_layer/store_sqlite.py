@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from autocapture_nx.kernel.hashing import sha256_text
+from autocapture_nx.storage.migrations import record_baseline
 from .contracts import validate_state_edge, validate_state_span
 from .ids import b64decode, b64encode, compute_embedding_hash
 
@@ -119,6 +120,11 @@ class StateTapeStore:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = self._connect()
             self._conn.executescript(_SCHEMA)
+            # FND-08: record a deterministic baseline schema version.
+            try:
+                record_baseline(self._conn, version=1, name="state_tape.baseline")
+            except Exception:
+                pass
             self._conn.commit()
 
     def insert_batch(self, spans: list[dict[str, Any]], edges: list[dict[str, Any]]) -> StateTapeCounts:

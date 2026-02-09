@@ -13,6 +13,9 @@ from dataclasses import dataclass
 from autocapture_nx.kernel.crypto import EncryptedBlob, decrypt_bytes, encrypt_bytes
 from autocapture_nx.kernel.keyring import KeyRing
 from autocapture_nx.kernel.metadata_store import ImmutableMetadataStore
+from autocapture_nx.kernel.telemetry import record_telemetry
+from autocapture_nx.storage.spillover import SpilloverStore
+from autocapture_nx.storage.migrations import record_baseline
 from autocapture_nx.state_layer.store_sqlite import StateTapeStore
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 from plugins.builtin.storage_encrypted.plugin import (
@@ -213,6 +216,17 @@ class SQLCipherStore:
         )
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_metadata_run_id ON metadata(run_id)"
+        )
+        # Common access patterns:
+        # - latest(record_type): WHERE record_type ORDER BY ts_utc DESC
+        # FND-08: baseline schema migrations table for operator visibility.
+        try:
+            record_baseline(self._conn, version=1, name="metadata.baseline")
+        except Exception:
+            pass
+        # - query filters: record_type + time window
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_metadata_record_type_ts ON metadata(record_type, ts_utc, id)"
         )
         self._conn.commit()
 
@@ -462,6 +476,9 @@ class PlainSQLiteStore:
         )
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_metadata_run_id ON metadata(run_id)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_metadata_record_type_ts ON metadata(record_type, ts_utc, id)"
         )
         self._conn.commit()
 
@@ -717,29 +734,59 @@ class PlainBlobStore:
                 except OSError:
                     pass
 
-    def put(self, record_id: str, data: bytes, *, ts_utc: str | None = None) -> None:
-        self.put_replace(record_id, data, ts_utc=ts_utc)
+    def put(
+        self,
+        record_id: str,
+        data: bytes,
+        *,
+        ts_utc: str | None = None,
+        fsync_policy: str | None = None,
+    ) -> None:
+        self.put_replace(record_id, data, ts_utc=ts_utc, fsync_policy=fsync_policy)
 
-    def put_replace(self, record_id: str, data: bytes, *, ts_utc: str | None = None) -> None:
+    def put_replace(
+        self,
+        record_id: str,
+        data: bytes,
+        *,
+        ts_utc: str | None = None,
+        fsync_policy: str | None = None,
+    ) -> None:
         path = self._path_for_write(record_id, ts_utc, stream=False)
         existed = any(os.path.exists(path) for path in self._path_candidates(record_id))
         self._remove_existing(record_id)
-        _atomic_write_bytes(path, data, fsync_policy=self._fsync_policy)
+        policy = _FsyncPolicy.normalize(fsync_policy) if fsync_policy else self._fsync_policy
+        _atomic_write_bytes(path, data, fsync_policy=policy)
         self._index[record_id] = path
         if self._count_cache is not None and not existed:
             self._count_cache += 1
 
-    def put_new(self, record_id: str, data: bytes, *, ts_utc: str | None = None) -> None:
+    def put_new(
+        self,
+        record_id: str,
+        data: bytes,
+        *,
+        ts_utc: str | None = None,
+        fsync_policy: str | None = None,
+    ) -> None:
         for path in self._path_candidates(record_id):
             if os.path.exists(path):
                 raise FileExistsError(f"Blob record already exists: {record_id}")
-        self.put_replace(record_id, data, ts_utc=ts_utc)
+        self.put_replace(record_id, data, ts_utc=ts_utc, fsync_policy=fsync_policy)
 
-    def put_stream(self, record_id: str, stream, chunk_size: int = 1024 * 1024, *, ts_utc: str | None = None) -> None:
+    def put_stream(
+        self,
+        record_id: str,
+        stream,
+        chunk_size: int = 1024 * 1024,
+        *,
+        ts_utc: str | None = None,
+        fsync_policy: str | None = None,
+    ) -> None:
         for path in self._path_candidates(record_id):
             if os.path.exists(path):
                 raise FileExistsError(f"Blob record already exists: {record_id}")
-        self.put_stream_replace(record_id, stream, chunk_size=chunk_size, ts_utc=ts_utc)
+        self.put_stream_replace(record_id, stream, chunk_size=chunk_size, ts_utc=ts_utc, fsync_policy=fsync_policy)
 
     def put_stream_replace(
         self,
@@ -748,10 +795,12 @@ class PlainBlobStore:
         chunk_size: int = 1024 * 1024,
         *,
         ts_utc: str | None = None,
+        fsync_policy: str | None = None,
     ) -> None:
         path = self._path_for_write(record_id, ts_utc, stream=True)
         existed = any(os.path.exists(path) for path in self._path_candidates(record_id))
         self._remove_existing(record_id)
+        policy = _FsyncPolicy.normalize(fsync_policy) if fsync_policy else self._fsync_policy
         tmp_path = f"{path}.tmp"
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(tmp_path, "wb") as handle:
@@ -760,16 +809,23 @@ class PlainBlobStore:
                 if not chunk:
                     break
                 handle.write(chunk)
-            _fsync_file(handle, self._fsync_policy)
+            _fsync_file(handle, policy)
         os.replace(tmp_path, path)
-        _fsync_dir(path, self._fsync_policy)
+        _fsync_dir(path, policy)
         self._index[record_id] = path
         if self._count_cache is not None and not existed:
             self._count_cache += 1
 
-    def put_path(self, record_id: str, path: str, *, ts_utc: str | None = None) -> None:
+    def put_path(
+        self,
+        record_id: str,
+        path: str,
+        *,
+        ts_utc: str | None = None,
+        fsync_policy: str | None = None,
+    ) -> None:
         with open(path, "rb") as handle:
-            self.put_stream_replace(record_id, handle, ts_utc=ts_utc)
+            self.put_stream_replace(record_id, handle, ts_utc=ts_utc, fsync_policy=fsync_policy)
 
     def get(self, record_id: str, default: bytes | None = None) -> bytes | None:
         for path in self._path_candidates(record_id):
@@ -1128,6 +1184,14 @@ class SQLCipherStoragePlugin(PluginBase):
                 require_decrypt=self._require_decrypt,
                 fsync_policy=self._fsync_policy,
             )
+            media = _maybe_wrap_spillover_media(
+                media,
+                config=getattr(self.context, "config", {}) if self.context is not None else {},
+                run_id=self._run_id,
+                fsync_policy=self._fsync_policy,
+                encrypted=True,
+                media_provider=self._media_provider,
+            )
             state_key = None
             if available:
                 _state_id, state_key = self._state_provider.active()
@@ -1142,6 +1206,14 @@ class SQLCipherStoragePlugin(PluginBase):
         metadata = ImmutableMetadataStore(store)
         entity_map = EntityMapAdapter(store)
         media = PlainBlobStore(self._media_dir, self._run_id, self._fsync_policy)
+        media = _maybe_wrap_spillover_media(
+            media,
+            config=getattr(self.context, "config", {}) if self.context is not None else {},
+            run_id=self._run_id,
+            fsync_policy=self._fsync_policy,
+            encrypted=False,
+            media_provider=None,
+        )
         state_tape = StateTapeStore(self._state_tape_path, key=None, fsync_policy=self._fsync_policy)
         return metadata, media, entity_map, state_tape
 
@@ -1157,3 +1229,56 @@ class SQLCipherStoragePlugin(PluginBase):
 
 def create_plugin(plugin_id: str, context: PluginContext) -> SQLCipherStoragePlugin:
     return SQLCipherStoragePlugin(plugin_id, context)
+
+
+def _maybe_wrap_spillover_media(
+    media_store: Any,
+    *,
+    config: dict[str, Any],
+    run_id: str,
+    fsync_policy: str,
+    encrypted: bool,
+    media_provider: DerivedKeyProvider | None,
+) -> Any:
+    storage_cfg = config.get("storage", {}) if isinstance(config, dict) else {}
+    spill_cfg = storage_cfg.get("spillover", {}) if isinstance(storage_cfg, dict) else {}
+    spill_cfg = spill_cfg if isinstance(spill_cfg, dict) else {}
+    enabled = bool(spill_cfg.get("enabled", False))
+    dirs = spill_cfg.get("media_dirs", [])
+    if not enabled or not isinstance(dirs, list) or not [d for d in dirs if str(d).strip()]:
+        return media_store
+
+    # Prefer spillover directories inside data_dir (portability via junction/mountpoint).
+    stores: list[tuple[str, Any]] = [(str(storage_cfg.get("media_dir") or ""), media_store)]
+    primary_root = stores[0][0] or getattr(media_store, "_root", "")  # best-effort
+    stores = [(primary_root, media_store)]
+
+    for raw in dirs:
+        path = str(raw or "").strip()
+        if not path:
+            continue
+        try:
+            if encrypted:
+                if media_provider is None:
+                    continue
+                alt = EncryptedBlobStore(
+                    path,
+                    media_provider,
+                    run_id,
+                    require_decrypt=bool(storage_cfg.get("encryption_required", False)),
+                    fsync_policy=fsync_policy,
+                )
+            else:
+                alt = PlainBlobStore(path, run_id, fsync_policy)
+        except Exception:
+            continue
+        stores.append((path, alt))
+
+    if len(stores) <= 1:
+        return media_store
+
+    return SpilloverStore(
+        config=config,
+        stores=stores,
+        telemetry=lambda event, payload: record_telemetry(event, payload),
+    )

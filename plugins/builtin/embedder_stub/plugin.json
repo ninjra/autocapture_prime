@@ -30,6 +30,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.embedder.basic",
+  "provides": [
+    "embedder.text"
+  ],
   "replaces": [
     "builtin.embedder.stub"
   ],

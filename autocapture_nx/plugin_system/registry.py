@@ -1036,7 +1036,9 @@ class PluginRegistry:
                 raw_anchor_path = anchor_cfg.get("path")
                 if isinstance(raw_anchor_path, str) and raw_anchor_path.strip():
                     anchor_path = raw_anchor_path
-                    anchor_dir = str(Path(raw_anchor_path).expanduser().resolve().parent)
+                    # Avoid filesystem-touching `resolve()` during boot; the filesystem
+                    # guard performs realpath normalization at access time.
+                    anchor_dir = str(Path(raw_anchor_path).expanduser().absolute().parent)
         except Exception:
             anchor_path = ""
             anchor_dir = ""
@@ -1047,14 +1049,14 @@ class PluginRegistry:
                 if isinstance(raw_keyring, str) and raw_keyring.strip():
                     keyring_path = raw_keyring
                     try:
-                        keyring_dir = str(Path(raw_keyring).expanduser().resolve().parent)
+                        keyring_dir = str(Path(raw_keyring).expanduser().absolute().parent)
                     except Exception:
                         keyring_dir = ""
                 raw_root = crypto_cfg.get("root_key_path")
                 if isinstance(raw_root, str) and raw_root.strip():
                     root_key_path = raw_root
                     try:
-                        root_key_dir = str(Path(raw_root).expanduser().resolve().parent)
+                        root_key_dir = str(Path(raw_root).expanduser().absolute().parent)
                     except Exception:
                         root_key_dir = ""
         except Exception:

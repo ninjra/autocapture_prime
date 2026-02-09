@@ -63,14 +63,20 @@ def build_user_config(template_path: str | Path, *, frames_dir: Path, max_frames
         runtime = template.setdefault("runtime", {})
         if isinstance(runtime, dict):
             runtime["run_id"] = str(run_id)
-    # Fixture runs must be WSL-stable. Force in-process plugin hosting and avoid
-    # allowlist-restricted inproc mode (which would otherwise spawn subprocess
-    # plugin hosts and exhaust RAM).
+    # Fixture runs must be WSL-stable. Prefer subprocess hosting so a single
+    # plugin import/init can't hang the whole kernel process. Keep caps low to
+    # avoid WSL OOM spikes.
     plugins_cfg = template.setdefault("plugins", {})
     if isinstance(plugins_cfg, dict):
         hosting = plugins_cfg.setdefault("hosting", {})
         if isinstance(hosting, dict):
-            hosting["mode"] = "inproc"
+            hosting["mode"] = "subprocess"
+            hosting.setdefault("subprocess_spawn_concurrency", 1)
+            hosting.setdefault("subprocess_max_hosts", 2)
+            hosting.setdefault("subprocess_idle_ttl_s", 10.0)
+            # The fixture harness must remain robust under WSL crashes/hangs.
+            # Keep plugins out-of-process unless absolutely required, so C-extension
+            # faults (sqlcipher/onnx/etc) can't take down the main kernel.
             hosting["inproc_allowlist"] = []
             hosting["inproc_justifications"] = {}
             # Keep caches under the fixture's data_dir so all writes remain within
@@ -475,8 +481,22 @@ def collect_plugin_trace(system: Any) -> dict[str, Any]:
 
 
 def probe_plugins(system: Any, *, sample_frame: bytes | None, sample_record_id: str | None) -> list[dict[str, Any]]:
+    """Probe a minimal set of plugin capabilities for fixture validation.
+
+    Important: probing every provider for every capability can spawn dozens of
+    subprocess plugin hosts (each can be hundreds of MB RSS), which is a common
+    cause of WSL OOM crashes during fixture runs. Default to probing only the
+    selected provider per capability; allow opting into full probing explicitly.
+    """
+
     if system is None or not hasattr(system, "capabilities"):
         return []
+
+    cfg = getattr(system, "config", {}) if system is not None else {}
+    tools_cfg = cfg.get("tools", {}) if isinstance(cfg, dict) else {}
+    fixture_cfg = tools_cfg.get("fixture", {}) if isinstance(tools_cfg, dict) else {}
+    probe_all = bool(fixture_cfg.get("probe_all_providers", False))
+
     results: list[dict[str, Any]] = []
     caps = system.capabilities.all() if hasattr(system, "capabilities") else {}
     for cap_name, cap_obj in sorted(caps.items(), key=lambda item: item[0]):
@@ -484,7 +504,9 @@ def probe_plugins(system: Any, *, sample_frame: bytes | None, sample_record_id: 
         if not providers:
             results.append({"capability": cap_name, "provider_id": None, "ok": False, "error": "no_providers"})
             continue
-        for provider_id, provider in providers:
+        # Probe only the first (selected) provider unless explicitly requested.
+        selected = providers if probe_all else providers[:1]
+        for provider_id, provider in selected:
             outcome = _probe_capability(
                 cap_name,
                 provider_id=str(provider_id),
@@ -494,6 +516,13 @@ def probe_plugins(system: Any, *, sample_frame: bytes | None, sample_record_id: 
                 system=system,
             )
             results.append(outcome)
+        # Enforce the subprocess host cap eagerly to avoid transient fanout.
+        try:
+            from autocapture_nx.plugin_system.host import reap_subprocess_hosts
+
+            reap_subprocess_hosts(force=False, bypass_interval_gate=True)
+        except Exception:
+            pass
     return results
 
 

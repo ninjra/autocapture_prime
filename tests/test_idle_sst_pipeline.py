@@ -147,7 +147,68 @@ class IdleSSTPipelineTests(unittest.TestCase):
             self.assertGreater(stats.processed, 0)
             self.assertTrue(any(k.startswith("run1/derived.sst.state/") for k in metadata.keys()))
 
+    def test_idle_processor_sst_pipeline_can_run_without_text_extractors(self) -> None:
+        """The SST pipeline should be able to run even when `derived.text.*` extractors are disabled.
+
+        This avoids duplicate OCR work (perf/WSL stability) while still producing
+        SST-derived records needed for QA and query-time answers.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _load_default_config()
+            storage = config.setdefault("storage", {})
+            storage["lexical_path"] = str(Path(tmpdir) / "lexical.db")
+            storage["vector_path"] = str(Path(tmpdir) / "vector.db")
+            storage["data_dir"] = str(tmpdir)
+
+            processing = config.setdefault("processing", {})
+            processing.setdefault("idle", {}).update(
+                {
+                    "enabled": True,
+                    "auto_start": False,
+                    "max_items_per_run": 5,
+                    "max_seconds_per_run": 10,
+                    "sleep_ms": 1,
+                    "max_concurrency_cpu": 1,
+                    "max_concurrency_gpu": 1,
+                    "extractors": {"ocr": False, "vlm": False},
+                }
+            )
+            sst = processing.setdefault("sst", {})
+            sst["heavy_always"] = True
+            sst["allow_ocr"] = True
+
+            metadata = _MetadataStore()
+            record_id = "run1/segment/1"
+            metadata.put(
+                record_id,
+                {
+                    "record_type": "evidence.capture.segment",
+                    "ts_utc": "2024-01-01T00:00:00+00:00",
+                    "container": {"type": "zip"},
+                },
+            )
+            media = _MediaStore({record_id: _frame_blob()})
+            events = _EventBuilder()
+            system = _System(
+                config,
+                {
+                    "storage.metadata": metadata,
+                    "storage.media": media,
+                    "ocr.engine": _OCRProvider(),
+                    "event.builder": events,
+                },
+            )
+            pipeline = SSTPipeline(system, extractor_id="test.sst", extractor_version="0.1.0")
+            system._caps["processing.pipeline"] = pipeline
+
+            processor = IdleProcessor(system)
+            stats = processor.process(should_abort=lambda: time.time() < 0)
+
+            self.assertEqual(stats.sst_runs, 1)
+            self.assertEqual(stats.sst_heavy, 1)
+            self.assertGreater(stats.processed, 0)
+            self.assertTrue(any(k.startswith("run1/derived.sst.state/") for k in metadata.keys()))
+
 
 if __name__ == "__main__":
     unittest.main()
-

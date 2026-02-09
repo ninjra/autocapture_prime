@@ -33,6 +33,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.tracking.file_activity.windows",
+  "provides": [
+    "tracking.file_activity"
+  ],
   "required_capabilities": [
     "event.builder",
     "storage.metadata"

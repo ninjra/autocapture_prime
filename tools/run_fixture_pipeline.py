@@ -44,9 +44,58 @@ def _resolve_path(path: str | Path) -> Path:
 
 
 def _collect_evidence(metadata) -> list[str]:
-    ids = []
-    for key in getattr(metadata, "keys", lambda: [])():
-        record = metadata.get(key, {})
+    def _safe_attr(name: str):
+        try:
+            return getattr(metadata, name)
+        except Exception:
+            return None
+
+    def _safe_call(name: str, *args, **kwargs):
+        fn = _safe_attr(name)
+        if fn is None or not callable(fn):
+            return None
+        try:
+            return fn(*args, **kwargs)
+        except Exception:
+            return None
+
+    # Some capability providers may wrap the underlying store (fanout/fallback).
+    # Prefer a single primary provider if exposed (keeps downstream logic simple).
+    primary = _safe_call("primary")
+    if isinstance(primary, tuple) and len(primary) == 2:
+        _pid, provider = primary
+        if provider is not None:
+            metadata = provider
+
+    raw_ids = _safe_call("keys")
+    # If the provider is a fanout proxy, `keys()` can return per-provider results.
+    if isinstance(raw_ids, list) and raw_ids and all(isinstance(x, dict) for x in raw_ids):
+        flattened: list[str] = []
+        for item in raw_ids:
+            if not isinstance(item, dict):
+                continue
+            result = item.get("result")
+            if isinstance(result, list):
+                flattened.extend(str(v) for v in result)
+        raw_ids = flattened
+
+    # Fall back to a bounded time-window scan when `.keys()` is unavailable due to
+    # subprocess method allowlists / capability wrappers.
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raw_ids = _safe_call("query_time_window", None, None, 5000)
+
+    ids: list[str] = []
+    if not isinstance(raw_ids, list):
+        return ids
+
+    get_fn = _safe_attr("get")
+    if get_fn is None or not callable(get_fn):
+        return ids
+    for key in raw_ids:
+        try:
+            record = get_fn(key, {})
+        except Exception:
+            continue
         if not isinstance(record, dict):
             continue
         record_type = str(record.get("record_type", ""))
@@ -63,6 +112,28 @@ def _wait_for_evidence(metadata, *, timeout_s: float = 10.0) -> list[str]:
             return ids
         time.sleep(0.1)
     return []
+
+
+def _debug_storage_metadata(metadata) -> dict[str, Any]:
+    payload: dict[str, Any] = {"type": type(metadata).__name__}
+    for name in ("keys", "get", "query_time_window", "primary"):
+        try:
+            attr = getattr(metadata, name)
+            payload[f"has_{name}"] = True
+            payload[f"{name}_callable"] = bool(callable(attr))
+        except Exception as exc:
+            payload[f"has_{name}"] = False
+            payload[f"{name}_error"] = f"{type(exc).__name__}: {exc}"
+    try:
+        if callable(getattr(metadata, "keys", None)):
+            keys = metadata.keys()
+            payload["keys_type"] = type(keys).__name__
+            payload["keys_len"] = len(keys) if hasattr(keys, "__len__") else None
+            if isinstance(keys, list):
+                payload["keys_sample"] = [str(x) for x in keys[:3]]
+    except Exception as exc:
+        payload["keys_call_error"] = f"{type(exc).__name__}: {exc}"
+    return payload
 
 
 def _sha256_text(text: str) -> str:
@@ -473,7 +544,10 @@ def main(argv: list[str] | None = None) -> int:
         # stepwise debugging without attaching a debugger.
         faulthandler.dump_traceback_later(30.0, repeat=False, file=sys.stderr)
         kernel = Kernel(default_config_paths(), safe_mode=False)
-        system = kernel.boot(start_conductor=False)
+        # Fixture validation is a one-shot CLI workflow. Avoid heavy boot steps
+        # (recovery/integrity sweeps, conductor wiring) to keep WSL stable and
+        # reduce wall-clock time.
+        system = kernel.boot(start_conductor=False, fast_boot=True)
         faulthandler.cancel_dump_traceback_later()
         report["boot_elapsed_s"] = round(time.monotonic() - t0, 3)
         print(f"[fixture] boot_elapsed_s={report['boot_elapsed_s']}")
@@ -494,6 +568,19 @@ def main(argv: list[str] | None = None) -> int:
         evidence_ids = _wait_for_evidence(metadata, timeout_s=float(args.capture_timeout_s))
         if not evidence_ids:
             print("ERROR: no evidence captured")
+            try:
+                report["debug"] = dict(report.get("debug", {}) if isinstance(report.get("debug", {}), dict) else {})
+                report["debug"]["storage_metadata"] = _debug_storage_metadata(metadata)
+                # Cross-check filesystem state (metadata is raw-first on disk).
+                try:
+                    meta_root = Path(str(data_dir)) / "metadata"
+                    report["debug"]["metadata_file_count"] = (
+                        len(list(meta_root.rglob("*.json"))) if meta_root.exists() else 0
+                    )
+                except Exception:
+                    pass
+            except Exception:
+                pass
             exit_code = 3
         capture.stop()
         report["capture_elapsed_s"] = round(time.monotonic() - t_cap, 3)
@@ -519,11 +606,15 @@ def main(argv: list[str] | None = None) -> int:
 
         if exit_code == 0:
             t_idle = time.monotonic()
+            import faulthandler
+            # If idle processing stalls (OCR/model hangs), emit a traceback for debugging.
+            faulthandler.dump_traceback_later(max(10.0, float(args.idle_timeout_s) + 5.0), repeat=False, file=sys.stderr)
             idle_result = run_idle_processing(
                 system,
                 max_steps=int(args.idle_max_steps),
                 timeout_s=float(args.idle_timeout_s),
             )
+            faulthandler.cancel_dump_traceback_later()
             report["idle_elapsed_s"] = round(time.monotonic() - t_idle, 3)
             report["idle"] = idle_result
             print(

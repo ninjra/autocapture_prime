@@ -8,6 +8,7 @@ import os
 import socket
 import threading
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, cast
 
@@ -139,17 +140,32 @@ def _ensure_patched() -> None:
         _patched = True
 
 
+@lru_cache(maxsize=8192)
+def _normalize_root_str(raw: str, os_name: str) -> str:
+    # Keep this fast: called for every plugin filesystem root during boot.
+    # We still resolve symlinks (realpath) for security, but we memoize heavily.
+    try:
+        expanded = str(Path(raw).expanduser())
+    except Exception:
+        expanded = str(raw)
+    if os_name == "nt" and normalize_windows_path_str is not None:
+        try:
+            return normalize_windows_path_str(expanded)
+        except Exception:
+            return expanded
+    try:
+        return os.path.realpath(expanded)
+    except Exception:
+        try:
+            return os.path.abspath(expanded)
+        except Exception:
+            return expanded
+
+
 def _normalize_root(path: Path) -> Path:
     try:
-        expanded = path.expanduser()
-        # Resolve symlinks where supported to prevent allowlist bypass via symlink traversal.
-        # On Windows, prefer `ntpath`-based normalization for deterministic comparisons.
-        if os.name == "nt" and normalize_windows_path_str is not None:
-            return Path(normalize_windows_path_str(str(expanded)))
-        try:
-            return Path(os.path.realpath(str(expanded))).absolute()
-        except Exception:
-            return expanded.absolute()
+        normalized = _normalize_root_str(str(path), os.name)
+        return Path(normalized).absolute()
     except Exception:
         return path
 

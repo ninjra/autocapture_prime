@@ -13,6 +13,13 @@ else
 fi
 
 export PYTHONPATH="$repo_root"
+# Keep fixture runs WSL-stable by limiting native thread pools (tesseract/onnx/etc).
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
+export OMP_THREAD_LIMIT="${OMP_THREAD_LIMIT:-1}"
+export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
+export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
+export VECLIB_MAXIMUM_THREADS="${VECLIB_MAXIMUM_THREADS:-1}"
 mkdir -p "$frames_dir"
 for stamp in 113519 113529 113539; do
   dest="$frames_dir/Screenshot 2026-02-02 ${stamp}.png"

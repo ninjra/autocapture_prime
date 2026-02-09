@@ -27,6 +27,13 @@ def _print_json(data: object) -> None:
 def cmd_doctor(args: argparse.Namespace) -> int:
     facade = create_facade(safe_mode=args.safe_mode)
     report = facade.doctor_report()
+    if getattr(args, "bundle", False):
+        bundle = facade.diagnostics_bundle_create()
+        if isinstance(bundle, dict):
+            path = str(bundle.get("path") or "")
+            sha = str(bundle.get("sha256") or "")
+            if path:
+                print(f"Diagnostics bundle: {path} sha256={sha}")
     ok = bool(report.get("ok"))
     for check in report.get("checks", []):
         ok_flag = bool(check.get("ok")) if isinstance(check, dict) else False
@@ -145,11 +152,32 @@ def cmd_tray(_args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     facade = create_facade(persistent=True, safe_mode=args.safe_mode, auto_start_capture=False)
     facade.run_start()
-    print("Capture running. Press Ctrl+C to stop.")
+    duration_s = int(getattr(args, "duration_s", 0) or 0)
+    status_interval_s = int(getattr(args, "status_interval_s", 0) or 0)
+    if duration_s > 0:
+        print(f"Capture running for up to {duration_s}s. Press Ctrl+C to stop early.")
+    else:
+        print("Capture running. Press Ctrl+C to stop.")
     try:
         import time
+        started = time.monotonic()
+        last_status = started
         while True:
             time.sleep(1)
+            now = time.monotonic()
+            if duration_s > 0 and (now - started) >= duration_s:
+                break
+            if status_interval_s > 0 and (now - last_status) >= status_interval_s:
+                last_status = now
+                try:
+                    result = facade.doctor_report()
+                except Exception:
+                    result = None
+                if isinstance(result, dict):
+                    summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+                    code = str(summary.get("code") or "")
+                    msg = str(summary.get("message") or "")
+                    print(f"[status] code={code} message={msg[:120]}")
     except KeyboardInterrupt:
         pass
     finally:
@@ -177,6 +205,14 @@ def cmd_query(args: argparse.Namespace) -> int:
     result = facade.query(args.text)
     _print_json(result)
     return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    facade = create_facade(safe_mode=args.safe_mode)
+    payload = facade.status()
+    _print_json(payload)
+    # Non-zero exit helps scripts/soak harnesses detect degraded mode.
+    return 3 if bool(payload.get("safe_mode")) else 0
 
 
 def cmd_state_jepa_approve(args: argparse.Namespace) -> int:
@@ -691,6 +727,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     doctor = sub.add_parser("doctor")
+    doctor.add_argument("--bundle", action="store_true", help="Create a diagnostics bundle zip")
     doctor.set_defaults(func=cmd_doctor)
 
     cfg = sub.add_parser("config")
@@ -716,7 +753,17 @@ def build_parser() -> argparse.ArgumentParser:
     tray.set_defaults(func=cmd_tray)
 
     run_cmd = sub.add_parser("run")
+    run_cmd.add_argument("--duration-s", type=int, default=0, help="Stop after N seconds (0=run until Ctrl+C)")
+    run_cmd.add_argument(
+        "--status-interval-s",
+        type=int,
+        default=0,
+        help="Print doctor status every N seconds (0=disabled)",
+    )
     run_cmd.set_defaults(func=cmd_run)
+
+    status_cmd = sub.add_parser("status")
+    status_cmd.set_defaults(func=cmd_status)
 
     query_cmd = sub.add_parser("query")
     query_cmd.add_argument("text")

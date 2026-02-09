@@ -196,6 +196,8 @@ def reap_subprocess_hosts(
             host = getattr(inst, "_host", None)
             if host is None:
                 continue
+            if not force and bool(getattr(inst, "_reap_protected", False)):
+                continue
             try:
                 in_flight = int(getattr(inst, "_in_flight", 0) or 0)
             except Exception:
@@ -217,6 +219,8 @@ def reap_subprocess_hosts(
         for inst in instances:
             host = getattr(inst, "_host", None)
             if host is None:
+                continue
+            if bool(getattr(inst, "_reap_protected", False)):
                 continue
             try:
                 in_flight = int(getattr(inst, "_in_flight", 0) or 0)
@@ -807,6 +811,18 @@ class SubprocessPlugin:
         self._in_flight = 0
         self._last_used_mono = time.monotonic()
         self._capabilities_probe_only = False
+        # Long-running background plugins (capture/tracking/window metadata) must not
+        # be reaped based solely on idle RPC activity, otherwise capture can stop
+        # silently after the TTL expires.
+        seed_kind = str(entrypoint_kind).strip() if entrypoint_kind else ""
+        protects = seed_kind.startswith(("capture.", "tracking.", "window."))
+        if provided_capabilities:
+            for cap in provided_capabilities:
+                text = str(cap).strip()
+                if text.startswith(("capture.", "tracking.", "window.")):
+                    protects = True
+                    break
+        self._reap_protected = bool(protects)
 
         # Register early so the reaper/cap logic can observe this instance even
         # during init-time host startups (important for WSL stability).

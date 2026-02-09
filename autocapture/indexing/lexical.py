@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from autocapture.indexing.manifest import bump_manifest, update_manifest_digest, manifest_path
+from autocapture_nx.storage.migrations import record_baseline
 
 
 class LexicalIndex:
@@ -22,6 +23,10 @@ class LexicalIndex:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(self.path)
             self._conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(doc_id, content)")
+            try:
+                record_baseline(self._conn, version=1, name="lexical.baseline")
+            except Exception:
+                pass
             self._conn.commit()
         self._identity_cache: dict[str, Any] | None = None
         self._identity_mtime: float | None = None

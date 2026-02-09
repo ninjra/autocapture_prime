@@ -28,6 +28,9 @@
     "raw_input": true
   },
   "plugin_id": "builtin.tracking.clipboard.windows",
+  "provides": [
+    "tracking.clipboard"
+  ],
   "required_capabilities": [
     "event.builder",
     "storage.metadata",

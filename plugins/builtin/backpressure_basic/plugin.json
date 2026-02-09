@@ -26,6 +26,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.backpressure.basic",
+  "provides": [
+    "capture.backpressure"
+  ],
   "required_capabilities": [],
   "settings_paths": [
     "backpressure"

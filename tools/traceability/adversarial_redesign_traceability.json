@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-02-08T19:11:49.890424Z",
+  "generated_utc": "2026-02-09T02:52:02.095270Z",
   "items": [
     {
       "evidence": [
@@ -9,7 +9,7 @@
       ],
       "id": "EXEC-01",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Formalize a persisted pipeline DAG (stages + deps) for capture\u2192process\u2192index\u2192query, stored in state_tape",
       "validators": [
         "tests/test_pipeline_dag_determinism.py"
@@ -22,7 +22,7 @@
       ],
       "id": "EXEC-02",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Add an idempotent job runner with explicit retry policy (bounded retries + backoff) and attempt records in ledger",
       "validators": [
         "tests/test_job_retry_records.py"
@@ -36,7 +36,7 @@
       ],
       "id": "EXEC-03",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Unify concurrency controls: per-stage semaphores + global CPU/RAM budgets + deterministic scheduling",
       "validators": [
         "tests/test_concurrency_budget_enforced.py",
@@ -135,7 +135,7 @@
       ],
       "id": "EXEC-10",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Deterministic retrieval tie-breaking: score\u2192evidence_id\u2192span_id ordering, documented as contract",
       "validators": [
         "tests/test_retrieval_tie_breaking.py"
@@ -375,7 +375,7 @@
       ],
       "id": "FND-05",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Introduce content-addressed ingest IDs for file-based inputs (sha256\u2192input_id) and dedupe at ingest boundary",
       "validators": [
         "tests/test_ingest_dedupe.py"
@@ -389,7 +389,7 @@
       ],
       "id": "FND-06",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Make disk-pressure handling fail-safe: preflight free-space, throttle capture/processing, and surface \u201cpaused due to disk\u201d state",
       "validators": [
         "tests/test_disk_pressure_pause.py",
@@ -419,7 +419,7 @@
       ],
       "id": "FND-08",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Add explicit DB migration framework with version pinning + rollback plan for all sqlite/state stores",
       "validators": [
         "tests/test_db_migrations.py",
@@ -448,7 +448,7 @@
       ],
       "id": "FND-10",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Make safe-mode and crash-loop reasons user-visible (CLI + web UI) with a deterministic \u201cnext safe action\u201d checklist",
       "validators": [
         "tests/test_safe_mode_ui_banner.py"
@@ -593,7 +593,7 @@
       ],
       "id": "META-10",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Define a canonical diagnostics bundle schema (bundle_manifest.json) for doctor + support artifacts",
       "validators": [
         "tests/test_diagnostics_bundle_schema.py"
@@ -789,7 +789,7 @@
       ],
       "id": "PERF-06",
       "notes": "",
-      "status": "missing",
+      "status": "partial",
       "title": "Use streaming I/O for proof bundle export and large media reads to reduce peak memory",
       "validators": [
         "tests/test_proof_bundle_streaming_memory.py"
@@ -815,7 +815,7 @@
       ],
       "id": "PERF-08",
       "notes": "",
-      "status": "missing",
+      "status": "partial",
       "title": "Surface resource usage (CPU/RAM/disk) and auto-throttle policies in UI; make them deterministic and configurable",
       "validators": [
         "tests/test_ui_resource_panel.py"
@@ -880,7 +880,7 @@
       ],
       "id": "QA-05",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Migration tests: forward/backward migrations for each DB with fixture corpora and checksums",
       "validators": [
         "tests/test_db_migrations.py"
@@ -990,13 +990,16 @@
     {
       "evidence": [
         "docs/runbook.md",
-        "docs/safe_mode.md"
+        "docs/safe_mode.md",
+        "tests/test_runbook_docs.py"
       ],
       "id": "RD-06",
-      "notes": "",
-      "status": "missing",
+      "notes": "Docs are versioned artifacts; a deterministic test asserts required sections exist.",
+      "status": "implemented",
       "title": "Write an operator runbook: backup/restore, safe-mode triage, plugin rollback, disk pressure, and integrity verification",
-      "validators": []
+      "validators": [
+        "tests/test_runbook_docs.py"
+      ]
     },
     {
       "evidence": [

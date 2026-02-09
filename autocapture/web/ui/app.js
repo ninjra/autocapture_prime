@@ -41,6 +41,8 @@ const statusRunId = qs("runId");
 const statusLedger = qs("ledgerHead");
 const statusCapture = qs("captureState");
 const kernelStatus = qs("kernelStatus");
+const safeModeCard = qs("safeModeCard");
+const safeModeReason = qs("safeModeReason");
 const captureBannerState = qs("captureBannerState");
 const processingBannerState = qs("processingBannerState");
 const captureBannerLast = qs("captureBannerLast");
@@ -265,6 +267,7 @@ async function refreshStatus() {
   }
   updateQuickControls();
   renderStatusBanner();
+  renderSafeModeCard();
   renderSlo();
 }
 
@@ -331,6 +334,19 @@ function renderStatusBanner() {
       captureBannerDisk.classList.toggle("critical", false);
       captureBannerDisk.classList.toggle("off", true);
     }
+  }
+}
+
+function renderSafeModeCard() {
+  if (!safeModeCard) return;
+  const safeMode = Boolean(state.status.safe_mode);
+  safeModeCard.hidden = !safeMode;
+  if (!safeMode) return;
+  if (safeModeReason) {
+    const reason = state.status.safe_mode_reason ? String(state.status.safe_mode_reason) : "unknown";
+    const crash = state.status.crash_loop || {};
+    const until = crash.safe_mode_until ? ` · until ${crash.safe_mode_until}` : "";
+    safeModeReason.textContent = `Reason: ${reason}${until}`;
   }
 }
 

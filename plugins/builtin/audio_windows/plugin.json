@@ -28,6 +28,9 @@
     "raw_input": true
   },
   "plugin_id": "builtin.capture.audio.windows",
+  "provides": [
+    "capture.audio"
+  ],
   "required_capabilities": [
     "event.builder",
     "storage.media",

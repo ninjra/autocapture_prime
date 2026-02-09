@@ -28,6 +28,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.window.metadata.windows",
+  "provides": [
+    "window.metadata"
+  ],
   "required_capabilities": [
     "event.builder",
     "storage.metadata"

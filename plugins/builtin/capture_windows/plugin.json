@@ -31,6 +31,9 @@
     "raw_input": true
   },
   "plugin_id": "builtin.capture.windows",
+  "provides": [
+    "capture.source"
+  ],
   "required_capabilities": [
     "capture.backpressure",
     "event.builder",

@@ -26,6 +26,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.state.policy",
+  "provides": [
+    "state.policy"
+  ],
   "required_capabilities": [],
   "settings_paths": [
     "processing"

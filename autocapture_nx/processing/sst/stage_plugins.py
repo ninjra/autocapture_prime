@@ -194,9 +194,7 @@ class SSTStagePluginBase(PluginBase):
         }
 
     def run(self, inp: PluginInput, ctx: RunContext) -> PluginOutput:  # pragma: no cover - interface
-        ctx.logger(
-            f"sst.plugin.noop: {self.meta.id} run not implemented for stages {self.stage_names or ()}"
-        )
+        ctx.logger(f"sst.plugin.noop: {self.meta.id} has no handler for stages {self.stage_names or ()}")
         return PluginOutput(
             items={},
             metrics={},
@@ -337,10 +335,12 @@ class OcrOnnxPlugin(SSTStagePluginBase):
                 ocr_capability=ctx.stores.get("ocr"),
                 frame_width=frame_width,
                 frame_height=frame_height,
+                full_frame_bytes=items.get("frame_bytes") if isinstance(items.get("frame_bytes"), (bytes, bytearray)) else None,
                 min_conf_bp=int(self._sst_cfg["ocr_min_conf_bp"]),
                 nms_iou_bp=int(self._sst_cfg["ocr_nms_iou_bp"]),
                 max_tokens=int(self._sst_cfg["ocr_max_tokens"]),
                 max_patches=int(self._sst_cfg["ocr_max_patches"]),
+                prefer_full_frame=bool(self._sst_cfg.get("ocr_prefer_full_frame", True)),
                 allow_ocr=allow_ocr,
                 should_abort=None,
                 deadline_ts=None,

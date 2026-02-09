@@ -30,6 +30,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.vlm.minicpm_v_2_6",
+  "provides": [
+    "vision.extractor"
+  ],
   "required_capabilities": [],
   "version": "0.1.0"
 }

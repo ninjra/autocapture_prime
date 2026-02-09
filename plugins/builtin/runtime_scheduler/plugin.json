@@ -26,6 +26,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.runtime.scheduler",
+  "provides": [
+    "runtime.scheduler"
+  ],
   "required_capabilities": [
     "runtime.governor"
   ],

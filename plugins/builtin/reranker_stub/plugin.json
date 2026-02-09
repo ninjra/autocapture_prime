@@ -30,6 +30,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.reranker.basic",
+  "provides": [
+    "reranker"
+  ],
   "replaces": [
     "builtin.reranker.stub"
   ],

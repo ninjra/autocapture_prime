@@ -15,6 +15,7 @@ from typing import Any
 
 from autocapture.indexing.manifest import bump_manifest, update_manifest_digest, manifest_path
 from autocapture.models.bundles import select_bundle, BundleInfo
+from autocapture_nx.storage.migrations import record_baseline
 
 class HashEmbedder:
     def __init__(self, dims: int = 384) -> None:
@@ -303,6 +304,10 @@ class VectorIndex:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(self.path)
             self._conn.execute("CREATE TABLE IF NOT EXISTS vectors (doc_id TEXT PRIMARY KEY, vector TEXT)")
+            try:
+                record_baseline(self._conn, version=1, name="vector.baseline")
+            except Exception:
+                pass
             self._conn.commit()
         self._embedder = embedder
         self._identity_cache: dict[str, Any] | None = None

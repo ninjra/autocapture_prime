@@ -39,10 +39,15 @@ def run_ocr_tokens(
     ocr_capability: Any | None,
     frame_width: int,
     frame_height: int,
+    full_frame_bytes: bytes | None = None,
     min_conf_bp: int,
     nms_iou_bp: int,
     max_tokens: int,
     max_patches: int,
+    prefer_full_frame: bool = False,
+    # Conservative threshold: if the full-frame pass yields at least this many
+    # tokens, don't fall back to patch OCR (which can be much slower on WSL).
+    min_full_frame_tokens: int = 8,
     allow_ocr: bool,
     should_abort: Callable[[], bool] | None,
     deadline_ts: float | None,
@@ -57,27 +62,57 @@ def run_ocr_tokens(
         diagnostics.append({"kind": "ocr.missing", "detail": "no providers"})
         return [], ExtractDiagnostics(tuple(diagnostics)), []
 
+    def _expired_or_aborted(provider_id: str) -> tuple[bool, list[dict[str, Any]] | None]:
+        if should_abort and should_abort():
+            diagnostics.append({"kind": "ocr.aborted", "detail": provider_id})
+            return True, None
+        if deadline_ts is not None:
+            import time
+            if time.time() >= deadline_ts:
+                diagnostics.append({"kind": "ocr.deadline", "detail": provider_id})
+                return True, None
+        return False, None
+
+    # Performance-first (WSL-friendly): try a single full-frame OCR pass first,
+    # then fall back to patch/tile OCR only if needed for coverage.
+    if prefer_full_frame and full_frame_bytes:
+        ff_patch = {
+            "patch_id": "full_frame",
+            "bbox": (0, 0, int(frame_width), int(frame_height)),
+            "image_bytes": bytes(full_frame_bytes),
+        }
+        ff_tokens: list[dict[str, Any]] = []
+        for provider_id, provider in providers:
+            done, _ = _expired_or_aborted(provider_id)
+            if done:
+                return (
+                    _postprocess_tokens(ff_tokens, min_conf_bp, nms_iou_bp, max_tokens),
+                    ExtractDiagnostics(tuple(diagnostics)),
+                    _flag_low_confidence(ff_tokens, min_conf_bp),
+                )
+            try:
+                provider_tokens = _extract_tokens_from_provider(provider, provider_id, ff_patch, frame_width, frame_height)
+            except Exception as exc:
+                diagnostics.append({"kind": "ocr.error", "provider_id": provider_id, "error": str(exc)})
+                continue
+            ff_tokens.extend(provider_tokens)
+        pp = _postprocess_tokens(ff_tokens, min_conf_bp, nms_iou_bp, max_tokens)
+        if len(pp) >= max(1, int(min_full_frame_tokens or 1)) or not patches:
+            diagnostics.append({"kind": "ocr.full_frame_ok", "tokens": len(pp)})
+            return pp, ExtractDiagnostics(tuple(diagnostics)), _flag_low_confidence(pp, min_conf_bp)
+        diagnostics.append({"kind": "ocr.full_frame_insufficient", "tokens": len(pp)})
+
     selected_patches = patches[: max(1, max_patches)]
     tokens: list[dict[str, Any]] = []
     for provider_id, provider in providers:
         for patch in selected_patches:
-            if should_abort and should_abort():
-                diagnostics.append({"kind": "ocr.aborted", "detail": provider_id})
+            done, _ = _expired_or_aborted(provider_id)
+            if done:
                 return (
                     _postprocess_tokens(tokens, min_conf_bp, nms_iou_bp, max_tokens),
                     ExtractDiagnostics(tuple(diagnostics)),
                     _flag_low_confidence(tokens, min_conf_bp),
                 )
-            if deadline_ts is not None:
-                import time
-
-                if time.time() >= deadline_ts:
-                    diagnostics.append({"kind": "ocr.deadline", "detail": provider_id})
-                    return (
-                        _postprocess_tokens(tokens, min_conf_bp, nms_iou_bp, max_tokens),
-                        ExtractDiagnostics(tuple(diagnostics)),
-                        _flag_low_confidence(tokens, min_conf_bp),
-                    )
             try:
                 provider_tokens = _extract_tokens_from_provider(provider, provider_id, patch, frame_width, frame_height)
             except Exception as exc:

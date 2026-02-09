@@ -24,6 +24,7 @@ from autocapture_nx.kernel.frame_evidence import ensure_frame_evidence
 from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.kernel.providers import capability_providers
+from autocapture_nx.processing.qa.fixture_answers import extract_fixture_answers
 
 
 @dataclass
@@ -63,6 +64,24 @@ class _IdleWorkItem:
     parent_hash: str | None
     missing_count: int
     needs_pipeline: bool
+
+
+def _is_missing_metadata_record(value: Any) -> bool:
+    """Normalize missing-record semantics across storage backends.
+
+    Some metadata providers return `{}` for missing keys instead of `None`.
+    Downstream processors must treat both as "missing" to avoid skipping work.
+    """
+
+    if value is None:
+        return True
+    if value == {}:
+        return True
+    if isinstance(value, dict):
+        # Real records always carry a record_type.
+        return "record_type" not in value
+    # Unexpected shapes are treated as missing to force regeneration.
+    return True
 
 
 def _derive_run_id(config: dict[str, Any], record_id: str) -> str:
@@ -435,6 +454,50 @@ class IdleProcessor:
                 if self._logger is not None:
                     self._logger.log("index.vector_error", {"doc_id": doc_id, "error": str(exc)})
 
+    def _store_fixture_answer_doc(
+        self,
+        *,
+        item: _IdleWorkItem,
+        base_text: str,
+        provider_id: str,
+    ) -> None:
+        """Emit deterministic QA "answer doc" lines from extracted text.
+
+        This improves query reliability for common operator questions without
+        requiring query-time media reprocessing.
+        """
+        if self._metadata is None:
+            return
+        answers = extract_fixture_answers(base_text)
+        lines = answers.as_lines()
+        if not lines:
+            return
+        doc_text = "\n".join(lines).strip()
+        if not doc_text:
+            return
+        record_id = f"{item.run_id}/derived.text.qa/{encode_record_id_component(provider_id)}/{item.encoded_source}"
+        if self._metadata.get(record_id) is not None:
+            return
+        payload = build_text_record(
+            kind="qa",
+            text=doc_text,
+            source_id=item.record_id,
+            source_record=item.record,
+            provider_id=str(provider_id),
+            config=self._config,
+            ts_utc=item.ts_utc,
+        )
+        if not payload:
+            return
+        try:
+            if hasattr(self._metadata, "put_new"):
+                self._metadata.put_new(record_id, payload)
+            else:
+                self._metadata.put(record_id, payload)
+        except Exception:
+            return
+        self._index_text(record_id, doc_text)
+
     def _run_provider_batch(
         self,
         extractor: Any,
@@ -620,20 +683,20 @@ class IdleProcessor:
                 for provider_id, _extractor in ocr_providers:
                     provider_component = encode_record_id_component(provider_id)
                     derived_id = f"{_derive_run_id(self._config, record_id)}/derived.text.ocr/{provider_component}/{encode_record_id_component(record_id)}"
-                    if metadata.get(derived_id) is None:
+                    if _is_missing_metadata_record(metadata.get(derived_id)):
                         missing_count += 1
             if allow_vlm:
                 for provider_id, _extractor in vlm_providers:
                     provider_component = encode_record_id_component(provider_id)
                     derived_id = f"{_derive_run_id(self._config, record_id)}/derived.text.vlm/{provider_component}/{encode_record_id_component(record_id)}"
-                    if metadata.get(derived_id) is None:
+                    if _is_missing_metadata_record(metadata.get(derived_id)):
                         missing_count += 1
             needs_pipeline = False
             if pipeline_enabled:
                 run_id = _derive_run_id(self._config, record_id)
                 frame_component = encode_record_id_component(record_id)
                 frame_id = f"{run_id}/derived.sst.frame/{frame_component}"
-                if metadata.get(frame_id) is None:
+                if _is_missing_metadata_record(metadata.get(frame_id)):
                     needs_pipeline = True
             if missing_count == 0 and not needs_pipeline:
                 last_record_id = source_record_id
@@ -688,7 +751,7 @@ class IdleProcessor:
             provider_component = encode_record_id_component(provider_id)
             for item in items:
                 derived_id = f"{item.run_id}/derived.text.{kind}/{provider_component}/{item.encoded_source}"
-                if self._metadata.get(derived_id) is None:
+                if _is_missing_metadata_record(self._metadata.get(derived_id)):
                     tasks.append((item, derived_id))
             if not tasks:
                 continue
@@ -738,6 +801,15 @@ class IdleProcessor:
                     )
                     if stored:
                         processed += 1
+                        # After storing OCR text for an item, also emit deterministic
+                        # fixture answer docs derived from that extracted text.
+                        if kind == "ocr":
+                            try:
+                                base_text = str(payload.get("text") or "")
+                                if base_text:
+                                    self._store_fixture_answer_doc(item=item, base_text=base_text, provider_id="qa.fixture")
+                            except Exception:
+                                pass
         return processed
 
     def process(self, *, should_abort: Callable[[], bool] | None = None) -> IdleProcessStats:
@@ -760,6 +832,9 @@ class IdleProcessor:
         max_items = int(idle_cfg.get("max_items_per_run", 20))
         max_seconds = int(idle_cfg.get("max_seconds_per_run", 30))
         extractors = idle_cfg.get("extractors", {})
+        # `processing.idle.extractors.*` controls the lightweight "derived.text.*"
+        # extractors. The SST pipeline is heavier and has separate gating so we can
+        # disable duplicate extraction while still allowing SST-derived answers.
         allow_ocr = bool(extractors.get("ocr", True))
         allow_vlm = bool(extractors.get("vlm", True))
         order_by = str(idle_cfg.get("order_by", "record_id") or "record_id").lower()
@@ -771,6 +846,10 @@ class IdleProcessor:
             allow_vlm = False
         sst_cfg = self._config.get("processing", {}).get("sst", {})
         pipeline_enabled = bool(sst_cfg.get("enabled", True)) and self._pipeline is not None
+        pipeline_allow_ocr = bool(sst_cfg.get("allow_ocr", allow_ocr))
+        pipeline_allow_vlm = bool(sst_cfg.get("allow_vlm", allow_vlm))
+        if max_gpu <= 0:
+            pipeline_allow_vlm = False
         start_mono = time.monotonic()
         start_wall = time.time()
         deadline_mono = start_mono + max(1, max_seconds)
@@ -873,8 +952,8 @@ class IdleProcessor:
                             record_id=item.record_id,
                             record=item.record,
                             frame_bytes=item.frame_bytes,
-                            allow_ocr=allow_ocr,
-                            allow_vlm=allow_vlm,
+                            allow_ocr=pipeline_allow_ocr,
+                            allow_vlm=pipeline_allow_vlm,
                             should_abort=should_abort,
                             # Enforce both the per-run max_seconds_per_run deadline and any
                             # governor lease budget deadline, whichever is sooner.

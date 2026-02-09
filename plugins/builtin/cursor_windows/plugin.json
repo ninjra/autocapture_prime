@@ -26,6 +26,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.cursor.windows",
+  "provides": [
+    "tracking.cursor"
+  ],
   "required_capabilities": [
     "event.builder",
     "storage.metadata"

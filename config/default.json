@@ -104,14 +104,15 @@
     "video": {
       "activity": {
         "active_bitrate_kbps": 2000,
-        "active_fps": 8,
+        "active_fps": 10,
         "active_jpeg_quality": 90,
         "active_window_s": 3,
         "assume_idle_when_missing": true,
+        "capture_when_idle": false,
         "check_interval_s": 1,
         "enabled": true,
-        "idle_bitrate_kbps": 8000,
-        "idle_fps": 30,
+        "idle_bitrate_kbps": 2000,
+        "idle_fps": 10,
         "idle_jpeg_quality": 90,
         "preserve_quality": true
       },
@@ -119,7 +120,7 @@
       "dd_nvenc": {
         "allow_fallback": true
       },
-      "container": "ffmpeg_lossless",
+      "container": "ffmpeg_mp4",
       "dedupe": {
         "enabled": true,
         "hash": "blake2b",
@@ -128,7 +129,7 @@
         "sample_bytes": 65536,
         "window_ms": 1500
       },
-      "enabled": true,
+      "enabled": false,
       "ffmpeg_path": "",
       "frame_format": "auto",
       "include_cursor": true,
@@ -141,6 +142,13 @@
       "segment_seconds": 60
     },
     "screenshot": {
+      "activity": {
+        "active_interval_s": 0.5,
+        "active_window_s": 300,
+        "assume_active_when_missing": true,
+        "enabled": true,
+        "idle_interval_s": 60
+      },
       "backend": "mss",
       "dedupe": {
         "enabled": true,
@@ -152,8 +160,10 @@
       "fps_target": 2,
       "include_cursor": true,
       "include_cursor_shape": true,
+      "media_fsync_policy": "bulk",
+      "render_cursor": false,
       "monitor_index": 0,
-      "png_compress_level": 3,
+      "png_compress_level": 1,
       "resolution": "native"
     },
     "window_metadata": {
@@ -1428,7 +1438,7 @@
     "window_limit": 1000
   },
   "runtime": {
-    "active_window_s": 3,
+    "active_window_s": 300,
     "activity": {
       "assume_idle_when_missing": false,
       "display_power_enabled": false,
@@ -1436,7 +1446,9 @@
       "display_idle_seconds": 300,
       "screensaver_enabled": true,
       "screensaver_poll_interval_s": 1.0,
-      "screensaver_idle_seconds": 60
+      "screensaver_idle_seconds": 300,
+      "screensaver_trigger_enabled": true,
+      "screensaver_trigger_idle_seconds": 300
     },
     "capture_controls": {
       "enabled": false
@@ -1564,6 +1576,17 @@
       "record_batches": true
     },
     "spool_dir": "data/spool",
+    "spool_overflow": {
+      "enabled": true,
+      "dir": "C:\\\\autocapture_spool_overflow",
+      "drain_interval_s": 2.0,
+      "max_drain_per_tick": 50
+    },
+    "spillover": {
+      "enabled": false,
+      "media_dirs": [],
+      "on_level": "soft"
+    },
     "vector_path": "data/vector.db"
   },
   "time": {

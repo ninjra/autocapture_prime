@@ -15,6 +15,12 @@
       "path": "plugin.py"
     }
   ],
+  "filesystem_policy": {
+    "readwrite": [
+      "{keyring_dir}",
+      "{root_key_dir}"
+    ]
+  },
   "hash_lock": {
     "artifact_sha256": "",
     "manifest_sha256": ""
@@ -26,6 +32,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.privacy.egress_sanitizer",
+  "provides": [
+    "privacy.egress_sanitizer"
+  ],
   "required_capabilities": [
     "storage.entity_map"
   ],
@@ -33,11 +42,5 @@
     "privacy",
     "storage"
   ],
-  "version": "0.1.0",
-  "filesystem_policy": {
-    "readwrite": [
-      "{keyring_dir}",
-      "{root_key_dir}"
-    ]
-  }
+  "version": "0.1.0"
 }

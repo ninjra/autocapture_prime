@@ -84,6 +84,11 @@ class RapidOcrPlugin(PluginBase):
             self._init_error = f"rapidocr_missing:{exc}"
             return
         kwargs: dict[str, Any] = {}
+        # Force onnxruntime thread pools to respect our WSL-friendly cap. RapidOCR
+        # supports these keys via its config.yaml UpdateParameters.
+        n = max(1, int(self._max_threads))
+        kwargs["intra_op_num_threads"] = n
+        kwargs["inter_op_num_threads"] = n
         if self._det_model_path:
             kwargs["det_model_path"] = str(self._det_model_path)
         if self._rec_model_path:
@@ -105,8 +110,12 @@ class RapidOcrPlugin(PluginBase):
                 kwargs["cls_use_cuda"] = bool(self._cls_use_cuda)
         try:
             sig = inspect.signature(RapidOCR)
-            allowed = set(sig.parameters.keys())
-            kwargs = {k: v for k, v in kwargs.items() if k in allowed}
+            # RapidOCR declares `**kwargs`, so accepted keys are not visible via
+            # inspect.signature; do not filter in that case.
+            has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+            if not has_var_kw:
+                allowed = set(sig.parameters.keys())
+                kwargs = {k: v for k, v in kwargs.items() if k in allowed}
         except Exception:
             pass
         try:

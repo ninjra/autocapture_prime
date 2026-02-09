@@ -51,6 +51,10 @@ class InputTrackerWindows(PluginBase):
         self._screensaver_poll_interval_s = 1.0
         self._screensaver_idle_seconds = 300.0
         self._screensaver_enabled = False
+        self._screensaver_trigger_enabled = False
+        self._screensaver_trigger_idle_seconds = 300.0
+        self._screensaver_last_trigger_ts: float | None = None
+        self._screensaver_triggered_since_input = False
 
     def _update_display_state(self, now: float) -> bool | None:
         if not self._display_enabled:
@@ -143,15 +147,13 @@ class InputTrackerWindows(PluginBase):
         if screensaver_on is True:
             if self._screensaver_last_on_ts is not None:
                 screensaver_idle_seconds = max(0.0, now - self._screensaver_last_on_ts)
+            # Screensaver running is a strong signal of user inactivity.
             idle = max(idle, screensaver_idle_seconds or 0.0, float(self._screensaver_idle_seconds))
-        elif screensaver_on is False:
-            idle = 0.0
         display_idle_seconds = None
-        if display_on is True:
-            idle = 0.0
-        elif display_on is False:
+        if display_on is False:
             if self._display_last_off_ts is not None:
                 display_idle_seconds = max(0.0, now - self._display_last_off_ts)
+            # Display off is a strong signal of user inactivity.
             idle = max(idle, display_idle_seconds or 0.0, float(self._display_idle_seconds))
         rate_hz = (len(events) / window_s) if window_s > 0 else 0.0
         if idle == float("inf"):
@@ -165,15 +167,8 @@ class InputTrackerWindows(PluginBase):
         if screensaver_on is True:
             user_active = False
             score = 0.0
-        elif screensaver_on is False:
-            user_active = True
-            score = 1.0
-        if screensaver_on is None:
-            if display_on is True:
-                user_active = True
-                score = 1.0
-            elif display_on is False:
-                user_active = False
+        if screensaver_on is None and display_on is False:
+            user_active = False
         return {
             "idle_seconds": idle,
             "user_active": user_active,
@@ -210,6 +205,10 @@ class InputTrackerWindows(PluginBase):
             self._screensaver_enabled = bool(runtime_activity.get("screensaver_enabled", False))
             self._screensaver_poll_interval_s = float(runtime_activity.get("screensaver_poll_interval_s", 1.0) or 1.0)
             self._screensaver_idle_seconds = float(runtime_activity.get("screensaver_idle_seconds", 300) or 300.0)
+            self._screensaver_trigger_enabled = bool(runtime_activity.get("screensaver_trigger_enabled", False))
+            self._screensaver_trigger_idle_seconds = float(
+                runtime_activity.get("screensaver_trigger_idle_seconds", self._screensaver_idle_seconds) or self._screensaver_idle_seconds
+            )
         self._batcher = _InputBatcher(store_events=(mode == "raw"))
         self._flush_interval_ms = int(capture_cfg.get("flush_interval_ms", 250))
         if mode == "off":
@@ -264,12 +263,43 @@ class InputTrackerWindows(PluginBase):
             self._last_event_ts = time.time()
             self._last_event_ts_utc = ts_utc
             self._activity_events.append(self._last_event_ts)
+            self._screensaver_triggered_since_input = False
 
     def _flush_loop(self) -> None:
         interval_s = max(0.05, self._flush_interval_ms / 1000.0)
         while not self._stop.is_set():
             time.sleep(interval_s)
+            self._maybe_trigger_screensaver()
             self._flush_batch()
+
+    def _maybe_trigger_screensaver(self) -> None:
+        if not self._screensaver_trigger_enabled:
+            return
+        now = time.time()
+        # Rate limit; don't hammer user32 in a tight loop.
+        if self._screensaver_last_trigger_ts is not None and (now - self._screensaver_last_trigger_ts) < 5.0:
+            return
+        idle = self.idle_seconds()
+        if idle == float("inf"):
+            return
+        if idle < float(self._screensaver_trigger_idle_seconds):
+            return
+        if self._screensaver_triggered_since_input:
+            return
+        try:
+            from autocapture_nx.windows.screensaver import screensaver_running, activate_screensaver
+        except Exception:
+            return
+        state = screensaver_running()
+        if state is True:
+            self._screensaver_triggered_since_input = True
+            return
+        if state is False:
+            ok = activate_screensaver()
+            self._screensaver_last_trigger_ts = now
+            if ok:
+                self._screensaver_triggered_since_input = True
+        return
 
     def _flush_batch(self) -> None:
         event_builder = self._event_builder

@@ -3,9 +3,9 @@
 Generated: 2026-02-08
 
 - total: 92
-- implemented: 22
+- implemented: 24
 - partial: 35
-- missing: 35
+- missing: 33
 
 | ID | Status | Title | Evidence | Validators |
 | --- | --- | --- | --- | --- |
@@ -18,7 +18,7 @@ Generated: 2026-02-08
 | EXEC-07 | partial | Make on-query extraction an explicit scheduled job: show blocked reasons and offer “schedule extraction now” | autocapture_nx/kernel/query.py<br>autocapture_nx/processing/idle.py<br>autocapture/web/ui/index.html | tests/test_schedule_extract_from_query.py |
 | EXEC-08 | implemented | Add standardized health checks for each pipeline capability (capture, OCR, VLM, indexing, retrieval, answer) | autocapture_nx/kernel/doctor.py<br>autocapture/web/routes/health.py<br>plugins/builtin/* | tests/test_component_health_matrix.py |
 | EXEC-09 | implemented | Tighten subprocess plugin runtime limits: enforce RPC timeouts, kill-on-timeout, and record termination in audit log | autocapture_nx/plugin_system/host_runner.py<br>autocapture_nx/kernel/audit.py<br>autocapture_nx/windows/win_sandbox.py | tests/test_plugin_timeout_killed.py |
-| EXEC-10 | missing | Deterministic retrieval tie-breaking: score→evidence_id→span_id ordering, documented as contract | plugins/builtin/retrieval_basic/plugin.py<br>contracts/retrieval.schema.json | tests/test_retrieval_tie_breaking.py |
+| EXEC-10 | implemented | Deterministic retrieval tie-breaking: score→evidence_id→span_id ordering, documented as contract | plugins/builtin/retrieval_basic/plugin.py<br>contracts/retrieval.schema.json | tests/test_retrieval_tie_breaking.py |
 | EXT-01 | partial | Define explicit plugin lifecycle states (installed→locked→approved→enabled→healthy) and enforce transitions | autocapture_nx/plugin_system/manager.py<br>autocapture_nx/plugin_system/registry.py<br>autocapture/web/routes/plugins.py | tests/test_plugin_lifecycle_state_machine.py |
 | EXT-02 | partial | Add local-only plugin install (`autocapture plugins install <path>`) with manifest validation and lock update preview | autocapture_nx/plugin_system/manager.py<br>contracts/plugin_manifest.schema.json<br>config/plugin_locks.json | tests/test_plugin_install_local_path.py |
 | EXT-03 | partial | Add update + rollback with lock history and manifest/permission diffs (CLI + UI) | autocapture_nx/plugin_system/manager.py<br>autocapture/web/ui/index.html<br>config/plugin_locks.json | tests/test_plugin_update_rollback.py |
@@ -36,7 +36,7 @@ Generated: 2026-02-08
 | FND-03 | implemented | Add `autocapture integrity scan` to verify ledger chain, anchors, blob hashes, and metadata references | autocapture/pillars/citable.py<br>autocapture_nx/ux/facade.py<br>autocapture_nx/cli.py<br>autocapture/web/routes/verify.py<br>tests/test_integrity_scan.py | tests/test_integrity_scan.py |
 | FND-04 | implemented | Record run-recovery actions as first-class journal/ledger events (quarantine, seal, replay) with before/after hashes | autocapture_nx/kernel/loader.py<br>plugins/builtin/journal_basic/plugin.py<br>plugins/builtin/ledger_basic/plugin.py | tests/test_recovery_audit_entries.py |
 | FND-05 | missing | Introduce content-addressed ingest IDs for file-based inputs (sha256→input_id) and dedupe at ingest boundary | autocapture_nx/ingest/*<br>autocapture_nx/kernel/prefixed_id.py<br>plugins/builtin/storage_media_basic/plugin.py | tests/test_ingest_dedupe.py |
-| FND-06 | missing | Make disk-pressure handling fail-safe: preflight free-space, throttle capture/processing, and surface “paused due to disk” state | autocapture_nx/capture/pipeline.py<br>autocapture_nx/storage/retention.py<br>autocapture/web/ui/index.html | tests/test_disk_pressure_pause.py<br>tools/gate_perf.py |
+| FND-06 | implemented | Make disk-pressure handling fail-safe: preflight free-space, throttle capture/processing, and surface “paused due to disk” state | autocapture_nx/capture/pipeline.py<br>autocapture_nx/storage/retention.py<br>autocapture/web/ui/index.html | tests/test_disk_pressure_pause.py<br>tools/gate_perf.py |
 | FND-07 | implemented | Add `autocapture backup create/restore` for config + locks + anchors (and optional data) with integrity checks | autocapture_nx/cli.py<br>autocapture_nx/kernel/paths.py<br>plugins/builtin/ledger_basic/plugin.py<br>plugins/builtin/anchor_basic/plugin.py | tests/test_backup_restore.py |
 | FND-08 | missing | Add explicit DB migration framework with version pinning + rollback plan for all sqlite/state stores | autocapture_nx/storage/*<br>autocapture/indexing/*<br>tools/gate_contract_pins.py | tests/test_db_migrations.py<br>tools/gate_doctor.py |
 | FND-09 | implemented | Standardize timestamp handling: store UTC in records, include tz_offset, and use monotonic clocks for durations | autocapture_nx/kernel/determinism.py<br>plugins/builtin/*<br>autocapture_nx/kernel/run_state.py | tests/test_time_normalization.py |

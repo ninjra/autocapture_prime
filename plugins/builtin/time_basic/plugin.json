@@ -26,6 +26,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.time.basic",
+  "provides": [
+    "time.intent_parser"
+  ],
   "required_capabilities": [],
   "settings_paths": [
     "time",

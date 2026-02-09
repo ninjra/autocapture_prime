@@ -3,14 +3,15 @@
     "contracts/answer_build_input.schema.json": "0d4ff561ba7120b7e4ad737c2ae6f9cbc365f045e691a0df9d12d700b81c5710",
     "contracts/answer_build_output.schema.json": "4607b3b99c6fedfc222d564ff098d818279b6c3fdb60628872b4fe95a899a148",
     "contracts/citation.schema.json": "fbd7c720a7fb915aea331b59dcad3ac25a042d0d2780717e9a208500e2d8653f",
-    "contracts/config_schema.json": "64318276de53bf92dfba28278ec9206934229a06dda355c4dedb85588e8dcfde",
-    "contracts/evidence.schema.json": "4eca78debb0b15ed965fadd1df7e2009aac640c75967ee71822db7c9529bde60",
+    "contracts/config_schema.json": "8919b25fb1c51996a34a0d0432032858be5a41cfd95562ac5c3743c283c71e61",
+    "contracts/evidence.schema.json": "c80c3a97f3d5747a52fb87144960eaabf902c12cc5be1c5d7a2966301fdb8fb8",
     "contracts/ir_pins.json": "b6f2ea5b6050d6c2bb10e62a0d0997a68b89d71b38f0973df21f011614d1a42d",
     "contracts/journal_schema.json": "6db83b98168def82e4c7dba3d4175597d6cd1e942ead8cefefc18b75c940eb50",
     "contracts/ledger_schema.json": "4dcc4657309e1326c739fb924a6cf2ef00d994f88de7a5833a30628fa493ccc8",
     "contracts/plugin_manifest.schema.json": "47b27d2988c4b1b9ec7ce048318cc19a0e3ee92f9c1dc24262032a4a734c7c3e",
     "contracts/plugin_sdk.md": "949be93d7359db1247cfabdb46f6328b120e115bbe1bf70ad9593c4fb4499e7d",
     "contracts/reasoning_packet.schema.json": "25ab514324b82bd15e267417f3a2cd4ddcb945ff4fa66206fd8f0840fd27f1cd",
+    "contracts/retrieval.schema.json": "61f1833f267068028c8ba00e05f7586e86957a5fc2af526f68c65b1a3d555d53",
     "contracts/security.md": "6946f3233c891fc66998872219d818caa9119449fd4e7ff9e28bb9259f5e6599",
     "contracts/sst_stage_input.schema.json": "fae8b412863a55c9edb3a86a2f14902a14836bd17ebf54bd3a42434736f1d4ed",
     "contracts/sst_stage_output.schema.json": "48fef9b4b0546d98b2b157a8f791acfe05ebe280c1df7de925020f83e24c9f45",
@@ -18,6 +19,6 @@
     "contracts/time_intent.schema.json": "6696c55883e35e0f2eb0689d61b7a05c637959d1d53ba7d8f985bbc2d5e397d8",
     "contracts/user_surface.md": "9eb471dc67affe574e89ff86f975ba12ff96f693a40b81fc8b92790a6e88e764"
   },
-  "generated_at": "2026-02-08T19:29:24.184767+00:00",
+  "generated_at": "2026-02-09T01:36:43.639417+00:00",
   "version": 1
 }

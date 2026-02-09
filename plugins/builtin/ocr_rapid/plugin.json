@@ -32,6 +32,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.ocr.rapid",
+  "provides": [
+    "ocr.engine"
+  ],
   "required_capabilities": [],
   "version": "0.1.0"
 }

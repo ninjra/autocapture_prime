@@ -26,6 +26,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.processing.sst.ui_vlm",
+  "provides": [
+    "processing.stage.hooks"
+  ],
   "required_capabilities": [
     "vision.extractor"
   ],

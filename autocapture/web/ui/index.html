@@ -521,6 +521,20 @@
               </div>
             </article>
 
+            <article class="card" id="safeModeCard" data-safe-mode-banner hidden>
+              <div class="card-header">
+                <h2>Safe Mode</h2>
+              </div>
+              <div class="status-line" id="safeModeReason">—</div>
+              <ol class="list" id="safeModeChecklist">
+                <li>Check `status` for `safe_mode_reason` and crash-loop fields.</li>
+                <li>Run `autocapture doctor`.</li>
+                <li>Run `autocapture integrity scan`.</li>
+                <li>If crash-loop is active, wait for `safe_mode_until` or investigate `kernel_error`.</li>
+                <li>Collect diagnostics bundle if needed.</li>
+              </ol>
+            </article>
+
             <article class="card" id="alertsCard">
               <div class="card-header">
                 <h2>Alerts</h2>

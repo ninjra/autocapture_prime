@@ -30,6 +30,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.vlm.basic",
+  "provides": [
+    "vision.extractor"
+  ],
   "replaces": [
     "builtin.vlm.stub"
   ],

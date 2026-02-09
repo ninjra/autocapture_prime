@@ -86,7 +86,7 @@
     },
     {
       "type": "object",
-      "properties": {"record_type": {"enum": ["derived.text.ocr", "derived.text.vlm"]}},
+      "properties": {"record_type": {"enum": ["derived.text.ocr", "derived.text.vlm", "derived.text.qa"]}},
       "required": [
         "text",
         "source_id",

@@ -1,46 +1,28 @@
+from __future__ import annotations
+
 import time
-import unittest
-from datetime import datetime, timezone
 
 from autocapture_nx.plugin_system.api import PluginContext
 from plugins.builtin.input_windows.plugin import InputTrackerWindows
 
 
-def _ctx() -> PluginContext:
-    config = {
-        "runtime": {"active_window_s": 3},
-        "capture": {"input_tracking": {"store_derived": False}},
-    }
-    return PluginContext(config=config, get_capability=lambda _name: None, logger=lambda _msg: None)
+def test_activity_signal_uses_last_input_idle_seconds() -> None:
+    cfg = {"runtime": {"active_window_s": 300, "activity": {"assume_idle_when_missing": False}}}
+    ctx = PluginContext(config=cfg, get_capability=lambda _name: None, logger=lambda _msg: None)
+    plugin = InputTrackerWindows("builtin.input.windows", ctx)
 
+    # Disable power/screensaver probes for deterministic CI behavior.
+    plugin._display_enabled = False  # type: ignore[attr-defined]
+    plugin._screensaver_enabled = False  # type: ignore[attr-defined]
 
-class InputActivitySignalTests(unittest.TestCase):
-    def test_activity_score_increases_on_event(self) -> None:
-        tracker = InputTrackerWindows("test.input", _ctx())
-        baseline = tracker.activity_signal()
-        self.assertFalse(baseline["user_active"])
+    now = time.time()
+    plugin._last_event_ts = now - 600  # type: ignore[attr-defined]
+    signal = plugin.activity_signal()
+    assert signal["idle_seconds"] >= 599
+    assert signal["user_active"] is False
 
-        ts = datetime.now(timezone.utc).isoformat()
-        tracker._record_event("key", {"action": "press"}, ts)
-        signal = tracker.activity_signal()
-
-        self.assertTrue(signal["user_active"])
-        self.assertGreater(signal["activity_score"], 0.0)
-        self.assertGreater(signal["event_rate_hz"], 0.0)
-
-    def test_activity_decays_after_idle(self) -> None:
-        tracker = InputTrackerWindows("test.input", _ctx())
-        ts = datetime.now(timezone.utc).isoformat()
-        tracker._record_event("mouse", {"pressed": True}, ts)
-
-        tracker._last_event_ts = time.time() - 10
-        tracker._activity_events.clear()
-        signal = tracker.activity_signal()
-
-        self.assertFalse(signal["user_active"])
-        self.assertLess(signal["activity_score"], 0.5)
-
-
-if __name__ == "__main__":
-    unittest.main()
+    plugin._last_event_ts = now - 10  # type: ignore[attr-defined]
+    signal2 = plugin.activity_signal()
+    assert 0 <= signal2["idle_seconds"] <= 15
+    assert signal2["user_active"] is True
 

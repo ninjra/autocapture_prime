@@ -27,6 +27,7 @@ from autocapture_nx.windows.win_capture import Frame, iter_screenshots, list_mon
 from autocapture_nx.windows.fullscreen import fullscreen_snapshot
 
 STOP_SENTINEL = object()
+FLUSH_SENTINEL = object()
 _FFMPEG_ENCODER_CACHE: dict[str, set[str]] = {}
 _FFMPEG_ENCODER_LOCK = threading.Lock()
 
@@ -671,6 +672,9 @@ class CapturePipeline:
         jpeg_quality = int(capture_cfg.get("jpeg_quality", mss_cfg.get("quality", self._jpeg_quality)))
         activity_cfg = capture_cfg.get("activity", {})
         activity_enabled = bool(activity_cfg.get("enabled", False))
+        # Ultralight mode: optionally disable *video* frame capture entirely while idle.
+        # Screenshots remain a separate capture stream and should remain enabled.
+        capture_when_idle = bool(activity_cfg.get("capture_when_idle", True))
         activity_window_s = float(activity_cfg.get("active_window_s", 3))
         activity_check_s = float(activity_cfg.get("check_interval_s", 1))
         assume_idle = bool(activity_cfg.get("assume_idle_when_missing", False))
@@ -707,6 +711,7 @@ class CapturePipeline:
             active_quality = int(base_quality)
             idle_quality = int(base_quality)
         activity_mode: str | None = None
+        last_activity_mode: str | None = None
         last_activity_check = 0.0
         last_idle_seconds = 0.0
         last_activity_score = 0.0
@@ -913,6 +918,27 @@ class CapturePipeline:
             if fullscreen_enabled and fullscreen_active:
                 time.sleep(fullscreen_poll_s)
                 continue
+            # If we're configured to capture only when active, check activity state
+            # before grabbing a frame so we avoid paying the capture+encode cost while idle.
+            if activity_enabled and capture_when_idle is False and (now - last_activity_check) >= max(0.2, activity_check_s):
+                mode, idle_seconds, activity_score, activity_reason = _activity_snapshot()
+                last_idle_seconds = float(idle_seconds)
+                last_activity_score = float(activity_score)
+                last_activity_reason = str(activity_reason) if activity_reason else None
+                last_activity_check = now
+                last_activity_mode = activity_mode
+                activity_mode = mode
+                if mode == "idle":
+                    # Flush any in-flight segment so we don't leave a partial segment
+                    # hanging when we stop capturing while idle.
+                    if last_activity_mode == "active" and frame_queue is not None:
+                        try:
+                            frame_queue.put(FLUSH_SENTINEL)
+                        except Exception:
+                            pass
+                    # Sleep a bit and re-check; this loop must remain responsive to stop().
+                    time.sleep(min(0.25, max(0.05, float(activity_check_s))))
+                    continue
             try:
                 frame = next(frame_iter)
             except StopIteration:
@@ -967,6 +993,7 @@ class CapturePipeline:
                             except Exception:
                                 pass
                 if mode != activity_mode:
+                    last_activity_mode = activity_mode
                     activity_mode = mode
                     if mode == "active":
                         base_fps = int(active_fps)
@@ -976,6 +1003,12 @@ class CapturePipeline:
                         base_fps = int(idle_fps)
                         base_bitrate = int(idle_bitrate)
                         base_quality = int(idle_quality)
+                    if mode == "idle" and capture_when_idle is False and last_activity_mode == "active":
+                        # Flush any in-flight segment; grab loop will stop capturing after this frame.
+                        try:
+                            frame_queue.put(FLUSH_SENTINEL)
+                        except Exception:
+                            pass
                     if degraded:
                         fps_target, bitrate_kbps, quality = _apply_disk_degrade(base_fps, base_bitrate, base_quality)
                     else:
@@ -1280,6 +1313,21 @@ class CapturePipeline:
             if frame is None:
                 if self._stop.is_set():
                     continue
+                continue
+            if frame is FLUSH_SENTINEL:
+                if segment is not None:
+                    artifact = segment.finalize()
+                    if artifact:
+                        dropped_frames, depth_max = self._pop_drop_stats()
+                        artifact.dropped_frames = dropped_frames
+                        artifact.queue_depth_max = depth_max
+                        artifact.duplicate_frames = int(segment_dup_frames)
+                        artifact.duplicate_dropped = int(segment_dup_dropped)
+                        segment_queue.put((artifact, backend))
+                    segment = None
+                    segment_start_mono = None
+                    segment_dup_frames = 0
+                    segment_dup_dropped = 0
                 continue
             if frame is STOP_SENTINEL:
                 if segment is not None:

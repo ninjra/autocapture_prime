@@ -15,6 +15,14 @@
       "path": "plugin.py"
     }
   ],
+  "filesystem_policy": {
+    "read": [
+      "{repo_root}/autocapture_nx"
+    ],
+    "readwrite": [
+      "{repo_root}/tools/hypervisor/runs"
+    ]
+  },
   "hash_lock": {
     "artifact_sha256": "",
     "manifest_sha256": ""
@@ -26,17 +34,12 @@
     "raw_input": false
   },
   "plugin_id": "builtin.devtools.diffusion",
+  "provides": [
+    "devtools.diffusion"
+  ],
   "required_capabilities": [],
   "settings_paths": [
     "devtools"
   ],
-  "version": "0.1.0",
-  "filesystem_policy": {
-    "read": [
-      "{repo_root}/autocapture_nx"
-    ],
-    "readwrite": [
-      "{repo_root}/tools/hypervisor/runs"
-    ]
-  }
+  "version": "0.1.0"
 }

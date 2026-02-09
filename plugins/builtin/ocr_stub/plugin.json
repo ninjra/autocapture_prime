@@ -29,6 +29,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.ocr.basic",
+  "provides": [
+    "ocr.engine"
+  ],
   "replaces": [
     "builtin.ocr.stub"
   ],

@@ -30,6 +30,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.vlm.llava_1_5_7b",
+  "provides": [
+    "vision.extractor"
+  ],
   "required_capabilities": [],
   "version": "0.1.0"
 }

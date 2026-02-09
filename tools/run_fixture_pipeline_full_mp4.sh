@@ -11,6 +11,12 @@ if [[ ! -x "$python_bin" ]]; then
 fi
 
 export PYTHONPATH="$repo_root"
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
+export OMP_THREAD_LIMIT="${OMP_THREAD_LIMIT:-1}"
+export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
+export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
+export VECLIB_MAXIMUM_THREADS="${VECLIB_MAXIMUM_THREADS:-1}"
 
 mkdir -p "$frames_dir"
 
@@ -48,4 +54,3 @@ exec "$python_bin" "$repo_root/tools/run_fixture_pipeline.py" \
   --capture-container ffmpeg_mp4 \
   --stub-frame-format jpeg \
   --video-frame-format jpeg
-

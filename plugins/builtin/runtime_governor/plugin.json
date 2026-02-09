@@ -26,6 +26,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.runtime.governor",
+  "provides": [
+    "runtime.governor"
+  ],
   "required_capabilities": [],
   "settings_paths": [
     "runtime"

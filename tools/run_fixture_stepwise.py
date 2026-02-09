@@ -247,7 +247,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         log("kernel_boot_start")
         kernel = Kernel(default_config_paths(), safe_mode=False)
-        system = _with_timeout(180, lambda: kernel.boot(start_conductor=False))
+        # Stepwise fixture validation is still a one-shot CLI flow; keep boot
+        # lightweight to avoid WSL hangs/segfaults in integrity sweeps.
+        system = _with_timeout(180, lambda: kernel.boot(start_conductor=False, fast_boot=True))
         log("kernel_boot_ok")
         report["plugins"] = {"load_report": collect_plugin_load_report(system)}
         log("plugin_load_report_ok")
