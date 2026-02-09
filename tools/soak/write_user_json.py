@@ -13,6 +13,18 @@ def _profile_payload(profile: str) -> dict[str, Any]:
         # Make the smoke check deterministic: force at least one write by disabling
         # dedupe temporarily (short run), while keeping screenshot cadence.
         return {
+            "storage": {
+                # Allow non-SQLite metadata backends for capture/ingest soak.
+                "metadata_require_db": False,
+            },
+            "plugins": {
+                "enabled": {
+                    # SQLCipher is optional and often painful on Windows; use the
+                    # AES-GCM encrypted store for soak reliability.
+                    "builtin.storage.sqlcipher": False,
+                    "builtin.storage.encrypted": True,
+                }
+            },
             "processing": {"idle": {"enabled": False}},
             "capture": {
                 "audio": {"enabled": False},
@@ -26,6 +38,15 @@ def _profile_payload(profile: str) -> dict[str, Any]:
         }
     if p == "soak_screenshot_only":
         return {
+            "storage": {
+                "metadata_require_db": False,
+            },
+            "plugins": {
+                "enabled": {
+                    "builtin.storage.sqlcipher": False,
+                    "builtin.storage.encrypted": True,
+                }
+            },
             "processing": {"idle": {"enabled": False}},
             "capture": {
                 "audio": {"enabled": False},
@@ -58,4 +79,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
