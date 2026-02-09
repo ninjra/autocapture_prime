@@ -24,5 +24,15 @@ if ! getent hosts github.com >/dev/null 2>&1; then
 fi
 
 git fetch origin
-git push -u origin "$branch"
 
+# Keep branch current with origin/main (merge, fail loud on conflicts).
+if git show-ref --verify --quiet refs/remotes/origin/main; then
+  counts="$(git rev-list --left-right --count origin/main...HEAD 2>/dev/null || echo '')"
+  behind="$(echo "$counts" | awk '{print $1}')"
+  if [[ -n "${behind:-}" ]] && [[ "$behind" != "0" ]]; then
+    echo "Merging origin/main into $branch (behind=$behind)..." >&2
+    git merge --no-edit origin/main
+  fi
+fi
+
+git push -u origin "$branch"
