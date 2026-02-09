@@ -18,6 +18,9 @@ def _profile_payload(profile: str) -> dict[str, Any]:
                 "metadata_require_db": False,
             },
             "plugins": {
+                # Soak runs force in-proc hosting to avoid subprocess storms;
+                # explicitly allow in-proc loading of enabled plugins.
+                "hosting": {"inproc_allow_all": True},
                 "enabled": {
                     # SQLCipher is optional and often painful on Windows; use the
                     # AES-GCM encrypted store for soak reliability.
@@ -42,6 +45,7 @@ def _profile_payload(profile: str) -> dict[str, Any]:
                 "metadata_require_db": False,
             },
             "plugins": {
+                "hosting": {"inproc_allow_all": True},
                 "enabled": {
                     "builtin.storage.sqlcipher": False,
                     "builtin.storage.encrypted": True,
