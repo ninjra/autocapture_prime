@@ -300,7 +300,14 @@ def cmd_consent_accept(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     facade = create_facade(persistent=True, safe_mode=args.safe_mode, auto_start_capture=False)
-    facade.run_start()
+    started = facade.run_start()
+    if not isinstance(started, dict) or not bool(started.get("ok", False)):
+        _print_json({"ok": False, "error": started.get("error") if isinstance(started, dict) else "run_start_failed"})
+        try:
+            facade.shutdown()
+        except Exception:
+            pass
+        return 2
     duration_s = int(getattr(args, "duration_s", 0) or 0)
     status_interval_s = int(getattr(args, "status_interval_s", 0) or 0)
     if duration_s > 0:
