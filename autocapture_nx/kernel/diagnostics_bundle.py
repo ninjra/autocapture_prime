@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from autocapture_nx.kernel.hashing import sha256_bytes, sha256_file
+from autocapture_nx.kernel.redaction import redact_obj, redact_text
 
 
 _ZIP_TS = (1980, 1, 1, 0, 0, 0)  # constant to keep zip deterministic across runs
@@ -27,28 +28,11 @@ def _utc_now_iso() -> str:
 
 def _redact_config(config: dict[str, Any]) -> dict[str, Any]:
     cfg = json.loads(json.dumps(config)) if isinstance(config, dict) else {}
-    gateway = cfg.get("gateway")
-    if isinstance(gateway, dict):
-        if "openai_api_key" in gateway and gateway.get("openai_api_key"):
-            gateway["openai_api_key"] = "[REDACTED]"
-    return cfg
+    return redact_obj(cfg)
 
 
 def _redact_text(text: str) -> str:
-    s = str(text or "")
-    # Best-effort token redaction.
-    for needle in ("Bearer ", "bearer "):
-        if needle in s:
-            parts = s.split(needle)
-            out = [parts[0]]
-            for tail in parts[1:]:
-                # redact up to whitespace/newline
-                i = 0
-                while i < len(tail) and not tail[i].isspace():
-                    i += 1
-                out.append(needle + "[REDACTED]" + tail[i:])
-            s = "".join(out)
-    return s
+    return redact_text(text)
 
 
 def _tail_lines(path: Path, max_lines: int) -> str:
@@ -163,4 +147,3 @@ def create_diagnostics_bundle(
 
     bundle_sha256 = sha256_file(out_path)
     return DiagnosticsBundleResult(path=str(out_path), bundle_sha256=bundle_sha256, manifest=manifest)
-

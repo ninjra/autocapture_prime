@@ -3,9 +3,9 @@
 Generated: 2026-02-09
 
 - total: 92
-- implemented: 42
+- implemented: 43
 - partial: 33
-- missing: 17
+- missing: 16
 
 | ID | Status | Title | Evidence | Validators |
 | --- | --- | --- | --- | --- |
@@ -89,7 +89,7 @@ Generated: 2026-02-09
 | SEC-06 | missing | Key rotation hardening: store key_id with every encrypted blob/record; support staged rewrap and verify mixed-key reads | autocapture/crypto/keyring.py<br>plugins/builtin/storage_encrypted/plugin.py<br>autocapture/web/routes/keys.py | tests/test_key_rotation_rewrap_plan.py |
 | SEC-07 | missing | Sign proof bundle manifest locally and verify on import/replay; include sha256 for all bundle files | autocapture_nx/kernel/proof_bundle.py<br>autocapture/crypto/dpapi.py | tests/test_proof_bundle_signature_verifies.py |
 | SEC-08 | implemented | Make capture consent explicit: persistent tray indicator + start/stop events ledgered; prevent silent background capture | autocapture_nx/kernel/consent.py<br>autocapture_nx/ux/facade.py<br>config/default.json<br>contracts/config_schema.json | tests/test_capture_consent.py |
-| SEC-09 | missing | Secrets hygiene: enforce sanitize_env for all subprocesses, redact tokens in logs, and add repo-wide secret scanning gate | autocapture_nx/plugin_system/host_runner.py<br>autocapture_nx/kernel/logging.py<br>tools/gate_secrets.py | tests/test_log_redaction.py<br>tools/gate_secrets.py |
+| SEC-09 | implemented | Secrets hygiene: enforce sanitize_env for all subprocesses, redact tokens in logs, and add repo-wide secret scanning gate | autocapture_nx/plugin_system/host.py<br>autocapture_nx/kernel/redaction.py<br>autocapture_nx/kernel/logging.py<br>autocapture_nx/kernel/diagnostics_bundle.py<br>tools/gate_secrets.py<br>tools/gate_security.py | tests/test_log_redaction.py<br>tools/gate_secrets.py |
 | SEC-10 | partial | Harden cloud/gateway pathways: require explicit privacy.cloud.enabled AND egress approval; block by default and test | autocapture/gateway/router.py<br>autocapture_nx/kernel/policy_gate.py<br>tests/test_gateway_policy_block_cloud_default.py | tests/test_cloud_enable_requires_two_step.py |
 | UX-01 | implemented | Add a first-class Activity Dashboard (Today/Recent) showing capture status, last ingest, errors, and SLO summary | autocapture_nx/ux/facade.py<br>autocapture/web/routes/status.py<br>autocapture/web/routes/telemetry.py<br>autocapture/web/routes/metrics.py | tests/test_status_is_lightweight.py |
 | UX-02 | partial | Add an Input Ingest / Capture panel: current data_dir, run_id, active sources, pause/resume, and disk banner | autocapture/web/ui/index.html<br>autocapture/web/routes/run.py | tests/test_pause_resume_idempotent.py |

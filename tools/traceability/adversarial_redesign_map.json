@@ -195,6 +195,24 @@
       "notes": "host_runner installs a process-wide deny policy before importing plugin modules; runtime patches socket/create_connection to fail closed for non-loopback."
     },
     {
+      "id": "SEC-09",
+      "title": "Secrets hygiene: enforce sanitize_env for all subprocesses, redact tokens in logs, and add repo-wide secret scanning gate",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/plugin_system/host.py",
+        "autocapture_nx/kernel/redaction.py",
+        "autocapture_nx/kernel/logging.py",
+        "autocapture_nx/kernel/diagnostics_bundle.py",
+        "tools/gate_secrets.py",
+        "tools/gate_security.py"
+      ],
+      "validators": [
+        "tests/test_log_redaction.py",
+        "tools/gate_secrets.py"
+      ],
+      "notes": "Subprocess env is sanitized; logs and diagnostics bundles redact common secret patterns; git-tracked files are scanned via tools/gate_secrets.py."
+    },
+    {
       "id": "UX-01",
       "title": "Add a first-class Activity Dashboard (Today/Recent) showing capture status, last ingest, errors, and SLO summary",
       "status": "implemented",

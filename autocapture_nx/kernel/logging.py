@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from autocapture_nx.kernel.redaction import redact_obj
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -95,11 +97,11 @@ class JsonlLogger:
             if k in payload:
                 continue
             payload[str(k)] = v
-        line = json.dumps(payload, sort_keys=True)
+        # SEC-09: redact secrets in logs at export boundary.
+        line = json.dumps(redact_obj(payload), sort_keys=True)
         self._rotate_if_needed()
         try:
             with self._cfg.path.open("a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
         except Exception:
             return
-
