@@ -169,21 +169,26 @@ def create_backup_bundle(
 
     # Always include: user config, lockfile (repo/config/plugin_locks.json), anchors, ledger/journal.
     lockfile = repo_path / "config" / "plugin_locks.json"
-    anchor_path = None
-    # Anchor path may live under repo root (default) or elsewhere.
+    # Anchor path has historically lived under repo root (data_anchor/), but
+    # portable runs should store it under the data dir. Include any that exist.
+    anchor_paths: list[Path] = []
     try:
-        default_anchor = repo_path / "data_anchor" / "anchors.ndjson"
-        if default_anchor.exists():
-            anchor_path = default_anchor
+        for cand in (
+            data_root / "anchor" / "anchors.ndjson",
+            data_root / "data_anchor" / "anchors.ndjson",
+            repo_path / "data_anchor" / "anchors.ndjson",
+        ):
+            if cand.exists() and cand.is_file():
+                anchor_paths.append(cand)
     except Exception:
-        anchor_path = None
+        anchor_paths = []
     ledger_path = data_root / "ledger.ndjson"
     journal_path = data_root / "journal.ndjson"
 
     must_exist: list[Path] = [config_user, lockfile]
     optional: list[Path] = []
-    if anchor_path:
-        optional.append(anchor_path)
+    for p in anchor_paths:
+        optional.append(p)
     if ledger_path.exists():
         optional.append(ledger_path)
     if journal_path.exists():

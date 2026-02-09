@@ -44,7 +44,7 @@ class PlatformPathTests(unittest.TestCase):
         self.assertTrue(Path(storage["media_dir"]).resolve().is_relative_to(data_dir.resolve()))
         self.assertTrue(Path(storage["spool_dir"]).resolve().is_relative_to(data_dir.resolve()))
         anchor_path = Path(storage["anchor"]["path"]).resolve()
-        self.assertFalse(anchor_path.is_relative_to(data_dir.resolve()))
+        self.assertTrue(anchor_path.is_relative_to(data_dir.resolve()))
 
     def test_doctor_reports_path_checks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

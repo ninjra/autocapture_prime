@@ -33,6 +33,9 @@ export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 export AUTOCAPTURE_PLUGINS_LAZY_START="${AUTOCAPTURE_PLUGINS_LAZY_START:-1}"
 export AUTOCAPTURE_PLUGINS_SUBPROCESS_SPAWN_CONCURRENCY="${AUTOCAPTURE_PLUGINS_SUBPROCESS_SPAWN_CONCURRENCY:-1}"
 export AUTOCAPTURE_PLUGINS_SUBPROCESS_MAX_HOSTS="${AUTOCAPTURE_PLUGINS_SUBPROCESS_MAX_HOSTS:-2}"
+# WSL stability: force in-proc plugin hosting for the soak run. This avoids
+# long-lived host_runner subprocesses for capture/tracking plugins.
+export AUTOCAPTURE_PLUGINS_HOSTING_MODE="${AUTOCAPTURE_PLUGINS_HOSTING_MODE:-inproc}"
 
 # Preflight (offline): fail fast before starting the 24h run.
 "$ROOT/.venv/bin/python" -m autocapture_nx doctor --self-test >/dev/null

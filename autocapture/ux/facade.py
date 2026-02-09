@@ -109,7 +109,7 @@ class UXFacade:
         with self._kernel_context() as system:
             config = system.config if hasattr(system, "config") else {}
             anchor_cfg = config.get("storage", {}).get("anchor", {})
-            anchor_path = Path(path) if path else Path(anchor_cfg.get("path", "data_anchor/anchors.ndjson"))
+            anchor_path = Path(path) if path else Path(anchor_cfg.get("path", "anchor/anchors.ndjson"))
             keyring = system.get("storage.keyring") if system.has("storage.keyring") else None
             ok, errors = verify_anchors(anchor_path, keyring)
             return {"ok": ok, "errors": errors, "path": str(anchor_path)}
@@ -138,7 +138,7 @@ class UXFacade:
             storage_cfg = config.get("storage", {}) if isinstance(config, dict) else {}
             data_dir = storage_cfg.get("data_dir", "data")
             ledger_path = Path(data_dir) / "ledger.ndjson"
-            anchor_path = Path(storage_cfg.get("anchor", {}).get("path", "data_anchor/anchors.ndjson"))
+            anchor_path = Path(storage_cfg.get("anchor", {}).get("path", "anchor/anchors.ndjson"))
             report = export_proof_bundle(
                 metadata=system.get("storage.metadata"),
                 media=system.get("storage.media"),

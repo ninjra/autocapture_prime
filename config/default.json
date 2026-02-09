@@ -1532,7 +1532,7 @@
     "anchor": {
       "every_entries": 50,
       "every_minutes": 5,
-      "path": "data_anchor/anchors.ndjson",
+      "path": "anchor/anchors.ndjson",
       "sign": true,
       "use_dpapi": true
     },

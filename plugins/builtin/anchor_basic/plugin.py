@@ -20,7 +20,7 @@ class AnchorWriter(PluginBase):
         super().__init__(plugin_id, context)
         storage_cfg = context.config.get("storage", {})
         anchor_cfg = storage_cfg.get("anchor", {})
-        self._path = anchor_cfg.get("path", os.path.join("data_anchor", "anchors.ndjson"))
+        self._path = anchor_cfg.get("path", os.path.join("anchor", "anchors.ndjson"))
         self._use_dpapi = bool(anchor_cfg.get("use_dpapi", os.name == "nt"))
         self._sign = bool(anchor_cfg.get("sign", True))
         os.makedirs(os.path.dirname(self._path), exist_ok=True)

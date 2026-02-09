@@ -308,12 +308,15 @@ def normalize_config_paths(
             storage[key] = _normalize_storage_value(storage[key])
     anchor = storage.get("anchor", {})
     if isinstance(anchor, dict) and "path" in anchor and isinstance(anchor.get("path"), str):
-        anchor_path = anchor["path"]
+        # Anchor logs must follow data_dir overrides so a run-scoped data_dir
+        # does not accidentally share anchors with unrelated runs (which can
+        # cause signature verification to fail when the keyring is different).
+        anchor_path = str(anchor.get("path") or "")
         anchor_path_obj = Path(anchor_path)
         if anchor_path_obj.is_absolute():
             anchor["path"] = str(anchor_path_obj)
         else:
-            anchor["path"] = str((data_dir_abs.parent / anchor_path).resolve())
+            anchor["path"] = _normalize_storage_value(anchor_path)
     crypto = storage.get("crypto", {})
     if isinstance(crypto, dict):
         for key in ("root_key_path", "keyring_path"):
