@@ -19,7 +19,7 @@ from typing import Any, cast
 
 from autocapture_nx.kernel.config import ConfigPaths, load_config, validate_config
 from autocapture_nx.kernel.paths import default_config_dir, resolve_repo_path
-from autocapture_nx.kernel.errors import ConfigError
+from autocapture_nx.kernel.errors import ConfigError, PluginError
 from autocapture_nx.kernel.hashing import sha256_directory, sha256_file, sha256_text
 from autocapture_nx.kernel.canonical_json import dumps
 from autocapture_nx import __version__ as kernel_version
