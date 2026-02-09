@@ -1,4 +1,11 @@
-"""Windows input tracking plugin using pynput."""
+"""Windows input tracking plugin.
+
+Modes
+- raw: pynput listeners, raw key/mouse payloads (high sensitivity).
+- activity: pynput listeners, derived-only payloads (no raw key values).
+- win32_idle: low-overhead idle tracking via Win32 GetLastInputInfo (no pynput).
+- off: disabled.
+"""
 
 from __future__ import annotations
 
@@ -113,6 +120,18 @@ class InputTrackerWindows(PluginBase):
         return self._last_event_ts
 
     def idle_seconds(self) -> float:
+        # win32_idle mode: compute directly from the OS, independent of pynput.
+        if self._mode == "win32_idle":
+            try:
+                from autocapture_nx.windows.win_idle import idle_seconds as _win_idle_seconds
+            except Exception:
+                _win_idle_seconds = None
+            if _win_idle_seconds is not None:
+                value = _win_idle_seconds()
+                if value is None:
+                    return float("inf")
+                return float(max(0.0, value))
+            return float("inf")
         if self._last_event_ts is None:
             return float("inf")
         return max(0.0, time.time() - self._last_event_ts)
@@ -185,10 +204,6 @@ class InputTrackerWindows(PluginBase):
     def start(self) -> None:
         if os.name != "nt":
             raise RuntimeError("Input tracking supported on Windows only")
-        try:
-            from pynput import keyboard, mouse
-        except Exception as exc:
-            raise RuntimeError(f"Missing input dependency: {exc}")
 
         self._stop.clear()
         self._batcher = _InputBatcher()
@@ -213,6 +228,15 @@ class InputTrackerWindows(PluginBase):
         self._flush_interval_ms = int(capture_cfg.get("flush_interval_ms", 250))
         if mode == "off":
             return
+        if mode == "win32_idle":
+            # No pynput listeners, no event batching. We still expose activity_signal()
+            # and incorporate display/screen-saver signals.
+            return
+
+        try:
+            from pynput import keyboard, mouse
+        except Exception as exc:
+            raise RuntimeError(f"Missing input dependency: {exc}")
 
         def on_key_press(key):
             ts = datetime.now(timezone.utc).isoformat()

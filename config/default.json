@@ -61,7 +61,7 @@
     },
     "input_tracking": {
       "flush_interval_ms": 250,
-      "mode": "activity",
+      "mode": "win32_idle",
       "store_derived": true
     },
     "clipboard": {
