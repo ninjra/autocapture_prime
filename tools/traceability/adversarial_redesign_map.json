@@ -167,6 +167,21 @@
       "notes": "This repo enforces explicit capture consent via a persistent state file and ledgers capture start/stop events. Tray indicator is implemented in the separate tray/UI repo; CLI/API remain authoritative."
     },
     {
+      "id": "SEC-03",
+      "title": "Make loopback binding enforceable: validate config + runtime bind address; tray launcher must respect config or refuse to start",
+      "status": "implemented",
+      "evidence": [
+        "contracts/config_schema.json",
+        "config/default.json",
+        "autocapture_nx/tray.py",
+        "autocapture/web/api.py"
+      ],
+      "validators": [
+        "tests/test_tray_launcher_respects_bind.py"
+      ],
+      "notes": "Config schema pins web.bind_host to 127.0.0.1; tray launcher enforces loopback at runtime; web middleware denies non-local requests."
+    },
+    {
       "id": "UX-01",
       "title": "Add a first-class Activity Dashboard (Today/Recent) showing capture status, last ingest, errors, and SLO summary",
       "status": "implemented",

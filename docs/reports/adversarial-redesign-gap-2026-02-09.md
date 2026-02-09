@@ -3,8 +3,8 @@
 Generated: 2026-02-09
 
 - total: 92
-- implemented: 40
-- partial: 35
+- implemented: 41
+- partial: 34
 - missing: 17
 
 | ID | Status | Title | Evidence | Validators |
@@ -83,7 +83,7 @@ Generated: 2026-02-09
 | RD-06 | implemented | Write an operator runbook: backup/restore, safe-mode triage, plugin rollback, disk pressure, and integrity verification | docs/runbook.md<br>docs/safe_mode.md<br>tests/test_runbook_docs.py | tests/test_runbook_docs.py |
 | SEC-01 | implemented | Harden filesystem_guard path normalization: resolve symlinks, normalize case/UNC, and deny path traversal consistently on Windows | autocapture_nx/plugin_system/runtime.py<br>autocapture_nx/windows/win_paths.py | tests/test_filesystem_guard_windows_edge_cases.py |
 | SEC-02 | partial | Ensure network_guard is applied early in subprocess plugins (sitecustomize) and covers common HTTP libs | autocapture_nx/plugin_system/host_runner.py<br>autocapture_nx/plugin_system/runtime.py | tests/test_network_guard_applies_before_imports.py |
-| SEC-03 | partial | Make loopback binding enforceable: validate config + runtime bind address; tray launcher must respect config or refuse to start | config/default.json<br>autocapture/web/api.py<br>ops/dev/launch_tray.ps1 | tests/test_tray_launcher_respects_bind.py |
+| SEC-03 | implemented | Make loopback binding enforceable: validate config + runtime bind address; tray launcher must respect config or refuse to start | contracts/config_schema.json<br>config/default.json<br>autocapture_nx/tray.py<br>autocapture/web/api.py | tests/test_tray_launcher_respects_bind.py |
 | SEC-04 | implemented | Default to approval_required=true for any egress, and require explicit per-destination allowlists; ledger every egress event | config/default.json<br>autocapture/egress/client.py<br>autocapture/web/routes/egress.py | tests/test_egress_requires_approval_by_default.py |
 | SEC-05 | missing | Add PII detection/redaction at export/egress boundaries using configured recognizers; record redaction map in metadata | autocapture/privacy/redaction.py<br>autocapture/egress/sanitize.py<br>config/default.json | tests/test_redaction_deterministic.py |
 | SEC-06 | missing | Key rotation hardening: store key_id with every encrypted blob/record; support staged rewrap and verify mixed-key reads | autocapture/crypto/keyring.py<br>plugins/builtin/storage_encrypted/plugin.py<br>autocapture/web/routes/keys.py | tests/test_key_rotation_rewrap_plan.py |

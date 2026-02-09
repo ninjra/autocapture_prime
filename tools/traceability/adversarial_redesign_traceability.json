@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-02-09T03:38:58.891921Z",
+  "generated_utc": "2026-02-09T03:41:25.965370Z",
   "items": [
     {
       "evidence": [
@@ -1037,13 +1037,14 @@
     },
     {
       "evidence": [
+        "contracts/config_schema.json",
         "config/default.json",
-        "autocapture/web/api.py",
-        "ops/dev/launch_tray.ps1"
+        "autocapture_nx/tray.py",
+        "autocapture/web/api.py"
       ],
       "id": "SEC-03",
-      "notes": "",
-      "status": "partial",
+      "notes": "Config schema pins web.bind_host to 127.0.0.1; tray launcher enforces loopback at runtime; web middleware denies non-local requests.",
+      "status": "implemented",
       "title": "Make loopback binding enforceable: validate config + runtime bind address; tray launcher must respect config or refuse to start",
       "validators": [
         "tests/test_tray_launcher_respects_bind.py"
