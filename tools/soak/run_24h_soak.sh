@@ -4,6 +4,13 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "$ROOT"
 
+# If the user didn't specify a persistent config/data dir, create a run-scoped one
+# under .data/ (gitignored). This avoids accidental reuse of corrupted dev DBs.
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+export AUTOCAPTURE_CONFIG_DIR="${AUTOCAPTURE_CONFIG_DIR:-$ROOT/.data/soak/config_$stamp}"
+export AUTOCAPTURE_DATA_DIR="${AUTOCAPTURE_DATA_DIR:-$ROOT/.data/soak/data_$stamp}"
+mkdir -p "$AUTOCAPTURE_CONFIG_DIR" "$AUTOCAPTURE_DATA_DIR"
+
 # Refuse to start if the repo is dirty; soak results must be attributable.
 if command -v git >/dev/null 2>&1; then
   if [[ -n "$(git status --porcelain)" ]]; then
