@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from autocapture.indexing.lexical import LexicalIndex
-from autocapture.indexing.vector import LocalEmbedder, QdrantVectorIndex, VectorIndex
+from autocapture.indexing.lexical_index import LexicalIndex
+from autocapture.indexing.vector_index import LocalEmbedder, QdrantVectorIndex, VectorIndex
 
 
 def _is_local_url(url: str) -> bool:
