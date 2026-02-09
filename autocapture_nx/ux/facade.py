@@ -1234,10 +1234,23 @@ class UXFacade:
         want_screenshot = bool((capture_cfg.get("screenshot") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
         want_audio = bool((capture_cfg.get("audio") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
         want_source = bool((capture_cfg.get("video") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        # Trackers are started only if enabled in config to reduce overhead during soak.
+        input_cfg = capture_cfg.get("input_tracking", {}) if isinstance(capture_cfg, dict) else {}
+        input_mode = str(input_cfg.get("mode") or "").strip().lower()
+        want_input = bool(input_mode and input_mode not in {"off", "disabled", "none"})
+        want_window_meta = bool((capture_cfg.get("window_metadata") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        want_cursor = bool((capture_cfg.get("cursor") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        want_clipboard = bool((capture_cfg.get("clipboard") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        want_file_activity = bool((capture_cfg.get("file_activity") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
         wanted = {
             "capture.source": want_source,
             "capture.screenshot": want_screenshot,
             "capture.audio": want_audio,
+            "tracking.input": want_input,
+            "window.metadata": want_window_meta,
+            "tracking.cursor": want_cursor,
+            "tracking.clipboard": want_clipboard,
+            "tracking.file_activity": want_file_activity,
         }
 
         def _providers(obj: Any) -> list[str] | None:
@@ -1311,14 +1324,16 @@ class UXFacade:
                 ("capture.source", capture, want_source),
                 ("capture.screenshot", screenshot, want_screenshot),
                 ("capture.audio", audio, want_audio),
-                ("tracking.input", input_tracker, False),
-                ("window.metadata", window_meta, False),
-                ("tracking.cursor", cursor_tracker, False),
-                ("tracking.clipboard", clipboard, False),
-                ("tracking.file_activity", file_activity, False),
+                ("tracking.input", input_tracker, want_input),
+                ("window.metadata", window_meta, want_window_meta),
+                ("tracking.cursor", cursor_tracker, want_cursor),
+                ("tracking.clipboard", clipboard, want_clipboard),
+                ("tracking.file_activity", file_activity, want_file_activity),
             ]
 
             for name, component, required in components:
+                if not required:
+                    continue
                 if component is None:
                     if required:
                         errors.append({"component": name, "error": "missing"})

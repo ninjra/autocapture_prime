@@ -9,6 +9,19 @@ from typing import Any
 
 def _profile_payload(profile: str) -> dict[str, Any]:
     p = str(profile or "").strip().lower()
+    # Minimal allowlist for capture+ingest-only soak:
+    # Keep plugin load stable and avoid unrelated providers (embedder/VLM/etc)
+    # that may require local model bundle directories.
+    allowlist_min = [
+        "builtin.anchor.basic",
+        "builtin.journal.basic",
+        "builtin.ledger.basic",
+        "builtin.observability.basic",
+        "builtin.storage.encrypted",
+        "builtin.capture.screenshot.windows",
+        "builtin.tracking.input.windows",
+        "builtin.window.metadata.windows",
+    ]
     if p == "smoke_screenshot_ingest":
         # Make the smoke check deterministic: force at least one write by disabling
         # dedupe temporarily (short run), while keeping screenshot cadence.
@@ -18,6 +31,7 @@ def _profile_payload(profile: str) -> dict[str, Any]:
                 "metadata_require_db": False,
             },
             "plugins": {
+                "allowlist": allowlist_min,
                 # Soak runs force in-proc hosting to avoid subprocess storms;
                 # explicitly allow in-proc loading of enabled plugins.
                 "hosting": {"inproc_allow_all": True},
@@ -33,6 +47,7 @@ def _profile_payload(profile: str) -> dict[str, Any]:
                 "audio": {"enabled": False},
                 "video": {"enabled": False},
                 "input_tracking": {"mode": "win32_idle"},
+                "window_metadata": {"enabled": True},
                 "screenshot": {
                     "enabled": True,
                     # Force deterministic smoke evidence even if the operator is idle
@@ -48,6 +63,7 @@ def _profile_payload(profile: str) -> dict[str, Any]:
                 "metadata_require_db": False,
             },
             "plugins": {
+                "allowlist": allowlist_min,
                 "hosting": {"inproc_allow_all": True},
                 "enabled": {
                     "builtin.storage.sqlcipher": False,
@@ -59,6 +75,7 @@ def _profile_payload(profile: str) -> dict[str, Any]:
                 "audio": {"enabled": False},
                 "video": {"enabled": False},
                 "input_tracking": {"mode": "win32_idle"},
+                "window_metadata": {"enabled": True},
                 "screenshot": {
                     "enabled": True,
                     "dedupe": {"enabled": True},

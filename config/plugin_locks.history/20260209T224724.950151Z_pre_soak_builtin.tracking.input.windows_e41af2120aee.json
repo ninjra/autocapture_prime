@@ -688,8 +688,14 @@
       }
     },
     "builtin.tracking.input.windows": {
-      "artifact_sha256": "991c23d298f68d386842f460589cbfc85bd54cabe95c568f837c4f5d83eb606b",
-      "manifest_sha256": "cd443a8d8c4aa6ea7eddae51db66195a5df5d48ae64a2e79c243d1d84af20baf"
+      "artifact_sha256": "442925da35c13628409ad93d8cfe2ec173d5072f5b4827763cbb756c56c7b4b3",
+      "contract_lock_hash": "5db1c4337c95f1450c2d625d1579d6a06d5f00a8ad3ee2dcae2d02badd2e7df7",
+      "kernel_api_version": "0.1.0",
+      "manifest_sha256": "cd443a8d8c4aa6ea7eddae51db66195a5df5d48ae64a2e79c243d1d84af20baf",
+      "sbom": {
+        "requirements": [],
+        "requirements_sha256": null
+      }
     },
     "builtin.vlm.basic": {
       "artifact_sha256": "ce604edf030c59ef7085445a73f82d1151ed5eb0ce7f4da06ffbdb9f19b1cdee",

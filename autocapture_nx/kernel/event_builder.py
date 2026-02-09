@@ -77,7 +77,11 @@ class EventBuilder:
             payload = dict(payload)
             if "run_id" not in payload and self._run_id:
                 payload["run_id"] = self._run_id
+            # Evidence records must always carry a schema_version. Callers often
+            # treat journal_event as a thin wrapper; enforce the invariant here
+            # so background capture threads don't crash the run.
             if "record_type" in payload and "run_id" in payload:
+                payload.setdefault("schema_version", 1)
                 validate_evidence_record(payload, event_id)
         return self._journal.append_event(
             event_type,

@@ -76,6 +76,7 @@ class WindowMetadataWindows(PluginBase):
                 content_hash = sha256_text(dumps(payload))
                 record_id = prefixed_id(run_id, "window", seq)
                 record = {
+                    "schema_version": 1,
                     "record_type": "evidence.window.meta",
                     "ts_utc": ts,
                     "run_id": run_id,
