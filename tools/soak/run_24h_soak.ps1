@@ -73,8 +73,8 @@ $env:AUTOCAPTURE_PLUGINS_SUBPROCESS_MAX_HOSTS = "2"
 Push-Location $Root
 try {
   # Prefer a Windows venv (WSL-created venvs are not usable on Windows).
-  $pyCmd = Ensure-VenvWin $Root
-  $py = $pyCmd[0]
+  # PowerShell unboxes single-item pipeline output to a scalar; don't index.
+  $py = (Ensure-VenvWin $Root)
 
   # Write smoke profile (force at least one screenshot blob for validation).
   & $py "$Root\\tools\\soak\\write_user_json.py" --config-dir "$env:AUTOCAPTURE_CONFIG_DIR" --profile smoke_screenshot_ingest | Out-Null
