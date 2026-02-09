@@ -54,7 +54,7 @@
       }
     },
     "builtin.capture.screenshot.windows": {
-      "artifact_sha256": "912695133a98c6a5f43ad05961cb43ce2be55f05267541c7304c4edd881f152d",
+      "artifact_sha256": "550c048edee6623b12f2a6e3546f179408e23d93abf071a0253855956a6f5b34",
       "manifest_sha256": "fcec2ecadf7ae8bfba911bda19c18d1dff049a8dfeff21154df5af8f0e57c663"
     },
     "builtin.capture.windows": {
