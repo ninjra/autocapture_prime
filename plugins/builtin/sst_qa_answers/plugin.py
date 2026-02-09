@@ -97,6 +97,8 @@ _NAME_STOP = {
     "Implement",
     "Workedfor",
     "Agency",
+    # Role labels: avoid pairing "Contractor Alice" etc.
+    "Contractor",
     # Common UI labels that form misleading adjacent "name-like" pairs.
     "Yesterday",
     "Priority",
@@ -731,18 +733,23 @@ def _extract_quorum_collaborator(tokens: list[dict[str, Any]]) -> tuple[str | No
     name = best_name
     _dist = float(best_key[0])
     # If we found a plausible human name in the UI, prefer it over non-human
-    # assignee tokens (e.g. "Open Invoice") and contractor names.
+    # assignee tokens (e.g. "Open Invoice").
     #
-    # Fall back to assignee/contractor only when no human name pair exists.
+    # Fall back to contractor/assignee only when no human name pair exists.
+    #
+    # NOTE: In the Quorum fixture, the task title commonly contains a contractor
+    # person name ("for Contractor First Last"). That is a better answer to
+    # "who is working with me" than a system label like "Open Invoice", so we
+    # intentionally prefer contractor-derived names over the OpenInvoice assignee.
     if name and " " in name:
         return name, bbox
-    if assignee_candidate is not None:
-        return assignee_candidate
     if contractor_best is not None:
         _y, _x, cname, cbbox = contractor_best
         return cname, cbbox
     if contractor_candidate is not None:
         return contractor_candidate
+    if assignee_candidate is not None:
+        return assignee_candidate
     return name, bbox
 
 

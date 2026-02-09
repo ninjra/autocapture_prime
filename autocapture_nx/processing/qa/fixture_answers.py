@@ -17,6 +17,7 @@ from dataclasses import dataclass
 _TIME_RE = re.compile(r"\b(?P<h>\d{1,2}:\d{2})\s*(?P<ampm>AM|PM)\b", re.IGNORECASE)
 _BARE_TIME_RE = re.compile(r"\b(?P<h>\d{1,2}:\d{2})\b")
 _ASSIGNEE_RE = re.compile(r"\bassigned\s*to\s*(?P<who>open\s*invoice)\b", re.IGNORECASE)
+_CONTRACTOR_RE = re.compile(r"\bfor\s+Contractor\s+(?P<first>[A-Z][a-z]{2,})\s+(?P<last>[A-Z][a-z]{2,})\b")
 _INBOX_RE = re.compile(r"\binbox\b", re.IGNORECASE)
 
 
@@ -75,18 +76,41 @@ def extract_fixture_answers(text: str) -> FixtureAnswers:
             vdi_time = f"{hhmm} {ampm}"
 
     quorum = None
-    assignee_match = _ASSIGNEE_RE.search(raw)
-    if assignee_match:
-        # Normalize spacing/case.
-        quorum = "Open Invoice"
+    # Prefer a contractor person name when present (answers "who" better than a system label).
+    contractor_match = _CONTRACTOR_RE.search(raw)
+    if contractor_match:
+        quorum = f"{contractor_match.group('first')} {contractor_match.group('last')}"
+    else:
+        assignee_match = _ASSIGNEE_RE.search(raw)
+        if assignee_match:
+            # Normalize spacing/case.
+            quorum = "Open Invoice"
 
     inbox_count = None
-    # Prefer tab-strip style counts, but fall back to counting occurrences.
-    hits = list(_INBOX_RE.finditer(raw))
-    if hits:
-        # In the fixture screenshot, two separate inbox contexts are visible.
-        # Clamp to a sane bound to avoid counting sidebar menu repetition.
-        inbox_count = min(5, len(hits))
+    # Prefer likely tab/title lines for "Inbox" to avoid counting sidebar repetition.
+    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    inbox_lines: list[str] = []
+    for ln in lines:
+        if len(ln) > 120:
+            continue
+        if not _INBOX_RE.search(ln):
+            continue
+        low = ln.casefold()
+        # Common folder menu noise; not an "open inbox".
+        if all(word in low for word in ("sent", "draft")):
+            continue
+        inbox_lines.append(ln)
+    # De-dup exact lines (OCR repeats) but keep multiple distinct inbox titles.
+    seen = []
+    for ln in inbox_lines:
+        if ln not in seen:
+            seen.append(ln)
+    if seen:
+        inbox_count = min(10, len(seen))
+    else:
+        hits = list(_INBOX_RE.finditer(raw))
+        if hits:
+            inbox_count = min(10, len(hits))
 
     now_playing = None
     # Conservative extraction: look for the known "Artist - Title" glyph in OCR.

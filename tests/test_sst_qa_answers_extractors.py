@@ -57,6 +57,20 @@ class SSTQAAnswersExtractorsTests(unittest.TestCase):
         collaborator, _bbox = qa._extract_quorum_collaborator(tokens)
         self.assertEqual(collaborator, "Alice Smith")
 
+    def test_extract_quorum_collaborator_prefers_contractor_over_open_invoice(self) -> None:
+        from plugins.builtin.sst_qa_answers import plugin as qa
+
+        tokens = [
+            {"text": "taskwasassignedtoOpenInvoice", "bbox": [10, 120, 320, 140]},
+            # Task title line: "... for Contractor Alice Smith ..."
+            {"text": "for", "bbox": [10, 200, 30, 220]},
+            {"text": "Contractor", "bbox": [40, 200, 120, 220]},
+            {"text": "Alice", "bbox": [130, 200, 180, 220]},
+            {"text": "Smith", "bbox": [190, 200, 250, 220]},
+        ]
+        collaborator, _bbox = qa._extract_quorum_collaborator(tokens)
+        self.assertEqual(collaborator, "Alice Smith")
+
     def test_extract_quorum_collaborator_ignores_yesyes_garbage(self) -> None:
         from plugins.builtin.sst_qa_answers import plugin as qa
 
