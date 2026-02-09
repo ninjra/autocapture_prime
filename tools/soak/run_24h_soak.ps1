@@ -79,6 +79,21 @@ try {
   # Write smoke profile (force at least one screenshot blob for validation).
   & $py "$Root\\tools\\soak\\write_user_json.py" --config-dir "$env:AUTOCAPTURE_CONFIG_DIR" --profile smoke_screenshot_ingest | Out-Null
 
+  # Stable per-machine consent: reuse the most recently accepted consent file from prior
+  # soak runs under .data/soak/ so operators don't need to re-accept for every new
+  # timestamped run-scoped directory (still fail-closed by default).
+  $consentDst = Join-Path $env:AUTOCAPTURE_DATA_DIR "state\\consent.capture.json"
+  if (-not (Test-Path $consentDst)) {
+    $consentDir = Split-Path -Parent $consentDst
+    New-Item -ItemType Directory -Force -Path $consentDir | Out-Null
+    $latest = Get-ChildItem -Path (Join-Path $Root ".data\\soak") -Filter "consent.capture.json" -Recurse -ErrorAction SilentlyContinue `
+      | Sort-Object LastWriteTime -Descending `
+      | Select-Object -First 1
+    if ($latest -and (Test-Path $latest.FullName)) {
+      try { Copy-Item -Force -Path $latest.FullName -Destination $consentDst | Out-Null } catch { }
+    }
+  }
+
   # Consent preflight (fail closed).
   $consent = & $py -m autocapture_nx consent status --data-dir "$env:AUTOCAPTURE_DATA_DIR" --config-dir "$env:AUTOCAPTURE_CONFIG_DIR" | Out-String
   if ($consent -match '"accepted"\s*:\s*false') {
