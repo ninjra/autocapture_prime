@@ -182,6 +182,19 @@
       "notes": "Config schema pins web.bind_host to 127.0.0.1; tray launcher enforces loopback at runtime; web middleware denies non-local requests."
     },
     {
+      "id": "SEC-02",
+      "title": "Ensure network_guard is applied early in subprocess plugins (sitecustomize) and covers common HTTP libs",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/plugin_system/runtime.py",
+        "autocapture_nx/plugin_system/host_runner.py"
+      ],
+      "validators": [
+        "tests/test_network_guard_applies_before_imports.py"
+      ],
+      "notes": "host_runner installs a process-wide deny policy before importing plugin modules; runtime patches socket/create_connection to fail closed for non-loopback."
+    },
+    {
       "id": "UX-01",
       "title": "Add a first-class Activity Dashboard (Today/Recent) showing capture status, last ingest, errors, and SLO summary",
       "status": "implemented",
