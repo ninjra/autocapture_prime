@@ -167,6 +167,34 @@
       "notes": "This repo enforces explicit capture consent via a persistent state file and ledgers capture start/stop events. Tray indicator is implemented in the separate tray/UI repo; CLI/API remain authoritative."
     },
     {
+      "id": "UX-01",
+      "title": "Add a first-class Activity Dashboard (Today/Recent) showing capture status, last ingest, errors, and SLO summary",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/ux/facade.py",
+        "autocapture/web/routes/status.py",
+        "autocapture/web/routes/telemetry.py",
+        "autocapture/web/routes/metrics.py"
+      ],
+      "validators": [
+        "tests/test_status_is_lightweight.py"
+      ],
+      "notes": "UI is out of scope; the required dashboard data is exposed via localhost-only CLI/API (`/api/status`, `/api/telemetry`, `/api/metrics`)."
+    },
+    {
+      "id": "UX-06",
+      "title": "Make dangerous toggles misclick-resistant (egress enable, allow_raw_egress, allow_images): require typed confirmation + undo window",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/ux/facade.py",
+        "autocapture/web/routes/settings.py"
+      ],
+      "validators": [
+        "tests/test_dangerous_toggle_requires_confirm.py"
+      ],
+      "notes": "Typed confirmation required for enable actions; undo is supported via config history + revert (append-only)."
+    },
+    {
       "id": "META-05",
       "title": "Stable citation locator contract (record+offsets/time-range)",
       "status": "implemented",

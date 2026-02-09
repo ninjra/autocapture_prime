@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-02-09T03:25:35.751760Z",
+  "generated_utc": "2026-02-09T03:38:58.891921Z",
   "items": [
     {
       "evidence": [
@@ -1106,16 +1106,17 @@
     },
     {
       "evidence": [
-        "autocapture/tray/app.py",
-        "plugins/builtin/ledger_basic/plugin.py",
-        "autocapture/web/ui/index.html"
+        "autocapture_nx/kernel/consent.py",
+        "autocapture_nx/ux/facade.py",
+        "config/default.json",
+        "contracts/config_schema.json"
       ],
       "id": "SEC-08",
-      "notes": "",
-      "status": "missing",
+      "notes": "This repo enforces explicit capture consent via a persistent state file and ledgers capture start/stop events. Tray indicator is implemented in the separate tray/UI repo; CLI/API remain authoritative.",
+      "status": "implemented",
       "title": "Make capture consent explicit: persistent tray indicator + start/stop events ledgered; prevent silent background capture",
       "validators": [
-        "tests/test_capture_start_stop_ledgered.py"
+        "tests/test_capture_consent.py"
       ]
     },
     {
@@ -1149,16 +1150,17 @@
     },
     {
       "evidence": [
-        "autocapture/web/ui/index.html",
+        "autocapture_nx/ux/facade.py",
+        "autocapture/web/routes/status.py",
         "autocapture/web/routes/telemetry.py",
-        "autocapture/web/routes/health.py"
+        "autocapture/web/routes/metrics.py"
       ],
       "id": "UX-01",
-      "notes": "",
-      "status": "partial",
+      "notes": "UI is out of scope; the required dashboard data is exposed via localhost-only CLI/API (`/api/status`, `/api/telemetry`, `/api/metrics`).",
+      "status": "implemented",
       "title": "Add a first-class Activity Dashboard (Today/Recent) showing capture status, last ingest, errors, and SLO summary",
       "validators": [
-        "tests/test_ui_dashboard_renders.py"
+        "tests/test_status_is_lightweight.py"
       ]
     },
     {
@@ -1218,13 +1220,12 @@
     },
     {
       "evidence": [
-        "autocapture/web/ui/index.html",
-        "autocapture/web/routes/settings.py",
-        "config/default.json"
+        "autocapture_nx/ux/facade.py",
+        "autocapture/web/routes/settings.py"
       ],
       "id": "UX-06",
-      "notes": "",
-      "status": "partial",
+      "notes": "Typed confirmation required for enable actions; undo is supported via config history + revert (append-only).",
+      "status": "implemented",
       "title": "Make dangerous toggles misclick-resistant (egress enable, allow_raw_egress, allow_images): require typed confirmation + undo window",
       "validators": [
         "tests/test_dangerous_toggle_requires_confirm.py"

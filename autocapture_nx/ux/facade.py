@@ -234,6 +234,11 @@ class KernelManager:
     def kernel(self) -> Kernel | None:
         return self._kernel
 
+    def system(self) -> Any | None:
+        # Return the already-booted system without forcing a boot.
+        with self._lock:
+            return self._system
+
     def last_error(self) -> str | None:
         return self._last_error
 
@@ -442,9 +447,31 @@ class UXFacade:
             self._pause_timer = None
         self._paused_until_utc = None
 
-    def config_set(self, patch: dict[str, Any]) -> dict[str, Any]:
+    def config_set(self, patch: dict[str, Any], *, confirm: str = "") -> dict[str, Any]:
         if not isinstance(patch, dict):
             raise ValueError("config_patch_invalid")
+        # Misclick-resistant dangerous toggles: require typed confirmation when enabling.
+        def _walk(obj: Any, prefix: tuple[str, ...] = ()) -> list[tuple[tuple[str, ...], Any]]:
+            if not isinstance(obj, dict):
+                return [(prefix, obj)]
+            out: list[tuple[tuple[str, ...], Any]] = []
+            for k, v in obj.items():
+                out.extend(_walk(v, prefix + (str(k),)))
+            return out
+
+        dangerous_enable_paths = {
+            ("privacy", "egress", "allow_raw_egress"),
+            ("privacy", "cloud", "enabled"),
+            ("privacy", "cloud", "allow_images"),
+        }
+        enabling = []
+        for path, value in _walk(patch):
+            if path in dangerous_enable_paths and bool(value) is True:
+                enabling.append(".".join(path))
+        if enabling:
+            if str(confirm).strip() != "I UNDERSTAND":
+                return {"ok": False, "error": "confirmation_required", "required": "I UNDERSTAND", "paths": enabling}
+
         previous = _snapshot_patch_values(self._config, patch)
         user_cfg = {}
         if self._paths.user_path.exists():
@@ -700,41 +727,42 @@ class UXFacade:
             return rotate_keys(system)
 
     def status(self) -> dict[str, Any]:
-        with self._kernel_mgr.session() as system:
-            kernel_error = self._kernel_mgr.last_error()
-            kernel = self._kernel_mgr.kernel()
-            safe_mode = bool(getattr(kernel, "safe_mode", self._safe_mode)) if kernel is not None else bool(self._safe_mode)
-            safe_mode_reason = getattr(kernel, "safe_mode_reason", None) if kernel is not None else None
-            crash_loop = None
-            if kernel is not None and hasattr(kernel, "crash_loop_status"):
-                try:
-                    crash_loop = kernel.crash_loop_status()
-                except Exception:
-                    crash_loop = None
-            builder = system.get("event.builder") if system and hasattr(system, "get") else None
-            run_id = builder.run_id if builder is not None else ""
-            ledger_head = builder.ledger_head() if builder is not None else None
-            capture_status = self._capture_status_payload()
-            processing_state = self._processing_state_payload(system)
-            telemetry = telemetry_snapshot()
-            slo = compute_slo_summary(self._config, telemetry, capture_status, processing_state)
-            return {
-                "run_id": run_id,
-                "ledger_head": ledger_head,
-                "plugins_loaded": len(getattr(system, "plugins", []) or []),
-                "safe_mode": safe_mode,
-                "safe_mode_reason": safe_mode_reason,
-                "crash_loop": crash_loop,
-                "capture_active": bool(self._run_active),
-                "paused_until_utc": self._paused_until_utc,
-                "paused": bool(self._paused_until_utc),
-                "capture_controls_enabled": self._capture_controls_enabled(),
-                "capture_status": capture_status,
-                "processing_state": processing_state,
-                "slo": slo,
-                "kernel_ready": system is not None,
-                "kernel_error": kernel_error,
-            }
+        # Status must be lightweight: do not force a kernel boot just to answer.
+        system = self._kernel_mgr.system()
+        kernel_error = self._kernel_mgr.last_error()
+        kernel = self._kernel_mgr.kernel()
+        safe_mode = bool(getattr(kernel, "safe_mode", self._safe_mode)) if kernel is not None else bool(self._safe_mode)
+        safe_mode_reason = getattr(kernel, "safe_mode_reason", None) if kernel is not None else None
+        crash_loop = None
+        if kernel is not None and hasattr(kernel, "crash_loop_status"):
+            try:
+                crash_loop = kernel.crash_loop_status()
+            except Exception:
+                crash_loop = None
+        builder = system.get("event.builder") if system and hasattr(system, "get") else None
+        run_id = builder.run_id if builder is not None else ""
+        ledger_head = builder.ledger_head() if builder is not None else None
+        capture_status = self._capture_status_payload()
+        processing_state = self._processing_state_payload(system)
+        telemetry = telemetry_snapshot()
+        slo = compute_slo_summary(self._config, telemetry, capture_status, processing_state)
+        return {
+            "run_id": run_id,
+            "ledger_head": ledger_head,
+            "plugins_loaded": len(getattr(system, "plugins", []) or []),
+            "safe_mode": safe_mode,
+            "safe_mode_reason": safe_mode_reason,
+            "crash_loop": crash_loop,
+            "capture_active": bool(self._run_active),
+            "paused_until_utc": self._paused_until_utc,
+            "paused": bool(self._paused_until_utc),
+            "capture_controls_enabled": self._capture_controls_enabled(),
+            "capture_status": capture_status,
+            "processing_state": processing_state,
+            "slo": slo,
+            "kernel_ready": system is not None,
+            "kernel_error": kernel_error,
+        }
 
     def _capture_status_payload(self) -> dict[str, Any]:
         from autocapture.storage.pressure import sample_disk_pressure
@@ -809,6 +837,12 @@ class UXFacade:
                     watchdog = conductor.watchdog_state()
                 except Exception:
                     watchdog = None
+        if system is None:
+            # Lightweight path: do not force a kernel boot for status UI/API.
+            telemetry = telemetry_snapshot()
+            latest = telemetry.get("latest", {}) if isinstance(telemetry, dict) else {}
+            watchdog = latest.get("processing.watchdog") if isinstance(latest, dict) else None
+            return {"mode": None, "paused": None, "reason": None, "watchdog": watchdog}
         if stats is None:
             stats = self.scheduler_status().get("stats")
         if stats is not None and hasattr(stats, "__dataclass_fields__"):

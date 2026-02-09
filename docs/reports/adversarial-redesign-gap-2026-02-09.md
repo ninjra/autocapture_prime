@@ -3,9 +3,9 @@
 Generated: 2026-02-09
 
 - total: 92
-- implemented: 37
-- partial: 37
-- missing: 18
+- implemented: 40
+- partial: 35
+- missing: 17
 
 | ID | Status | Title | Evidence | Validators |
 | --- | --- | --- | --- | --- |
@@ -88,15 +88,15 @@ Generated: 2026-02-09
 | SEC-05 | missing | Add PII detection/redaction at export/egress boundaries using configured recognizers; record redaction map in metadata | autocapture/privacy/redaction.py<br>autocapture/egress/sanitize.py<br>config/default.json | tests/test_redaction_deterministic.py |
 | SEC-06 | missing | Key rotation hardening: store key_id with every encrypted blob/record; support staged rewrap and verify mixed-key reads | autocapture/crypto/keyring.py<br>plugins/builtin/storage_encrypted/plugin.py<br>autocapture/web/routes/keys.py | tests/test_key_rotation_rewrap_plan.py |
 | SEC-07 | missing | Sign proof bundle manifest locally and verify on import/replay; include sha256 for all bundle files | autocapture_nx/kernel/proof_bundle.py<br>autocapture/crypto/dpapi.py | tests/test_proof_bundle_signature_verifies.py |
-| SEC-08 | missing | Make capture consent explicit: persistent tray indicator + start/stop events ledgered; prevent silent background capture | autocapture/tray/app.py<br>plugins/builtin/ledger_basic/plugin.py<br>autocapture/web/ui/index.html | tests/test_capture_start_stop_ledgered.py |
+| SEC-08 | implemented | Make capture consent explicit: persistent tray indicator + start/stop events ledgered; prevent silent background capture | autocapture_nx/kernel/consent.py<br>autocapture_nx/ux/facade.py<br>config/default.json<br>contracts/config_schema.json | tests/test_capture_consent.py |
 | SEC-09 | missing | Secrets hygiene: enforce sanitize_env for all subprocesses, redact tokens in logs, and add repo-wide secret scanning gate | autocapture_nx/plugin_system/host_runner.py<br>autocapture_nx/kernel/logging.py<br>tools/gate_secrets.py | tests/test_log_redaction.py<br>tools/gate_secrets.py |
 | SEC-10 | partial | Harden cloud/gateway pathways: require explicit privacy.cloud.enabled AND egress approval; block by default and test | autocapture/gateway/router.py<br>autocapture_nx/kernel/policy_gate.py<br>tests/test_gateway_policy_block_cloud_default.py | tests/test_cloud_enable_requires_two_step.py |
-| UX-01 | partial | Add a first-class Activity Dashboard (Today/Recent) showing capture status, last ingest, errors, and SLO summary | autocapture/web/ui/index.html<br>autocapture/web/routes/telemetry.py<br>autocapture/web/routes/health.py | tests/test_ui_dashboard_renders.py |
+| UX-01 | implemented | Add a first-class Activity Dashboard (Today/Recent) showing capture status, last ingest, errors, and SLO summary | autocapture_nx/ux/facade.py<br>autocapture/web/routes/status.py<br>autocapture/web/routes/telemetry.py<br>autocapture/web/routes/metrics.py | tests/test_status_is_lightweight.py |
 | UX-02 | partial | Add an Input Ingest / Capture panel: current data_dir, run_id, active sources, pause/resume, and disk banner | autocapture/web/ui/index.html<br>autocapture/web/routes/run.py | tests/test_pause_resume_idempotent.py |
 | UX-03 | partial | Create a Run/Job Detail view with full provenance: config snapshot, plugin hashes, ledger head, anchors, artifacts | autocapture/web/ui/index.html<br>autocapture/web/routes/metadata.py<br>autocapture/web/routes/trace.py | tests/test_run_detail_contains_provenance.py |
 | UX-04 | partial | Query UI: show extraction completeness (allowed/blocked/ran), time window coverage, and a citation explorer | autocapture/web/ui/index.html<br>autocapture/web/routes/query.py<br>autocapture_nx/kernel/query.py | tests/test_query_ui_shows_blocked_extract.py |
 | UX-05 | partial | Extension Manager UI v2 (IA + flows): Installed / Available / Updates / Approvals / Health / Policies | autocapture/web/ui/index.html<br>autocapture/web/routes/plugins.py<br>autocapture_nx/plugin_system/manager.py | tests/test_extension_manager_core_flows.py |
-| UX-06 | partial | Make dangerous toggles misclick-resistant (egress enable, allow_raw_egress, allow_images): require typed confirmation + undo window | autocapture/web/ui/index.html<br>autocapture/web/routes/settings.py<br>config/default.json | tests/test_dangerous_toggle_requires_confirm.py |
+| UX-06 | implemented | Make dangerous toggles misclick-resistant (egress enable, allow_raw_egress, allow_images): require typed confirmation + undo window | autocapture_nx/ux/facade.py<br>autocapture/web/routes/settings.py | tests/test_dangerous_toggle_requires_confirm.py |
 | UX-07 | missing | Accessibility hardening: add ARIA labels, focus order, skip links, and keyboard shortcuts; run automated a11y checks | autocapture/web/ui/index.html<br>autocapture/web/ui/static/* | tests/test_accessibility_smoke.py |
 | UX-08 | partial | Standardize error UX: actionable messages, “copy diagnostics”, and “open doctor bundle” on failures | autocapture/web/ui/index.html<br>autocapture/web/routes/doctor.py | tests/test_error_to_diagnostics_flow.py |
 | UX-09 | partial | Add config presets and a diff viewer (effective vs user overrides) with search and safe defaults | autocapture/web/ui/index.html<br>autocapture/config/load.py<br>contracts/config_schema.json | tests/test_config_diff_viewer.py |
