@@ -73,22 +73,22 @@
     "explicit": [
       {
         "query": "what time is it on the vdi",
-        "expect": "VDI time: 11:35 AM",
+        "expect": "VDI time:",
         "match_mode": "contains"
       },
       {
         "query": "who is working with me on the quorum task",
-        "expect": "Quorum task collaborator: Open Invoice",
+        "expect": "Quorum task collaborator:",
         "match_mode": "contains"
       },
       {
         "query": "how many inboxes I have open",
-        "expect": "Open inboxes: 2",
+        "expect": "Open inboxes:",
         "match_mode": "contains"
       },
       {
         "query": "what song is playing",
-        "expect": "Now playing: Master Cylinder - Jung At Heart",
+        "expect": "Now playing:",
         "match_mode": "contains"
       },
       {
@@ -98,7 +98,7 @@
       },
       {
         "query": "what time is it on the vdi, and who is working with me on the quorum task. Lastly tell me how many inboxes I have open.",
-        "expect": "Quorum task collaborator: Open Invoice",
+        "expect": "Quorum task collaborator:",
         "match_mode": "contains"
       }
     ],

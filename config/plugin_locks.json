@@ -1,6 +1,6 @@
 {
   "contract_lock_hash": "5db1c4337c95f1450c2d625d1579d6a06d5f00a8ad3ee2dcae2d02badd2e7df7",
-  "generated_at": "2026-02-09T14:17:51.450165+00:00",
+  "generated_at": "2026-02-09T16:06:47.280539+00:00",
   "kernel_api_version": "0.1.0",
   "plugins": {
     "builtin.anchor.basic": {
@@ -194,7 +194,7 @@
       }
     },
     "builtin.ocr.basic": {
-      "artifact_sha256": "03fd112c8fbd6a2b867c601e74920db1d82cef7b3f6f5a8d1beb0435b86902e3",
+      "artifact_sha256": "dc9146a8766a690641ff60b8b92586f1ef9b7791ddc2b76f0ebb1f091c51ea78",
       "contract_lock_hash": "5db1c4337c95f1450c2d625d1579d6a06d5f00a8ad3ee2dcae2d02badd2e7df7",
       "kernel_api_version": "0.1.0",
       "manifest_sha256": "a3ff10716265b40c3854ccf51835f74fce9eb1fdb0856c447f53ce48489126b8",
@@ -474,7 +474,7 @@
       }
     },
     "builtin.sst.qa.answers": {
-      "artifact_sha256": "1a9777f9b5d005e22fe5fbe16c3a29c188153cb27ba2985bba3965ee8a3d6153",
+      "artifact_sha256": "66ce81c53c3f448670031b17a471a186572f7e8a8f0159e1d2f5d6a35dfedd3d",
       "contract_lock_hash": "5db1c4337c95f1450c2d625d1579d6a06d5f00a8ad3ee2dcae2d02badd2e7df7",
       "kernel_api_version": "0.1.0",
       "manifest_sha256": "1c0741f72fa5ffde0a9bf0ea2234191805e631a8e3819db298668d27cdbb4ca2",
