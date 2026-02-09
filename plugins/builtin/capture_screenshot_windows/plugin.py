@@ -11,6 +11,7 @@ from typing import Any
 
 from autocapture_nx.capture.screenshot import ScreenshotDeduper, encode_png
 from autocapture_nx.capture.overflow_spool import OverflowSpool, OverflowSpoolConfig
+from autocapture_nx.capture.spool_queue import enqueue_or_spool
 from autocapture_nx.capture.screenshot_policy import schedule_from_config
 from autocapture_nx.kernel.hashing import sha256_canonical
 from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
@@ -27,9 +28,8 @@ class ScreenshotCaptureWindows(PluginBase):
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._worker: threading.Thread | None = None
-        # Keep the queue small and block instead of dropping under backpressure.
-        # If storage is slower than capture, we prefer slowing capture (no-loss)
-        # over silently dropping evidence.
+        # Keep the queue small to cap memory, and prefer spooling to disk over
+        # dropping when storage is slower than capture (no-loss policy).
         self._store_queue: "queue.Queue[dict[str, Any] | None]" = queue.Queue(maxsize=2)
         self._seq = 0
         self._cursor_shape: CursorShape | None = None
@@ -93,13 +93,14 @@ class ScreenshotCaptureWindows(PluginBase):
         last_mode: str | None = None
         render_cursor = bool(cfg.get("render_cursor", cfg.get("include_cursor", True)))
 
+        overflow = OverflowSpool(OverflowSpoolConfig.from_config(self.context.config))
+        try:
+            overflow.ensure_dirs()
+        except Exception:
+            overflow = OverflowSpool(OverflowSpoolConfig(enabled=False, root="", drain_interval_s=2.0, max_drain_per_tick=0))
+
         def _store_worker() -> None:
             last_disk_level: str | None = None
-            overflow = OverflowSpool(OverflowSpoolConfig.from_config(self.context.config))
-            try:
-                overflow.ensure_dirs()
-            except Exception:
-                overflow = OverflowSpool(OverflowSpoolConfig(enabled=False, root="", drain_interval_s=2.0, max_drain_per_tick=0))
             while not self._stop.is_set():
                 # Drain overflow spooled items when the primary data_dir volume has recovered.
                 try:
@@ -395,20 +396,31 @@ class ScreenshotCaptureWindows(PluginBase):
                         "media_fsync_policy": media_fsync_policy,
                     }
                     # No-loss policy: never drop frames due to store backpressure.
-                    # If storage cannot keep up, block here until the worker drains.
-                    enqueue_start = time.perf_counter()
-                    while not self._stop.is_set():
+                    # Prefer spooling to overflow (different volume) over blocking the
+                    # capture loop when the in-memory store queue is full.
+                    def _spool() -> bool:
+                        if not overflow.enabled:
+                            return False
+                        png_bytes, payload, _encode_ms, _write_ms = _encode_and_build(job, event_builder=event_builder)
+                        overflow.write_item(record_id=record_id, payload=payload, blob=png_bytes)
                         try:
-                            self._store_queue.put(job, timeout=0.5)
-                            break
-                        except queue.Full:
-                            continue
+                            deduper.mark_saved(fingerprint, now=time.monotonic())
+                        except Exception:
+                            pass
+                        return True
+
+                    decision = enqueue_or_spool(self._store_queue, job, spool_fn=_spool, block_timeout_s=0.5)
                     try:
-                        wait_ms = int(max(0.0, (time.perf_counter() - enqueue_start) * 1000.0))
+                        wait_ms = int(decision.waited_ms)
                         if wait_ms > 0:
                             record_telemetry(
                                 "capture.screenshot.backpressure_wait",
-                                {"ts_utc": ts_utc, "wait_ms": wait_ms, "mode": str(schedule.mode)},
+                                {
+                                    "ts_utc": ts_utc,
+                                    "wait_ms": wait_ms,
+                                    "mode": str(schedule.mode),
+                                    "spooled": bool(decision.spooled),
+                                },
                             )
                     except Exception:
                         pass
