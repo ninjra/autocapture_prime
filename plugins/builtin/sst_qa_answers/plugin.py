@@ -265,9 +265,12 @@ def _count_inboxes(tokens: list[dict[str, Any]]) -> int:
     if max_y2 <= 0:
         return 0
 
-    # "Top bar" threshold (fraction of screen height). Keep this somewhat generous
-    # so we still detect tab strips that are slightly lower in the frame.
-    top_threshold_y = float(max_y2) * 0.18
+    # "Top bar" threshold (fraction of screen height).
+    #
+    # Bias toward over-counting rather than under-counting: users asking "how many
+    # inboxes do I have open" care more about missing a real open inbox than
+    # counting an extra noisy hit, and downstream QA already clamps counts.
+    top_threshold_y = float(max_y2) * 0.28
 
     # Deduplicate by coarse x/y buckets to avoid double-counting overlapping OCR hits
     # for the same tab label while still allowing multiple distinct inbox tabs.
@@ -283,10 +286,11 @@ def _count_inboxes(tokens: list[dict[str, Any]]) -> int:
         if cy > top_threshold_y:
             # Likely a sidebar label or in-body content; not an "open inbox tab".
             continue
-        x_bucket = int(cx // 220)
-        y_bucket = int(cy // 80)
+        # Slightly finer buckets reduce accidental merging of multiple inbox tabs.
+        x_bucket = int(cx // 180)
+        y_bucket = int(cy // 70)
         seen.add((x_bucket, y_bucket))
-    return len(seen)
+    return min(20, len(seen))
 
 
 def _line_key(bbox: tuple[int, int, int, int]) -> int:
