@@ -11,6 +11,15 @@ export AUTOCAPTURE_CONFIG_DIR="${AUTOCAPTURE_CONFIG_DIR:-$ROOT/.data/soak/config
 export AUTOCAPTURE_DATA_DIR="${AUTOCAPTURE_DATA_DIR:-$ROOT/.data/soak/data_$stamp}"
 mkdir -p "$AUTOCAPTURE_CONFIG_DIR" "$AUTOCAPTURE_DATA_DIR"
 
+# Stable per-machine consent: if the operator already accepted capture consent
+# in any previous run under .data/soak/, reuse that acceptance to avoid forcing
+# manual consent for every run-scoped dir while still failing closed by default.
+latest_consent="$(ls -1dt "$ROOT/.data/soak/data_"*/consent/capture_consent.json 2>/dev/null | head -n 1 || true)"
+if [[ -n "$latest_consent" ]] && [[ ! -f "$AUTOCAPTURE_DATA_DIR/consent/capture_consent.json" ]]; then
+  mkdir -p "$AUTOCAPTURE_DATA_DIR/consent"
+  cp -f "$latest_consent" "$AUTOCAPTURE_DATA_DIR/consent/capture_consent.json" || true
+fi
+
 # Refuse to start if the repo is dirty; soak results must be attributable.
 if command -v git >/dev/null 2>&1; then
   if [[ -n "$(git status --porcelain)" ]]; then
