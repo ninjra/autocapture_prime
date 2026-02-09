@@ -75,6 +75,51 @@ def cmd_plugins_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_plugins_load_report(args: argparse.Namespace) -> int:
+    # Debug-only command used by soak scripts when capture+ingest fails to start.
+    # It intentionally attempts a real plugin load to surface missing deps,
+    # lock mismatches, and capability/provider gaps.
+    from autocapture_nx.plugin_system.registry import PluginRegistry
+    from autocapture_nx.kernel.paths import repo_root
+
+    paths = default_config_paths()
+    config = load_config(paths, safe_mode=bool(args.safe_mode))
+    registry = PluginRegistry(config, safe_mode=bool(args.safe_mode))
+    error = None
+    caps = []
+    try:
+        _plugins, capabilities = registry.load_plugins()
+        try:
+            caps = sorted((capabilities.all() or {}).keys())
+        except Exception:
+            caps = []
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        try:
+            caps = []
+        except Exception:
+            caps = []
+    report = {}
+    try:
+        report = registry.load_report()
+    except Exception:
+        report = {}
+    payload = {
+        "ok": error is None,
+        "error": error,
+        "repo_root": str(repo_root()),
+        "config_default": str(paths.default_path),
+        "config_user": str(paths.user_path),
+        "paths": config.get("paths") if isinstance(config, dict) else {},
+        "hosting_mode_env": os.getenv("AUTOCAPTURE_PLUGINS_HOSTING_MODE", ""),
+        "report": report,
+        "capabilities": caps,
+        "capabilities_count": int(len(caps)),
+    }
+    _print_json(payload)
+    return 0 if payload.get("ok") else 2
+
+
 def cmd_plugins_approve(_args: argparse.Namespace) -> int:
     facade = create_facade()
     facade.plugins_approve()
@@ -908,6 +953,8 @@ def build_parser() -> argparse.ArgumentParser:
     plugins_list = plugins_sub.add_parser("list")
     plugins_list.add_argument("--json", action="store_true", default=False)
     plugins_list.set_defaults(func=cmd_plugins_list)
+    plugins_load_report = plugins_sub.add_parser("load-report")
+    plugins_load_report.set_defaults(func=cmd_plugins_load_report)
     plugins_approve = plugins_sub.add_parser("approve")
     plugins_approve.set_defaults(func=cmd_plugins_approve)
     plugins_plan = plugins_sub.add_parser("plan")

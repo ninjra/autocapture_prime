@@ -116,6 +116,8 @@ try {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     & $py -m autocapture_nx status 2>&1 | Out-Host
+    Write-Host "[debug] plugins load-report:"
+    & $py -m autocapture_nx plugins load-report 2>&1 | Out-Host
     $ErrorActionPreference = $prevEAP
     exit 3
   }

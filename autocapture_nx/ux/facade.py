@@ -1214,9 +1214,64 @@ class UXFacade:
         errors: list[dict[str, Any]] = []
         started_names: list[str] = []
         kernel_error = None
-        # Ensure these are always defined even if the session block errors early.
-        present: dict[str, bool] = {}
-        wanted: dict[str, bool] = {}
+        # Ensure these are always defined, even if the session block errors early.
+        # This prevents ambiguous soak output like present={} wanted={} which hides
+        # whether capture was configured and which capabilities were missing.
+        present: dict[str, Any] = {
+            "capture.source": False,
+            "capture.screenshot": False,
+            "capture.audio": False,
+            "tracking.input": False,
+            "window.metadata": False,
+            "tracking.cursor": False,
+            "tracking.clipboard": False,
+            "tracking.file_activity": False,
+        }
+        wanted: dict[str, Any] = {}
+        # Compute "wanted" from config outside the kernel session so it is always
+        # populated even when boot fails.
+        capture_cfg = self._config.get("capture") if isinstance(self._config.get("capture"), dict) else {}
+        want_screenshot = bool((capture_cfg.get("screenshot") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        want_audio = bool((capture_cfg.get("audio") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        want_source = bool((capture_cfg.get("video") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        wanted = {
+            "capture.source": want_source,
+            "capture.screenshot": want_screenshot,
+            "capture.audio": want_audio,
+        }
+
+        def _providers(obj: Any) -> list[str] | None:
+            # Best-effort introspection for capability proxies (helps diagnose
+            # "no providers" cases where hasattr/getattr can raise).
+            if obj is None:
+                return None
+            if hasattr(obj, "provider_ids") and callable(getattr(obj, "provider_ids", None)):
+                try:
+                    ids = obj.provider_ids()
+                    if isinstance(ids, list):
+                        return [str(x) for x in ids]
+                except Exception:
+                    return None
+            if hasattr(obj, "plugin_id"):
+                try:
+                    pid = getattr(obj, "plugin_id")
+                    if isinstance(pid, str) and pid:
+                        return [pid]
+                except Exception:
+                    return None
+            return None
+
+        def _startable(obj: Any) -> tuple[bool, str | None]:
+            if obj is None:
+                return (False, "missing")
+            try:
+                attr = getattr(obj, "start", None)
+            except Exception as exc:
+                return (False, f"start_attr_error:{type(exc).__name__}:{exc}")
+            if not callable(attr):
+                return (False, "no_start_method")
+            return (True, None)
+
         with self._kernel_mgr.session() as system:
             if system is None:
                 kernel_error = self._kernel_mgr.last_error()
@@ -1226,36 +1281,30 @@ class UXFacade:
                     "kernel_error": kernel_error,
                     "started": [],
                     "errors": [],
+                    "present": present,
+                    "wanted": wanted,
                 }
 
-            capture = system.get("capture.source") if hasattr(system, "get") else None
+            # Pull capabilities with "has" checks where possible to avoid raising when a
+            # capability is not registered.
+            capture = system.get("capture.source") if hasattr(system, "has") and system.has("capture.source") else None
             screenshot = system.get("capture.screenshot") if hasattr(system, "has") and system.has("capture.screenshot") else None
-            audio = system.get("capture.audio") if hasattr(system, "get") else None
-            input_tracker = system.get("tracking.input") if hasattr(system, "get") else None
-            window_meta = system.get("window.metadata") if hasattr(system, "get") else None
+            audio = system.get("capture.audio") if hasattr(system, "has") and system.has("capture.audio") else None
+            input_tracker = system.get("tracking.input") if hasattr(system, "has") and system.has("tracking.input") else None
+            window_meta = system.get("window.metadata") if hasattr(system, "has") and system.has("window.metadata") else None
             cursor_tracker = system.get("tracking.cursor") if hasattr(system, "has") and system.has("tracking.cursor") else None
             clipboard = system.get("tracking.clipboard") if hasattr(system, "has") and system.has("tracking.clipboard") else None
             file_activity = system.get("tracking.file_activity") if hasattr(system, "has") and system.has("tracking.file_activity") else None
 
-            capture_cfg = self._config.get("capture") if isinstance(self._config.get("capture"), dict) else {}
-            want_screenshot = bool((capture_cfg.get("screenshot") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
-            want_audio = bool((capture_cfg.get("audio") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
-            want_source = bool((capture_cfg.get("video") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
-
             present = {
-                "capture.source": capture is not None,
-                "capture.screenshot": screenshot is not None,
-                "capture.audio": audio is not None,
-                "tracking.input": input_tracker is not None,
-                "window.metadata": window_meta is not None,
-                "tracking.cursor": cursor_tracker is not None,
-                "tracking.clipboard": clipboard is not None,
-                "tracking.file_activity": file_activity is not None,
-            }
-            wanted = {
-                "capture.source": want_source,
-                "capture.screenshot": want_screenshot,
-                "capture.audio": want_audio,
+                "capture.source": {"present": capture is not None, "providers": _providers(capture), "startable": _startable(capture)[0]},
+                "capture.screenshot": {"present": screenshot is not None, "providers": _providers(screenshot), "startable": _startable(screenshot)[0]},
+                "capture.audio": {"present": audio is not None, "providers": _providers(audio), "startable": _startable(audio)[0]},
+                "tracking.input": {"present": input_tracker is not None, "providers": _providers(input_tracker), "startable": _startable(input_tracker)[0]},
+                "window.metadata": {"present": window_meta is not None, "providers": _providers(window_meta), "startable": _startable(window_meta)[0]},
+                "tracking.cursor": {"present": cursor_tracker is not None, "providers": _providers(cursor_tracker), "startable": _startable(cursor_tracker)[0]},
+                "tracking.clipboard": {"present": clipboard is not None, "providers": _providers(clipboard), "startable": _startable(clipboard)[0]},
+                "tracking.file_activity": {"present": file_activity is not None, "providers": _providers(file_activity), "startable": _startable(file_activity)[0]},
             }
 
             components: list[tuple[str, Any, bool]] = [
@@ -1274,10 +1323,19 @@ class UXFacade:
                     if required:
                         errors.append({"component": name, "error": "missing"})
                     continue
-                if not hasattr(component, "start"):
+                ok_start, start_issue = _startable(component)
+                if not ok_start:
+                    if required:
+                        errors.append({"component": name, "error": start_issue or "not_startable"})
                     continue
                 try:
-                    component.start()
+                    start_fn = getattr(component, "start")
+                except Exception as exc:
+                    if required:
+                        errors.append({"component": name, "error": f"start_attr_error:{type(exc).__name__}:{exc}"})
+                    continue
+                try:
+                    start_fn()
                     started_names.append(name)
                 except Exception as exc:
                     if required:
