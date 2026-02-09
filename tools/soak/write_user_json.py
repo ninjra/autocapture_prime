@@ -35,6 +35,9 @@ def _profile_payload(profile: str) -> dict[str, Any]:
                 "input_tracking": {"mode": "win32_idle"},
                 "screenshot": {
                     "enabled": True,
+                    # Force deterministic smoke evidence even if the operator is idle
+                    # (activity policy would otherwise switch to 60s interval).
+                    "activity": {"enabled": False},
                     "dedupe": {"enabled": False},
                 },
             },
