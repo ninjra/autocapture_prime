@@ -7,7 +7,6 @@ adversarial redesign gates (e.g., pipeline DAG persisted in the state tape).
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any
 

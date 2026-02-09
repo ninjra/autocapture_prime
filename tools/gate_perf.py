@@ -153,9 +153,33 @@ def main(argv: list[str] | None = None) -> int:
     min_artifacts_per_s = float(throughput_cfg.get("min_artifacts_per_s", 1000.0))
 
     def _measure_startup() -> float:
-        t0 = time.perf_counter()
-        Kernel(paths, safe_mode=True).boot()
-        return (time.perf_counter() - t0) * 1000.0
+        # Run perf gate boot in an isolated temp data/config dir so:
+        # - instance locks from other runs can't interfere
+        # - encrypted stores don't trip over existing real user DB state
+        # - retries don't leak locks/hosts
+        with tempfile.TemporaryDirectory() as tmp_root:
+            prev_data = os.environ.get("AUTOCAPTURE_DATA_DIR")
+            prev_cfg = os.environ.get("AUTOCAPTURE_CONFIG_DIR")
+            os.environ["AUTOCAPTURE_DATA_DIR"] = tmp_root
+            os.environ["AUTOCAPTURE_CONFIG_DIR"] = str(Path(tmp_root) / "config")
+            kernel = Kernel(paths, safe_mode=True)
+            t0 = time.perf_counter()
+            try:
+                kernel.boot()
+            finally:
+                try:
+                    kernel.shutdown()
+                except Exception:
+                    pass
+                if prev_data is None:
+                    os.environ.pop("AUTOCAPTURE_DATA_DIR", None)
+                else:
+                    os.environ["AUTOCAPTURE_DATA_DIR"] = prev_data
+                if prev_cfg is None:
+                    os.environ.pop("AUTOCAPTURE_CONFIG_DIR", None)
+                else:
+                    os.environ["AUTOCAPTURE_CONFIG_DIR"] = prev_cfg
+            return (time.perf_counter() - t0) * 1000.0
 
     elapsed_ms = _measure_startup()
     print(f"startup_ms={elapsed_ms:.1f} max_ms={max_startup_ms}")

@@ -10,7 +10,6 @@ This is a lightweight, heuristic gate meant to catch obvious mistakes:
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 
 from autocapture_nx.kernel.redaction import redact_text
@@ -31,8 +30,15 @@ def _is_text_file(path: Path) -> bool:
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
+    # Allowlist files that intentionally contain "secret-shaped" strings for
+    # redaction/validator tests. Keep this list tight to avoid masking real leaks.
+    allowlisted = {
+        "tests/test_log_redaction.py",
+    }
     findings: list[tuple[str, str]] = []
     for rel in _git_ls_files(repo_root):
+        if rel in allowlisted:
+            continue
         p = (repo_root / rel).resolve()
         if not p.exists() or not p.is_file():
             continue
@@ -61,4 +67,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

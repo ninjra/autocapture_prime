@@ -17,7 +17,7 @@ import tempfile
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from autocapture_nx.kernel.atomic_write import atomic_write_text

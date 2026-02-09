@@ -31,6 +31,7 @@ class ProofBundleReplayTests(unittest.TestCase):
             metadata.put(
                 evidence_id,
                 {
+                    "schema_version": 1,
                     "record_type": "evidence.capture.segment",
                     "run_id": "run1",
                     "segment_id": "seg0",

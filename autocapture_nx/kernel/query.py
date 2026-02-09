@@ -16,9 +16,11 @@ from autocapture_nx.kernel.paths import resolve_repo_path
 from autocapture_nx.kernel.derived_records import (
     build_derivation_edge,
     build_text_record,
+    build_artifact_manifest,
     derived_text_record_id,
     derivation_edge_id,
     extract_text_payload,
+    artifact_manifest_id,
 )
 from autocapture_nx.kernel.frame_evidence import ensure_frame_evidence
 from autocapture.indexing.factory import build_indexes
@@ -212,7 +214,6 @@ def extract_on_demand(
             run_id = getattr(system, "config", {}).get("runtime", {}).get("run_id")
         run_id = run_id or "run"
         derived_ids: list[tuple[str, Any, str, str]] = []
-        encoded_source = encode_record_id_component(record_id)
         for provider_id, extractor in _capability_providers(ocr, "ocr.engine"):
             derived_ids.append(
                 (
@@ -289,6 +290,29 @@ def extract_on_demand(
                     continue
             else:
                 metadata.put(derived_id, payload)
+            # META-07: persist a content-addressed artifact manifest with lineage pointers.
+            try:
+                run_id = str(payload.get("run_id") or record_id.split("/", 1)[0])
+                manifest_id = artifact_manifest_id(run_id, derived_id)
+                artifact_hash = str(payload.get("payload_hash") or payload.get("content_hash") or "")
+                derived_from = {
+                    "evidence_id": record_id,
+                    "evidence_hash": record.get("content_hash") if isinstance(record, dict) else None,
+                    "model_digest": payload.get("model_digest"),
+                }
+                manifest = build_artifact_manifest(
+                    run_id=run_id,
+                    artifact_id=derived_id,
+                    artifact_sha256=artifact_hash,
+                    derived_from=derived_from,
+                    ts_utc=payload.get("ts_utc"),
+                )
+                if hasattr(metadata, "put_new"):
+                    metadata.put_new(manifest_id, manifest)
+                else:
+                    metadata.put(manifest_id, manifest)
+            except Exception:
+                pass
             _index_text(derived_id, payload.get("text", ""))
             if collected_ids is not None:
                 collected_ids.append(derived_id)
@@ -676,7 +700,7 @@ def _derived_text_doc(hit: dict[str, Any], media_id: str, metadata: Any) -> tupl
     return None, None
 
 
-def run_query_without_state(system, query: str) -> dict[str, Any]:
+def run_query_without_state(system, query: str, *, schedule_extract: bool = False) -> dict[str, Any]:
     start_perf = time.perf_counter()
     parser = system.get("time.intent_parser")
     retrieval = system.get("retrieval.strategy")
@@ -780,6 +804,22 @@ def run_query_without_state(system, query: str) -> dict[str, Any]:
         extraction_blocked = True
         extraction_blocked_reason = "disabled"
 
+    scheduled_job_id: str | None = None
+    if schedule_extract and extraction_blocked and candidate_ids and metadata is not None:
+        try:
+            scheduled_job_id = _schedule_extraction_job(
+                metadata,
+                run_id=_source_run_id(results, candidate_ids),
+                candidate_ids=[str(cid) for cid in candidate_ids if cid],
+                time_window=time_window,
+                allow_ocr=bool(allow_ocr),
+                allow_vlm=bool(allow_vlm),
+                blocked_reason=str(extraction_blocked_reason or ""),
+                query=str(query_text or query),
+            )
+        except Exception:
+            scheduled_job_id = None
+
     # META-08: minimal evaluation fields to make missing extraction measurable.
     # Keep this deterministic: compute only from returned results/candidates.
     seen_ids: set[str] = set()
@@ -811,6 +851,7 @@ def run_query_without_state(system, query: str) -> dict[str, Any]:
         "missing_spans_count": int(missing_spans),
         "blocked_extract": bool(extraction_blocked),
         "blocked_reason": str(extraction_blocked_reason or ""),
+        "scheduled_extract_job_id": scheduled_job_id,
         "result_count": int(result_count),
         "candidate_count": int(candidate_count),
         "freshness_newest_ts_utc": newest_ts,
@@ -1229,6 +1270,7 @@ def run_query_without_state(system, query: str) -> dict[str, Any]:
                 "ran": bool(extraction_ran),
                 "blocked": bool(extraction_blocked),
                 "blocked_reason": extraction_blocked_reason,
+                "scheduled_job_id": scheduled_job_id,
                 "require_idle": bool(require_idle),
                 "idle_seconds": idle_seconds,
                 "idle_window_s": idle_window,
@@ -1241,7 +1283,60 @@ def run_query_without_state(system, query: str) -> dict[str, Any]:
             "error": custom_claims_error,
             "debug": custom_claims_debug,
         },
+        "scheduled_extract_job_id": scheduled_job_id,
     }
+
+
+def _source_run_id(results: list[dict[str, Any]], candidate_ids: list[str]) -> str:
+    for item in results:
+        if isinstance(item, dict):
+            rid = str(item.get("record_id") or "")
+            if "/" in rid:
+                return rid.split("/", 1)[0]
+    for rid in candidate_ids:
+        rid = str(rid or "")
+        if "/" in rid:
+            return rid.split("/", 1)[0]
+    return "run"
+
+
+def _schedule_extraction_job(
+    metadata: Any,
+    *,
+    run_id: str,
+    candidate_ids: list[str],
+    time_window: dict[str, Any] | None,
+    allow_ocr: bool,
+    allow_vlm: bool,
+    blocked_reason: str,
+    query: str,
+) -> str:
+    payload = {
+        "schema_version": 1,
+        "record_type": "derived.job.extract",
+        "run_id": str(run_id),
+        "state": "pending",
+        "candidate_ids": list(candidate_ids),
+        "time_window": time_window,
+        "allow_ocr": bool(allow_ocr),
+        "allow_vlm": bool(allow_vlm),
+        "blocked_reason": str(blocked_reason or ""),
+        "query": str(query or ""),
+    }
+    # Deterministic: hash canonical JSON of the scheduling payload.
+    job_hash = sha256_canonical(payload)[:16]
+    record_id = f"{run_id}/derived.job.extract/{job_hash}"
+    try:
+        if metadata.get(record_id) is not None:
+            return record_id
+    except Exception:
+        pass
+    payload["content_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "content_hash"})
+    if hasattr(metadata, "put_new"):
+        metadata.put_new(record_id, payload)
+    else:
+        metadata.put(record_id, payload)
+    return record_id
 
 
 def _should_fallback_state(result: dict[str, Any]) -> bool:
@@ -1268,12 +1363,12 @@ def _merge_state_fallback(state_result: dict[str, Any], fallback: dict[str, Any]
     return merged
 
 
-def run_query(system, query: str) -> dict[str, Any]:
+def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str, Any]:
     state_cfg = system.config.get("processing", {}).get("state_layer", {}) if hasattr(system, "config") else {}
     if isinstance(state_cfg, dict) and bool(state_cfg.get("query_enabled", False)):
         state_result = run_state_query(system, query)
         if _should_fallback_state(state_result):
-            fallback = run_query_without_state(system, query)
+            fallback = run_query_without_state(system, query, schedule_extract=bool(schedule_extract))
             return _merge_state_fallback(state_result, fallback)
         return state_result
-    return run_query_without_state(system, query)
+    return run_query_without_state(system, query, schedule_extract=bool(schedule_extract))

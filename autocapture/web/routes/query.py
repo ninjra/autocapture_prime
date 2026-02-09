@@ -10,11 +10,12 @@ router = APIRouter()
 
 class QueryRequest(BaseModel):
     query: str
+    schedule_extract: bool = False
 
 
 @router.post("/api/query")
 def query(req: QueryRequest, request: Request):
-    return request.app.state.facade.query(req.query)
+    return request.app.state.facade.query(req.query, schedule_extract=bool(req.schedule_extract))
 
 
 @router.post("/api/state/query")

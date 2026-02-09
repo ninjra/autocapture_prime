@@ -34,13 +34,13 @@ def chat(req: ChatRequest):
         gate = PolicyGate(config, sanitizer)
         payload = req.model_dump()
         payload["messages"] = [{"role": "user", "content": prepared_prompt}]
-        decision = gate.enforce("mx.core.llm_openai_compat", payload)
-        if not decision.ok:
-            raise HTTPException(status_code=403, detail=decision.reason)
-        client = EgressClient(gate)
         base_url = config.get("gateway", {}).get("openai_base_url")
         if not base_url:
             raise HTTPException(status_code=400, detail="gateway_base_url_missing")
+        decision = gate.enforce("mx.core.llm_openai_compat", payload, url=str(base_url))
+        if not decision.ok:
+            raise HTTPException(status_code=403, detail=decision.reason)
+        client = EgressClient(gate)
         try:
             resp = client.post(
                 f"{base_url}/v1/chat/completions",

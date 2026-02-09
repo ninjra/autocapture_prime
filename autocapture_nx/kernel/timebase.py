@@ -12,10 +12,15 @@ from datetime import datetime, timezone
 from typing import Any
 
 
+# Keep ZoneInfo as a runtime value (not a static type) so mypy/ruff do not
+# complain about assigning None to a type.
+ZoneInfo: Any
 try:  # Python 3.9+
-    from zoneinfo import ZoneInfo  # type: ignore
+    from zoneinfo import ZoneInfo as _ZoneInfo  # type: ignore
+
+    ZoneInfo = _ZoneInfo
 except Exception:  # pragma: no cover
-    ZoneInfo = None  # type: ignore[assignment]
+    ZoneInfo = None
 
 
 def utc_iso_z(dt: datetime) -> str:
@@ -72,4 +77,3 @@ def normalize_time(
         tzid=tz,
         offset_minutes=tz_offset_minutes(tz, at_utc=base_utc),
     )
-

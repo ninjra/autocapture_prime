@@ -215,7 +215,7 @@ def _collect_timelines(
     window_events: list[tuple[float, str, dict[str, Any]]] = []
     input_summaries: list[tuple[float, float, str]] = []
     cursor_samples: list[tuple[float, str]] = []
-    for record_id in getattr(store, "keys", lambda: [])():
+    for record_id in sorted(getattr(store, "keys", lambda: [])()):
         record = store.get(record_id, {})
         record_type = str(record.get("record_type", ""))
         if record_type == "evidence.window.meta":
@@ -256,7 +256,7 @@ def _scan_metadata(
     candidate_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
-    record_ids = list(getattr(store, "keys", lambda: [])())
+    record_ids = sorted(list(getattr(store, "keys", lambda: [])()))
     if candidate_ids is not None:
         record_ids = [rid for rid in record_ids if rid in candidate_ids]
     for record_id in record_ids:

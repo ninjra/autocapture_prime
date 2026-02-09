@@ -20,6 +20,19 @@ def screensaver_running() -> bool | None:
         user32 = ctypes.windll.user32  # type: ignore[attr-defined]
     except Exception:
         return None
+    try:
+        running = ctypes.c_uint(0)
+        ok = user32.SystemParametersInfoW(
+            SPI_GETSCREENSAVERRUNNING,
+            0,
+            ctypes.byref(running),
+            0,
+        )
+        if not ok:
+            return None
+        return bool(running.value)
+    except Exception:
+        return None
 
 
 def activate_screensaver() -> bool:
@@ -36,16 +49,3 @@ def activate_screensaver() -> bool:
         return bool(ok)
     except Exception:
         return False
-    try:
-        running = ctypes.c_uint(0)
-        ok = user32.SystemParametersInfoW(
-            SPI_GETSCREENSAVERRUNNING,
-            0,
-            ctypes.byref(running),
-            0,
-        )
-        if not ok:
-            return None
-        return bool(running.value)
-    except Exception:
-        return None

@@ -3,7 +3,7 @@ import unittest
 import zipfile
 
 from autocapture_nx.kernel.query import extract_on_demand
-from autocapture_nx.kernel.ids import encode_record_id_component
+from autocapture_nx.kernel.derived_records import derived_text_record_id
 
 
 class _MediaStore:
@@ -60,11 +60,8 @@ class ExtractOnDemandCandidateTests(unittest.TestCase):
 
         processed = extract_on_demand(system, time_window=None, limit=5, allow_ocr=True, allow_vlm=False, candidate_ids=[record_a])
         self.assertEqual(processed, 1)
-        encoded_a = encode_record_id_component(record_a)
-        encoded_b = encode_record_id_component(record_b)
-        provider = encode_record_id_component("ocr.engine")
-        ocr_a = f"run1/derived.text.ocr/{provider}/{encoded_a}"
-        ocr_b = f"run1/derived.text.ocr/{provider}/{encoded_b}"
+        ocr_a = derived_text_record_id(kind="ocr", run_id="run1", provider_id="ocr.engine", source_id=record_a, config={})
+        ocr_b = derived_text_record_id(kind="ocr", run_id="run1", provider_id="ocr.engine", source_id=record_b, config={})
         self.assertIn(ocr_a, metadata.data)
         self.assertNotIn(ocr_b, metadata.data)
 

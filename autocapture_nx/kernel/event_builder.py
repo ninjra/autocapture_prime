@@ -7,10 +7,8 @@ import threading
 from datetime import datetime, timezone
 from typing import Any
 
-from autocapture_nx.kernel.canonical_json import dumps
 from autocapture_nx.kernel.errors import ConfigError
 from autocapture_nx.kernel.evidence import validate_evidence_record
-from autocapture_nx.kernel.hashing import sha256_text
 from autocapture_nx.kernel.ids import prefixed_id
 from autocapture_nx.kernel.policy_snapshot import policy_snapshot_hash, policy_snapshot_payload
 from autocapture_nx.kernel.timebase import normalize_time, utc_iso_z, tz_offset_minutes

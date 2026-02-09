@@ -11,7 +11,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 
 RE_ID_HEADING = re.compile(r"^###\s+([A-Z]{2,6}-\d{2})\b")

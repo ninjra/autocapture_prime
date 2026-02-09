@@ -308,6 +308,13 @@ class UXFacade:
             logger = JsonlLogger.from_config(self._config, name="core")
         except Exception:
             logger = None
+        # OPS-06: always include DB schema/version snapshot without requiring heavy work.
+        try:
+            from autocapture_nx.kernel.db_status import db_status_snapshot
+
+            db_status = db_status_snapshot(self._config)
+        except Exception:
+            db_status = None
         kernel = self._kernel_mgr.kernel()
         if kernel is None:
             kernel = Kernel(self._paths, safe_mode=self._safe_mode)
@@ -338,6 +345,8 @@ class UXFacade:
                 report.setdefault("logs", {})["core_jsonl"] = logger.path
             except Exception:
                 pass
+        if db_status is not None:
+            report["db_status"] = db_status
         return report
 
     def diagnostics_bundle_create(self) -> dict[str, Any]:
@@ -347,6 +356,69 @@ class UXFacade:
         report = self.doctor_report()
         result = create_diagnostics_bundle(config=self._config, doctor_report=report)
         return {"ok": True, "path": result.path, "sha256": result.bundle_sha256, "manifest": result.manifest}
+
+    def self_test(self) -> dict[str, Any]:
+        """OPS-07: low-friction, offline self-test (boot + ledger write + verify)."""
+        import time
+
+        started = time.perf_counter()
+        boot_ok = False
+        plugin_count = 0
+        ledger_head = None
+        error: str | None = None
+        boot_ms = None
+        ledger_ms = None
+        verify_ms = None
+        try:
+            boot_start = time.perf_counter()
+            with self._kernel_mgr.session() as system:
+                boot_ok = system is not None
+                boot_ms = int(round((time.perf_counter() - boot_start) * 1000.0))
+                try:
+                    plugin_count = int(len(getattr(system, "plugins", []) or []))
+                except Exception:
+                    plugin_count = 0
+                # Append a deterministic ledger entry (best-effort; do not fail open).
+                ledger_start = time.perf_counter()
+                try:
+                    builder = system.get("event.builder") if system and hasattr(system, "get") else None
+                    if builder is not None and hasattr(builder, "ledger_entry"):
+                        builder.ledger_entry(
+                            "operator.self_test",
+                            inputs=[],
+                            outputs=[],
+                            payload={"event": "self_test"},
+                        )
+                        try:
+                            ledger_head = builder.ledger_head()
+                        except Exception:
+                            ledger_head = None
+                finally:
+                    ledger_ms = int(round((time.perf_counter() - ledger_start) * 1000.0))
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+
+        verify_start = time.perf_counter()
+        ledger_report = self.verify_ledger()
+        anchors_report = self.verify_anchors()
+        verify_ms = int(round((time.perf_counter() - verify_start) * 1000.0))
+
+        ok = bool(boot_ok) and bool(ledger_report.get("ok")) and bool(anchors_report.get("ok"))
+        return {
+            "ok": ok,
+            "boot_ok": bool(boot_ok),
+            "plugin_count": int(plugin_count),
+            "ledger_head": ledger_head,
+            "ledger": ledger_report,
+            "anchors": anchors_report,
+            "timings_ms": {
+                "boot_ms": boot_ms,
+                "ledger_write_ms": ledger_ms,
+                "verify_ms": verify_ms,
+                "total_ms": int(round((time.perf_counter() - started) * 1000.0)),
+            },
+            "error": error,
+        }
 
     def resolve_citations(self, citations: list[dict[str, Any]]) -> dict[str, Any]:
         with self._kernel_mgr.session() as system:
@@ -359,6 +431,50 @@ class UXFacade:
 
     def config_get(self) -> dict[str, Any]:
         return dict(self._config)
+
+    def config_diff(self) -> dict[str, Any]:
+        """UX-09: deterministic diff viewer (default vs user overrides vs effective)."""
+
+        def _load(path: Path) -> dict[str, Any]:
+            if not path.exists():
+                return {}
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                return {}
+
+        default_cfg = _load(self._paths.default_path)
+        user_cfg = _load(self._paths.user_path)
+        effective = dict(self._config)
+
+        def _walk(prefix: str, a: Any, b: Any, out: list[dict[str, Any]]) -> None:
+            if isinstance(a, dict) and isinstance(b, dict):
+                keys = sorted({*a.keys(), *b.keys()}, key=lambda k: str(k))
+                for k in keys:
+                    kp = f"{prefix}.{k}" if prefix else str(k)
+                    _walk(kp, a.get(k, _MISSING), b.get(k, _MISSING), out)
+                return
+            if a is _MISSING and b is _MISSING:
+                return
+            if a == b:
+                return
+            out.append({"path": prefix, "from": a if a is not _MISSING else None, "to": b if b is not _MISSING else None})
+
+        diff_default_to_effective: list[dict[str, Any]] = []
+        _walk("", default_cfg, effective, diff_default_to_effective)
+        diff_default_to_effective.sort(key=lambda r: str(r.get("path") or ""))
+
+        diff_user_to_effective: list[dict[str, Any]] = []
+        _walk("", user_cfg, effective, diff_user_to_effective)
+        diff_user_to_effective.sort(key=lambda r: str(r.get("path") or ""))
+
+        return {
+            "ok": True,
+            "default_path": str(self._paths.default_path),
+            "user_path": str(self._paths.user_path),
+            "diff_default_to_effective": diff_default_to_effective,
+            "diff_user_to_effective": diff_user_to_effective,
+        }
 
     def _now_utc(self) -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -633,15 +749,163 @@ class UXFacade:
         manager = PluginManager(self._config, safe_mode=self._safe_mode)
         return manager.approve_hashes()
 
+    def plugins_plan(self) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        return manager.plugins_plan()
+
+    def plugins_apply(self, plan_hash: str, *, enable: list[str] | None = None, disable: list[str] | None = None) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        result = manager.plugins_apply(plan_hash=str(plan_hash), enable=enable, disable=disable)
+        if bool(result.get("ok")):
+            self.reload_config()
+        return result
+
+    def plugins_install_local(self, path: str, *, dry_run: bool = True) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        result = manager.install_local(path, dry_run=dry_run)
+        # Installing updates config + lockfile; reload effective config.
+        if bool(result.get("ok")) and not dry_run:
+            self.reload_config()
+        return result
+
+    def plugins_lock_snapshot(self, reason: str) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        return manager.lockfile_snapshot(reason=str(reason))
+
+    def plugins_lock_rollback(self, snapshot_path: str) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        result = manager.lockfile_rollback(snapshot_path)
+        if bool(result.get("ok")):
+            self.reload_config()
+        return result
+
+    def plugins_lifecycle_state(self, plugin_id: str) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        return manager.lifecycle_state(plugin_id)
+
+    def plugins_permissions_digest(self, plugin_id: str) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        return manager.permissions_digest(plugin_id)
+
+    def plugins_approve_permissions(self, plugin_id: str, accept_digest: str, *, confirm: str = "") -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        result = manager.approve_permissions_confirm(plugin_id, accept_digest=str(accept_digest), confirm=str(confirm))
+        if bool(result.get("ok")):
+            self.reload_config()
+        return result
+
+    def plugins_lock_diff(self, a_path: str, b_path: str) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        return manager.lockfile_diff(str(a_path), str(b_path))
+
+    def plugins_update_lock(self, plugin_id: str, *, reason: str = "update") -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        result = manager.update_lock_entry(plugin_id, reason=str(reason))
+        if bool(result.get("ok")):
+            self.reload_config()
+        return result
+
+    def plugins_quarantine(self, plugin_id: str, reason: str) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        result = manager.quarantine(plugin_id, reason=str(reason))
+        if bool(result.get("ok")):
+            self.reload_config()
+        return result
+
+    def plugins_unquarantine(self, plugin_id: str) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        result = manager.unquarantine(plugin_id)
+        if bool(result.get("ok")):
+            self.reload_config()
+        return result
+
+    def plugins_logs(self, plugin_id: str, *, limit: int = 80) -> dict[str, Any]:
+        # EXT-09: return per-plugin host_runner logs (best-effort, sanitized).
+        limit = max(1, min(400, int(limit or 80)))
+        data_dir = str(self._config.get("storage", {}).get("data_dir", "data"))
+        run_id = str(self._config.get("runtime", {}).get("run_id") or "")
+        if not run_id:
+            run_id = str(self.status().get("run_id") or "run")
+        path = Path(data_dir) / "runs" / run_id / f"plugin_host_{plugin_id}.log"
+        if not path.exists():
+            return {"ok": True, "plugin_id": plugin_id, "path": str(path), "lines": [], "missing": True}
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        tail = lines[-limit:]
+        redacted: list[str] = []
+        for line in tail:
+            text = str(line)
+            if "OPENAI_API_KEY" in text or "Authorization:" in text:
+                continue
+            redacted.append(text[:2000])
+        return {"ok": True, "plugin_id": plugin_id, "path": str(path), "lines": redacted, "missing": False}
+
+    def plugins_capabilities_matrix(self) -> dict[str, Any]:
+        # EXT-12: stable capabilities matrix derived from manifests.
+        plan = self.plugins_plan()
+        return {"ok": True, "capabilities": plan.get("capabilities", {}), "conflicts": plan.get("conflicts", {})}
+
     def plugins_reload(self, plugin_ids: list[str] | None = None) -> dict[str, Any]:
         kernel = self._kernel_mgr.kernel()
         if kernel is None:
             raise RuntimeError("kernel_not_running")
         return kernel.reload_plugins(plugin_ids=plugin_ids)
 
-    def query(self, text: str) -> dict[str, Any]:
+    def operator_reindex(self) -> dict[str, Any]:
+        from autocapture_nx.kernel.operator_ledger import record_operator_action
+
+        return record_operator_action(config=self._config, action="reindex", payload={"scheduled": True})
+
+    def operator_vacuum(self, *, include_state: bool = True) -> dict[str, Any]:
+        import sqlite3
+
+        from autocapture_nx.kernel.operator_ledger import record_operator_action
+
+        storage = self._config.get("storage", {}) if isinstance(self._config, dict) else {}
+        paths = [
+            ("metadata", storage.get("metadata_path", "data/metadata.db")),
+            ("lexical", storage.get("lexical_path", "data/lexical.db")),
+            ("vector", storage.get("vector_path", "data/vector.db")),
+        ]
+        if include_state:
+            paths.extend(
+                [
+                    ("state_tape", storage.get("state_tape_path", "data/state/state_tape.db")),
+                    ("state_vector", storage.get("state_vector_path", "data/state/state_vector.db")),
+                ]
+            )
+        vacuumed: list[str] = []
+        for _name, raw in paths:
+            if not raw:
+                continue
+            try:
+                con = sqlite3.connect(str(raw))
+                try:
+                    con.execute("VACUUM")
+                    con.commit()
+                finally:
+                    con.close()
+                vacuumed.append(str(raw))
+            except Exception:
+                continue
+        return record_operator_action(config=self._config, action="vacuum", payload={"vacuumed": vacuumed})
+
+    def operator_quarantine(self, plugin_id: str, *, reason: str) -> dict[str, Any]:
+        from autocapture_nx.kernel.operator_ledger import record_operator_action
+
+        result = self.plugins_quarantine(plugin_id, reason)
+        record_operator_action(config=self._config, action="quarantine", payload={"plugin_id": plugin_id, "reason": reason})
+        return result
+
+    def operator_rollback_locks(self, snapshot_path: str) -> dict[str, Any]:
+        from autocapture_nx.kernel.operator_ledger import record_operator_action
+
+        result = self.plugins_lock_rollback(snapshot_path)
+        record_operator_action(config=self._config, action="rollback-locks", payload={"snapshot_path": snapshot_path})
+        return result
+
+    def query(self, text: str, *, schedule_extract: bool = False) -> dict[str, Any]:
         with self._kernel_mgr.session() as system:
-            return run_query(system, text)
+            return run_query(system, text, schedule_extract=bool(schedule_extract))
 
     def state_query(self, text: str) -> dict[str, Any]:
         from autocapture_nx.kernel.query import run_state_query
@@ -746,6 +1010,36 @@ class UXFacade:
         processing_state = self._processing_state_payload(system)
         telemetry = telemetry_snapshot()
         slo = compute_slo_summary(self._config, telemetry, capture_status, processing_state)
+        # PERF-08: resource snapshot + governor state (best-effort; do not boot kernel).
+        resources = None
+        governor = None
+        try:
+            from autocapture.runtime.resources import sample_resources
+
+            snap = sample_resources()
+            resources = {
+                "cpu_utilization": snap.cpu_utilization,
+                "ram_utilization": snap.ram_utilization,
+            }
+        except Exception:
+            resources = None
+        if system is not None and hasattr(system, "has") and system.has("runtime.governor"):
+            try:
+                gov = system.get("runtime.governor")
+            except Exception:
+                gov = None
+            if gov is not None:
+                try:
+                    # Avoid expensive signal collection: expose budget snapshot and preempt state only.
+                    bs = gov.budget_snapshot() if hasattr(gov, "budget_snapshot") else None
+                    governor = {
+                        "idle_window_s": getattr(gov, "idle_window_s", None),
+                        "suspend_workers": getattr(gov, "suspend_workers", None),
+                        "budget": asdict(bs) if bs is not None else None,
+                        "should_preempt": bool(gov.should_preempt()) if hasattr(gov, "should_preempt") else None,
+                    }
+                except Exception:
+                    governor = None
         return {
             "run_id": run_id,
             "ledger_head": ledger_head,
@@ -760,8 +1054,47 @@ class UXFacade:
             "capture_status": capture_status,
             "processing_state": processing_state,
             "slo": slo,
+            "resources": resources,
+            "governor": governor,
             "kernel_ready": system is not None,
             "kernel_error": kernel_error,
+        }
+
+    def run_detail(self) -> dict[str, Any]:
+        """UX-03: run/job detail payload with provenance anchors."""
+        system = self._kernel_mgr.system()
+        builder = system.get("event.builder") if system and hasattr(system, "get") else None
+        run_id = ""
+        ledger_head = None
+        last_anchor = None
+        try:
+            run_id = builder.run_id if builder is not None else ""
+        except Exception:
+            run_id = ""
+        try:
+            ledger_head = builder.ledger_head() if builder is not None else None
+        except Exception:
+            ledger_head = None
+        try:
+            last_anchor = builder.last_anchor() if builder is not None and hasattr(builder, "last_anchor") else None
+        except Exception:
+            last_anchor = None
+        lockfile = None
+        try:
+            manager = PluginManager(self._config, safe_mode=self._safe_mode)
+            lock_path = manager._lockfile_path()  # noqa: SLF001
+            from autocapture_nx.kernel.hashing import sha256_file
+
+            lockfile = {"path": str(lock_path), "sha256": sha256_file(lock_path) if lock_path.exists() else None}
+        except Exception:
+            lockfile = None
+        return {
+            "ok": True,
+            "run_id": run_id,
+            "data_dir": str(self._config.get("storage", {}).get("data_dir", "data")),
+            "ledger_head": ledger_head,
+            "last_anchor": last_anchor,
+            "lockfile": lockfile,
         }
 
     def _capture_status_payload(self) -> dict[str, Any]:
@@ -1021,6 +1354,29 @@ class UXFacade:
                 self._pause_timer = timer
                 timer.start()
         return {"ok": True, "paused_until_utc": self._paused_until_utc}
+
+    def run_resume(self) -> dict[str, Any]:
+        """UX-02: idempotent resume (do not duplicate capture.start ledger entries)."""
+        if not self._capture_controls_enabled():
+            return {"ok": False, "error": "capture_controls_disabled"}
+        with self._pause_lock:
+            self._clear_pause_locked()
+        if self._run_active:
+            return {"ok": True, "running": True, "resumed": False}
+        self._start_components()
+        with self._kernel_mgr.session() as system:
+            builder = system.get("event.builder") if system and hasattr(system, "get") else None
+            if builder is not None and hasattr(builder, "ledger_entry"):
+                try:
+                    builder.ledger_entry(
+                        "operator.capture.resume",
+                        inputs=[],
+                        outputs=[],
+                        payload={"event": "capture.resume"},
+                    )
+                except Exception:
+                    pass
+        return {"ok": True, "running": True, "resumed": True}
 
     def scheduler_status(self) -> dict[str, Any]:
         with self._kernel_mgr.session() as system:

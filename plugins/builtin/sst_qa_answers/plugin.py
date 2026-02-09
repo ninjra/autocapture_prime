@@ -188,6 +188,15 @@ def _extract_vdi_time(tokens: list[dict[str, Any]]) -> tuple[str | None, tuple[i
     if not candidates:
         # Fallback: parse "Chill Instrumental <Artist> -<Title>" from the token stream
         # without relying on line grouping (OCR y-jitter can break line bucketing).
+        def _clean(word: str) -> str:
+            w = str(word or "").strip()
+            if not w:
+                return ""
+            # Keep the token stream readable for regex parsing; avoid inventing text.
+            w = w.replace("\u2019", "'")
+            w = re.sub(r"[^A-Za-z0-9&\\-–—− ]+", "", w)
+            return w.strip()
+
         approx = " ".join(_clean(t) for _bbox, t in items if _clean(t))
         m = re.search(
             r"Chill\\s+Instrumental\\s+"
@@ -818,14 +827,12 @@ def _extract_now_playing(tokens: list[dict[str, Any]]) -> tuple[str | None, tupl
             # Delimiter between artist and title can be a standalone dash token or
             # a dash-prefixed word (e.g. "-Jung").
             title_first = None
-            title_bbox = bbox
             if w and w[0] in dashes and len(w) > 2 and w[1].isalpha():
                 title_first = w[1:]
             elif w in dashes and (idx + 1) < len(cleaned):
                 _bb2, _w2 = cleaned[idx + 1]
                 if _w2 and _title_ok(_w2):
                     title_first = _w2
-                    title_bbox = _bb2
             if not title_first:
                 continue
             if not _title_ok(title_first):

@@ -31,7 +31,7 @@ class EventBuilderTests(unittest.TestCase):
         journal = _Journal()
         ledger = _Ledger()
         builder = EventBuilder(_config(), journal, ledger)
-        with patch("autocapture_nx.kernel.event_builder.sha256_text", side_effect=["h1", "h2"]) as mock_hash:
+        with patch("autocapture_nx.kernel.event_builder.policy_snapshot_hash", side_effect=["h1", "h2"]) as mock_hash:
             first = builder.policy_snapshot_hash()
             builder._config["runtime"]["timezone"] = "UTC+1"
             second = builder.policy_snapshot_hash()
@@ -41,7 +41,7 @@ class EventBuilderTests(unittest.TestCase):
     def test_ledger_entry_prefix_and_policy_hash(self) -> None:
         journal = _Journal()
         ledger = _Ledger()
-        with patch("autocapture_nx.kernel.event_builder.sha256_text", return_value="policyhash"):
+        with patch("autocapture_nx.kernel.event_builder.policy_snapshot_hash", return_value="policyhash"):
             builder = EventBuilder(_config(), journal, ledger)
             ledger_hash = builder.ledger_entry("capture", inputs=[], outputs=["out"])
         self.assertEqual(ledger_hash, "hash")

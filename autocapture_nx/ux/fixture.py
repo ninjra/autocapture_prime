@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from dataclasses import dataclass, asdict, is_dataclass
@@ -63,14 +64,17 @@ def build_user_config(template_path: str | Path, *, frames_dir: Path, max_frames
         runtime = template.setdefault("runtime", {})
         if isinstance(runtime, dict):
             runtime["run_id"] = str(run_id)
-    # Fixture runs must be WSL-stable. Prefer subprocess hosting so a single
-    # plugin import/init can't hang the whole kernel process. Keep caps low to
-    # avoid WSL OOM spikes.
+    # Fixture runs must be WSL-stable. On WSL we strongly prefer in-proc hosting
+    # to avoid spawning many host_runner processes (each can be hundreds of MB).
+    # Keep caps low either way to avoid OOM spikes.
     plugins_cfg = template.setdefault("plugins", {})
     if isinstance(plugins_cfg, dict):
         hosting = plugins_cfg.setdefault("hosting", {})
         if isinstance(hosting, dict):
-            hosting["mode"] = "subprocess"
+            is_wsl = bool(os.getenv("WSL_INTEROP") or os.getenv("WSL_DISTRO_NAME"))
+            hosting["mode"] = "inproc" if is_wsl else "subprocess"
+            # Make in-proc usage explicit for traceability (EXT-07).
+            hosting.setdefault("inproc_allow_all", True)
             hosting.setdefault("subprocess_spawn_concurrency", 1)
             hosting.setdefault("subprocess_max_hosts", 2)
             hosting.setdefault("subprocess_idle_ttl_s", 10.0)
@@ -127,7 +131,9 @@ def collect_auto_queries(
         if not isinstance(record, dict):
             continue
         record_type = str(record.get("record_type", ""))
-        if record_type.startswith("derived.sst.text"):
+        # Auto-queries must work even when SST is disabled (OCR-only fixtures).
+        # Treat any derived text layer (SST/OCR/VLM/etc) as a token source.
+        if record_type.startswith("derived.sst.text") or record_type.startswith("derived.text."):
             text = str(record.get("text", "") or "")
             tokens.extend(_tokenize(text, casefold=casefold))
         if record_type == "derived.sst.state":

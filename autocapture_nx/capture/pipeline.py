@@ -1439,6 +1439,7 @@ class CapturePipeline:
         fps_effective = _safe_div(artifact.frame_count * 1000, artifact.duration_ms or 1)
         run_id = str(self._config.get("runtime", {}).get("run_id", ""))
         metadata = {
+            "schema_version": 1,
             "record_type": "evidence.capture.segment",
             "run_id": run_id,
             "segment_id": artifact.segment_id,

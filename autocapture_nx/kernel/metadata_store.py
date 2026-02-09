@@ -134,6 +134,7 @@ def build_unavailable_record(
     details: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
+        "schema_version": 1,
         "record_type": "evidence.capture.unavailable",
         "run_id": run_id,
         "ts_utc": ts_utc,

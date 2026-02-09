@@ -43,7 +43,10 @@ class KeyRotationTests(unittest.TestCase):
             system = kernel.boot()
             try:
                 store = system.get("storage.metadata")
-                store.put("rec1", {"record_type": "derived.test", "run_id": "run1", "content_hash": "hash", "value": 123})
+                store.put(
+                    "rec1",
+                    {"schema_version": 1, "record_type": "derived.test", "run_id": "run1", "content_hash": "hash", "value": 123},
+                )
                 self.assertEqual(store.get("rec1")["value"], 123)
                 rotate_keys(system)
                 self.assertEqual(store.get("rec1")["value"], 123)

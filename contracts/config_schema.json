@@ -1156,6 +1156,9 @@
               },
               "type": "array"
             },
+            "inproc_allow_all": {
+              "type": "boolean"
+            },
             "inproc_justifications": {
               "additionalProperties": {
                 "type": "string"

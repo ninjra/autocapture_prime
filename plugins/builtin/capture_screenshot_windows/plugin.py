@@ -763,7 +763,6 @@ def _store_job_overflow(
 
 
 def _encode_and_build(job: dict[str, Any], *, event_builder: Any) -> tuple[bytes, dict[str, Any], int, int]:
-    record_id = str(job.get("record_id") or "")
     run_id = str(job.get("run_id") or "")
     ts_utc = str(job.get("ts_utc") or "")
     monitor_index = int(job.get("monitor_index") or 0)

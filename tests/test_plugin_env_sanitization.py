@@ -33,8 +33,9 @@ def _write_env_plugin(root: Path, plugin_id: str) -> None:
         "version": "0.1.0",
         "enabled": True,
         "entrypoints": [
-            {"kind": "plugin", "id": "main", "path": "plugin.py", "callable": "create_plugin"}
+            {"kind": "env.cap", "id": "main", "path": "plugin.py", "callable": "create_plugin"}
         ],
+        "provides": ["env.cap"],
         "permissions": {"filesystem": "none", "gpu": False, "raw_input": False, "network": False},
         "required_capabilities": [],
         "compat": {"requires_kernel": ">=0.0.0", "requires_schema_versions": [1]},
@@ -46,6 +47,10 @@ def _write_env_plugin(root: Path, plugin_id: str) -> None:
 
 class EnvSanitizationTests(unittest.TestCase):
     def test_env_is_sanitized(self) -> None:
+        # MOD-021 low-resource mode forces in-proc hosting for WSL stability; in that
+        # mode we intentionally avoid spawning subprocess plugin hosts.
+        if os.getenv("AUTOCAPTURE_PLUGINS_HOSTING_MODE", "").strip().lower() == "inproc":
+            self.skipTest("subprocess hosting disabled in this environment")
         with tempfile.TemporaryDirectory(dir=".") as tmp:
             root = Path(tmp)
             plugin_id = "test.env.sanitize"

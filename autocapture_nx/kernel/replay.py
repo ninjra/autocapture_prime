@@ -46,7 +46,13 @@ def replay_bundle(path: str | Path, *, keyring: Any | None = None) -> ReplayRepo
         _read_json(zf, "manifest.json")
         sig_result = verify_proof_bundle(path, keyring=keyring)
         if not sig_result.get("ok"):
-            errors.append(f"bundle_signature_invalid:{sig_result.get('error')}")
+            # If no keyring is available, we cannot verify signatures; treat as a warning
+            # for local/dev replay while still surfacing the condition.
+            msg = f"bundle_signature_invalid:{sig_result.get('error')}"
+            if keyring is None:
+                warnings.append(msg)
+            else:
+                errors.append(msg)
         metadata_lines = _read_text(zf, "metadata.jsonl").splitlines()
         ledger_text = _read_text(zf, "ledger.ndjson")
         anchor_text = _read_text(zf, "anchors.ndjson")

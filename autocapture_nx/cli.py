@@ -26,6 +26,10 @@ def _print_json(data: object) -> None:
 
 def cmd_doctor(args: argparse.Namespace) -> int:
     facade = create_facade(safe_mode=args.safe_mode)
+    if getattr(args, "self_test", False):
+        result = facade.self_test()
+        _print_json(result)
+        return 0 if bool(result.get("ok")) else 2
     report = facade.doctor_report()
     if getattr(args, "bundle", False):
         bundle = facade.diagnostics_bundle_create()
@@ -76,6 +80,123 @@ def cmd_plugins_approve(_args: argparse.Namespace) -> int:
     facade.plugins_approve()
     print("Plugin lockfile updated")
     return 0
+
+
+def cmd_plugins_plan(_args: argparse.Namespace) -> int:
+    facade = create_facade()
+    _print_json(facade.plugins_plan())
+    return 0
+
+
+def cmd_plugins_capabilities(_args: argparse.Namespace) -> int:
+    facade = create_facade()
+    _print_json(facade.plugins_capabilities_matrix())
+    return 0
+
+
+def cmd_plugins_install(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    dry_run = not bool(getattr(args, "apply", False))
+    result = facade.plugins_install_local(args.path, dry_run=dry_run)
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_plugins_lock_snapshot(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.plugins_lock_snapshot(str(args.reason))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_plugins_lock_rollback(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.plugins_lock_rollback(str(args.snapshot_path))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_plugins_lifecycle(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.plugins_lifecycle_state(str(args.plugin_id))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_plugins_permissions(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.plugins_permissions_digest(str(args.plugin_id))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_plugins_permissions_approve(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.plugins_approve_permissions(
+        str(args.plugin_id),
+        str(args.accept_digest),
+        confirm=str(getattr(args, "confirm", "") or ""),
+    )
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_plugins_logs(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.plugins_logs(str(args.plugin_id), limit=int(args.limit))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_plugins_apply(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    enable = list(getattr(args, "enable", []) or [])
+    disable = list(getattr(args, "disable", []) or [])
+    result = facade.plugins_apply(str(args.plan_hash), enable=enable, disable=disable)
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_plugins_lock_diff(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.plugins_lock_diff(str(args.a_path), str(args.b_path))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_plugins_lock_update(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.plugins_update_lock(str(args.plugin_id), reason=str(args.reason))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_operator_reindex(_args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.operator_reindex()
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_operator_vacuum(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.operator_vacuum(include_state=bool(getattr(args, "include_state", True)))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_operator_quarantine(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.operator_quarantine(str(args.plugin_id), reason=str(args.reason))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_operator_rollback_locks(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.operator_rollback_locks(str(args.snapshot_path))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
 
 
 def cmd_plugins_verify_defaults(_args: argparse.Namespace) -> int:
@@ -202,7 +323,8 @@ def cmd_run(args: argparse.Namespace) -> int:
                 except Exception:
                     result = None
                 if isinstance(result, dict):
-                    summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+                    summary_raw = result.get("summary")
+                    summary: dict[str, Any] = summary_raw if isinstance(summary_raw, dict) else {}
                     code = str(summary.get("code") or "")
                     msg = str(summary.get("message") or "")
                     print(f"[status] code={code} message={msg[:120]}")
@@ -756,6 +878,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = sub.add_parser("doctor")
     doctor.add_argument("--bundle", action="store_true", help="Create a diagnostics bundle zip")
+    doctor.add_argument("--self-test", action="store_true", help="Run a lightweight offline self-test")
     doctor.set_defaults(func=cmd_doctor)
 
     cfg = sub.add_parser("config")
@@ -774,8 +897,71 @@ def build_parser() -> argparse.ArgumentParser:
     plugins_list.set_defaults(func=cmd_plugins_list)
     plugins_approve = plugins_sub.add_parser("approve")
     plugins_approve.set_defaults(func=cmd_plugins_approve)
+    plugins_plan = plugins_sub.add_parser("plan")
+    plugins_plan.set_defaults(func=cmd_plugins_plan)
+    plugins_caps = plugins_sub.add_parser("capabilities")
+    plugins_caps.set_defaults(func=cmd_plugins_capabilities)
+    plugins_install = plugins_sub.add_parser("install")
+    plugins_install.add_argument("path")
+    plugins_install.add_argument("--apply", action="store_true", default=False, help="Apply install (default is dry-run)")
+    plugins_install.set_defaults(func=cmd_plugins_install)
+    plugins_lock = plugins_sub.add_parser("lock")
+    plugins_lock_sub = plugins_lock.add_subparsers(dest="lock_cmd", required=True)
+    plugins_lock_snapshot = plugins_lock_sub.add_parser("snapshot")
+    plugins_lock_snapshot.add_argument("--reason", default="snapshot")
+    plugins_lock_snapshot.set_defaults(func=cmd_plugins_lock_snapshot)
+    plugins_lock_rollback = plugins_lock_sub.add_parser("rollback")
+    plugins_lock_rollback.add_argument("snapshot_path")
+    plugins_lock_rollback.set_defaults(func=cmd_plugins_lock_rollback)
+    plugins_lock_diff = plugins_lock_sub.add_parser("diff")
+    plugins_lock_diff.add_argument("a_path")
+    plugins_lock_diff.add_argument("b_path")
+    plugins_lock_diff.set_defaults(func=cmd_plugins_lock_diff)
+    plugins_lock_update = plugins_lock_sub.add_parser("update")
+    plugins_lock_update.add_argument("plugin_id")
+    plugins_lock_update.add_argument("--reason", default="update")
+    plugins_lock_update.set_defaults(func=cmd_plugins_lock_update)
+    plugins_lifecycle = plugins_sub.add_parser("lifecycle")
+    plugins_lifecycle.add_argument("plugin_id")
+    plugins_lifecycle.set_defaults(func=cmd_plugins_lifecycle)
+    plugins_permissions = plugins_sub.add_parser("permissions")
+    plugins_permissions.add_argument("plugin_id")
+    plugins_permissions.set_defaults(func=cmd_plugins_permissions)
+    plugins_permissions_approve = plugins_sub.add_parser("approve-permissions")
+    plugins_permissions_approve.add_argument("plugin_id")
+    plugins_permissions_approve.add_argument("--accept-digest", required=True)
+    plugins_permissions_approve.add_argument(
+        "--confirm",
+        default="",
+        help="If required, pass the exact confirmation string returned in the approval error (e.g. APPROVE:<plugin_id>).",
+    )
+    plugins_permissions_approve.set_defaults(func=cmd_plugins_permissions_approve)
+    plugins_apply = plugins_sub.add_parser("apply")
+    plugins_apply.add_argument("--plan-hash", required=True)
+    plugins_apply.add_argument("--enable", action="append", default=[], help="Plugin id to enable (repeatable).")
+    plugins_apply.add_argument("--disable", action="append", default=[], help="Plugin id to disable (repeatable).")
+    plugins_apply.set_defaults(func=cmd_plugins_apply)
+    plugins_logs = plugins_sub.add_parser("logs")
+    plugins_logs.add_argument("plugin_id")
+    plugins_logs.add_argument("--limit", type=int, default=80)
+    plugins_logs.set_defaults(func=cmd_plugins_logs)
     plugins_verify = plugins_sub.add_parser("verify-defaults")
     plugins_verify.set_defaults(func=cmd_plugins_verify_defaults)
+
+    operator = sub.add_parser("operator")
+    operator_sub = operator.add_subparsers(dest="operator_cmd", required=True)
+    op_reindex = operator_sub.add_parser("reindex")
+    op_reindex.set_defaults(func=cmd_operator_reindex)
+    op_vacuum = operator_sub.add_parser("vacuum")
+    op_vacuum.add_argument("--include-state", action=argparse.BooleanOptionalAction, default=True)
+    op_vacuum.set_defaults(func=cmd_operator_vacuum)
+    op_quarantine = operator_sub.add_parser("quarantine")
+    op_quarantine.add_argument("plugin_id")
+    op_quarantine.add_argument("--reason", default="operator_quarantine")
+    op_quarantine.set_defaults(func=cmd_operator_quarantine)
+    op_rollback = operator_sub.add_parser("rollback-locks")
+    op_rollback.add_argument("snapshot_path")
+    op_rollback.set_defaults(func=cmd_operator_rollback_locks)
 
     consent = sub.add_parser("consent")
     consent_sub = consent.add_subparsers(dest="consent_cmd", required=True)

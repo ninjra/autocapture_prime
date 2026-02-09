@@ -8,9 +8,9 @@ from autocapture.core.hashing import hash_text, normalize_text
 from autocapture.indexing.lexical import LexicalIndex
 from autocapture_nx.kernel.hashing import sha256_canonical
 from autocapture_nx.kernel.query import extract_on_demand
-from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.plugin_system.api import PluginContext
 from plugins.builtin.retrieval_basic.plugin import RetrievalStrategy
+from autocapture_nx.kernel.derived_records import derived_text_record_id
 
 
 class _MediaStore:
@@ -48,6 +48,7 @@ class QueryDerivedRecordTests(unittest.TestCase):
         metadata = _MetadataStore()
         record_id = "run1/segment/0"
         evidence = {
+            "schema_version": 1,
             "record_type": "evidence.capture.segment",
             "run_id": "run1",
             "segment_id": "seg0",
@@ -77,11 +78,20 @@ class QueryDerivedRecordTests(unittest.TestCase):
         processed = extract_on_demand(system, time_window=None, limit=2)
         self.assertEqual(processed, 2)
         self.assertNotIn("text", metadata.get(record_id))
-        encoded = encode_record_id_component(record_id)
-        vlm_provider = encode_record_id_component("vision.extractor")
-        ocr_provider = encode_record_id_component("ocr.engine")
-        vlm_id = f"run1/derived.text.vlm/{vlm_provider}/{encoded}"
-        ocr_id = f"run1/derived.text.ocr/{ocr_provider}/{encoded}"
+        vlm_id = derived_text_record_id(
+            kind="vlm",
+            run_id="run1",
+            provider_id="vision.extractor",
+            source_id=record_id,
+            config={},
+        )
+        ocr_id = derived_text_record_id(
+            kind="ocr",
+            run_id="run1",
+            provider_id="ocr.engine",
+            source_id=record_id,
+            config={},
+        )
         derived_vlm = metadata.get(vlm_id)
         derived_ocr = metadata.get(ocr_id)
         self.assertEqual(derived_vlm["record_type"], "derived.text.vlm")
@@ -98,6 +108,7 @@ class QueryDerivedRecordTests(unittest.TestCase):
             metadata = _MetadataStore()
             record_id = "run1/segment/1"
             evidence = {
+                "schema_version": 1,
                 "record_type": "evidence.capture.segment",
                 "run_id": "run1",
                 "segment_id": "seg1",
@@ -111,10 +122,15 @@ class QueryDerivedRecordTests(unittest.TestCase):
             }
             evidence["payload_hash"] = sha256_canonical({k: v for k, v in evidence.items() if k != "payload_hash"})
             metadata.put(record_id, evidence)
-            encoded = encode_record_id_component(record_id)
-            vlm_provider = encode_record_id_component("vision.extractor")
-            derived_id = f"run1/derived.text.vlm/{vlm_provider}/{encoded}"
+            derived_id = derived_text_record_id(
+                kind="vlm",
+                run_id="run1",
+                provider_id="vision.extractor",
+                source_id=record_id,
+                config={},
+            )
             derived = {
+                "schema_version": 1,
                 "record_type": "derived.text.vlm",
                 "run_id": "run1",
                 "ts_utc": "2024-01-02T00:00:00+00:00",

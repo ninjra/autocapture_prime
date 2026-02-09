@@ -39,6 +39,14 @@
             <p class="label">Disk</p>
             <p id="captureBannerDisk" class="badge off">—</p>
           </div>
+          <div class="status-item">
+            <p class="label">CPU</p>
+            <p id="captureBannerCpu" class="badge off">—</p>
+          </div>
+          <div class="status-item">
+            <p class="label">RAM</p>
+            <p id="captureBannerRam" class="badge off">—</p>
+          </div>
         </div>
       </header>
 
@@ -568,6 +576,10 @@
               <div class="card-header">
                 <h2>Query</h2>
                 <button id="runQuery">Ask</button>
+              </div>
+              <div id="queryStatus" class="status-line"></div>
+              <div class="actions">
+                <button id="queryScheduleExtract" class="ghost" disabled>Schedule extraction now</button>
               </div>
               <textarea id="queryInput" placeholder="Ask a question about your captured timeline..."></textarea>
               <div id="queryOutput" class="output"></div>

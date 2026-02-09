@@ -1,5 +1,7 @@
 # User Surface (Pinned Contract)
 
+**Core runtime**: `autocapture_nx` (the `autocapture` CLI is the pinned user-facing entrypoint that bootstraps NX).
+
 ## CLI
 The baseline user-visible interface is the `autocapture` CLI.
 

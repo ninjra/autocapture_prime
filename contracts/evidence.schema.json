@@ -1,8 +1,9 @@
 {
   "type": "object",
   "additionalProperties": true,
-  "required": ["record_type", "run_id"],
+  "required": ["schema_version", "record_type", "run_id"],
   "properties": {
+    "schema_version": {"type": "integer"},
     "record_type": {"type": "string"},
     "run_id": {"type": "string"},
     "ts_utc": {"type": "string"},
@@ -42,6 +43,8 @@
     "child_id": {"type": "string"},
     "relation_type": {"type": "string"},
     "artifact_id": {"type": "string"},
+    "artifact_sha256": {"type": "string"},
+    "derived_from": {"type": "object"},
     "kind": {"type": "string"},
     "created_ts_ms": {"type": "integer"},
     "extractor": {"type": "object"},
@@ -117,6 +120,16 @@
       "type": "object",
       "properties": {"record_type": {"enum": ["derived.graph.edge"]}},
       "required": ["parent_id", "child_id", "relation_type", "span_ref", "method"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["derived.job.extract"]}},
+      "required": ["state", "candidate_ids", "allow_ocr", "allow_vlm"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["derived.artifact.manifest"]}},
+      "required": ["artifact_id", "artifact_sha256", "derived_from"]
     },
     {
       "type": "object",

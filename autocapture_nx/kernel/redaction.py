@@ -17,6 +17,17 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("private_key", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")),
 ]
 
+_SENSITIVE_KEYS = {
+    # Keep this tight and explicit to avoid redacting non-secret config values
+    # like "token_format" or "token_scope".
+    "openai_api_key",
+    "api_key",
+    "access_token",
+    "refresh_token",
+    "client_secret",
+    "authorization",
+}
+
 
 def redact_text(value: str) -> str:
     text = str(value or "")
@@ -37,5 +48,15 @@ def redact_obj(obj: Any) -> Any:
     if isinstance(obj, tuple):
         return [redact_obj(v) for v in obj]
     if isinstance(obj, dict):
-        return {k: redact_obj(v) for k, v in obj.items()}
+        redacted: dict[Any, Any] = {}
+        for k, v in obj.items():
+            try:
+                key = str(k).casefold()
+            except Exception:
+                key = ""
+            if key in _SENSITIVE_KEYS:
+                redacted[k] = "[REDACTED]"
+            else:
+                redacted[k] = redact_obj(v)
+        return redacted
     return redact_text(str(obj))

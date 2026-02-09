@@ -102,17 +102,37 @@ def export_proof_bundle(
         blob_manifest: dict[str, dict[str, Any]] = {}
         blob_count = 0
         for record_id in evidence_list:
-            try:
-                data = media.get(record_id)
-            except Exception:
-                data = None
-            if not data:
-                warnings.append(f"blob_missing:{record_id}")
-                continue
             blob_name = f"{encode_record_id_component(record_id)}.bin"
             blob_path = blobs_dir / blob_name
-            blob_path.write_bytes(data)
-            blob_hash = hashlib.sha256(data).hexdigest()
+            blob_hash = None
+            wrote = False
+            # PERF-06: prefer streaming reads when available to keep peak memory low.
+            stream_fn = getattr(media, "open_stream", None)
+            if callable(stream_fn):
+                try:
+                    hasher = hashlib.sha256()
+                    with stream_fn(record_id) as handle:
+                        with blob_path.open("wb") as out:
+                            while True:
+                                chunk = handle.read(1024 * 1024)
+                                if not chunk:
+                                    break
+                                out.write(chunk)
+                                hasher.update(chunk)
+                    blob_hash = hasher.hexdigest()
+                    wrote = True
+                except Exception:
+                    wrote = False
+            if not wrote:
+                try:
+                    data = media.get(record_id)
+                except Exception:
+                    data = None
+                if not data:
+                    warnings.append(f"blob_missing:{record_id}")
+                    continue
+                blob_path.write_bytes(data)
+                blob_hash = hashlib.sha256(data).hexdigest()
             blob_manifest[record_id] = {"file": f"blobs/{blob_name}", "sha256": blob_hash}
             blob_count += 1
 
@@ -243,7 +263,7 @@ def _collect_records(
     derived_ids: set[str] = set()
     edge_ids: set[str] = set()
     missing: list[str] = []
-    keys = list(getattr(metadata, "keys", lambda: [])())
+    keys = sorted(list(getattr(metadata, "keys", lambda: [])()))
     evidence_set = set(evidence_ids)
     for record_id in evidence_ids:
         record = metadata.get(record_id)

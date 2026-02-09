@@ -38,6 +38,10 @@ class PolicyGateTests(unittest.TestCase):
 
     def test_sanitized_allowed(self):
         cfg = self._base_config()
+        # Default policy is fail-closed with approval_required=true. This test
+        # asserts the sanitized path when operator approvals are explicitly
+        # disabled (for local/dev use).
+        cfg["privacy"]["egress"]["approval_required"] = False
         gate = PolicyGate(cfg, _Sanitizer())
         decision = gate.enforce("mx.gateway", {"q": "x"})
         self.assertTrue(decision.ok)

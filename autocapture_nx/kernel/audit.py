@@ -6,6 +6,7 @@ import json
 import sqlite3
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
@@ -189,6 +190,30 @@ class PluginAuditLog:
                 "last_failure": str(last_failure) if last_failure else None,
             }
         return summary
+
+    def recent_failures(self, plugin_id: str, *, window_s: int = 300) -> dict[str, Any]:
+        """EXT-08: count failures within a sliding window for crash-loop detection."""
+        pid = str(plugin_id or "").strip()
+        if not pid:
+            return {"ok": False, "error": "plugin_id_missing"}
+        window_s = int(max(1, int(window_s)))
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=window_s)).isoformat()
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS failures,
+                       MAX(ts_utc) AS last_failure
+                  FROM plugin_exec_audit
+                 WHERE plugin_id = ?
+                   AND ok = 0
+                   AND ts_utc >= ?
+                """,
+                (pid, cutoff),
+            ).fetchone()
+        failures = int(row[0] or 0) if row else 0
+        last = str(row[1]) if row and row[1] else None
+        return {"ok": True, "plugin_id": pid, "window_s": window_s, "failures": failures, "last_failure": last}
 
     def record_plugin_metadata(
         self,

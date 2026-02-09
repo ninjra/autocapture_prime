@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 from autocapture_nx.kernel.consent import accept_capture_consent, consent_path, load_capture_consent
 from autocapture_nx.ux.facade import UXFacade
 from autocapture_nx.kernel.loader import default_config_paths

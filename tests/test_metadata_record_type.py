@@ -22,12 +22,16 @@ class MetadataRecordTypeTests(unittest.TestCase):
         store = ImmutableMetadataStore(_Store())
         with self.assertRaises(ValueError):
             store.put("rec", {"value": 1})
-        store.put("rec", {"record_type": "derived.test", "run_id": "run1", "content_hash": "hash", "value": 1})
+        store.put(
+            "rec",
+            {"schema_version": 1, "record_type": "derived.test", "run_id": "run1", "content_hash": "hash", "value": 1},
+        )
         self.assertEqual(store.get("rec")["value"], 1)
 
     def test_evidence_requires_run_id_and_hash(self) -> None:
         store = ImmutableMetadataStore(_Store())
         base = {
+            "schema_version": 1,
             "record_type": "evidence.capture.segment",
             "segment_id": "seg0",
             "ts_start_utc": "2026-01-01T00:00:00+00:00",

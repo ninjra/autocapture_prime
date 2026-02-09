@@ -34,6 +34,7 @@ class EncryptedStorageTests(unittest.TestCase):
             store.put(
                 "record1",
                 {
+                    "schema_version": 1,
                     "record_type": "derived.test",
                     "run_id": "run1",
                     "secret": "value",
@@ -72,8 +73,8 @@ class EncryptedStorageTests(unittest.TestCase):
             ctx = PluginContext(config=config, get_capability=lambda _k: None, logger=lambda _m: None)
             plugin = EncryptedStoragePlugin("test", ctx)
             store = plugin.capabilities()["storage.metadata"]
-            store.put("b", {"record_type": "derived.test", "run_id": "run1", "content_hash": "hash", "value": 2})
-            store.put("a", {"record_type": "derived.test", "run_id": "run1", "content_hash": "hash", "value": 1})
+            store.put("b", {"schema_version": 1, "record_type": "derived.test", "run_id": "run1", "content_hash": "hash", "value": 2})
+            store.put("a", {"schema_version": 1, "record_type": "derived.test", "run_id": "run1", "content_hash": "hash", "value": 1})
             self.assertEqual(store.keys(), ["a", "b"])
 
     def test_media_blob_binary_format(self) -> None:

@@ -30,6 +30,7 @@ class EncryptedStoreFailLoudTests(unittest.TestCase):
                 "record1",
                 {
                     "record_type": "derived.test",
+                    "schema_version": 1,
                     "run_id": "run1",
                     "secret": "value",
                     "ts_utc": ts_utc,

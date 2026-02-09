@@ -96,6 +96,7 @@ def _make_facade(tmp_dir, idle_seconds=999):
 
 def _segment_record(record_id, payload_bytes):
     return {
+        "schema_version": 1,
         "record_type": "evidence.capture.segment",
         "run_id": "run1",
         "segment_id": "seg0",

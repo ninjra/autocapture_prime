@@ -18,6 +18,7 @@ class StorageRetentionTests(unittest.TestCase):
         metadata.put_new(
             old_id,
             {
+                "schema_version": 1,
                 "record_type": "evidence.capture.frame",
                 "run_id": "run1",
                 "ts_utc": old_ts,
@@ -27,6 +28,7 @@ class StorageRetentionTests(unittest.TestCase):
         metadata.put_new(
             new_id,
             {
+                "schema_version": 1,
                 "record_type": "evidence.capture.frame",
                 "run_id": "run1",
                 "ts_utc": new_ts,

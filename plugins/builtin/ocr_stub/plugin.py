@@ -8,6 +8,7 @@ WSL stability note:
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
@@ -134,12 +135,33 @@ class OCRLocal(PluginBase):
             pass
 
         text = "\n".join([t.strip() for t in texts if t and str(t).strip()]).strip()
-        return {"text": text, "tokens": []}
+        return {"text": text, "tokens": _tokens_from_text(text)}
 
 
 def _as_bytes_io(data: bytes):
     from io import BytesIO
     return BytesIO(data)
+
+
+_RE_TOKEN = re.compile(r"[A-Za-z0-9]+(?:[._:/-][A-Za-z0-9]+)*")
+
+
+def _tokens_from_text(text: str) -> list[dict[str, Any]]:
+    """Return lightweight, deterministic tokens without bboxes.
+
+    This keeps `OCRLocal` usable in unit tests and in fallback-mode call sites,
+    while leaving bbox estimation to the SST pipeline (which already has a
+    deterministic approximation path).
+    """
+    if not text or not str(text).strip():
+        return []
+    # Bound token fanout: UI screenshots can contain huge OCR output.
+    # Keep the first 512 tokens which is enough for tests and most fixtures.
+    raw = _RE_TOKEN.findall(str(text))
+    out: list[dict[str, Any]] = []
+    for tok in raw[:512]:
+        out.append({"text": tok, "bbox": None, "confidence": 0.65})
+    return out
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> OCRLocal:

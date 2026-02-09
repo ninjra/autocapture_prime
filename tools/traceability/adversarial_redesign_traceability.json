@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-02-09T04:26:31.320828Z",
+  "generated_utc": "2026-02-09T07:06:49.502704Z",
   "items": [
     {
       "evidence": [
@@ -51,7 +51,7 @@
       ],
       "id": "EXEC-04",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Implement `autocapture replay` to re-run processing/indexing on an existing dataset without mutating original artifacts",
       "validators": [
         "tests/test_replay_produces_new_artifacts.py"
@@ -65,7 +65,7 @@
       ],
       "id": "EXEC-05",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Eliminate nondeterminism sources (time.now, unordered dict iteration, RNG) from critical pipelines; enforce stable sort everywhere",
       "validators": [
         "tests/test_deterministic_retrieval_order.py",
@@ -80,7 +80,7 @@
       ],
       "id": "EXEC-06",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Introduce staged multi-store writes for evidence: write blob\u2192write metadata\u2192append journal\u2192append ledger, with rollback markers",
       "validators": [
         "tests/test_two_phase_commit_recovery.py"
@@ -94,7 +94,7 @@
       ],
       "id": "EXEC-07",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Make on-query extraction an explicit scheduled job: show blocked reasons and offer \u201cschedule extraction now\u201d",
       "validators": [
         "tests/test_schedule_extract_from_query.py"
@@ -144,12 +144,12 @@
     {
       "evidence": [
         "autocapture_nx/plugin_system/manager.py",
-        "autocapture_nx/plugin_system/registry.py",
-        "autocapture/web/routes/plugins.py"
+        "autocapture/web/routes/plugins.py",
+        "tests/test_plugin_lifecycle_state_machine.py"
       ],
       "id": "EXT-01",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Define explicit plugin lifecycle states (installed\u2192locked\u2192approved\u2192enabled\u2192healthy) and enforce transitions",
       "validators": [
         "tests/test_plugin_lifecycle_state_machine.py"
@@ -159,11 +159,11 @@
       "evidence": [
         "autocapture_nx/plugin_system/manager.py",
         "contracts/plugin_manifest.schema.json",
-        "config/plugin_locks.json"
+        "tests/test_plugin_install_local_path.py"
       ],
       "id": "EXT-02",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Add local-only plugin install (`autocapture plugins install <path>`) with manifest validation and lock update preview",
       "validators": [
         "tests/test_plugin_install_local_path.py"
@@ -172,12 +172,12 @@
     {
       "evidence": [
         "autocapture_nx/plugin_system/manager.py",
-        "autocapture/web/ui/index.html",
-        "config/plugin_locks.json"
+        "autocapture/web/routes/plugins.py",
+        "tests/test_plugin_update_rollback.py"
       ],
       "id": "EXT-03",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Add update + rollback with lock history and manifest/permission diffs (CLI + UI)",
       "validators": [
         "tests/test_plugin_update_rollback.py"
@@ -191,7 +191,7 @@
       ],
       "id": "EXT-04",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Enforce compatibility contracts: plugin declares kernel_api_version + contract_lock_hash; registry refuses mismatches",
       "validators": [
         "tests/test_plugin_compatibility_gate.py",
@@ -201,11 +201,12 @@
     {
       "evidence": [
         "autocapture_nx/plugin_system/manager.py",
-        "autocapture_nx/plugin_system/registry.py"
+        "autocapture_nx/ux/facade.py",
+        "autocapture/web/routes/plugins.py"
       ],
       "id": "EXT-05",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Add `plugins plan/apply` dry-run: compute capability graph, conflicts, and required permissions before applying changes",
       "validators": [
         "tests/test_plugins_plan_output_deterministic.py"
@@ -213,13 +214,13 @@
     },
     {
       "evidence": [
-        "autocapture/web/ui/index.html",
+        "autocapture_nx/plugin_system/manager.py",
         "autocapture/web/routes/plugins.py",
-        "autocapture_nx/plugin_system/runtime.py"
+        "autocapture_nx/cli.py"
       ],
       "id": "EXT-06",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Permission UX: require explicit per-plugin filesystem roots + network scopes; show permissions diff on approval",
       "validators": [
         "tests/test_plugin_permission_prompt_required.py"
@@ -227,13 +228,12 @@
     },
     {
       "evidence": [
-        "config/default.json",
         "autocapture_nx/plugin_system/registry.py",
-        "autocapture/web/ui/index.html"
+        "config/default.json"
       ],
       "id": "EXT-07",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Sandbox policy UI: show hosting mode (subprocess/inproc), job limits, and reasons; restrict inproc to allowlist with explicit override",
       "validators": [
         "tests/test_inproc_allowlist_enforced.py"
@@ -241,13 +241,13 @@
     },
     {
       "evidence": [
-        "autocapture_nx/plugin_system/host_runner.py",
+        "autocapture_nx/plugin_system/registry.py",
         "autocapture_nx/kernel/audit.py",
-        "autocapture/web/routes/plugins.py"
+        "autocapture_nx/plugin_system/manager.py"
       ],
       "id": "EXT-08",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Add standardized plugin health checks and heartbeat; surface in UI and disable on repeated failures",
       "validators": [
         "tests/test_plugin_crash_loop_quarantine.py"
@@ -255,12 +255,12 @@
     },
     {
       "evidence": [
-        "autocapture_nx/plugin_system/host_runner.py",
-        "autocapture/web/ui/index.html"
+        "autocapture/web/routes/plugins.py",
+        "autocapture_nx/ux/facade.py"
       ],
       "id": "EXT-09",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Expose per-plugin logs and last error context (sanitized) in plugin manager",
       "validators": [
         "tests/test_plugin_logs_endpoint.py"
@@ -273,7 +273,7 @@
       ],
       "id": "EXT-10",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Add plugin SBOM metadata (dependencies + hashes) to plugin lock entries",
       "validators": [
         "tests/test_plugin_lock_contains_sbom.py"
@@ -287,7 +287,7 @@
       ],
       "id": "EXT-11",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Cryptographically sign plugin_locks.json and approvals with local key; verify before boot",
       "validators": [
         "tests/test_plugin_locks_signature_verified.py"
@@ -295,12 +295,12 @@
     },
     {
       "evidence": [
-        "autocapture/web/ui/index.html",
-        "autocapture_nx/plugin_system/registry.py"
+        "autocapture_nx/ux/facade.py",
+        "autocapture/web/routes/plugins.py"
       ],
       "id": "EXT-12",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Implement a plugin \u201ccapabilities matrix\u201d page: what provides what, conflicts, and current selection rationale",
       "validators": [
         "tests/test_capabilities_matrix_endpoint.py"
@@ -505,7 +505,7 @@
       ],
       "id": "META-04",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Version all record schemas explicitly (schema_version field) and enforce validation at write boundaries",
       "validators": [
         "tests/test_schema_version_enforced.py",
@@ -551,7 +551,7 @@
       ],
       "id": "META-07",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Introduce a content-addressed artifact manifest for all derived artifacts (OCR text, embeddings, indexes) with lineage pointers",
       "validators": [
         "tests/test_artifact_manifest_lineage.py"
@@ -658,13 +658,13 @@
     },
     {
       "evidence": [
-        "autocapture_nx/cli.py",
-        "autocapture_nx/kernel/loader.py",
-        "plugins/builtin/ledger_basic/plugin.py"
+        "autocapture_nx/kernel/operator_ledger.py",
+        "autocapture_nx/ux/facade.py",
+        "autocapture_nx/cli.py"
       ],
       "id": "OPS-05",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Add operator commands: `reindex`, `vacuum`, `quarantine`, `rollback-locks`, each producing ledgered actions",
       "validators": [
         "tests/test_operator_commands_ledgered.py"
@@ -672,12 +672,13 @@
     },
     {
       "evidence": [
-        "autocapture_nx/kernel/doctor.py",
-        "autocapture/web/ui/index.html"
+        "autocapture_nx/kernel/db_status.py",
+        "autocapture/web/routes/doctor.py",
+        "autocapture_nx/ux/facade.py"
       ],
       "id": "OPS-06",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Expose migration status (DB versions, last migration timestamp, checksum) in doctor + UI",
       "validators": [
         "tests/test_doctor_reports_db_versions.py"
@@ -685,13 +686,13 @@
     },
     {
       "evidence": [
+        "autocapture_nx/ux/facade.py",
         "autocapture/web/routes/doctor.py",
-        "autocapture_nx/kernel/query.py",
-        "autocapture/pillars/citable.py"
+        "autocapture_nx/cli.py"
       ],
       "id": "OPS-07",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Add a self-test harness runnable from tray: capture 5s, extract 1 segment, query 1 prompt, verify ledger",
       "validators": [
         "tests/test_self_test_harness.py"
@@ -700,12 +701,11 @@
     {
       "evidence": [
         "autocapture_nx/ux/facade.py",
-        "tools/gate_perf.py",
-        "autocapture/web/ui/index.html"
+        "tools/gate_slo_budget.py"
       ],
       "id": "OPS-08",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Make SLO/error budget first-class: surface budgets in UI and fail gates when regression exceeds thresholds",
       "validators": [
         "tests/test_slo_budget_regression_gate.py"
@@ -713,12 +713,12 @@
     },
     {
       "evidence": [
-        "plugins/builtin/capture_windows/plugin.py",
-        "autocapture_nx/capture/pipeline.py"
+        "autocapture_nx/capture/pipeline.py",
+        "plugins/builtin/capture_windows/plugin.py"
       ],
       "id": "PERF-01",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Batch and pipeline capture encoding/writes to reduce per-frame overhead; measure CPU and I/O per segment",
       "validators": [
         "tests/test_capture_throughput_baseline.py",
@@ -733,7 +733,7 @@
       ],
       "id": "PERF-02",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Incremental indexing: process only new/changed evidence by ID+hash; avoid full reindex on boot",
       "validators": [
         "tests/test_incremental_indexing.py"
@@ -747,7 +747,7 @@
       ],
       "id": "PERF-03",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Add caching for expensive derived steps (OCR/VLM/embeddings) keyed by (evidence_hash, extractor_version, config_hash)",
       "validators": [
         "tests/test_extractor_cache_keys.py"
@@ -761,7 +761,7 @@
       ],
       "id": "PERF-04",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Complete WSL2 job loop: implement worker response handling + backpressure; avoid polling/scanning directories",
       "validators": [
         "tests/test_wsl2_job_roundtrip.py"
@@ -775,7 +775,7 @@
       ],
       "id": "PERF-05",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Optional GPU acceleration (RTX 4090): OCR/embeddings via WSL2 worker; gated by config and local-only constraints",
       "validators": [
         "tests/test_gpu_offload_flagged.py",
@@ -789,7 +789,7 @@
       ],
       "id": "PERF-06",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Use streaming I/O for proof bundle export and large media reads to reduce peak memory",
       "validators": [
         "tests/test_proof_bundle_streaming_memory.py"
@@ -810,12 +810,13 @@
     },
     {
       "evidence": [
+        "autocapture_nx/ux/facade.py",
         "autocapture/web/ui/index.html",
-        "autocapture_nx/runtime/governor.py"
+        "autocapture/web/ui/app.js"
       ],
       "id": "PERF-08",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Surface resource usage (CPU/RAM/disk) and auto-throttle policies in UI; make them deterministic and configurable",
       "validators": [
         "tests/test_ui_resource_panel.py"
@@ -829,7 +830,7 @@
       ],
       "id": "QA-01",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Add deterministic golden fixtures for query outputs (with model stubs) including citations and provenance",
       "validators": [
         "tests/test_query_golden.py"
@@ -842,7 +843,7 @@
       ],
       "id": "QA-02",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Add chaos tests for crash recovery: kill during writes, partial segments, interrupted exports; verify deterministic recovery",
       "validators": [
         "tests/test_crash_recovery_chaos.py"
@@ -855,7 +856,7 @@
       ],
       "id": "QA-03",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Fuzz config and plugin manifest validation (schema + semantic rules) with corpus-based mutations",
       "validators": [
         "tests/test_config_fuzz.py",
@@ -868,7 +869,7 @@
       ],
       "id": "QA-04",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Security regression suite for sandbox guards: symlink/UNC traversal, import-time sockets, subprocess env leaks",
       "validators": [
         "tests/test_security_guards.py"
@@ -892,7 +893,7 @@
       ],
       "id": "QA-06",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "UI smoke + accessibility tests executed in CI (headless) for critical screens",
       "validators": [
         "tests/test_ui_smoke.py"
@@ -918,7 +919,7 @@
       ],
       "id": "QA-08",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Proof-bundle replay verification tests: tamper detection, missing files, and cross-version imports",
       "validators": [
         "tests/test_proof_bundle_verify.py"
@@ -1072,7 +1073,7 @@
       ],
       "id": "SEC-05",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Add PII detection/redaction at export/egress boundaries using configured recognizers; record redaction map in metadata",
       "validators": [
         "tests/test_redaction_deterministic.py"
@@ -1086,7 +1087,7 @@
       ],
       "id": "SEC-06",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Key rotation hardening: store key_id with every encrypted blob/record; support staged rewrap and verify mixed-key reads",
       "validators": [
         "tests/test_key_rotation_rewrap_plan.py"
@@ -1099,7 +1100,7 @@
       ],
       "id": "SEC-07",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Sign proof bundle manifest locally and verify on import/replay; include sha256 for all bundle files",
       "validators": [
         "tests/test_proof_bundle_signature_verifies.py"
@@ -1146,7 +1147,7 @@
       ],
       "id": "SEC-10",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Harden cloud/gateway pathways: require explicit privacy.cloud.enabled AND egress approval; block by default and test",
       "validators": [
         "tests/test_cloud_enable_requires_two_step.py"
@@ -1169,12 +1170,13 @@
     },
     {
       "evidence": [
-        "autocapture/web/ui/index.html",
-        "autocapture/web/routes/run.py"
+        "autocapture/web/routes/run.py",
+        "autocapture_nx/ux/facade.py",
+        "autocapture/web/ui/index.html"
       ],
       "id": "UX-02",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Add an Input Ingest / Capture panel: current data_dir, run_id, active sources, pause/resume, and disk banner",
       "validators": [
         "tests/test_pause_resume_idempotent.py"
@@ -1182,13 +1184,12 @@
     },
     {
       "evidence": [
-        "autocapture/web/ui/index.html",
-        "autocapture/web/routes/metadata.py",
-        "autocapture/web/routes/trace.py"
+        "autocapture/web/routes/run.py",
+        "autocapture_nx/ux/facade.py"
       ],
       "id": "UX-03",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Create a Run/Job Detail view with full provenance: config snapshot, plugin hashes, ledger head, anchors, artifacts",
       "validators": [
         "tests/test_run_detail_contains_provenance.py"
@@ -1196,13 +1197,13 @@
     },
     {
       "evidence": [
+        "autocapture_nx/kernel/query.py",
         "autocapture/web/ui/index.html",
-        "autocapture/web/routes/query.py",
-        "autocapture_nx/kernel/query.py"
+        "autocapture/web/ui/app.js"
       ],
       "id": "UX-04",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Query UI: show extraction completeness (allowed/blocked/ran), time window coverage, and a citation explorer",
       "validators": [
         "tests/test_query_ui_shows_blocked_extract.py"
@@ -1210,13 +1211,13 @@
     },
     {
       "evidence": [
-        "autocapture/web/ui/index.html",
         "autocapture/web/routes/plugins.py",
-        "autocapture_nx/plugin_system/manager.py"
+        "autocapture_nx/plugin_system/manager.py",
+        "autocapture_nx/ux/facade.py"
       ],
       "id": "UX-05",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Extension Manager UI v2 (IA + flows): Installed / Available / Updates / Approvals / Health / Policies",
       "validators": [
         "tests/test_extension_manager_core_flows.py"
@@ -1242,7 +1243,7 @@
       ],
       "id": "UX-07",
       "notes": "",
-      "status": "missing",
+      "status": "implemented",
       "title": "Accessibility hardening: add ARIA labels, focus order, skip links, and keyboard shortcuts; run automated a11y checks",
       "validators": [
         "tests/test_accessibility_smoke.py"
@@ -1250,12 +1251,12 @@
     },
     {
       "evidence": [
-        "autocapture/web/ui/index.html",
-        "autocapture/web/routes/doctor.py"
+        "autocapture/web/routes/doctor.py",
+        "autocapture_nx/ux/facade.py"
       ],
       "id": "UX-08",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Standardize error UX: actionable messages, \u201ccopy diagnostics\u201d, and \u201copen doctor bundle\u201d on failures",
       "validators": [
         "tests/test_error_to_diagnostics_flow.py"
@@ -1263,13 +1264,12 @@
     },
     {
       "evidence": [
-        "autocapture/web/ui/index.html",
-        "autocapture/config/load.py",
-        "contracts/config_schema.json"
+        "autocapture/web/routes/settings.py",
+        "autocapture_nx/ux/facade.py"
       ],
       "id": "UX-09",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Add config presets and a diff viewer (effective vs user overrides) with search and safe defaults",
       "validators": [
         "tests/test_config_diff_viewer.py"
@@ -1283,7 +1283,7 @@
       ],
       "id": "UX-10",
       "notes": "",
-      "status": "partial",
+      "status": "implemented",
       "title": "Terminology cleanup: unify NX/MX naming in UI + docs; add a single \u201cCore runtime: autocapture_nx\u201d statement",
       "validators": [
         "tests/test_docs_consistency_smoke.py"

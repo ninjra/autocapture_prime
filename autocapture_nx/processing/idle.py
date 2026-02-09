@@ -17,7 +17,9 @@ from typing import Any, Callable
 
 from autocapture_nx.kernel.derived_records import (
     build_derivation_edge,
+    build_artifact_manifest,
     build_text_record,
+    artifact_manifest_id,
     derived_text_record_id,
     derivation_edge_id,
 )
@@ -517,6 +519,32 @@ class IdleProcessor:
                 self._metadata.put(record_id, payload)
         except Exception:
             return
+        # META-07: record artifact manifest for deterministic QA doc.
+        try:
+            run_id = str(payload.get("run_id") or item.run_id)
+            manifest_id = artifact_manifest_id(run_id, record_id)
+            artifact_hash = str(payload.get("payload_hash") or payload.get("content_hash") or "")
+            derived_from = {
+                "evidence_id": item.record_id,
+                "evidence_hash": item.record.get("content_hash"),
+                "model_digest": payload.get("model_digest"),
+            }
+            manifest = build_artifact_manifest(
+                run_id=run_id,
+                artifact_id=record_id,
+                artifact_sha256=artifact_hash,
+                derived_from=derived_from,
+                ts_utc=payload.get("ts_utc"),
+            )
+            if hasattr(self._metadata, "put_new"):
+                try:
+                    self._metadata.put_new(manifest_id, manifest)
+                except Exception:
+                    pass
+            else:
+                self._metadata.put(manifest_id, manifest)
+        except Exception:
+            pass
         self._index_text(record_id, doc_text)
 
     def _run_provider_batch(
@@ -583,6 +611,32 @@ class IdleProcessor:
             inserted = True
         if not inserted:
             return False
+        # META-07: persist a content-addressed artifact manifest with lineage pointers.
+        try:
+            run_id = str(payload.get("run_id") or record_id.split("/", 1)[0])
+            manifest_id = artifact_manifest_id(run_id, derived_id)
+            artifact_hash = str(payload.get("payload_hash") or payload.get("content_hash") or "")
+            derived_from = {
+                "evidence_id": record_id,
+                "evidence_hash": record.get("content_hash"),
+                "model_digest": payload.get("model_digest"),
+            }
+            manifest = build_artifact_manifest(
+                run_id=run_id,
+                artifact_id=derived_id,
+                artifact_sha256=artifact_hash,
+                derived_from=derived_from,
+                ts_utc=payload.get("ts_utc"),
+            )
+            if hasattr(self._metadata, "put_new"):
+                try:
+                    self._metadata.put_new(manifest_id, manifest)
+                except Exception:
+                    pass
+            else:
+                self._metadata.put(manifest_id, manifest)
+        except Exception:
+            pass
         self._index_text(derived_id, payload.get("text", ""))
         stats.processed += 1
         if kind == "ocr":

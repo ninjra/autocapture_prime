@@ -27,6 +27,10 @@ node_modules/
 /repomix-output.xml
 /repomix-output.md
 /repomix-output.*
+/repomix*.md
+/repomix*.txt
+/repomix*.json
+/repomix*.xml
 /inventory_*.csv
 /artifacts/
 /docs/AUTOCAPTURE_NX_BLUEPRINT*.md

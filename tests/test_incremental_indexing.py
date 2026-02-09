@@ -1,4 +1,3 @@
-import json
 import tempfile
 from pathlib import Path
 import unittest
@@ -39,4 +38,3 @@ class IncrementalIndexingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

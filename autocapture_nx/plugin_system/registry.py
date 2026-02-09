@@ -16,7 +16,7 @@ from typing import Any, TYPE_CHECKING, cast
 from autocapture_nx import __version__ as kernel_version
 from autocapture_nx.kernel.config import SchemaLiteValidator
 from autocapture_nx.kernel.audit import PluginAuditLog, hash_payload
-from autocapture_nx.kernel.errors import PermissionError, PluginError
+from autocapture_nx.kernel.errors import PluginError
 from autocapture_nx.kernel.hashing import sha256_directory, sha256_file, clear_directory_hash_cache
 from autocapture_nx.kernel.paths import plugins_dir, resolve_repo_path, load_json
 from autocapture_nx.kernel.schema_registry import SchemaRegistry, derive_schema_from_paths
@@ -114,7 +114,9 @@ def _capability_guard(capabilities, plugin_id: str, required_capabilities: set[s
 
     def _get_capability(name: str):
         if name not in allowed:
-            raise PermissionError(f"Plugin {plugin_id} not allowed to access capability {name}")
+            # Treat this as a plugin contract violation (not a host OS permission
+            # error) so callers can handle it deterministically.
+            raise PluginError(f"capability_not_allowed:{plugin_id}:{name}")
         return capabilities.get(name)
 
     return _get_capability
@@ -560,9 +562,42 @@ class PluginRegistry:
         if not lockfile.exists():
             raise PluginError(f"Missing plugin lockfile: {lockfile}")
         try:
-            return load_json(lockfile)
+            payload = load_json(lockfile)
         except FileNotFoundError:
             raise PluginError(f"Missing plugin lockfile: {lockfile}")
+        # EXT-11: optional lockfile signature verification (enabled via config/env).
+        sig_cfg = locks_cfg.get("signature", {}) if isinstance(locks_cfg, dict) else {}
+        enforce_sig = bool(sig_cfg.get("enforce", False))
+        if os.getenv("AUTOCAPTURE_PLUGINS_LOCKS_REQUIRE_SIGNATURE", "").strip().lower() in {"1", "true", "yes"}:
+            enforce_sig = True
+        if enforce_sig:
+            try:
+                from autocapture_nx.plugin_system.lock_signing import verify_lockfile
+                from autocapture_nx.kernel.keyring import KeyRing
+
+                storage = self.config.get("storage", {}) if isinstance(self.config, dict) else {}
+                crypto = storage.get("crypto", {}) if isinstance(storage, dict) else {}
+                keyring_path = str(crypto.get("keyring_path", "data/vault/keyring.json"))
+                root_key_path = str(crypto.get("root_key_path", "data/vault/root.key"))
+                backend = str(crypto.get("keyring_backend", "auto"))
+                credential_name = str(crypto.get("keyring_credential_name", "autocapture.keyring"))
+                require_protection = bool(storage.get("encryption_required", False) and os.name == "nt")
+                keyring = KeyRing.load(
+                    keyring_path,
+                    legacy_root_path=root_key_path,
+                    require_protection=require_protection,
+                    backend=backend,
+                    credential_name=credential_name,
+                )
+                sig_path = sig_cfg.get("path") or (str(lockfile) + ".sig.json")
+                report = verify_lockfile(lock_path=lockfile, sig_path=resolve_repo_path(sig_path), keyring=keyring)
+                if not report.get("ok", False):
+                    raise PluginError(f"plugin_locks signature invalid: {report.get('error')}")
+            except PluginError:
+                raise
+            except Exception as exc:
+                raise PluginError(f"plugin_locks signature verify failed: {type(exc).__name__}") from exc
+        return payload
 
     def _validate_manifest(self, manifest: dict[str, Any]) -> None:
         schema_path = resolve_repo_path("contracts/plugin_manifest.schema.json")
@@ -593,6 +628,21 @@ class PluginRegistry:
         if plugin_id not in plugin_locks:
             raise PluginError(f"Plugin {plugin_id} missing from lockfile")
         expected = plugin_locks[plugin_id]
+        # EXT-04: compatibility contracts pinned in the lock entry.
+        try:
+            expected_kernel = expected.get("kernel_api_version")
+            if expected_kernel and str(expected_kernel) != str(kernel_version):
+                raise PluginError(f"Plugin {plugin_id} kernel_api_version mismatch")
+            expected_contract = expected.get("contract_lock_hash") or lockfile.get("contract_lock_hash")
+            if expected_contract:
+                lock_path = resolve_repo_path("contracts/lock.json")
+                actual_contract = sha256_file(lock_path) if lock_path.exists() else None
+                if str(expected_contract) != str(actual_contract):
+                    raise PluginError(f"Plugin {plugin_id} contract_lock_hash mismatch")
+        except PluginError:
+            raise
+        except Exception:
+            pass
         manifest_hash = sha256_file(manifest_path)
         artifact_hash = sha256_directory(plugin_root)
         if manifest_hash != expected.get("manifest_sha256"):
@@ -1624,11 +1674,29 @@ class PluginRegistry:
         default_pack = set(self._normalize_ids(self.config.get("plugins", {}).get("default_pack", []), alias_map))
         inproc_allowlist = set(self._normalize_ids(hosting_cfg.get("inproc_allowlist", []), alias_map))
         self._validate_inproc_justifications(inproc_allowlist)
+        quarantine_cfg = plugins_cfg.get("quarantine", {}) if isinstance(plugins_cfg, dict) else {}
+        quarantine_ids: set[str] = set()
+        if isinstance(quarantine_cfg, dict):
+            quarantine_ids = set(self._normalize_ids(list(quarantine_cfg.keys()), alias_map))
+        elif isinstance(quarantine_cfg, list):
+            quarantine_ids = set(self._normalize_ids(quarantine_cfg, alias_map))
+        # EXT-07: inproc must be explicitly allowlisted. On WSL we auto-fill the
+        # allowlist with enabled plugins to avoid subprocess OOM while keeping a
+        # deterministic, inspectable allowlist.
+        effective_inproc_allowlist: set[str] = set(inproc_allowlist)
+        allow_all_inproc = bool(hosting_cfg.get("inproc_allow_all", False))
+        # Safe-mode minimal is used by health/perf gates; it must not fail open
+        # due to missing allowlist plumbing. In safe-mode minimal, we allow
+        # in-proc loading of the minimal pack deterministically.
+        if self.safe_mode and safe_mode_minimal:
+            allow_all_inproc = True
 
         def use_inproc(pid: str) -> bool:
             if hosting_mode == "inproc":
-                return not inproc_allowlist or pid in inproc_allowlist
-            return pid in inproc_allowlist
+                if allow_all_inproc:
+                    return True
+                return pid in effective_inproc_allowlist
+            return pid in effective_inproc_allowlist
 
         loaded: list[LoadedPlugin] = []
         capabilities = CapabilityRegistry()
@@ -1649,6 +1717,79 @@ class PluginRegistry:
             for pid, (_path, manifest) in manifests_by_id.items()
             if pid in allowlist and is_enabled(pid, manifest)
         }
+        if quarantine_ids:
+            enabled_set = {pid for pid in enabled_set if pid not in quarantine_ids}
+        # WSL2 stability: when running in-proc (whether auto-forced or explicitly
+        # requested via env/config), default the effective inproc allowlist to the
+        # enabled set if no allowlist was provided. This preserves EXT-07's
+        # "explicit inproc allowlist" invariant without requiring test harnesses
+        # to plumb per-plugin justifications for ephemeral local plugins.
+        if hosting_mode == "inproc" and _is_wsl() and not effective_inproc_allowlist:
+            # Only auto-fill the in-proc allowlist when WSL in-proc hosting is
+            # being forced/enabled by policy. Tests may explicitly disable
+            # this behavior to validate EXT-07 fail-closed semantics.
+            if wsl_force_inproc:
+                effective_inproc_allowlist.update(sorted(enabled_set))
+
+        # EXT-08: crash-loop containment (auto-quarantine repeated failures).
+        # Best-effort and deterministic: quarantine only when failures exceed a
+        # fixed threshold within a bounded window.
+        try:
+            health_cfg = plugins_cfg.get("health", {}) if isinstance(plugins_cfg, dict) else {}
+            auto_quarantine = bool(health_cfg.get("auto_quarantine", True))
+            crash_limit = int(health_cfg.get("crash_loop_failures", 3) or 3)
+            crash_window_s = int(health_cfg.get("crash_loop_window_s", 300) or 300)
+        except Exception:
+            auto_quarantine = True
+            crash_limit = 3
+            crash_window_s = 300
+        if auto_quarantine and crash_limit > 0 and crash_window_s > 0 and enabled_set:
+            # Load current user quarantine map so we can persist new quarantines.
+            from autocapture_nx.kernel.atomic_write import atomic_write_json
+            from datetime import datetime, timezone
+
+            config_dir = self.config.get("paths", {}).get("config_dir", "config") if isinstance(self.config, dict) else "config"
+            user_path = Path(str(config_dir)) / "user.json"
+            try:
+                user_cfg = json.loads(user_path.read_text(encoding="utf-8")) if user_path.exists() else {}
+            except Exception:
+                user_cfg = {}
+            user_plugins = user_cfg.setdefault("plugins", {}) if isinstance(user_cfg, dict) else {}
+            user_quarantine = user_plugins.setdefault("quarantine", {}) if isinstance(user_plugins, dict) else {}
+            if not isinstance(user_quarantine, dict):
+                user_quarantine = {}
+                if isinstance(user_plugins, dict):
+                    user_plugins["quarantine"] = user_quarantine
+            new_quarantines: list[str] = []
+            for pid in sorted(enabled_set):
+                if pid in quarantine_ids or pid in user_quarantine:
+                    continue
+                try:
+                    recent = self._audit_log.recent_failures(pid, window_s=crash_window_s)
+                except Exception:
+                    continue
+                if not (isinstance(recent, dict) and recent.get("ok")):
+                    continue
+                try:
+                    failures = int(recent.get("failures") or 0)
+                except Exception:
+                    failures = 0
+                if failures >= crash_limit:
+                    quarantine_ids.add(pid)
+                    new_quarantines.append(pid)
+                    user_quarantine[pid] = {
+                        "reason": "crash_loop",
+                        "failures": failures,
+                        "window_s": int(crash_window_s),
+                        "ts_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    }
+            if new_quarantines:
+                # Persist quarantine marks; do not delete old entries.
+                try:
+                    atomic_write_json(user_path, user_cfg, sort_keys=True, indent=2)
+                except Exception:
+                    pass
+                enabled_set = {pid for pid in enabled_set if pid not in quarantine_ids}
 
         if (self.safe_mode or plugins_cfg.get("safe_mode", False)) and safe_mode_minimal:
             minimal = self._minimal_safe_mode_set(manifests_by_id, allowlist, alias_map)
@@ -1753,6 +1894,8 @@ class PluginRegistry:
                 filesystem_policy = self._filesystem_policy(plugin_id, manifest, manifest_path.parent)
 
                 inproc = use_inproc(plugin_id)
+                if hosting_mode == "inproc" and not allow_all_inproc and not inproc:
+                    raise PluginError(f"inproc_not_allowlisted:{plugin_id}")
                 for entry in entrypoints:
                     module_path = manifest_path.parent / entry["path"]
                     if not module_path.exists():

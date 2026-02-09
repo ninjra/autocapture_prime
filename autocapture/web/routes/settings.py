@@ -37,6 +37,11 @@ def config_history(request: Request, limit: int = 20):
     return request.app.state.facade.config_history(limit=limit)
 
 
+@router.get("/api/config/diff")
+def config_diff(request: Request):
+    return request.app.state.facade.config_diff()
+
+
 @router.post("/api/config/revert")
 def config_revert(req: ConfigRevert, request: Request):
     return request.app.state.facade.config_revert(req.change_id)

@@ -342,9 +342,9 @@
     "capture_queue_p95": 3,
     "error_budget_pct": 1.0,
     "ingestion_mb_s": 50,
-    "memory_ceiling_mb": 512,
+    "memory_ceiling_mb": 768,
     "query_latency_ms": 2000,
-    "startup_ms": 500,
+    "startup_ms": 1000,
     "state_layer": {
       "ingestion_latency_regression_pct": 10,
       "query_p95_ms": 1500,

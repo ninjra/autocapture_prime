@@ -49,8 +49,8 @@ def extract_fixture_answers(text: str) -> FixtureAnswers:
     # bottom-right crop near the end, which may include a time without AM/PM.
     tail = raw[-2000:] if len(raw) > 2000 else raw
     bare_match = None
-    for m in _BARE_TIME_RE.finditer(tail):
-        bare_match = m
+    for match in _BARE_TIME_RE.finditer(tail):
+        bare_match = match
     if bare_match:
         hhmm = bare_match.group("h").strip()
         # Try to infer AM/PM from nearby context; fall back to global majority.
@@ -75,8 +75,8 @@ def extract_fixture_answers(text: str) -> FixtureAnswers:
             vdi_time = f"{hhmm} {ampm}"
 
     quorum = None
-    m = _ASSIGNEE_RE.search(raw)
-    if m:
+    assignee_match = _ASSIGNEE_RE.search(raw)
+    if assignee_match:
         # Normalize spacing/case.
         quorum = "Open Invoice"
 
@@ -91,8 +91,8 @@ def extract_fixture_answers(text: str) -> FixtureAnswers:
     now_playing = None
     # Conservative extraction: look for the known "Artist - Title" glyph in OCR.
     # This can be generalized later, but must remain deterministic.
-    m = re.search(r"\bMaster\s+Cylinder\s*[-–—]\s*Jung\s+At\s+Heart\b", raw, re.IGNORECASE)
-    if m:
+    now_match = re.search(r"\bMaster\s+Cylinder\s*[-–—]\s*Jung\s+At\s+Heart\b", raw, re.IGNORECASE)
+    if now_match:
         now_playing = "Master Cylinder - Jung At Heart"
 
     return FixtureAnswers(

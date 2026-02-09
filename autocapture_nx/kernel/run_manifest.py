@@ -6,7 +6,6 @@ META-09: record determinism inputs explicitly (tz/locale/RNG seeds) so replay is
 from __future__ import annotations
 
 import locale
-from dataclasses import dataclass
 from typing import Any
 
 from autocapture_nx.kernel.rng import RNGService
@@ -49,4 +48,3 @@ def determinism_inputs(config: dict[str, Any]) -> dict[str, Any]:
             "run_seed_hex": str(run_seed_hex),
         },
     }
-

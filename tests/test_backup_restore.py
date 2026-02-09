@@ -1,6 +1,3 @@
-from pathlib import Path
-
-
 def test_backup_create_and_restore_archives_conflicts(tmp_path, monkeypatch):
     # Fake a repo root so backup/restore doesn't touch the real repo.
     repo = tmp_path / "repo"

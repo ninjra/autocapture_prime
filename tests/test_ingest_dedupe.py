@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import tempfile
 
-import pytest
-
 from autocapture_nx.ingest.file_ingest import ingest_file
 from plugins.builtin.storage_memory.plugin import InMemoryStore
 
@@ -52,4 +50,3 @@ def test_ingest_file_dedupes_by_sha256() -> None:
     rec = meta.get(record_id)
     assert rec["sha256"] == res1.sha256
     assert rec["media_record_id"] == res1.media_record_id
-

@@ -35,7 +35,7 @@ def _lock_file(handle) -> None:
         import msvcrt
 
         try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
         except OSError as exc:
             raise ConfigError("instance_lock_held") from exc
         return
@@ -52,7 +52,7 @@ def _unlock_file(handle) -> None:
         import msvcrt
 
         try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
         except OSError:
             return
         return
@@ -90,4 +90,3 @@ def acquire_instance_lock(data_dir: str | Path) -> InstanceLock:
         # Lock is still held; best-effort metadata write.
         pass
     return InstanceLock(path=lock_path, _handle=handle)
-

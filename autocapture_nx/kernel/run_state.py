@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from autocapture_nx.kernel.atomic_write import atomic_write_json
 from autocapture_nx.kernel.timebase import normalize_time, utc_iso_z, tz_offset_minutes
@@ -78,4 +77,3 @@ def write_run_state(path: str | Path, payload: RunStatePayload) -> None:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_json(target, asdict(payload), sort_keys=True, indent=None)
-

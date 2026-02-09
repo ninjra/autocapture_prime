@@ -17,6 +17,7 @@ class EvidenceSchemaTests(unittest.TestCase):
 
         samples = [
             {
+                "schema_version": 1,
                 "record_type": "evidence.capture.segment",
                 "run_id": "run1",
                 "segment_id": "seg0",
@@ -28,12 +29,14 @@ class EvidenceSchemaTests(unittest.TestCase):
                 "content_hash": "hash",
             },
             {
+                "schema_version": 1,
                 "record_type": "evidence.capture.frame",
                 "run_id": "run1",
                 "ts_utc": "2026-01-01T00:00:00+00:00",
                 "content_hash": "hash",
             },
             {
+                "schema_version": 1,
                 "record_type": "evidence.window.meta",
                 "run_id": "run1",
                 "ts_utc": "2026-01-01T00:00:00+00:00",
@@ -41,6 +44,7 @@ class EvidenceSchemaTests(unittest.TestCase):
                 "content_hash": "hash",
             },
             {
+                "schema_version": 1,
                 "record_type": "derived.text.ocr",
                 "run_id": "run1",
                 "text": "hello",
@@ -54,6 +58,7 @@ class EvidenceSchemaTests(unittest.TestCase):
                 "payload_hash": "hash",
             },
             {
+                "schema_version": 1,
                 "record_type": "derived.text.qa",
                 "run_id": "run1",
                 "text": "VDI time: 11:35 AM",
@@ -67,6 +72,7 @@ class EvidenceSchemaTests(unittest.TestCase):
                 "payload_hash": "hash",
             },
             {
+                "schema_version": 1,
                 "record_type": "derived.input.summary",
                 "run_id": "run1",
                 "start_ts_utc": "2026-01-01T00:00:00+00:00",
@@ -76,6 +82,7 @@ class EvidenceSchemaTests(unittest.TestCase):
                 "payload_hash": "hash",
             },
             {
+                "schema_version": 1,
                 "record_type": "derived.cursor.sample",
                 "run_id": "run1",
                 "ts_utc": "2026-01-01T00:00:00+00:00",
@@ -83,6 +90,7 @@ class EvidenceSchemaTests(unittest.TestCase):
                 "payload_hash": "hash",
             },
             {
+                "schema_version": 1,
                 "record_type": "derived.audio.segment",
                 "run_id": "run1",
                 "ts_utc": "2026-01-01T00:00:00+00:00",
@@ -92,6 +100,7 @@ class EvidenceSchemaTests(unittest.TestCase):
                 "payload_hash": "hash",
             },
             {
+                "schema_version": 1,
                 "record_type": "derived.graph.edge",
                 "run_id": "run1",
                 "parent_id": "run1/segment/0",
@@ -102,6 +111,7 @@ class EvidenceSchemaTests(unittest.TestCase):
                 "content_hash": "hash",
             },
             {
+                "schema_version": 1,
                 "record_type": "derived.sst.frame",
                 "run_id": "run1",
                 "artifact_id": "run1/derived.sst.frame/0",
@@ -112,6 +122,7 @@ class EvidenceSchemaTests(unittest.TestCase):
                 "content_hash": "hash",
             },
             {
+                "schema_version": 1,
                 "record_type": "derived.sst.text.extra",
                 "run_id": "run1",
                 "artifact_id": "run1/derived.sst.text.extra/0",
@@ -122,6 +133,7 @@ class EvidenceSchemaTests(unittest.TestCase):
                 "content_hash": "hash",
             },
             {
+                "schema_version": 1,
                 "record_type": "derived.test",
                 "run_id": "run1",
                 "payload_hash": "hash",

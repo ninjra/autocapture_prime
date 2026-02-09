@@ -45,6 +45,11 @@ def _write_echo_plugin(root: Path, plugin_id: str) -> None:
 
 class RpcSizeLimitTests(unittest.TestCase):
     def test_rpc_message_size_limit(self) -> None:
+        # This test validates subprocess RPC framing limits. Under the low-resource
+        # WSL harness we force in-proc hosting for stability, where there is no
+        # subprocess RPC boundary to enforce a max message size.
+        if os.environ.get("AUTOCAPTURE_PLUGINS_HOSTING_MODE", "").strip().lower() == "inproc":
+            self.skipTest("subprocess-only: rpc_max_message_bytes is enforced in host_runner IPC")
         with tempfile.TemporaryDirectory(dir=".") as tmp:
             root = Path(tmp)
             plugin_id = "test.rpc.size"

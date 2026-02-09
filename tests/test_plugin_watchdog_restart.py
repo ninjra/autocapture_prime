@@ -51,6 +51,10 @@ def _write_slow_plugin(root: Path, plugin_id: str) -> None:
 
 class PluginWatchdogTests(unittest.TestCase):
     def test_watchdog_restarts_on_timeout(self) -> None:
+        # MOD-021 low-resource mode forces in-proc hosting for WSL stability; the
+        # subprocess watchdog is only meaningful when subprocess hosting is enabled.
+        if os.getenv("AUTOCAPTURE_PLUGINS_HOSTING_MODE", "").strip().lower() == "inproc":
+            self.skipTest("subprocess hosting disabled in this environment")
         with tempfile.TemporaryDirectory(dir=".") as tmp:
             root = Path(tmp)
             plugin_id = "test.slow.watchdog"

@@ -8,7 +8,6 @@ between schema/docs used by plugins and the recorded lock hash in
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 from autocapture_nx.kernel.hashing import sha256_file
@@ -56,4 +55,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -156,7 +156,15 @@ def _normalize_root_str(raw: str, os_name: str) -> str:
         except Exception:
             return expanded
     try:
-        return os.path.realpath(expanded)
+        # SEC-01: `os.path.realpath()` calls `os.lstat()`, which we patch to
+        # enforce filesystem policies. Temporarily suspend the policy while we
+        # normalize roots to avoid re-entrant recursion.
+        previous = _current_fs_policy()
+        _set_fs_policy(None)
+        try:
+            return os.path.realpath(expanded)
+        finally:
+            _set_fs_policy(previous)
     except Exception:
         try:
             return os.path.abspath(expanded)

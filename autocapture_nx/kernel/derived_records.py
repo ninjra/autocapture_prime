@@ -117,6 +117,7 @@ def build_text_record(
     models_cfg = config.get("models", {}) if isinstance(config, dict) else {}
     override = _provider_model_override(models_cfg, provider_id)
     payload: dict[str, Any] = {
+        "schema_version": 1,
         "record_type": f"derived.text.{kind}",
         "run_id": (source_record.get("run_id") or source_id.split("/", 1)[0]),
         "ts_utc": ts_utc,
@@ -163,6 +164,7 @@ def build_derivation_edge(
     method: str,
 ) -> dict[str, Any]:
     edge = {
+        "schema_version": 1,
         "record_type": "derived.graph.edge",
         "run_id": run_id,
         "ts_utc": span_ref.get("end_ts_utc") or span_ref.get("start_ts_utc"),
@@ -174,3 +176,29 @@ def build_derivation_edge(
     }
     edge["content_hash"] = sha256_text(dumps(edge))
     return edge
+
+
+def artifact_manifest_id(run_id: str, artifact_id: str) -> str:
+    token = encode_record_id_component(str(artifact_id))
+    return f"{run_id}/derived.artifact.manifest/{token}"
+
+
+def build_artifact_manifest(
+    *,
+    run_id: str,
+    artifact_id: str,
+    artifact_sha256: str,
+    derived_from: dict[str, Any],
+    ts_utc: str | None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "record_type": "derived.artifact.manifest",
+        "run_id": str(run_id),
+        "ts_utc": ts_utc,
+        "artifact_id": str(artifact_id),
+        "artifact_sha256": str(artifact_sha256 or ""),
+        "derived_from": dict(derived_from) if isinstance(derived_from, dict) else {},
+    }
+    payload["content_hash"] = sha256_text(dumps(payload))
+    return payload

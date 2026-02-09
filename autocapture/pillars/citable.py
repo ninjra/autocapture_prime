@@ -12,7 +12,6 @@ from typing import Any
 
 from autocapture.core.hashing import canonical_dumps
 from autocapture_nx.kernel.crypto import derive_key
-from autocapture_nx.kernel.evidence import is_evidence_like
 from autocapture_nx.kernel.hashing import sha256_canonical
 from autocapture_nx.kernel.canonical_json import dumps as canonical_dumps_nx
 from autocapture_nx.kernel.keyring import KeyRing

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import pytest
-
 from autocapture_nx.storage.spillover import SpilloverStore
 
 
@@ -67,4 +65,3 @@ def test_spillover_keeps_primary_when_below_trigger() -> None:
     store.put_new("rid2", b"x", ts_utc="t0")
     assert primary.writes == ["rid2"]
     assert spill.writes == []
-
