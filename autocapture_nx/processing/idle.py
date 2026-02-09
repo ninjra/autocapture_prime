@@ -443,13 +443,19 @@ class IdleProcessor:
             return
         if self._lexical is not None:
             try:
-                self._lexical.index(doc_id, text)
+                if hasattr(self._lexical, "index_if_changed"):
+                    self._lexical.index_if_changed(doc_id, text)  # type: ignore[attr-defined]
+                else:
+                    self._lexical.index(doc_id, text)
             except Exception as exc:
                 if self._logger is not None:
                     self._logger.log("index.lexical_error", {"doc_id": doc_id, "error": str(exc)})
         if self._vector is not None:
             try:
-                self._vector.index(doc_id, text)
+                if hasattr(self._vector, "index_if_changed"):
+                    self._vector.index_if_changed(doc_id, text)  # type: ignore[attr-defined]
+                else:
+                    self._vector.index(doc_id, text)
             except Exception as exc:
                 if self._logger is not None:
                     self._logger.log("index.vector_error", {"doc_id": doc_id, "error": str(exc)})

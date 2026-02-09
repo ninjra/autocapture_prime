@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,8 @@ class LexicalIndex:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(self.path)
             self._conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(doc_id, content)")
+            # PERF-02: track per-doc digests to avoid redundant re-indexing.
+            self._conn.execute("CREATE TABLE IF NOT EXISTS indexed (doc_id TEXT PRIMARY KEY, digest TEXT)")
             try:
                 record_baseline(self._conn, version=1, name="lexical.baseline")
             except Exception:
@@ -37,11 +40,29 @@ class LexicalIndex:
             raise PermissionError("LexicalIndex is read-only")
         self._conn.execute("DELETE FROM fts WHERE doc_id = ?", (doc_id,))
         self._conn.execute("INSERT INTO fts(doc_id, content) VALUES (?, ?)", (doc_id, content))
+        digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        self._conn.execute("REPLACE INTO indexed (doc_id, digest) VALUES (?, ?)", (doc_id, digest))
         self._conn.commit()
         try:
             bump_manifest(self.path, "lexical")
         except Exception:
             pass
+
+    def index_if_changed(self, doc_id: str, content: str) -> bool:
+        """Index only when the content digest has changed."""
+        if self._read_only:
+            raise PermissionError("LexicalIndex is read-only")
+        digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        try:
+            cur = self._conn.execute("SELECT digest FROM indexed WHERE doc_id = ?", (doc_id,))
+            row = cur.fetchone()
+            if row and str(row[0]) == digest:
+                return False
+        except Exception:
+            # If the digest table is unavailable/corrupt, fall back to full index.
+            pass
+        self.index(doc_id, content)
+        return True
 
     def count(self) -> int:
         cur = self._conn.execute("SELECT COUNT(*) FROM fts")

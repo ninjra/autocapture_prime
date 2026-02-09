@@ -304,6 +304,8 @@ class VectorIndex:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(self.path)
             self._conn.execute("CREATE TABLE IF NOT EXISTS vectors (doc_id TEXT PRIMARY KEY, vector TEXT)")
+            # PERF-02: track per-doc digests to avoid redundant re-embedding.
+            self._conn.execute("CREATE TABLE IF NOT EXISTS indexed (doc_id TEXT PRIMARY KEY, digest TEXT)")
             try:
                 record_baseline(self._conn, version=1, name="vector.baseline")
             except Exception:
@@ -319,11 +321,27 @@ class VectorIndex:
             raise PermissionError("VectorIndex is read-only")
         vec = self._embedder.embed(text)
         self._conn.execute("REPLACE INTO vectors (doc_id, vector) VALUES (?, ?)", (doc_id, json.dumps(vec)))
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        self._conn.execute("REPLACE INTO indexed (doc_id, digest) VALUES (?, ?)", (doc_id, digest))
         self._conn.commit()
         try:
             bump_manifest(self.path, "vector")
         except Exception:
             pass
+
+    def index_if_changed(self, doc_id: str, text: str) -> bool:
+        if self._read_only:
+            raise PermissionError("VectorIndex is read-only")
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        try:
+            cur = self._conn.execute("SELECT digest FROM indexed WHERE doc_id = ?", (doc_id,))
+            row = cur.fetchone()
+            if row and str(row[0]) == digest:
+                return False
+        except Exception:
+            pass
+        self.index(doc_id, text)
+        return True
 
     def count(self) -> int:
         cur = self._conn.execute("SELECT COUNT(*) FROM vectors")
