@@ -29,10 +29,10 @@ class _Retrieval:
     def search(self, query: str, time_window=None):  # noqa: ANN001
         q = str(query or "").casefold()
         hits = []
-        if "chill instrumental" in q:
-            hits.append({"record_id": "run_test/derived.text.ocr/test_provider/song", "derived_id": None})
-        if "assigned" in q:
-            hits.append({"record_id": "run_test/derived.text.ocr/test_provider/quorum", "derived_id": None})
+        if "song" in q or "playing" in q:
+            hits.append({"record_id": "run_test/derived.text.obs/test_provider/song", "derived_id": None})
+        if "quorum" in q or "working" in q:
+            hits.append({"record_id": "run_test/derived.text.obs/test_provider/quorum", "derived_id": None})
         return hits
 
 
@@ -76,8 +76,12 @@ def _load_fixture(name: str) -> dict[str, Any]:
 def _normalize_ts(obj: dict[str, Any]) -> dict[str, Any]:
     out = json.loads(json.dumps(obj, sort_keys=True))
     prov = out.get("provenance", {})
-    if isinstance(prov, dict) and "generated_at_utc" in prov:
-        prov["generated_at_utc"] = "<ts>"
+    if isinstance(prov, dict):
+        if "generated_at_utc" in prov:
+            prov["generated_at_utc"] = "<ts>"
+        for key in ("plugin_locks_sha256", "effective_config_sha256", "contracts_lock_sha256"):
+            if key in prov:
+                prov[key] = "<hash>"
     out["provenance"] = prov
     return out
 
@@ -100,4 +104,3 @@ class QueryGoldenTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

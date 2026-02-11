@@ -1,6 +1,6 @@
 {
   "contract_lock_hash": "7dc348c57fe09bc9e490a23337dfba5c7bddf62952809f5a772511f342c10266",
-  "generated_at": "2026-02-11T15:36:28.875438+00:00",
+  "generated_at": "2026-02-11T16:19:50.308944+00:00",
   "kernel_api_version": "0.1.0",
   "plugins": {
     "builtin.anchor.basic": {
@@ -554,7 +554,7 @@
       }
     },
     "builtin.sst.qa.answers": {
-      "artifact_sha256": "1b58edefcd17a7ae908d9e9144ff711ae892b56d5504dda62d5d208c105441bf",
+      "artifact_sha256": "884f116a05d0883941fb3dd07dc93b1fc56fc78476cf5e139862f6af55a9a718",
       "contract_lock_hash": "7dc348c57fe09bc9e490a23337dfba5c7bddf62952809f5a772511f342c10266",
       "kernel_api_version": "0.1.0",
       "manifest_sha256": "1c0741f72fa5ffde0a9bf0ea2234191805e631a8e3819db298668d27cdbb4ca2",

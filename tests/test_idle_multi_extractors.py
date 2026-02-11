@@ -5,7 +5,7 @@ import zipfile
 from pathlib import Path
 
 from autocapture.indexing.lexical import LexicalIndex
-from autocapture_nx.kernel.ids import encode_record_id_component
+from autocapture_nx.kernel.derived_records import derived_text_record_id
 from autocapture_nx.processing.idle import IdleProcessor
 from autocapture_nx.plugin_system.registry import CapabilityProxy, MultiCapabilityProxy
 
@@ -117,10 +117,14 @@ class IdleMultiExtractorTests(unittest.TestCase):
             stats = processor.process()
             self.assertEqual(stats.processed, 2)
 
-            encoded_source = encode_record_id_component(record_id)
             for provider in ("ocr.one", "ocr.two"):
-                provider_component = encode_record_id_component(provider)
-                derived_id = f"run1/derived.text.ocr/{provider_component}/{encoded_source}"
+                derived_id = derived_text_record_id(
+                    kind="ocr",
+                    run_id="run1",
+                    provider_id=provider,
+                    source_id=record_id,
+                    config=config,
+                )
                 self.assertIn(derived_id, metadata.data)
                 self.assertEqual(metadata.data[derived_id]["provider_id"], provider)
 

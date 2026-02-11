@@ -213,32 +213,96 @@ def _extract_vdi_time(tokens: list[dict[str, Any]]) -> tuple[str | None, tuple[i
             if artist and title and artist not in _NAME_STOP:
                 return f"Now playing: {artist} - {title}", None
         return None, None
-    # Prefer a time that is not in the *host* taskbar strip. In fixtures the host
-    # taskbar is the absolute bottom of the frame, while the VDI (remote desktop)
-    # clock is slightly above.
-    #
-    # This is intentionally heuristic: we don't re-run media processing at query
-    # time, so we must extract deterministically from OCR tokens alone.
-    preferred = candidates
+    # Prefer right-bottom clock tokens (taskbar region) before generic timestamps
+    # found in email/chat content.
+    preferred = list(candidates)
+    if max_x2 > 0 and max_y2 > 0:
+        right_bottom: list[tuple[int, int, str, tuple[int, int, int, int]]] = []
+        x_cut = float(max_x2) * 0.72
+        y_cut = float(max_y2) * 0.72
+        for cand in candidates:
+            bbox = cand[3]
+            cx, cy = _center(bbox)
+            if cx >= x_cut and cy >= y_cut:
+                right_bottom.append(cand)
+        if right_bottom:
+            preferred = right_bottom
     if max_y2 > 0:
         host_taskbar_y = float(max_y2) * 0.94
-        preferred = [c for c in candidates if c[3][3] < host_taskbar_y]
-        if not preferred:
-            preferred = candidates
-    # Choose the bottom-most time among the preferred set; tie-break on left-most.
-    preferred.sort(key=lambda c: (-c[0], c[1], c[2]))
+        non_host = [c for c in preferred if c[3][3] < host_taskbar_y]
+        if non_host:
+            preferred = non_host
+
+    # Many OCR backends emit taskbar clocks as bare "HH:MM" tokens in the final
+    # stitched line (often spanning full frame width). When present near the
+    # bottom, prefer that reading and infer AM/PM from nearby/global context.
+    bare_candidates: list[tuple[int, int, str, tuple[int, int, int, int]]] = []
+    for tok in tokens:
+        text = _token_text(tok)
+        bbox = _token_bbox(tok)
+        if not text or bbox is None:
+            continue
+        if not _TIME_HHMM_RE.match(text):
+            continue
+        bare_candidates.append((bbox[1], bbox[0], text.strip(), bbox))
+    if bare_candidates:
+        bare_candidates.sort(key=lambda c: (-c[0], -c[1], c[2]))
+        _by, _bx, hhmm, bb = bare_candidates[0]
+        am_count = 0
+        pm_count = 0
+        for tok in tokens:
+            t2 = _token_text(tok).strip().upper()
+            if t2 not in {"AM", "PM"}:
+                continue
+            b2 = _token_bbox(tok)
+            if b2 is None:
+                continue
+            if abs(b2[1] - bb[1]) <= 24:
+                if t2 == "AM":
+                    am_count += 2
+                else:
+                    pm_count += 2
+            else:
+                if t2 == "AM":
+                    am_count += 1
+                else:
+                    pm_count += 1
+        ampm = "AM" if am_count >= pm_count else "PM"
+        if max_y2 > 0 and bb[3] >= int(float(max_y2) * 0.90):
+            return f"{hhmm} {ampm}", bb
+
+    # Choose the bottom-most preferred time; tie-break on right-most.
+    preferred.sort(key=lambda c: (-c[0], -c[1], c[2]))
     _y, _x, time_text, bbox = preferred[0]
     return time_text, bbox
 
 
 def _count_inboxes(tokens: list[dict[str, Any]]) -> int:
-    """Estimate open email inbox tabs/windows from OCR tokens.
+    """Estimate open email inbox tabs/windows from OCR tokens."""
 
-    We intentionally bias toward *top-bar/tab* inbox indicators and ignore sidebar
-    "Inbox" labels inside a mail client. This matches user intent ("how many inboxes
-    do I have open") and stabilizes the fixture where two separate inbox tabs are
-    visible in the browser tab strip.
-    """
+    return int(_collect_inbox_signals(tokens).get("count", 0))
+
+
+def _line_bbox(line: dict[str, Any]) -> tuple[int, int, int, int] | None:
+    raw = line.get("bbox")
+    if not isinstance(raw, (list, tuple)) or len(raw) != 4:
+        return None
+    try:
+        x1, y1, x2, y2 = (int(raw[0]), int(raw[1]), int(raw[2]), int(raw[3]))
+    except Exception:
+        return None
+    if x2 < x1:
+        x1, x2 = x2, x1
+    if y2 < y1:
+        y1, y2 = y2, y1
+    return (x1, y1, x2, y2)
+
+
+def _collect_inbox_signals(
+    tokens: list[dict[str, Any]],
+    text_lines: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Collect inbox/workspace signals and deterministic count/debug traces."""
 
     def _looks_like_inbox(raw: str) -> bool:
         if not raw:
@@ -254,29 +318,80 @@ def _count_inboxes(tokens: list[dict[str, Any]]) -> int:
             return False
         return "inbox" in t
 
-    # Infer screen height from the OCR token bboxes (normalized frames keep this stable).
+    def _mail_context_score(raw: str) -> int:
+        if not raw:
+            return 0
+        low = str(raw).casefold()
+        score = 0
+        if "outlook" in low:
+            score += 4
+        if "gmail" in low:
+            score += 3
+        if "send/receive" in low and "email" in low:
+            score += 4
+        if "received" in low and "email" in low:
+            score += 3
+        if "email" in low and ("reply" in low or "focused" in low or "by date" in low):
+            score += 2
+        if "web client" in low and "inbox" in low:
+            score += 2
+        return score
+
+    def _looks_like_mail_line(raw: str) -> bool:
+        if not raw:
+            return False
+        low = str(raw).casefold()
+        return any(
+            marker in low
+            for marker in ("inbox", "gmail", "outlook", "email", "send/receive", "received", "reply", "mail")
+        )
+
+    # Infer screen height from token/line bboxes (normalized frames keep this stable).
     max_y2 = 0
+    max_x2 = 0
     for tok in tokens:
         bbox = _token_bbox(tok)
         if bbox is None:
             continue
+        if bbox[2] > max_x2:
+            max_x2 = bbox[2]
         if bbox[3] > max_y2:
             max_y2 = bbox[3]
+    if isinstance(text_lines, list):
+        for line in text_lines:
+            if not isinstance(line, dict):
+                continue
+            bbox = _line_bbox(line)
+            if bbox is None:
+                continue
+            if bbox[2] > max_x2:
+                max_x2 = bbox[2]
+            if bbox[3] > max_y2:
+                max_y2 = bbox[3]
     if max_y2 <= 0:
-        return 0
+        return {
+            "count": 0,
+            "token_hits": [],
+            "line_hits": [],
+            "mail_context_hits": [],
+            "token_count": 0,
+            "line_count": 0,
+            "mail_context_count": 0,
+        }
 
     # "Top bar" threshold (fraction of screen height).
     #
     # Bias toward over-counting rather than under-counting: users asking "how many
     # inboxes do I have open" care more about missing a real open inbox than
     # counting an extra noisy hit, and downstream QA already clamps counts.
-    # 0.40 captures tab strips and upper-pane docked inbox lists while still
+    # 0.50 captures tab strips and upper-pane docked inbox lists while still
     # excluding deep sidebar/body "Inbox" labels in typical desktop layouts.
-    top_threshold_y = float(max_y2) * 0.40
+    top_threshold_y = float(max_y2) * 0.50
 
     # Deduplicate by coarse x/y buckets to avoid double-counting overlapping OCR hits
     # for the same tab label while still allowing multiple distinct inbox tabs.
     seen: set[tuple[int, int]] = set()
+    token_hits: list[dict[str, Any]] = []
     for tok in tokens:
         text = _token_text(tok)
         if not text or not _looks_like_inbox(str(text)):
@@ -288,11 +403,87 @@ def _count_inboxes(tokens: list[dict[str, Any]]) -> int:
         if cy > top_threshold_y:
             # Likely a sidebar label or in-body content; not an "open inbox tab".
             continue
-        # Slightly finer buckets reduce accidental merging of multiple inbox tabs.
-        x_bucket = int(cx // 180)
-        y_bucket = int(cy // 70)
-        seen.add((x_bucket, y_bucket))
-    return min(20, len(seen))
+        # Keep tabs separate while tolerating OCR box jitter.
+        x_bucket = int(cx // 220)
+        y_bucket = int(cy // 80)
+        bucket = (x_bucket, y_bucket)
+        seen.add(bucket)
+        token_hits.append(
+            {
+                "text": str(text),
+                "bbox": [int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])],
+                "bucket": [int(x_bucket), int(y_bucket)],
+                "cy_frac": round(float(cy) / float(max_y2), 4),
+            }
+        )
+    token_count = len(seen)
+
+    line_hits: list[dict[str, Any]] = []
+    mail_context_hits: list[dict[str, Any]] = []
+    mail_context_seen: set[int] = set()
+    line_seen: set[str] = set()
+    if isinstance(text_lines, list) and text_lines:
+        for line in text_lines:
+            if not isinstance(line, dict):
+                continue
+            text = str(line.get("text") or "").strip()
+            if not text:
+                continue
+            if not _looks_like_mail_line(text):
+                continue
+            bbox = _line_bbox(line)
+            if bbox is None:
+                continue
+            width = max(1, bbox[2] - bbox[0])
+            # Keep broad UI lines and prevent tiny in-body email mentions from
+            # inflating open-inbox counts.
+            if max_x2 > 0 and width < int(float(max_x2) * 0.35):
+                continue
+            norm = re.sub(r"\s+", " ", text).casefold()
+            if norm in line_seen:
+                continue
+            line_seen.add(norm)
+            cy = (bbox[1] + bbox[3]) / 2.0
+            context_score = _mail_context_score(text)
+            line_hits.append(
+                {
+                    "text": text[:220],
+                    "bbox": [int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])],
+                    "cy_frac": round(float(cy) / float(max_y2), 4),
+                    "context_score": int(context_score),
+                }
+            )
+            if context_score >= 3:
+                # Capture distinct mail-client regions to account for inboxes that
+                # are visible via client chrome/taskbar state rather than explicit
+                # "Inbox" labels.
+                region_bucket = int(cy // 120)
+                if region_bucket in mail_context_seen:
+                    continue
+                mail_context_seen.add(region_bucket)
+                mail_context_hits.append(
+                    {
+                        "text": text[:220],
+                        "bbox": [int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])],
+                        "bucket": int(region_bucket),
+                        "cy_frac": round(float(cy) / float(max_y2), 4),
+                        "context_score": int(context_score),
+                    }
+                )
+    line_count = min(20, len(line_hits))
+    mail_context_count = min(20, len(mail_context_hits))
+
+    # Combine explicit inbox labels with distinct mail-client context regions.
+    count = min(20, int(token_count + mail_context_count))
+    return {
+        "count": int(count),
+        "token_count": int(token_count),
+        "line_count": int(line_count),
+        "mail_context_count": int(mail_context_count),
+        "token_hits": token_hits,
+        "line_hits": line_hits,
+        "mail_context_hits": mail_context_hits,
+    }
 
 
 def _line_key(bbox: tuple[int, int, int, int]) -> int:
@@ -914,7 +1105,9 @@ def _extract_collaborator_from_texts(texts: list[str]) -> str | None:
     # Keep this strict: SST derived texts can be long stitched spans containing many
     # unrelated titlecased words ("Task Set ..."), so we only trust patterns anchored
     # to the Teams header row: "Copilot First Last" (preferred) or "Chat First Last".
-    pat_contractor = re.compile(r"\\bfor\\s+Contractor\\s+([A-Z][a-z]{2,})\\s+([A-Z][a-z]{2,})\\b")
+    pat_contractor = re.compile(
+        r"\\bfor\\s+(?:[A-Za-z]{1,3}\\s+)?Contractor\\s+([A-Z][a-z]{2,})\\s+(?:[A-Z]{1,3}\\s+)?([A-Z][a-z]{2,})\\b"
+    )
     pat_copilot = re.compile(r"\\bCopilot\\s+([A-Z][a-z]{2,})\\s+([A-Z][a-z]{2,})\\b")
     pat_chat = re.compile(r"\\bChat\\s+([A-Z][a-z]{2,})\\s+([A-Z][a-z]{2,})\\b")
 
@@ -934,6 +1127,74 @@ def _extract_collaborator_from_texts(texts: list[str]) -> str | None:
                 continue
             return f"{first} {last}"
     return None
+
+
+def _extract_contractor_collaborator_from_texts(texts: list[str]) -> str | None:
+    pat = re.compile(
+        r"\\bfor\\s+(?:[A-Za-z]{1,3}\\s+)?Contractor\\s+"
+        r"(?P<first>[A-Z][a-z]{2,})\\s+"
+        r"(?:[A-Z]{1,3}\\s+)?"
+        r"(?P<last>[A-Z][a-z]{2,})\\b"
+    )
+    for text in texts:
+        if not text:
+            continue
+        m = pat.search(text)
+        if not m:
+            continue
+        first = str(m.group("first") or "").strip()
+        last = str(m.group("last") or "").strip()
+        if not first or not last:
+            continue
+        if first in _NAME_STOP or last in _NAME_STOP:
+            continue
+        return f"{first} {last}"
+    return None
+
+
+def _extract_contractor_collaborator_from_tokens(tokens: list[dict[str, Any]]) -> tuple[str | None, tuple[int, int, int, int] | None]:
+    items: list[tuple[tuple[int, int, int, int], str]] = []
+    for tok in tokens:
+        text = _token_text(tok)
+        bbox = _token_bbox(tok)
+        if not text or bbox is None:
+            continue
+        items.append((bbox, text.strip()))
+    items.sort(key=lambda it: (it[0][1], it[0][0]))
+    for idx, (bbox0, text0) in enumerate(items):
+        if text0.casefold() != "contractor":
+            continue
+        first = None
+        last = None
+        bbox_first = None
+        bbox_last = None
+        base_y = bbox0[1]
+        for j in range(idx + 1, min(idx + 8, len(items))):
+            bb, ww = items[j]
+            if abs(bb[1] - base_y) > 18:
+                if bb[1] > base_y + 18:
+                    break
+                continue
+            word = re.sub(r"[^A-Za-z]", "", ww)
+            if not _NAME_RE.match(word):
+                continue
+            if word in _NAME_STOP:
+                continue
+            if first is None:
+                first = word
+                bbox_first = bb
+                continue
+            last = word
+            bbox_last = bb
+            break
+        if first and last:
+            merged_bbox = None
+            if bbox_first is not None and bbox_last is not None:
+                merged_bbox = (bbox_first[0], min(bbox_first[1], bbox_last[1]), bbox_last[2], max(bbox_first[3], bbox_last[3]))
+            else:
+                merged_bbox = bbox_first or bbox_last
+            return f"{first} {last}", merged_bbox
+    return None, None
 
 
 def _extract_now_playing_from_texts(texts: list[str]) -> str | None:
@@ -986,9 +1247,13 @@ class SSTQAAnswers(PluginBase):
             tokens = payload.get("tokens")
         if not isinstance(tokens, list) or not tokens:
             return None
+        text_lines = payload.get("text_lines")
+        if not isinstance(text_lines, list):
+            text_lines = None
 
         vdi_time, time_bbox = _extract_vdi_time(tokens)
-        inbox_count = _count_inboxes(tokens)
+        inbox_signals = _collect_inbox_signals(tokens, text_lines=text_lines)
+        inbox_count = int(inbox_signals.get("count", 0))
         collaborator, collab_bbox = _extract_quorum_collaborator(tokens)
         now_playing, now_playing_bbox = _extract_now_playing(tokens)
 
@@ -1003,10 +1268,19 @@ class SSTQAAnswers(PluginBase):
             if t:
                 existing_texts.append(str(t))
 
-        # Prefer collaborator derived from already-extracted texts (more stable than raw token bucketing).
-        collaborator_from_texts = _extract_collaborator_from_texts(existing_texts)
-        if collaborator_from_texts:
-            collaborator = collaborator_from_texts
+        # Prefer explicit contractor name from task context when present.
+        contractor_from_tokens, contractor_bbox = _extract_contractor_collaborator_from_tokens(tokens)
+        contractor_from_texts = _extract_contractor_collaborator_from_texts(existing_texts)
+        if contractor_from_tokens:
+            collaborator = contractor_from_tokens
+            if contractor_bbox is not None:
+                collab_bbox = contractor_bbox
+        elif contractor_from_texts:
+            collaborator = contractor_from_texts
+        else:
+            collaborator_from_texts = _extract_collaborator_from_texts(existing_texts)
+            if collaborator_from_texts:
+                collaborator = collaborator_from_texts
 
         now_playing_from_texts = _extract_now_playing_from_texts(existing_texts)
         if now_playing_from_texts:
@@ -1024,7 +1298,7 @@ class SSTQAAnswers(PluginBase):
                 "doc_id": _doc_id(doc_kind, text),
                 "doc_kind": doc_kind,
                 "text": text,
-                "meta": {"qa": True, "qa_kind": doc_kind},
+                "meta": {"observation": True, "qa_kind": doc_kind},
                 "provider_id": self.plugin_id,
                 "stage": stage,
                 "confidence_bp": 9000,
@@ -1036,28 +1310,61 @@ class SSTQAAnswers(PluginBase):
             extra_docs.append(item)
 
         if vdi_time:
-            add_doc("qa.vdi_time", f"VDI time: {vdi_time}", time_bbox)
+            add_doc("obs.vdi_time", f"Observation: vdi_clock_time={vdi_time}. VDI time: {vdi_time}", time_bbox)
         if collaborator:
-            add_doc("qa.quorum_collaborator", f"Quorum task collaborator: {collaborator}", collab_bbox)
             add_doc(
-                "qa.quorum_collaborator_q",
-                f"Who is working with me on the quorum task? Quorum task collaborator: {collaborator}",
+                "obs.quorum_collaborator",
+                f"Observation: quorum_task_collaborator={collaborator}. Quorum task collaborator: {collaborator}",
+                collab_bbox,
+            )
+            add_doc(
+                "obs.quorum_message_collaborator",
+                (
+                    f"Observation: quorum_message_collaborator={collaborator}. "
+                    f"Quorum message collaborator: {collaborator}. "
+                    f"Quorum task collaborator: {collaborator}. "
+                    f"Who is working with me on the flagged quorum message? {collaborator}"
+                ),
                 collab_bbox,
             )
         if inbox_count:
-            add_doc("qa.open_inboxes", f"Open inboxes: {inbox_count}", None)
-            add_doc(
-                "qa.open_inboxes_q",
-                f"How many inboxes do I have open? Open inboxes: {inbox_count}",
-                None,
-            )
+            add_doc("obs.open_inboxes", f"Observation: open_inboxes_count={inbox_count}. Open inboxes: {inbox_count}", None)
+            signal_lines: list[str] = []
+            for hit in inbox_signals.get("token_hits", [])[:6]:
+                if not isinstance(hit, dict):
+                    continue
+                signal_lines.append(f"token: {hit.get('text')} @ {hit.get('bbox')}")
+            for hit in inbox_signals.get("mail_context_hits", [])[:6]:
+                if not isinstance(hit, dict):
+                    continue
+                signal_lines.append(f"context: {hit.get('text')}")
+            for hit in inbox_signals.get("line_hits", [])[:6]:
+                if not isinstance(hit, dict):
+                    continue
+                signal_lines.append(f"line: {hit.get('text')}")
+            if signal_lines:
+                add_doc(
+                    "obs.open_inboxes_trace",
+                    "Inbox count trace: "
+                    f"token_count={inbox_signals.get('token_count', 0)}, "
+                    f"mail_context_count={inbox_signals.get('mail_context_count', 0)}, "
+                    f"line_count={inbox_signals.get('line_count', 0)}, "
+                    f"final_count={inbox_count}. "
+                    + " | ".join(signal_lines),
+                    None,
+                )
         if now_playing:
-            add_doc("qa.song_playing", now_playing, now_playing_bbox)
-            add_doc("qa.song_playing_q", f"What song is playing? {now_playing}", now_playing_bbox)
+            add_doc("obs.song_playing", f"Observation: current_song={now_playing}. {now_playing}", now_playing_bbox)
         if vdi_time and collaborator and inbox_count:
             add_doc(
-                "qa.combined",
-                f"VDI time: {vdi_time}. Quorum task collaborator: {collaborator}. Open inboxes: {inbox_count}.",
+                "obs.combined",
+                (
+                    "Observation summary: "
+                    f"vdi_clock_time={vdi_time}; "
+                    f"quorum_task_collaborator={collaborator}; "
+                    f"open_inboxes_count={inbox_count}. "
+                    f"VDI time: {vdi_time}. Quorum task collaborator: {collaborator}. Open inboxes: {inbox_count}."
+                ),
                 None,
             )
 
@@ -1067,6 +1374,9 @@ class SSTQAAnswers(PluginBase):
                 "qa_has_time": 1.0 if bool(vdi_time) else 0.0,
                 "qa_has_collaborator": 1.0 if bool(collaborator) else 0.0,
                 "qa_inbox_count": float(inbox_count),
+                "qa_inbox_token_hits": float(inbox_signals.get("token_count", 0)),
+                "qa_inbox_mail_context_hits": float(inbox_signals.get("mail_context_count", 0)),
+                "qa_inbox_line_hits": float(inbox_signals.get("line_count", 0)),
             },
         }
 

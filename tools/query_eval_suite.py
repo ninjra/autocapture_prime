@@ -7,7 +7,9 @@ Case schema:
     "id": "song",
     "query": "what song is playing",
     "expects_any": ["sunlight", "jennifer doherty"],
-    "expects_all": []
+    "expects_all": [],
+    "expect_exact": "Now playing: Jennifer Doherty - Sunlight",
+    "require_citations": true
   }
 ]
 """
@@ -54,6 +56,31 @@ def _answer_text(result: dict[str, Any]) -> str:
     return "\n".join(texts)
 
 
+def _claim_texts(result: dict[str, Any]) -> list[str]:
+    answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
+    claims = answer.get("claims", []) if isinstance(answer.get("claims", []), list) else []
+    texts: list[str] = []
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        txt = str(claim.get("text") or "").strip()
+        if txt:
+            texts.append(txt)
+    return texts
+
+
+def _has_citations(result: dict[str, Any]) -> bool:
+    answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
+    claims = answer.get("claims", []) if isinstance(answer.get("claims", []), list) else []
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        cites = claim.get("citations", [])
+        if isinstance(cites, list) and cites:
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class CaseOutcome:
     case_id: str
@@ -71,16 +98,43 @@ def _run_case(system, case: dict[str, Any]) -> CaseOutcome:  # type: ignore[no-u
         return CaseOutcome(case_id, query, False, "", "missing_query", {})
     expects_any = [str(x).strip().lower() for x in (case.get("expects_any") or []) if str(x).strip()]
     expects_all = [str(x).strip().lower() for x in (case.get("expects_all") or []) if str(x).strip()]
+    raw_exact = case.get("expect_exact")
+    if raw_exact is None:
+        raw_exact = case.get("expects_exact")
+    if isinstance(raw_exact, list):
+        expects_exact = [str(x).strip() for x in raw_exact if str(x).strip()]
+    elif raw_exact is None:
+        expects_exact = []
+    else:
+        expects_exact = [str(raw_exact).strip()] if str(raw_exact).strip() else []
+    require_citations = bool(case.get("require_citations", True))
     try:
         result = run_query(system, query, schedule_extract=False)
     except Exception as exc:
         return CaseOutcome(case_id, query, False, "", f"query_failed:{type(exc).__name__}:{exc}", {})
-    text = _answer_text(result)
+    claim_texts = _claim_texts(result)
+    text = "\n".join(claim_texts)
     low = text.lower()
     any_ok = True if not expects_any else any(token in low for token in expects_any)
     all_ok = all(token in low for token in expects_all)
-    passed = bool(any_ok and all_ok)
-    detail = "ok" if passed else f"expectation_failed:any_ok={any_ok},all_ok={all_ok}"
+    exact_ok = True
+    if expects_exact:
+        norm_claims = [" ".join(t.casefold().split()) for t in claim_texts]
+        norm_expected = [" ".join(t.casefold().split()) for t in expects_exact]
+        exact_ok = any(exp in claim for exp in norm_expected for claim in norm_claims)
+    citations_ok = (not require_citations) or _has_citations(result)
+    passed = bool(any_ok and all_ok and exact_ok and citations_ok)
+    detail = (
+        "ok"
+        if passed
+        else (
+            "expectation_failed:"
+            f"any_ok={any_ok},"
+            f"all_ok={all_ok},"
+            f"exact_ok={exact_ok},"
+            f"citations_ok={citations_ok}"
+        )
+    )
     return CaseOutcome(case_id, query, passed, text, detail, result)
 
 

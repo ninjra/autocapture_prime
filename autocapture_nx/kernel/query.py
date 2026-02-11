@@ -6,6 +6,7 @@ import io
 import zipfile
 import time
 import sqlite3
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -1042,156 +1043,11 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
             ],
         }
 
-    # Optional: query-time QA helpers that use already-extracted metadata only (no media decode).
-    # These improve answerability for natural-language questions that don't share tokens with the
-    # best supporting evidence (e.g. "what song is playing").
-    qlow = str(query or "").casefold()
+    # Query-time tactical extractors are intentionally disabled.
+    # Answers must come from persisted derived records produced at processing time.
     custom_claims: list[dict[str, Any]] = []
     custom_claims_error: str | None = None
-    custom_claims_debug: dict[str, Any] = {}
-    try:
-        if retrieval is not None and metadata is not None:
-            def _scan_metadata_for(pattern, *, limit: int = 500):  # type: ignore[no-untyped-def]
-                """Fallback text scan over already-extracted metadata (no media decode).
-
-                Used when retrieval indexes don't surface the right evidence for
-                natural-language questions.
-                """
-
-                import re as _re
-
-                pat = pattern if hasattr(pattern, "search") else _re.compile(str(pattern))
-                found: list[tuple[str, Any, Any]] = []
-                try:
-                    keys = list(getattr(metadata, "keys", lambda: [])())
-                except Exception:
-                    keys = []
-                # Prefer derived text records first.
-                for rid in keys:
-                    rec = metadata.get(rid, {})
-                    if not isinstance(rec, dict):
-                        continue
-                    rtype = str(rec.get("record_type") or "")
-                    if not rtype.startswith("derived.text."):
-                        continue
-                    txt = rec.get("text", "")
-                    if not isinstance(txt, str) or not txt:
-                        continue
-                    m = pat.search(txt)
-                    if not m:
-                        continue
-                    found.append((str(rid), rec, m))
-                    if len(found) >= int(limit):
-                        break
-                return found
-
-            # "Who is working with me on the quorum task" -> extract contractor name from task title.
-            if "quorum" in qlow and ("working" in qlow or "who" in qlow):
-                # Prefer the explicit assignee string when present (e.g. "task was assigned to OpenInvoice").
-                hint = retrieval.search("assigned to", time_window=time_window) or retrieval.search("assigned", time_window=time_window) or retrieval.search("assigned", time_window=None)
-                custom_claims_debug["quorum_hint_count"] = int(len(hint)) if isinstance(hint, list) else 0
-                pat = __import__("re").compile(r"assigned\s*to\s*(?P<assignee>[A-Za-z][A-Za-z0-9]{1,48})", flags=__import__("re").IGNORECASE)
-
-                def _split_camel(value: str) -> str:
-                    if not value:
-                        return value
-                    out: list[str] = []
-                    current = value[0]
-                    for ch in value[1:]:
-                        if ch.isupper() and current and (current[-1].islower() or current[-1].isdigit()):
-                            out.append(current)
-                            current = ch
-                        else:
-                            current += ch
-                    out.append(current)
-                    return " ".join(p for p in out if p)
-
-                matches = []
-                try:
-                    matches = [(str(hit.get("record_id") or ""), hit.get("derived_id"), pat.search((metadata.get(hit.get("derived_id") or hit.get("record_id") or "", {}) or {}).get("text", ""))) for hit in (hint[:10] if isinstance(hint, list) else [])]
-                except Exception:
-                    matches = []
-                found = []
-                for evidence_id, derived_id, m in matches:
-                    if evidence_id and m:
-                        found.append((evidence_id, derived_id, m))
-                if not found:
-                    for rid, _rec, m in _scan_metadata_for(pat, limit=200):
-                        found.append((rid, None, m))
-                        break
-                custom_claims_debug["quorum_found_count"] = int(len(found))
-                for evidence_id, derived_id, m in found[:10]:
-                    raw = str(m.group("assignee") or "").strip()
-                    if not raw:
-                        continue
-                    # Keep only alphanumerics so we don't fabricate separators from OCR noise.
-                    cleaned = "".join(ch for ch in raw if ch.isalnum())
-                    if not cleaned:
-                        continue
-                    name = _split_camel(cleaned)
-                    claim = _claim_with_citation(
-                        claim_text=f"Quorum task collaborator: {name}",
-                        evidence_id=evidence_id,
-                        derived_id=derived_id,
-                        match_text=m.group(0),
-                        match_start=m.start(),
-                        match_end=m.end(),
-                    )
-                    if claim:
-                        custom_claims.append(claim)
-                        break
-
-            # "What song is playing" -> extract from SiriusXM "Chill Instrumental ..." line.
-            if "song" in qlow and ("play" in qlow or "playing" in qlow):
-                hint = retrieval.search("Chill Instrumental", time_window=time_window) or retrieval.search("Chill Instrumental", time_window=None)
-                custom_claims_debug["song_hint_count"] = int(len(hint)) if isinstance(hint, list) else 0
-                pat = __import__("re").compile(
-                    r"Chill\s+Instrumental\s+"
-                    r"(?P<artist>[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})"
-                    r"\s*[-–—−]\s*"
-                    r"(?P<title>[A-Z][A-Za-z]+(?:\s+(?:[A-Z][A-Za-z]+|At|Of|In|On|To|And|&)){0,6})"
-                )
-                found = []
-                if isinstance(hint, list):
-                    for hit in hint[:10]:
-                        evidence_id = str(hit.get("record_id") or "")
-                        derived_id = hit.get("derived_id")
-                        record_id = derived_id or evidence_id
-                        rec = metadata.get(record_id, {})
-                        txt = rec.get("text", "") if isinstance(rec, dict) else ""
-                        m = pat.search(txt)
-                        if evidence_id and m:
-                            found.append((evidence_id, derived_id, m))
-                if not found:
-                    for rid, _rec, m in _scan_metadata_for(pat, limit=200):
-                        found.append((rid, None, m))
-                        break
-                custom_claims_debug["song_found_count"] = int(len(found))
-                for evidence_id, derived_id, m in found[:10]:
-                    artist = m.group("artist").strip()
-                    title = m.group("title").strip()
-                    if not artist or not title:
-                        continue
-                    claim = _claim_with_citation(
-                        claim_text=f"Now playing: {artist} - {title}",
-                        evidence_id=evidence_id,
-                        derived_id=derived_id,
-                        match_text=m.group(0),
-                        match_start=m.start(),
-                        match_end=m.end(),
-                    )
-                    if claim:
-                        custom_claims.append(claim)
-                        break
-    except Exception:
-        # Fail closed: query should still return normal retrieval results.
-        try:
-            import traceback
-
-            custom_claims_error = traceback.format_exc(limit=2).strip()
-        except Exception:
-            custom_claims_error = "custom_claims_exception"
-        custom_claims = list(custom_claims)
+    custom_claims_debug: dict[str, Any] = {"mode": "persisted_only"}
 
     # Optional: LLM synthesizer that emits quote-grounded claims, converted into
     # verifiable citations. This runs strictly over already-extracted text.
@@ -1623,17 +1479,126 @@ def _append_query_metric(system, *, query: str, method: str, result: dict[str, A
         pass
 
 
+def _query_tokens(query: str) -> set[str]:
+    tokens = [tok for tok in normalize_text(str(query or "")).split() if len(tok) >= 2]
+    return {tok for tok in tokens}
+
+
+def _claim_texts(result: dict[str, Any]) -> list[str]:
+    answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
+    claims = answer.get("claims", []) if isinstance(answer.get("claims", []), list) else []
+    out: list[str] = []
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        text = str(claim.get("text") or "").strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def _citation_count(result: dict[str, Any]) -> int:
+    answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
+    claims = answer.get("claims", []) if isinstance(answer.get("claims", []), list) else []
+    total = 0
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        cites = claim.get("citations", [])
+        if isinstance(cites, list):
+            total += len(cites)
+    return int(total)
+
+
+def _is_count_query(query: str) -> bool:
+    low = str(query or "").casefold()
+    return any(marker in low for marker in ("how many", "count", "number of"))
+
+
+def _has_numeric_claim(result: dict[str, Any]) -> bool:
+    for text in _claim_texts(result):
+        if re.search(r"\b\d+\b", text):
+            return True
+    return False
+
+
+def _score_query_result(query: str, result: dict[str, Any]) -> dict[str, Any]:
+    answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
+    state = str(answer.get("state") or "")
+    state_score = {"ok": 40.0, "partial": 20.0, "no_evidence": 0.0, "error": -20.0}.get(state, 0.0)
+    claim_texts = _claim_texts(result)
+    claim_count = int(len(claim_texts))
+    citation_count = _citation_count(result)
+    q_tokens = _query_tokens(query)
+    claim_tokens: set[str] = set()
+    for text in claim_texts:
+        claim_tokens |= _query_tokens(text)
+    overlap = int(len(q_tokens & claim_tokens))
+    overlap_ratio = (float(overlap) / float(len(q_tokens))) if q_tokens else 0.0
+    overlap_score = float(round(overlap_ratio * 30.0, 3))
+    claims_score = float(min(20, claim_count * 4))
+    citations_score = float(min(20, citation_count * 2))
+    coverage_ratio = 0.0
+    evaluation = result.get("evaluation", {}) if isinstance(result.get("evaluation", {}), dict) else {}
+    try:
+        coverage_ratio = float(evaluation.get("coverage_ratio", 0.0) or 0.0)
+    except Exception:
+        coverage_ratio = 0.0
+    coverage_score = float(round(min(1.0, max(0.0, coverage_ratio)) * 10.0, 3))
+    numeric_bonus = 0.0
+    if _is_count_query(query):
+        numeric_bonus = 12.0 if _has_numeric_claim(result) else -4.0
+    total = float(round(state_score + claims_score + citations_score + overlap_score + coverage_score + numeric_bonus, 3))
+    return {
+        "total": total,
+        "state": state,
+        "components": {
+            "state_score": state_score,
+            "claims_score": claims_score,
+            "citations_score": citations_score,
+            "overlap_score": overlap_score,
+            "coverage_score": coverage_score,
+            "numeric_bonus": numeric_bonus,
+            "query_token_count": int(len(q_tokens)),
+            "overlap_tokens": int(overlap),
+            "claim_count": int(claim_count),
+            "citation_count": int(citation_count),
+            "coverage_ratio": float(round(coverage_ratio, 6)),
+        },
+    }
+
+
 def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str, Any]:
     state_cfg = system.config.get("processing", {}).get("state_layer", {}) if hasattr(system, "config") else {}
     if isinstance(state_cfg, dict) and bool(state_cfg.get("query_enabled", False)):
         state_result = run_state_query(system, query)
-        if _should_fallback_state(state_result):
-            fallback = run_query_without_state(system, query, schedule_extract=bool(schedule_extract))
-            merged = _merge_state_fallback(state_result, fallback)
-            _append_query_metric(system, query=query, method="state_fallback", result=merged)
+        classic_result = run_query_without_state(system, query, schedule_extract=bool(schedule_extract))
+        state_score = _score_query_result(query, state_result)
+        classic_score = _score_query_result(query, classic_result)
+
+        prefer_classic = bool(classic_score.get("total", 0.0) >= state_score.get("total", 0.0))
+        if prefer_classic:
+            merged = _merge_state_fallback(state_result, classic_result)
+            processing = merged.get("processing", {}) if isinstance(merged.get("processing", {}), dict) else {}
+            processing["arbitration"] = {
+                "winner": "classic",
+                "state_score": state_score,
+                "classic_score": classic_score,
+            }
+            merged["processing"] = processing
+            _append_query_metric(system, query=query, method="classic_arbitrated", result=merged)
             return merged
-        _append_query_metric(system, query=query, method="state", result=state_result)
-        return state_result
+
+        result = dict(state_result)
+        processing = result.get("processing", {}) if isinstance(result.get("processing", {}), dict) else {}
+        processing["arbitration"] = {
+            "winner": "state",
+            "state_score": state_score,
+            "classic_score": classic_score,
+        }
+        result["processing"] = processing
+        _append_query_metric(system, query=query, method="state_arbitrated", result=result)
+        return result
     result = run_query_without_state(system, query, schedule_extract=bool(schedule_extract))
     _append_query_metric(system, query=query, method="classic", result=result)
     return result

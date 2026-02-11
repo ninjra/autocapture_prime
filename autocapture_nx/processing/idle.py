@@ -31,7 +31,6 @@ from autocapture_nx.kernel.model_output_records import (
     model_output_record_id,
 )
 from autocapture_nx.kernel.providers import capability_providers
-from autocapture_nx.processing.qa.fixture_answers import extract_fixture_answers
 from autocapture_nx.storage.facts_ndjson import append_fact_line
 
 
@@ -518,76 +517,6 @@ class IdleProcessor:
                 if self._logger is not None:
                     self._logger.log("index.vector_error", {"doc_id": doc_id, "error": str(exc)})
 
-    def _store_fixture_answer_doc(
-        self,
-        *,
-        item: _IdleWorkItem,
-        base_text: str,
-        provider_id: str,
-    ) -> None:
-        """Emit deterministic QA "answer doc" lines from extracted text.
-
-        This improves query reliability for common operator questions without
-        requiring query-time media reprocessing.
-        """
-        if self._metadata is None:
-            return
-        answers = extract_fixture_answers(base_text)
-        lines = answers.as_lines()
-        if not lines:
-            return
-        doc_text = "\n".join(lines).strip()
-        if not doc_text:
-            return
-        record_id = f"{item.run_id}/derived.text.qa/{encode_record_id_component(provider_id)}/{item.encoded_source}"
-        if self._metadata.get(record_id) is not None:
-            return
-        payload = build_text_record(
-            kind="qa",
-            text=doc_text,
-            source_id=item.record_id,
-            source_record=item.record,
-            provider_id=str(provider_id),
-            config=self._config,
-            ts_utc=item.ts_utc,
-        )
-        if not payload:
-            return
-        try:
-            if hasattr(self._metadata, "put_new"):
-                self._metadata.put_new(record_id, payload)
-            else:
-                self._metadata.put(record_id, payload)
-        except Exception:
-            return
-        # META-07: record artifact manifest for deterministic QA doc.
-        try:
-            run_id = str(payload.get("run_id") or item.run_id)
-            manifest_id = artifact_manifest_id(run_id, record_id)
-            artifact_hash = str(payload.get("payload_hash") or payload.get("content_hash") or "")
-            derived_from = {
-                "evidence_id": item.record_id,
-                "evidence_hash": item.record.get("content_hash"),
-                "model_digest": payload.get("model_digest"),
-            }
-            manifest = build_artifact_manifest(
-                run_id=run_id,
-                artifact_id=record_id,
-                artifact_sha256=artifact_hash,
-                derived_from=derived_from,
-                ts_utc=payload.get("ts_utc"),
-            )
-            if hasattr(self._metadata, "put_new"):
-                try:
-                    self._metadata.put_new(manifest_id, manifest)
-                except Exception:
-                    pass
-            else:
-                self._metadata.put(manifest_id, manifest)
-        except Exception:
-            pass
-        self._index_text(record_id, doc_text)
-
     def _run_provider_batch(
         self,
         extractor: Any,
@@ -965,15 +894,6 @@ class IdleProcessor:
                             _ = append_fact_line(self._config, rel_path="model_outputs.ndjson", payload=out_payload)
                         except Exception:
                             pass
-                        # After storing OCR text for an item, also emit deterministic
-                        # fixture answer docs derived from that extracted text.
-                        if kind == "ocr":
-                            try:
-                                base_text = str(payload.get("text") or "")
-                                if base_text:
-                                    self._store_fixture_answer_doc(item=item, base_text=base_text, provider_id="qa.fixture")
-                            except Exception:
-                                pass
         return processed
 
     def process(self, *, should_abort: Callable[[], bool] | None = None) -> IdleProcessStats:
