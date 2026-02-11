@@ -349,6 +349,10 @@ def _build_env(hosting: dict[str, Any], config: dict[str, Any], plugin_id: str) 
     if not bool(hosting.get("sanitize_env", True)):
         return None
     env = os.environ.copy()
+    # Subprocess plugin hosts run under a strict filesystem guard. Prevent Python
+    # from attempting to write `__pycache__/*.pyc` files (which can violate a
+    # plugin's declared filesystem policy and crash the host during import).
+    env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
     if "AUTOCAPTURE_ROOT" not in env:
         try:
             env["AUTOCAPTURE_ROOT"] = str(resolve_repo_path("."))
@@ -470,7 +474,7 @@ class PluginProcess:
         plugin_path: Path,
         callable_name: str,
         plugin_id: str,
-        network_allowed: bool,
+        network_allowed: bool | str,
         host_config: dict[str, Any],
         plugin_config: dict[str, Any],
         *,
@@ -482,6 +486,16 @@ class PluginProcess:
         rng_strict: bool = True,
         rng_enabled: bool = False,
     ) -> None:
+        if isinstance(network_allowed, bool):
+            scope = "internet" if network_allowed else "none"
+        else:
+            scope = str(network_allowed or "none").strip().lower()
+            if scope in {"true", "1", "yes"}:
+                scope = "internet"
+            elif scope in {"false", "0", "no"}:
+                scope = "none"
+        if scope not in {"none", "localhost", "internet"}:
+            scope = "none"
         hosting = _hosting_cfg(host_config)
         self._rpc_timeout_s = float(hosting.get("rpc_timeout_s", 10))
         self._rpc_startup_timeout_s = float(hosting.get("rpc_startup_timeout_s", self._rpc_timeout_s))
@@ -507,7 +521,7 @@ class PluginProcess:
                 str(plugin_path),
                 callable_name,
                 plugin_id,
-                "true" if network_allowed else "false",
+                scope,
             ],
             env=_build_env(hosting, host_config, plugin_id),
             limits=_adjust_job_limits_for_venv(python_exe, hosting.get("job_limits", {})),
@@ -759,7 +773,7 @@ class SubprocessPlugin:
         plugin_path: Path,
         callable_name: str,
         plugin_id: str,
-        network_allowed: bool,
+        network_allowed: bool | str,
         config: dict[str, Any],
         *,
         plugin_config: dict[str, Any] | None = None,
@@ -779,7 +793,17 @@ class SubprocessPlugin:
         self._plugin_path = plugin_path
         self._callable_name = callable_name
         self._plugin_id = plugin_id
-        self._network_allowed = network_allowed
+        if isinstance(network_allowed, bool):
+            scope = "internet" if network_allowed else "none"
+        else:
+            scope = str(network_allowed or "none").strip().lower()
+            if scope in {"true", "1", "yes"}:
+                scope = "internet"
+            elif scope in {"false", "0", "no"}:
+                scope = "none"
+        if scope not in {"none", "localhost", "internet"}:
+            scope = "none"
+        self._network_scope = scope
         self._config = config
         self._plugin_config = plugin_config if isinstance(plugin_config, dict) else config
         self.settings = dict(self._plugin_config)
@@ -919,7 +943,7 @@ class SubprocessPlugin:
                     self._plugin_path,
                     self._callable_name,
                     self._plugin_id,
-                    self._network_allowed,
+                    self._network_scope,
                     self._config,
                     self._plugin_config,
                     capabilities=self._capabilities,
@@ -953,13 +977,20 @@ class SubprocessPlugin:
     def _refresh_caps(self) -> None:
         if self._host is None:
             return
-        caps = self._host.capabilities()
-        self._cap_methods = {name: set(methods) for name, methods in caps.items()}
-        for name, methods in self._cap_methods.items():
-            if name not in self._caps:
-                self._caps[name] = RemoteCapability(self, name, sorted(methods))
-            else:
-                self._caps[name].update_methods(sorted(methods))
+        # Cap enumeration is an RPC and can take long enough on WSL that the
+        # background reaper would otherwise treat the host as "idle" (in_flight=0)
+        # and close it mid-startup.
+        self._in_flight += 1
+        try:
+            caps = self._host.capabilities()
+            self._cap_methods = {name: set(methods) for name, methods in caps.items()}
+            for name, methods in self._cap_methods.items():
+                if name not in self._caps:
+                    self._caps[name] = RemoteCapability(self, name, sorted(methods))
+                else:
+                    self._caps[name].update_methods(sorted(methods))
+        finally:
+            self._in_flight = max(0, int(self._in_flight) - 1)
 
     def _record_timeout(self) -> bool:
         now = time.monotonic()

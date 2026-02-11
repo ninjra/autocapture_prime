@@ -19,8 +19,8 @@ def test_journal_event_defaults_schema_version_for_evidence():
     from autocapture_nx.kernel.event_builder import EventBuilder
 
     j = _Journal()
-    l = _Ledger()
-    b = EventBuilder({"runtime": {"run_id": "run_1"}}, j, l, None)
+    ledger = _Ledger()
+    b = EventBuilder({"runtime": {"run_id": "run_1"}}, j, ledger, None)
     payload = {
         "record_type": "evidence.window.meta",
         "run_id": "run_1",

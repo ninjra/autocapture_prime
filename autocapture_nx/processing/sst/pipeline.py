@@ -11,6 +11,7 @@ from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.canonical_json import CanonicalJSONError, dumps as canonical_dumps
 from autocapture_nx.kernel.derived_records import extract_text_payload
 from autocapture_nx.kernel.ids import encode_record_id_component
+from autocapture_nx.kernel.providers import capability_providers
 
 from .action import infer_action
 from .compliance import redact_artifacts, redact_text, redact_value
@@ -102,6 +103,7 @@ class SSTPipeline:
         self._ocr = self._cap("ocr.engine")
         self._vlm = self._cap("vision.extractor")
         self._stage_hooks = self._cap("processing.stage.hooks")
+        self._post_index = self._cap("index.postprocess")
         self._events = self._cap("event.builder")
         self._logger = self._cap("observability.logger")
         self._lexical = None
@@ -1153,10 +1155,12 @@ class SSTPipeline:
             return self._persistence
         self._ensure_indexes()
         index_fn = self._index_text
+        post_fn = self._post_index_text
         self._persistence = SSTPersistence(
             metadata=self._metadata,
             event_builder=self._events,
             index_text=index_fn,
+            post_index=post_fn,
             extractor_id=self._extractor_id,
             extractor_version=self._extractor_version,
             config_hash=self._config_hash,
@@ -1190,6 +1194,23 @@ class SSTPipeline:
                 self._vector.index(doc_id, text)
             except Exception as exc:
                 self._log(f"sst.index_vector_error[{doc_id}]: {exc}")
+
+    def _post_index_text(self, doc_id: str, text: str) -> None:
+        """Optional post-index fanout (late interaction, extra embeddings, etc)."""
+        if not text:
+            return
+        cap = self._post_index
+        if cap is None:
+            return
+        for provider_id, provider in capability_providers(cap, "index.postprocess"):
+            _ = provider_id
+            try:
+                if hasattr(provider, "process_doc"):
+                    provider.process_doc(doc_id, text)
+                elif callable(provider):
+                    provider(doc_id, text)
+            except Exception as exc:
+                self._log(f"sst.post_index_error[{doc_id}]: {exc}")
 
     def _log(self, msg: str) -> None:
         if self._logger is None:

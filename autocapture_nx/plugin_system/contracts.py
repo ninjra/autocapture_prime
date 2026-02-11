@@ -29,6 +29,12 @@ _DEFAULT_CONTRACTS: dict[str, dict[str, dict[str, str]]] = {
             "output_schema_path": "contracts/answer_build_output.schema.json",
         }
     },
+    "answer.synthesizer": {
+        "synthesize": {
+            "input_schema_path": "contracts/answer_synthesize_input.schema.json",
+            "output_schema_path": "contracts/answer_synthesize_output.schema.json",
+        }
+    },
 }
 
 

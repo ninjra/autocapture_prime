@@ -48,7 +48,7 @@
       "id": "builtin.backpressure.basic"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "id": "builtin.capture.audio.windows"
     },
     {
@@ -56,11 +56,11 @@
       "id": "builtin.capture.basic"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "id": "builtin.capture.screenshot.windows"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "id": "builtin.capture.windows"
     },
     {
@@ -280,7 +280,7 @@
       "id": "builtin.tracking.file_activity.windows"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "id": "builtin.tracking.input.windows"
     },
     {
@@ -288,7 +288,7 @@
       "id": "builtin.vlm.basic"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "id": "builtin.window.metadata.windows"
     }
   ],

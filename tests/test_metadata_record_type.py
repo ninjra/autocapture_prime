@@ -1,6 +1,7 @@
 import unittest
 
 from autocapture_nx.kernel.metadata_store import ImmutableMetadataStore
+from autocapture_nx.kernel.hashing import sha256_canonical
 
 
 class _Store:
@@ -42,8 +43,16 @@ class MetadataRecordTypeTests(unittest.TestCase):
         }
         with self.assertRaises(ValueError):
             store.put("rec1", {**base, "content_hash": "hash"})
-        with self.assertRaises(ValueError):
-            store.put("rec2", {**base, "run_id": "run1"})
+        # Evidence-like records must include run_id, but do not need a caller-supplied
+        # content_hash: the store normalizes payload_hash to satisfy the contract.
+        store.put("rec2", {**base, "run_id": "run1"})
+        rec2 = store.get("rec2")
+        self.assertEqual(rec2["run_id"], "run1")
+        self.assertIn("payload_hash", rec2)
+        self.assertEqual(
+            rec2["payload_hash"],
+            sha256_canonical({k: v for k, v in rec2.items() if k != "payload_hash"}),
+        )
         store.put(
             "rec3",
             {**base, "run_id": "run1", "content_hash": "hash"},

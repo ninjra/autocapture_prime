@@ -1,0 +1,30 @@
+[
+  {
+    "id": "song_now_playing",
+    "query": "what song is playing",
+    "expects_any": [
+      "sunlight",
+      "jennifer doherty"
+    ],
+    "expects_all": []
+  },
+  {
+    "id": "quorum_collaborator",
+    "query": "who is working with me on the flagged quorum message",
+    "expects_any": [
+      "open invoice",
+      "openinvoice"
+    ],
+    "expects_all": []
+  },
+  {
+    "id": "inboxes_count",
+    "query": "how many inboxes do i have open",
+    "expects_any": [
+      "inbox",
+      "open"
+    ],
+    "expects_all": []
+  }
+]
+

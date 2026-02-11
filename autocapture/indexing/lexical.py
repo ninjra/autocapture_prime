@@ -3,12 +3,85 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 from autocapture.indexing.manifest import bump_manifest, update_manifest_digest, manifest_path
 from autocapture_nx.storage.migrations import record_baseline
+
+
+_STOPWORDS = {
+    # Keep this small and stable; the goal is to avoid "AND-ing" away recall for
+    # natural-language questions, not to do full NLP.
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "do",
+    "for",
+    "from",
+    "have",
+    "how",
+    "i",
+    "in",
+    "is",
+    "it",
+    "many",
+    "me",
+    "my",
+    "of",
+    "on",
+    "open",
+    "or",
+    "the",
+    "to",
+    "was",
+    "we",
+    "what",
+    "when",
+    "where",
+    "who",
+    "with",
+    "you",
+    "your",
+}
+
+
+def _fts_expr(query: str) -> str:
+    """Convert arbitrary user text into a safe, FTS5-compatible MATCH expression."""
+
+    raw = str(query or "").strip().lower()
+    if not raw:
+        return ""
+
+    tokens = [t for t in re.findall(r"[a-z0-9]+", raw) if t]
+    if not tokens:
+        return ""
+
+    filtered: list[str] = [t for t in tokens if t not in _STOPWORDS and len(t) > 1]
+    if not filtered:
+        filtered = tokens
+
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for tok in filtered:
+        if tok in seen:
+            continue
+        seen.add(tok)
+        uniq.append(tok)
+
+    if not uniq:
+        return ""
+    if len(uniq) == 1:
+        return f"\"{uniq[0]}\""
+    # Use OR for recall; rank by bm25 and then deterministic tie-breakers upstream.
+    return " OR ".join(f"\"{tok}\"" for tok in uniq[:12])
 
 
 class LexicalIndex:
@@ -70,13 +143,30 @@ class LexicalIndex:
         return int(row[0]) if row else 0
 
     def query(self, text: str, limit: int = 10) -> list[dict[str, Any]]:
+        expr = _fts_expr(text)
+        if not expr:
+            return []
         cur = self._conn.execute(
             "SELECT doc_id, snippet(fts, 1, '[', ']', '...', 10), bm25(fts) "
             "FROM fts WHERE fts MATCH ? ORDER BY bm25(fts), doc_id LIMIT ?",
-            (text, limit),
+            (expr, limit),
         )
         hits = []
         for doc_id, snippet, bm25_score in cur.fetchall():
+            if isinstance(doc_id, (bytes, bytearray)):
+                try:
+                    doc_id = doc_id.decode("utf-8", errors="replace")
+                except Exception:
+                    doc_id = str(doc_id)
+            else:
+                doc_id = str(doc_id)
+            if isinstance(snippet, (bytes, bytearray)):
+                try:
+                    snippet = snippet.decode("utf-8", errors="replace")
+                except Exception:
+                    snippet = str(snippet)
+            else:
+                snippet = str(snippet) if snippet is not None else ""
             raw_score = float(bm25_score) if bm25_score is not None else 0.0
             score = 1.0 / (1.0 + max(raw_score, 0.0))
             hits.append({"doc_id": doc_id, "snippet": snippet, "score": score})

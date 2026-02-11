@@ -1314,12 +1314,32 @@
                 "type": "string"
               },
               "type": "array"
+            },
+            "localhost_allowed_plugin_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             }
           },
           "required": [
             "network_allowed_plugin_ids"
           ],
           "type": "object"
+        },
+        "quarantine": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": true
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
         },
         "safe_mode": {
           "type": "boolean"
@@ -2424,6 +2444,12 @@
         "activity": {
           "additionalProperties": false,
           "properties": {
+            "signal_path": {
+              "type": "string"
+            },
+            "sidecar_signal_path": {
+              "type": "string"
+            },
             "assume_idle_when_missing": {
               "type": "boolean"
             },
@@ -2862,6 +2888,18 @@
         },
         "encryption_enabled": {
           "type": "boolean"
+        },
+        "sqlcipher": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled"
+          ],
+          "type": "object"
         },
         "entity_map": {
           "additionalProperties": false,

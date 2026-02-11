@@ -104,6 +104,20 @@ def persist_policy_snapshot(
             "policy_snapshot_hash": snapshot_hash,
             "payload": payload,
         }
+        # Content-addressed record IDs are stable across runs. On subsequent runs,
+        # skip the write if the record already exists to avoid noisy put_new errors
+        # (which can cascade into auto-quarantine via the plugin audit log).
+        try:
+            if hasattr(metadata, "get") and metadata.get(record_id) is not None:
+                return PolicySnapshotPersistResult(
+                    snapshot_hash=snapshot_hash,
+                    record_id=record_id,
+                    path=str(out_path),
+                    existed=True,
+                )
+        except Exception:
+            # Fall through to best-effort persistence below.
+            pass
         try:
             if hasattr(metadata, "put_new"):
                 metadata.put_new(record_id, record)

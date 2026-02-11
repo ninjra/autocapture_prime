@@ -1044,6 +1044,11 @@ class SSTQAAnswers(PluginBase):
             )
         if inbox_count:
             add_doc("qa.open_inboxes", f"Open inboxes: {inbox_count}", None)
+            add_doc(
+                "qa.open_inboxes_q",
+                f"How many inboxes do I have open? Open inboxes: {inbox_count}",
+                None,
+            )
         if now_playing:
             add_doc("qa.song_playing", now_playing, now_playing_bbox)
             add_doc("qa.song_playing_q", f"What song is playing? {now_playing}", now_playing_bbox)

@@ -1,0 +1,70 @@
+{
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [],
+  "enabled": false,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "vision.extractor",
+      "path": "plugin.py"
+    }
+  ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "optional_deps": [
+    "Pillow"
+  ],
+  "permissions": {
+    "filesystem": "read",
+    "gpu": true,
+    "network": true,
+    "raw_input": false
+  },
+  "plugin_id": "builtin.vlm.vllm_localhost",
+  "provides": [
+    "vision.extractor"
+  ],
+  "required_capabilities": [],
+  "default_settings": {
+    "base_url": "http://127.0.0.1:8000",
+    "api_key": "",
+    "model": "",
+    "timeout_s": 30.0,
+    "prompt": "",
+    "max_tokens": 256
+  },
+  "settings_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "base_url": {
+        "type": "string"
+      },
+      "api_key": {
+        "type": "string"
+      },
+      "model": {
+        "type": "string"
+      },
+      "timeout_s": {
+        "type": "number"
+      },
+      "prompt": {
+        "type": "string"
+      },
+      "max_tokens": {
+        "type": "integer"
+      }
+    }
+  },
+  "version": "0.1.0"
+}
+

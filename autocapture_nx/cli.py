@@ -345,11 +345,11 @@ def cmd_consent_accept(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     facade = create_facade(persistent=True, safe_mode=args.safe_mode, auto_start_capture=False)
-    started = facade.run_start()
-    if not isinstance(started, dict) or not bool(started.get("ok", False)):
+    start_result = facade.run_start()
+    if not isinstance(start_result, dict) or not bool(start_result.get("ok", False)):
         # Preserve structured details to support soak debugging.
-        if isinstance(started, dict):
-            payload = dict(started)
+        if isinstance(start_result, dict):
+            payload = dict(start_result)
             payload.setdefault("ok", False)
             _print_json(payload)
         else:
@@ -367,12 +367,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("Capture running. Press Ctrl+C to stop.")
     try:
         import time
-        started = time.monotonic()
-        last_status = started
+        started_mono = time.monotonic()
+        last_status = started_mono
         while True:
             time.sleep(1)
             now = time.monotonic()
-            if duration_s > 0 and (now - started) >= duration_s:
+            if duration_s > 0 and (now - started_mono) >= duration_s:
                 break
             if status_interval_s > 0 and (now - last_status) >= status_interval_s:
                 last_status = now
@@ -487,6 +487,17 @@ def cmd_state_jepa_archive(args: argparse.Namespace) -> int:
 def cmd_enrich(args: argparse.Namespace) -> int:
     facade = create_facade(safe_mode=args.safe_mode)
     result = facade.enrich(force=True)
+    _print_json(result)
+    return 0
+
+
+def cmd_batch_run(args: argparse.Namespace) -> int:
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.batch_run(
+        max_loops=int(args.max_loops),
+        sleep_ms=int(args.sleep_ms),
+        require_idle=bool(args.require_idle),
+    )
     _print_json(result)
     return 0
 
@@ -1083,6 +1094,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     enrich_cmd = sub.add_parser("enrich")
     enrich_cmd.set_defaults(func=cmd_enrich)
+
+    batch_cmd = sub.add_parser("batch")
+    batch_sub = batch_cmd.add_subparsers(dest="batch_cmd", required=True)
+    batch_run = batch_sub.add_parser("run")
+    batch_run.add_argument("--max-loops", type=int, default=500)
+    batch_run.add_argument("--sleep-ms", type=int, default=200)
+    batch_run.add_argument("--require-idle", action=argparse.BooleanOptionalAction, default=True)
+    batch_run.set_defaults(func=cmd_batch_run)
 
     devtools = sub.add_parser("devtools")
     devtools_sub = devtools.add_subparsers(dest="devtools_cmd", required=True)

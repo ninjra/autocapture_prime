@@ -308,15 +308,22 @@ def normalize_config_paths(
             storage[key] = _normalize_storage_value(storage[key])
     anchor = storage.get("anchor", {})
     if isinstance(anchor, dict) and "path" in anchor and isinstance(anchor.get("path"), str):
-        # Anchor logs must follow data_dir overrides so a run-scoped data_dir
-        # does not accidentally share anchors with unrelated runs (which can
-        # cause signature verification to fail when the keyring is different).
+        # Anchor logs must remain run-scoped (follow data_dir overrides) but must
+        # not live *inside* data_dir. Keeping anchors outside data_dir provides a
+        # clearer integrity boundary and is enforced by doctor checks.
         anchor_path = str(anchor.get("path") or "")
         anchor_path_obj = Path(anchor_path)
         if anchor_path_obj.is_absolute():
             anchor["path"] = str(anchor_path_obj)
         else:
-            anchor["path"] = _normalize_storage_value(anchor_path)
+            # Resolve relative to the parent of data_dir so each run gets its own
+            # anchor domain even when tests override data_dir to a temp dir.
+            text = anchor_path.replace("\\", "/")
+            for prefix in legacy_prefixes:
+                if text.startswith(f"{prefix}/"):
+                    text = text[len(prefix) + 1 :]
+                    break
+            anchor["path"] = str((data_dir_abs.parent / text).resolve())
     crypto = storage.get("crypto", {})
     if isinstance(crypto, dict):
         for key in ("root_key_path", "keyring_path"):

@@ -33,16 +33,20 @@ def _debug(message: str) -> None:
 
 
 def _host_log_path(config: dict[str, Any], plugin_id: str) -> Path | None:
-    try:
-        storage = config.get("storage", {}) if isinstance(config, dict) else {}
-        data_dir = storage.get("data_dir", "data")
-        runtime = config.get("runtime", {}) if isinstance(config, dict) else {}
-        run_id = runtime.get("run_id", "run")
-        run_dir = Path(str(data_dir)) / "runs" / str(run_id)
-        run_dir.mkdir(parents=True, exist_ok=True)
-        return run_dir / f"plugin_host_{plugin_id}.log"
-    except Exception:
-        return None
+    # Subprocess hosts run under a filesystem guard. Logging must never try to
+    # create or write outside of the plugin's allowed write roots.
+    #
+    # The parent process sets TMPDIR/TMP/TEMP to an allowed per-plugin scratch
+    # directory under the plugin cache. Prefer that directory and avoid mkdirs
+    # here (mkdir can be denied and slow under WSL /mnt/<drive>).
+    for key in ("AUTOCAPTURE_HOST_LOG_DIR", "TMPDIR", "TEMP", "TMP"):
+        raw = os.getenv(key, "").strip()
+        if raw:
+            try:
+                return Path(raw) / f"plugin_host_{plugin_id}.log"
+            except Exception:
+                continue
+    return None
 
 
 def _log_host_error(config: dict[str, Any], plugin_id: str, message: str) -> None:
@@ -293,10 +297,18 @@ def _seed_optional_libs(seed: int) -> None:
 
 def main() -> None:
     if len(sys.argv) < 5:
-        raise SystemExit("usage: host_runner <plugin_path> <callable> <plugin_id> <network_allowed>")
-    plugin_path, callable_name, plugin_id, network_allowed_text = sys.argv[1:5]
-    network_allowed = network_allowed_text.lower() == "true"
-    set_global_network_deny(not network_allowed)
+        raise SystemExit("usage: host_runner <plugin_path> <callable> <plugin_id> <network_scope>")
+    plugin_path, callable_name, plugin_id, network_scope_text = sys.argv[1:5]
+    scope = str(network_scope_text or "none").strip().lower()
+    if scope in {"true", "1", "yes"}:
+        # Back-compat: old runners passed a boolean.
+        scope = "internet"
+    if scope not in {"none", "localhost", "internet"}:
+        scope = "none"
+    network_allowed = scope != "none"
+    # Even when a plugin can create sockets, keep the global deny enabled unless
+    # the plugin is explicitly granted "internet" scope (egress gateway only).
+    set_global_network_deny(scope != "internet")
 
     init_line = sys.stdin.readline()
     if not init_line:
@@ -318,21 +330,42 @@ def main() -> None:
 
     set_global_filesystem_policy(fs_policy)
     _debug("filesystem policy installed")
-    _log_host_error(config, plugin_id, f"host_runner start: pid={os.getpid()} python={sys.executable}")
-    # OPS-01: structured JSONL logging with correlation IDs (best-effort).
-    try:
-        from autocapture_nx.kernel.logging import JsonlLogger
+    if os.getenv("AUTOCAPTURE_HOST_DEBUG", "") and fs_policy is not None:
+        try:
+            _debug(
+                "fs_policy roots:"
+                f" read={len(getattr(fs_policy, 'read_roots', ()))},"
+                f" readwrite={len(getattr(fs_policy, 'readwrite_roots', ()))},"
+                f" sample_read={[str(p) for p in list(getattr(fs_policy, 'read_roots', ()))[:5]]}"
+            )
+        except Exception:
+            pass
+    # File-based logging in a guarded subprocess is best-effort only. On WSL
+    # mounts it can be surprisingly slow and has caused host startup timeouts.
+    # Keep it off by default and enable only for local debugging.
+    allow_host_logs = bool(os.getenv("AUTOCAPTURE_HOST_ENABLE_FILE_LOGS", "").strip())
 
-        logger = JsonlLogger.from_config(config, name="plugin_host")
-        logger.event(
-            event="plugin.host_runner.start",
-            run_id=str(config.get("runtime", {}).get("run_id") or ""),
-            plugin_id=str(plugin_id),
-            pid=os.getpid(),
-            python=sys.executable,
-        )
-    except Exception:
-        logger = None
+    logger = None
+    if allow_host_logs:
+        _debug("host log begin")
+        _log_host_error(config, plugin_id, f"host_runner start: pid={os.getpid()} python={sys.executable}")
+        _debug("host log done")
+        # OPS-01: structured JSONL logging with correlation IDs (best-effort).
+        try:
+            _debug("jsonl logger begin")
+            from autocapture_nx.kernel.logging import JsonlLogger
+
+            logger = JsonlLogger.from_config(config, name="plugin_host")
+            logger.event(
+                event="plugin.host_runner.start",
+                run_id=str(config.get("runtime", {}).get("run_id") or ""),
+                plugin_id=str(plugin_id),
+                pid=os.getpid(),
+                python=sys.executable,
+            )
+            _debug("jsonl logger done")
+        except Exception:
+            logger = None
 
     rng_enabled = bool(rng_info.get("enabled", False))
     rng_seed_value = rng_info.get("seed")
@@ -356,7 +389,9 @@ def main() -> None:
         rpc_timeout_s=float(hosting.get("rpc_timeout_s", 10)),
         rpc_max_message_bytes=int(hosting.get("rpc_max_message_bytes", 2_000_000)),
     )
+    _debug("bridge start begin")
     bridge.start()
+    _debug("bridge start done")
 
     def _get_capability(name: str) -> Any:
         cap = str(name)
@@ -425,6 +460,7 @@ def main() -> None:
                 break
             req_id = request.get("id")
             method = request.get("method")
+            _debug(f"request: id={req_id} method={method}")
             try:
                 if method == "capabilities":
                     result = {
@@ -432,6 +468,9 @@ def main() -> None:
                         for name, obj in cap_map.items()
                     }
                 elif method == "call":
+                    _debug(
+                        f"call begin: cap={request.get('capability')} fn={request.get('function')} id={req_id}"
+                    )
                     cap = cap_map[request["capability"]]
                     func = getattr(cap, request["function"])
                     args = _decode(request.get("args", []))
@@ -441,6 +480,7 @@ def main() -> None:
                             _seed_optional_libs(rng_seed_int)
                         result = func(*args, **kwargs)
                     result = _encode(result)
+                    _debug(f"call done: id={req_id}")
                 else:
                     raise ValueError("unknown method")
                 response = {"id": req_id, "ok": True, "result": result}
@@ -451,6 +491,7 @@ def main() -> None:
                     "error": f"{type(exc).__name__}: {exc}",
                 }
             bridge.send(response)
+            _debug(f"response sent: id={req_id} ok={bool(response.get('ok'))}")
     finally:
         bridge.close()
 

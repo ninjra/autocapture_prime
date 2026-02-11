@@ -42,12 +42,30 @@ def build_component_matrix(*, system: Any, checks: list[Any] | None = None) -> l
     components: list[ComponentHealth] = []
 
     # Pipeline capability checks (minimal, presence-based).
-    capture_ok = _has_cap(caps, "capture.source") or _has_cap(caps, "capture.audio")
+    # Capture is optional when disabled in config (sidecar mode). If this repo is
+    # configured to capture locally, require the relevant capture capabilities.
+    want_capture = True
+    try:
+        cfg = getattr(system, "config", None)
+        if isinstance(cfg, dict):
+            capture_cfg = cfg.get("capture", {}) if isinstance(cfg.get("capture"), dict) else {}
+            want_screenshot = bool((capture_cfg.get("screenshot") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_audio = bool((capture_cfg.get("audio") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_video = bool((capture_cfg.get("video") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_capture = bool(want_screenshot or want_audio or want_video)
+    except Exception:
+        want_capture = True
+    if want_capture:
+        capture_ok = _has_cap(caps, "capture.source") or _has_cap(caps, "capture.screenshot") or _has_cap(caps, "capture.audio")
+        capture_detail = "ok" if capture_ok else "missing capture.source/capture.screenshot/capture.audio"
+    else:
+        capture_ok = True
+        capture_detail = "disabled"
     components.append(
         ComponentHealth(
             name="capture",
             ok=bool(capture_ok),
-            detail="ok" if capture_ok else "missing capture.source/capture.audio",
+            detail=capture_detail,
             checked_at_utc=checked,
         )
     )

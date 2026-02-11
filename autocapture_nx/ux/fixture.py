@@ -15,6 +15,7 @@ from autocapture.runtime.resources import sample_resources
 from autocapture_nx.kernel.audit import append_audit_event
 from autocapture_nx.kernel.paths import resolve_repo_path
 from autocapture_nx.kernel.query import run_query
+from autocapture_nx.kernel.activity_signal import load_activity_signal
 from autocapture_nx.processing.idle import IdleProcessor
 from autocapture_nx.kernel.providers import capability_providers
 
@@ -722,8 +723,17 @@ def _runtime_signals(system: Any) -> dict[str, Any]:
                 idle_seconds = 0.0
             user_active = idle_seconds < active_window_s
     else:
-        idle_seconds = float("inf") if assume_idle else 0.0
-        user_active = False if assume_idle else True
+        signal = None
+        try:
+            signal = load_activity_signal(cfg)
+        except Exception:
+            signal = None
+        if signal is not None:
+            idle_seconds = float(signal.idle_seconds)
+            user_active = bool(signal.user_active)
+        else:
+            idle_seconds = float("inf") if assume_idle else 0.0
+            user_active = False if assume_idle else True
     enforce_cfg = runtime_cfg.get("mode_enforcement", {}) if isinstance(runtime_cfg, dict) else {}
     suspend_workers = bool(enforce_cfg.get("suspend_workers", True))
     fixture_override = bool(enforce_cfg.get("fixture_override", False))

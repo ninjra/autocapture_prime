@@ -233,7 +233,7 @@ def _extra_doc_payloads(metadata: _MetadataStore) -> list[dict[str, Any]]:
 @unittest.skipIf(Image is None, "Pillow is required for SST stage hook tests")
 class SSTStageHookTests(unittest.TestCase):
     def test_stage_hooks_fanout_true_runs_all_providers(self) -> None:
-        with tempfile.TemporaryDirectory(dir=".") as tmpdir:
+        with tempfile.TemporaryDirectory() as tmpdir:
             metadata, storage = _run_pipeline(
                 tmpdir,
                 stage_overrides={
@@ -255,7 +255,7 @@ class SSTStageHookTests(unittest.TestCase):
             self.assertTrue(any(hit["doc_id"].startswith("run1/derived.sst.text/extra/") for hit in hits))
 
     def test_stage_hooks_provider_filter_and_fanout_false(self) -> None:
-        with tempfile.TemporaryDirectory(dir=".") as tmpdir:
+        with tempfile.TemporaryDirectory() as tmpdir:
             metadata, _storage = _run_pipeline(
                 tmpdir,
                 stage_overrides={
@@ -267,7 +267,7 @@ class SSTStageHookTests(unittest.TestCase):
             self.assertIn("hook.two", provider_ids)
             self.assertNotIn("hook.one", provider_ids)
 
-        with tempfile.TemporaryDirectory(dir=".") as tmpdir:
+        with tempfile.TemporaryDirectory() as tmpdir:
             metadata, _storage = _run_pipeline(
                 tmpdir,
                 stage_overrides={
@@ -280,7 +280,7 @@ class SSTStageHookTests(unittest.TestCase):
             self.assertNotIn("hook.two", provider_ids)
 
     def test_stage_hook_extra_docs_not_redacted_when_raw_first(self) -> None:
-        with tempfile.TemporaryDirectory(dir=".") as tmpdir:
+        with tempfile.TemporaryDirectory() as tmpdir:
             metadata, _storage = _run_pipeline(
                 tmpdir,
                 stage_overrides={

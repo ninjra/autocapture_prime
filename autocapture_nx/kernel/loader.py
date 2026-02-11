@@ -2001,27 +2001,56 @@ class Kernel:
                         detail=str(exc),
                     )
                 )
-        allowed_network = set(
-            config.get("plugins", {})
-            .get("permissions", {})
-            .get("network_allowed_plugin_ids", [])
+        perms_cfg = (
+            config.get("plugins", {}).get("permissions", {})
+            if isinstance(config.get("plugins", {}).get("permissions", {}), dict)
+            else {}
         )
-        if allowed_network != {"builtin.egress.gateway"}:
+        allowed_internet = set(perms_cfg.get("network_allowed_plugin_ids", []) or [])
+        allowed_localhost = set(perms_cfg.get("localhost_allowed_plugin_ids", []) or [])
+        # Internet access remains tightly scoped: only the egress gateway can
+        # reach non-loopback destinations (localhost-only network is separately
+        # allowlisted and still guarded at runtime).
+        if allowed_internet != {"builtin.egress.gateway"}:
             checks.append(
                 DoctorCheck(
-                    name="network_allowlist",
+                    name="network_allowlist_internet",
                     ok=False,
-                    detail="network allowlist must contain only builtin.egress.gateway",
+                    detail="plugins.permissions.network_allowed_plugin_ids must contain only builtin.egress.gateway",
                 )
             )
         else:
             checks.append(
                 DoctorCheck(
-                    name="network_allowlist",
+                    name="network_allowlist_internet",
                     ok=True,
                     detail="ok",
                 )
             )
+        checks.append(
+            DoctorCheck(
+                name="network_allowlist_localhost",
+                ok=True,
+                detail=f"count={len(allowed_localhost)}",
+            )
+        )
+        # Capture plugins are deprecated in this repo: sidecar is responsible for
+        # capture/ingest. Keep processing-only pipeline fail-closed.
+        enabled_map = config.get("plugins", {}).get("enabled", {}) if isinstance(config.get("plugins", {}).get("enabled", {}), dict) else {}
+        deprecated_capture = [
+            "builtin.capture.audio.windows",
+            "builtin.capture.screenshot.windows",
+            "builtin.capture.basic",
+            "builtin.capture.windows",
+        ]
+        enabled_deprecated = [pid for pid in deprecated_capture if bool(enabled_map.get(pid, False))]
+        checks.append(
+            DoctorCheck(
+                name="capture_plugins_deprecated",
+                ok=not enabled_deprecated,
+                detail=("enabled=" + ",".join(enabled_deprecated)) if enabled_deprecated else "ok",
+            )
+        )
         return checks
 
 

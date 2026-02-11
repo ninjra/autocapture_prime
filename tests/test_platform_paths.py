@@ -44,7 +44,10 @@ class PlatformPathTests(unittest.TestCase):
         self.assertTrue(Path(storage["media_dir"]).resolve().is_relative_to(data_dir.resolve()))
         self.assertTrue(Path(storage["spool_dir"]).resolve().is_relative_to(data_dir.resolve()))
         anchor_path = Path(storage["anchor"]["path"]).resolve()
-        self.assertTrue(anchor_path.is_relative_to(data_dir.resolve()))
+        # Anchors are run-scoped but intentionally stored outside data_dir to keep a
+        # cleaner integrity boundary (see doctor check anchor_separate_domain).
+        self.assertFalse(anchor_path.is_relative_to(data_dir.resolve()))
+        self.assertTrue(anchor_path.is_relative_to(data_dir.resolve().parent))
 
     def test_doctor_reports_path_checks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -25,6 +25,7 @@ from autocapture_nx.kernel.query import run_query
 from autocapture_nx.kernel.telemetry import telemetry_snapshot, percentile
 from autocapture_nx.kernel.atomic_write import atomic_write_json
 from autocapture_nx.kernel.doctor import build_health_report
+from autocapture_nx.kernel.activity_signal import load_activity_signal
 from autocapture_nx.kernel.logging import JsonlLogger
 from autocapture_nx.plugin_system.manager import PluginManager
 from autocapture_nx.processing.idle import _extract_frame, _get_media_blob
@@ -992,6 +993,23 @@ class UXFacade:
             conductor = create_conductor(system)
             return conductor.run_once(force=force)
 
+    def batch_run(
+        self,
+        *,
+        max_loops: int = 500,
+        sleep_ms: int = 200,
+        require_idle: bool = True,
+    ) -> dict[str, Any]:
+        from autocapture_nx.runtime.batch import run_processing_batch
+
+        with self._kernel_mgr.session() as system:
+            return run_processing_batch(
+                system,
+                max_loops=int(max_loops),
+                sleep_ms=int(sleep_ms),
+                require_idle=bool(require_idle),
+            )
+
     def keys_rotate(self) -> dict[str, Any]:
         from autocapture_nx.kernel.key_rotation import rotate_keys
 
@@ -1320,23 +1338,28 @@ class UXFacade:
                 "tracking.file_activity": {"present": file_activity is not None, "providers": _providers(file_activity), "startable": _startable(file_activity)[0]},
             }
 
-            components: list[tuple[str, Any, bool]] = [
-                ("capture.source", capture, want_source),
-                ("capture.screenshot", screenshot, want_screenshot),
-                ("capture.audio", audio, want_audio),
-                # Trackers are optional for capture+ingest: capture must never be
-                # blocked due to missing peripheral metadata providers.
-                ("tracking.input", input_tracker, False),
-                ("window.metadata", window_meta, False),
-                ("tracking.cursor", cursor_tracker, False),
-                ("tracking.clipboard", clipboard, False),
-                ("tracking.file_activity", file_activity, False),
+            # (name, component, should_start, required)
+            #
+            # Trackers are optional for capture+ingest: capture must never be blocked due
+            # to missing peripheral metadata providers. However, they still must respect
+            # config "wanted" flags (do not start when disabled).
+            components: list[tuple[str, Any, bool, bool]] = [
+                ("capture.source", capture, want_source, want_source),
+                ("capture.screenshot", screenshot, want_screenshot, want_screenshot),
+                ("capture.audio", audio, want_audio, want_audio),
+                ("tracking.input", input_tracker, want_input, False),
+                ("window.metadata", window_meta, want_window_meta, False),
+                ("tracking.cursor", cursor_tracker, want_cursor, False),
+                ("tracking.clipboard", clipboard, want_clipboard, False),
+                ("tracking.file_activity", file_activity, want_file_activity, False),
             ]
 
-            for name, component, required in components:
+            for name, component, should_start, required in components:
                 if component is None:
                     if required:
                         errors.append({"component": name, "error": "missing"})
+                    continue
+                if not should_start:
                     continue
                 ok_start, start_issue = _startable(component)
                 if not ok_start:
@@ -1415,6 +1438,31 @@ class UXFacade:
     def run_start(self) -> dict[str, Any]:
         with self._pause_lock:
             self._clear_pause_locked()
+        # If capture is not configured, fail fast with a clear message. This repo
+        # treats capture+ingest as an external (Windows sidecar) responsibility by
+        # default.
+        try:
+            capture_cfg = self._config.get("capture") if isinstance(self._config.get("capture"), dict) else {}
+            want_screenshot = bool((capture_cfg.get("screenshot") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_audio = bool((capture_cfg.get("audio") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_source = bool((capture_cfg.get("video") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            input_cfg = capture_cfg.get("input_tracking", {}) if isinstance(capture_cfg, dict) else {}
+            input_mode = str(input_cfg.get("mode") or "").strip().lower()
+            want_input = bool(input_mode and input_mode not in {"off", "disabled", "none"})
+            want_window_meta = bool((capture_cfg.get("window_metadata") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_cursor = bool((capture_cfg.get("cursor") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_clipboard = bool((capture_cfg.get("clipboard") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_file_activity = bool((capture_cfg.get("file_activity") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            if not any((want_source, want_screenshot, want_audio, want_input, want_window_meta, want_cursor, want_clipboard, want_file_activity)):
+                return {
+                    "ok": False,
+                    "error": "capture_disabled",
+                    "running": False,
+                    "hint": "use_windows_sidecar_contract",
+                }
+        except Exception:
+            # If config is malformed, fall through to existing error handling.
+            pass
         # Fail closed: require explicit capture consent if configured.
         try:
             privacy_cfg = self._config.get("privacy", {}) if isinstance(self._config, dict) else {}
@@ -2095,8 +2143,17 @@ class UXFacade:
                         idle_seconds = 0.0
                     can_run = idle_seconds >= idle_window
                 else:
-                    assume_idle = bool(system.config.get("runtime", {}).get("activity", {}).get("assume_idle_when_missing", False))
-                    can_run = assume_idle
+                    signal = None
+                    try:
+                        signal = load_activity_signal(system.config)
+                    except Exception:
+                        signal = None
+                    if signal is not None:
+                        idle_seconds = float(signal.idle_seconds)
+                        can_run = idle_seconds >= idle_window
+                    else:
+                        assume_idle = bool(system.config.get("runtime", {}).get("activity", {}).get("assume_idle_when_missing", False))
+                        can_run = assume_idle
             if not can_run:
                 return {
                     "ok": False,

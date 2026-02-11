@@ -28,8 +28,10 @@ from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.kernel.providers import capability_providers
 from autocapture_nx.kernel.schema_registry import SchemaRegistry
 from autocapture_nx.kernel.telemetry import record_telemetry
+from autocapture_nx.storage.facts_ndjson import append_fact_line
 from autocapture_nx.state_layer.policy_gate import StatePolicyGate, normalize_state_policy_decision
 from autocapture_nx.state_layer.evidence_compiler import EvidenceCompiler
+from autocapture_nx.kernel.activity_signal import load_activity_signal
 
 
 def _parse_ts(ts: str | None) -> datetime | None:
@@ -775,11 +777,20 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
                     idle_seconds = 0.0
                 can_run = idle_seconds >= idle_window
             else:
-                assume_idle = bool(system.config.get("runtime", {}).get("activity", {}).get("assume_idle_when_missing", False))
-                can_run = assume_idle
-                if not assume_idle:
-                    extraction_blocked = True
-                    extraction_blocked_reason = "idle_required"
+                signal = None
+                try:
+                    signal = load_activity_signal(system.config)
+                except Exception:
+                    signal = None
+                if signal is not None:
+                    idle_seconds = float(signal.idle_seconds)
+                    can_run = idle_seconds >= idle_window
+                else:
+                    assume_idle = bool(system.config.get("runtime", {}).get("activity", {}).get("assume_idle_when_missing", False))
+                    can_run = assume_idle
+                    if not assume_idle:
+                        extraction_blocked = True
+                        extraction_blocked_reason = "idle_required"
         if can_run and candidate_ids:
             extract_on_demand(
                 system,
@@ -1105,9 +1116,128 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
             custom_claims_error = "custom_claims_exception"
         custom_claims = list(custom_claims)
 
+    # Optional: LLM synthesizer that emits quote-grounded claims, converted into
+    # verifiable citations. This runs strictly over already-extracted text.
+    synth_claims: list[dict[str, Any]] = []
+    synth_debug: dict[str, Any] = {}
+    synth_error: str | None = None
+    try:
+        synthesizer = None
+        if hasattr(system, "get"):
+            try:
+                synthesizer = _resolve_single_provider(system.get("answer.synthesizer"))
+            except Exception:
+                synthesizer = None
+        if synthesizer is not None and metadata is not None and query_ledger_hash and anchor_ref:
+            evidence_items: list[dict[str, Any]] = []
+            for item in (results[:10] if isinstance(results, list) else []):
+                rid = str(item.get("derived_id") or "").strip()
+                if not rid:
+                    continue
+                rec = metadata.get(rid, {})
+                if not isinstance(rec, dict):
+                    continue
+                txt = rec.get("text", "")
+                if not isinstance(txt, str) or not txt.strip():
+                    continue
+                evidence_items.append(
+                    {
+                        "record_id": rid,
+                        "text": txt,
+                        "ts_utc": rec.get("ts_utc") or rec.get("ts_start_utc") or rec.get("ts_end_utc"),
+                    }
+                )
+            synth_debug["evidence_items"] = int(len(evidence_items))
+            if evidence_items and hasattr(synthesizer, "synthesize"):
+                try:
+                    synth_out = synthesizer.synthesize(query_text, evidence_items, max_claims=3)
+                except TypeError:
+                    # Back-compat for plugins that don't accept keyword args.
+                    synth_out = synthesizer.synthesize(query_text, evidence_items)
+                if isinstance(synth_out, dict):
+                    synth_debug["backend"] = synth_out.get("backend")
+                    synth_debug["model"] = synth_out.get("model")
+                    if synth_out.get("error"):
+                        synth_error = str(synth_out.get("error"))
+                    raw_claims = synth_out.get("claims", [])
+                else:
+                    raw_claims = []
+
+                if isinstance(raw_claims, list) and raw_claims:
+                    for claim in raw_claims[:6]:
+                        if not isinstance(claim, dict):
+                            continue
+                        claim_text = str(claim.get("text") or "").strip()
+                        ev = claim.get("evidence", [])
+                        if not claim_text or not isinstance(ev, list) or not ev:
+                            continue
+                        citations: list[dict[str, Any]] = []
+                        for ev_item in ev[:6]:
+                            if not isinstance(ev_item, dict):
+                                continue
+                            derived_id = str(ev_item.get("record_id") or "").strip()
+                            quote = str(ev_item.get("quote") or "")
+                            if not derived_id or not quote:
+                                continue
+                            derived = metadata.get(derived_id, {})
+                            if not isinstance(derived, dict):
+                                continue
+                            evidence_id = str(derived.get("source_id") or "").strip()
+                            if not evidence_id:
+                                continue
+                            evidence_rec = metadata.get(evidence_id, {})
+                            if not isinstance(evidence_rec, dict):
+                                continue
+                            derived_text = str(derived.get("text") or "")
+                            start = derived_text.find(quote)
+                            if start < 0:
+                                continue
+                            end = start + len(quote)
+                            derived_hash = _record_hash(derived)
+                            evidence_hash = _record_hash(evidence_rec)
+                            if not derived_hash or not evidence_hash:
+                                continue
+                            locator = _citation_locator(
+                                kind="text_offsets",
+                                record_id=derived_id,
+                                record_hash=str(derived_hash),
+                                offset_start=int(start),
+                                offset_end=int(end),
+                                span_text=quote,
+                            )
+                            citations.append(
+                                {
+                                    "schema_version": 1,
+                                    "locator": locator,
+                                    "span_id": evidence_id,
+                                    "evidence_id": evidence_id,
+                                    "evidence_hash": evidence_hash,
+                                    "derived_id": derived_id,
+                                    "derived_hash": derived_hash,
+                                    "span_kind": "text",
+                                    "span_ref": derived.get("span_ref") if isinstance(derived, dict) else None,
+                                    "ledger_head": query_ledger_hash,
+                                    "anchor_ref": anchor_ref,
+                                    "source": "synth",
+                                    "offset_start": int(start),
+                                    "offset_end": int(end),
+                                }
+                            )
+                        if citations:
+                            synth_claims.append({"text": claim_text, "citations": citations})
+    except Exception:
+        try:
+            import traceback
+
+            synth_error = traceback.format_exc(limit=2).strip()
+        except Exception:
+            synth_error = "synth_exception"
+
     claims = []
     stale_hits: list[str] = []
     for claim in custom_claims:
+        claims.append(claim)
+    for claim in synth_claims:
         claims.append(claim)
     for result in results:
         derived_id = result.get("derived_id")
@@ -1283,6 +1413,11 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
             "error": custom_claims_error,
             "debug": custom_claims_debug,
         },
+        "synth_claims": {
+            "count": int(len(synth_claims)),
+            "error": synth_error,
+            "debug": synth_debug,
+        },
         "scheduled_extract_job_id": scheduled_job_id,
     }
 
@@ -1363,12 +1498,59 @@ def _merge_state_fallback(state_result: dict[str, Any], fallback: dict[str, Any]
     return merged
 
 
+def _append_query_metric(system, *, query: str, method: str, result: dict[str, Any]) -> None:
+    config = getattr(system, "config", {}) if system is not None else {}
+    if not isinstance(config, dict):
+        return
+    answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
+    evaluation = result.get("evaluation", {}) if isinstance(result.get("evaluation", {}), dict) else {}
+    custom_claims = result.get("custom_claims", {}) if isinstance(result.get("custom_claims", {}), dict) else {}
+    synth_claims = result.get("synth_claims", {}) if isinstance(result.get("synth_claims", {}), dict) else {}
+    prov = result.get("provenance", {}) if isinstance(result.get("provenance", {}), dict) else {}
+    processing = result.get("processing", {}) if isinstance(result.get("processing", {}), dict) else {}
+    extraction = processing.get("extraction", {}) if isinstance(processing.get("extraction", {}), dict) else {}
+    synth_debug = synth_claims.get("debug", {}) if isinstance(synth_claims.get("debug", {}), dict) else {}
+    payload = {
+        "schema_version": 1,
+        "record_type": "derived.query.eval",
+        "ts_utc": datetime.now(timezone.utc).isoformat(),
+        "query": str(query or ""),
+        "query_sha256": sha256_text(str(query or "")),
+        "method": str(method or ""),
+        "answer_state": str(answer.get("state") or ""),
+        "claim_count": int(len(answer.get("claims", []))) if isinstance(answer.get("claims", []), list) else 0,
+        "result_count": int(len(result.get("results", []))) if isinstance(result.get("results", []), list) else 0,
+        "coverage_bp": int(round(float(evaluation.get("coverage_ratio", 0.0) or 0.0) * 10000.0)),
+        "missing_spans_count": int(evaluation.get("missing_spans_count", 0) or 0),
+        "blocked_extract": bool(evaluation.get("blocked_extract", False)),
+        "blocked_reason": str(evaluation.get("blocked_reason") or ""),
+        "custom_claims_count": int(custom_claims.get("count", 0) or 0),
+        "synth_claims_count": int(synth_claims.get("count", 0) or 0),
+        "synth_error": str(synth_claims.get("error") or ""),
+        "synth_backend": str(synth_debug.get("backend") or ""),
+        "synth_model": str(synth_debug.get("model") or ""),
+        "query_ledger_head": str(prov.get("query_ledger_head") or ""),
+        "anchor_ref": str(prov.get("anchor_ref") or ""),
+        "extracted_count": int(extraction.get("extracted_count", 0) or 0),
+        "candidate_count": int(extraction.get("candidate_count", 0) or 0),
+    }
+    try:
+        _ = append_fact_line(config, rel_path="query_eval.ndjson", payload=payload)
+    except Exception:
+        pass
+
+
 def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str, Any]:
     state_cfg = system.config.get("processing", {}).get("state_layer", {}) if hasattr(system, "config") else {}
     if isinstance(state_cfg, dict) and bool(state_cfg.get("query_enabled", False)):
         state_result = run_state_query(system, query)
         if _should_fallback_state(state_result):
             fallback = run_query_without_state(system, query, schedule_extract=bool(schedule_extract))
-            return _merge_state_fallback(state_result, fallback)
+            merged = _merge_state_fallback(state_result, fallback)
+            _append_query_metric(system, query=query, method="state_fallback", result=merged)
+            return merged
+        _append_query_metric(system, query=query, method="state", result=state_result)
         return state_result
-    return run_query_without_state(system, query, schedule_extract=bool(schedule_extract))
+    result = run_query_without_state(system, query, schedule_extract=bool(schedule_extract))
+    _append_query_metric(system, query=query, method="classic", result=result)
+    return result

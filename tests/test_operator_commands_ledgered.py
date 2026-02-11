@@ -27,9 +27,11 @@ class OperatorCommandsLedgeredTests(unittest.TestCase):
             ledger_lines = (data_dir / "ledger.ndjson").read_text(encoding="utf-8").splitlines()
             self.assertTrue(ledger_lines)
             ledger = json.loads(ledger_lines[-1])
-            self.assertEqual(ledger.get("record_type"), "operator.reindex")
+            # Ledger is an append-only hash-chained log of "ledger.entry" envelopes.
+            # The operator action type is recorded in the `stage` field.
+            self.assertEqual(ledger.get("record_type"), "ledger.entry")
+            self.assertEqual(ledger.get("stage"), "operator.reindex")
 
 
 if __name__ == "__main__":
     unittest.main()
-

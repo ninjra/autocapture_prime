@@ -24,7 +24,7 @@ from autocapture_nx.kernel.rng import RNGScope, RNGService, install_rng_guard
 
 from .api import PluginContext
 from .contracts import IOContract, load_io_contracts
-from .host import SubprocessPlugin
+from .host import SubprocessPlugin, estimate_rows_read, estimate_rows_written
 from .manifest import PluginManifest
 from .runtime import FilesystemPolicy, filesystem_guard, network_guard
 from .settings import build_plugin_settings
@@ -198,6 +198,10 @@ class CapabilityProxy:
         rng_enabled: bool = False,
         plugin_id: str | None = None,
         trace_hook: Any | None = None,
+        audit_log: PluginAuditLog | None = None,
+        audit_run_id: str | None = None,
+        audit_code_hash: str | None = None,
+        audit_settings_hash: str | None = None,
         temp_dir: str | None = None,
     ) -> None:
         self._target = target
@@ -211,6 +215,10 @@ class CapabilityProxy:
         self._rng_enabled = rng_enabled
         self._plugin_id = str(plugin_id or "")
         self._trace_hook = trace_hook
+        self._audit_log = audit_log
+        self._audit_run_id = str(audit_run_id or "").strip()
+        self._audit_code_hash = str(audit_code_hash or "").strip() or None
+        self._audit_settings_hash = str(audit_settings_hash or "").strip() or None
         self._temp_dir = str(temp_dir or "").strip()
 
     @property
@@ -257,6 +265,8 @@ class CapabilityProxy:
         start_perf = time.perf_counter()
         ok = True
         error = None
+        audit_error_text: str | None = None
+        audit_result: Any = None
         try:
             with RNGScope(self._rng_seed, strict=self._rng_strict, enabled=self._rng_enabled):
                 with network_guard(self._network_allowed):
@@ -268,9 +278,11 @@ class CapabilityProxy:
                         with _temporary_tempdir_env(self._temp_dir):
                             result = func(*args, **kwargs)
             self._validate_output(method, result)
+            audit_result = result
         except Exception as exc:
             ok = False
             error = f"{type(exc).__name__}: {exc}"
+            audit_error_text = error
             raise
         finally:
             end_utc = datetime.now(timezone.utc).isoformat()
@@ -288,6 +300,38 @@ class CapabilityProxy:
                             "ok": bool(ok),
                             "error": error,
                         }
+                    )
+                except Exception:
+                    pass
+            # Always audit in-proc capability execution via the same append-only audit DB.
+            # Subprocess-hosted plugins already record audit rows inside PluginHostSubprocess.
+            if self._audit_log is not None and self._plugin_id and self._capability:
+                try:
+                    run_id = self._audit_run_id or "run"
+                    input_hash, input_bytes = hash_payload({"args": list(args), "kwargs": dict(kwargs)})
+                    output_hash, output_bytes = hash_payload(audit_result) if ok else (None, None)
+                    data_hash, _ = hash_payload({"input": input_hash, "output": output_hash})
+                    rows_written = estimate_rows_written(method, list(args), dict(kwargs))
+                    rows_read = estimate_rows_read(method, audit_result) if ok else None
+                    self._audit_log.record(
+                        run_id=run_id,
+                        plugin_id=self._plugin_id,
+                        capability=str(self._capability),
+                        method=str(method),
+                        ok=bool(ok),
+                        error=audit_error_text,
+                        duration_ms=duration_ms,
+                        rows_read=rows_read,
+                        rows_written=rows_written,
+                        memory_rss_mb=None,
+                        memory_vms_mb=None,
+                        input_hash=input_hash,
+                        output_hash=output_hash,
+                        data_hash=data_hash,
+                        code_hash=self._audit_code_hash,
+                        settings_hash=self._audit_settings_hash,
+                        input_bytes=input_bytes,
+                        output_bytes=output_bytes,
                     )
                 except Exception:
                     pass
@@ -653,11 +697,14 @@ class PluginRegistry:
     def _check_permissions(self, manifest: dict[str, Any]) -> None:
         perms = manifest.get("permissions", {})
         if perms.get("network", False):
-            allowed = set(
-                self.config.get("plugins", {})
-                .get("permissions", {})
-                .get("network_allowed_plugin_ids", [])
+            perms_cfg = (
+                self.config.get("plugins", {}).get("permissions", {})
+                if isinstance(self.config.get("plugins", {}).get("permissions", {}), dict)
+                else {}
             )
+            allowed_internet = set(perms_cfg.get("network_allowed_plugin_ids", []) or [])
+            allowed_localhost = set(perms_cfg.get("localhost_allowed_plugin_ids", []) or [])
+            allowed = allowed_internet | allowed_localhost
             if manifest.get("plugin_id") not in allowed:
                 raise PluginError("Network permission denied by policy")
             hosting = self.config.get("plugins", {}).get("hosting", {})
@@ -665,6 +712,27 @@ class PluginRegistry:
             inproc_allowlist = set(hosting.get("inproc_allowlist", []) or [])
             if hosting_mode != "subprocess" or manifest.get("plugin_id") in inproc_allowlist:
                 raise PluginError("Network-capable plugins must run in subprocess hosting mode")
+
+    def _network_scope_for_plugin(self, plugin_id: str, *, network_requested: bool) -> str:
+        """Return one of: none, localhost, internet.
+
+        - `internet` is reserved for the egress gateway.
+        - `localhost` allows loopback-only sockets (enforced via global network deny).
+        """
+        if not network_requested:
+            return "none"
+        perms_cfg = (
+            self.config.get("plugins", {}).get("permissions", {})
+            if isinstance(self.config.get("plugins", {}).get("permissions", {}), dict)
+            else {}
+        )
+        allowed_internet = set(perms_cfg.get("network_allowed_plugin_ids", []) or [])
+        allowed_localhost = set(perms_cfg.get("localhost_allowed_plugin_ids", []) or [])
+        if plugin_id in allowed_internet:
+            return "internet"
+        if plugin_id in allowed_localhost:
+            return "localhost"
+        return "none"
 
     def _load_inproc_instance(
         self,
@@ -1406,6 +1474,7 @@ class PluginRegistry:
 
     def _capabilities_for_plugins(self, plugins: list[LoadedPlugin]) -> CapabilityRegistry:
         providers_by_cap: dict[str, list[tuple[str, CapabilityProxy]]] = {}
+        run_id = str(self.config.get("runtime", {}).get("run_id", "") or "run")
         for plugin in plugins:
             network_allowed = bool(plugin.manifest.get("permissions", {}).get("network", False))
             filesystem_policy = plugin.filesystem_policy
@@ -1414,6 +1483,16 @@ class PluginRegistry:
             rng_seed_info = self._rng_service.seed_for_plugin(plugin.plugin_id) if self._rng_service.enabled else None
             rng_seed = rng_seed_info.plugin_seed if rng_seed_info else None
             for cap_name, impl in plugin.capabilities.items():
+                # In-proc calls must be audited here. Subprocess-hosted plugins record audit rows
+                # inside their subprocess host wrapper; avoid double-auditing RemoteCapability.
+                audit_log = None
+                try:
+                    from .host import RemoteCapability  # local import to avoid cycles
+
+                    if not isinstance(impl, RemoteCapability):
+                        audit_log = self._audit_log
+                except Exception:
+                    audit_log = self._audit_log
                 proxy = CapabilityProxy(
                     impl,
                     network_allowed,
@@ -1426,6 +1505,8 @@ class PluginRegistry:
                     rng_enabled=self._rng_service.enabled,
                     plugin_id=plugin.plugin_id,
                     trace_hook=self._trace.record,
+                    audit_log=audit_log,
+                    audit_run_id=run_id,
                 )
                 providers_by_cap.setdefault(cap_name, []).append((plugin.plugin_id, proxy))
         return self._resolve_capabilities(providers_by_cap)
@@ -1526,6 +1607,7 @@ class PluginRegistry:
 
         if not isinstance(system, SystemType):
             raise PluginError("register_capabilities requires a System instance")
+        run_id = str(self.config.get("runtime", {}).get("run_id", "") or "run")
         for plugin in plugins:
             if isinstance(plugin, LoadedPlugin):
                 plugin_id = plugin.plugin_id
@@ -1547,6 +1629,14 @@ class PluginRegistry:
                 continue
             for cap_name, impl in caps.items():
                 policy = self._capability_policy(cap_name)
+                audit_log = None
+                try:
+                    from .host import RemoteCapability  # local import to avoid cycles
+
+                    if not isinstance(impl, RemoteCapability):
+                        audit_log = self._audit_log
+                except Exception:
+                    audit_log = self._audit_log
                 if system.has(cap_name):
                     if policy.get("mode") != "multi":
                         raise PluginError(f"Duplicate capability for {cap_name}: {plugin_id}")
@@ -1568,6 +1658,8 @@ class PluginRegistry:
                                 rng_enabled=self._rng_service.enabled,
                                 plugin_id=plugin_id,
                                 trace_hook=self._trace.record,
+                                audit_log=audit_log,
+                                audit_run_id=run_id,
                             ),
                         )
                         continue
@@ -1590,6 +1682,8 @@ class PluginRegistry:
                                     rng_enabled=self._rng_service.enabled,
                                     plugin_id=plugin_id,
                                     trace_hook=self._trace.record,
+                                    audit_log=audit_log,
+                                    audit_run_id=run_id,
                                 ),
                             )
                         ],
@@ -1611,6 +1705,8 @@ class PluginRegistry:
                             rng_enabled=self._rng_service.enabled,
                             plugin_id=plugin_id,
                             trace_hook=self._trace.record,
+                            audit_log=audit_log,
+                            audit_run_id=run_id,
                         ),
                         network_allowed=network_allowed,
                         filesystem_policy=filesystem_policy,
@@ -1639,7 +1735,8 @@ class PluginRegistry:
             hosting_mode = "inproc"
         # WSL2 is often memory-constrained; subprocess hosting can spawn many heavy
         # Python processes (one per plugin) and destabilize the VM. Default to
-        # in-proc hosting on WSL unless explicitly overridden by env/config.
+        # in-proc hosting on WSL unless explicitly overridden by env or by setting
+        # hosting.wsl_force_inproc=false.
         wsl_force_inproc = bool(hosting_cfg.get("wsl_force_inproc", True))
         if (
             hosting_mode_env == ""
@@ -1680,6 +1777,25 @@ class PluginRegistry:
             quarantine_ids = set(self._normalize_ids(list(quarantine_cfg.keys()), alias_map))
         elif isinstance(quarantine_cfg, list):
             quarantine_ids = set(self._normalize_ids(quarantine_cfg, alias_map))
+
+        # Never quarantine core storage/ledger/anchor providers; quarantining them
+        # can make the kernel unbootable (missing required capabilities).
+        core_caps = {"storage.metadata", "storage.media", "journal.writer", "ledger.writer", "anchor.writer"}
+
+        def _is_core_plugin(pid: str) -> bool:
+            entry = manifests_by_id.get(pid)
+            if not entry:
+                return False
+            _path, manifest = entry
+            provides = manifest.get("provides", []) if isinstance(manifest, dict) else []
+            if not isinstance(provides, list):
+                return False
+            for cap in provides:
+                if str(cap).strip() in core_caps:
+                    return True
+            return False
+
+        quarantine_ids = {pid for pid in quarantine_ids if not _is_core_plugin(pid)}
         # EXT-07: inproc must be explicitly allowlisted. On WSL we auto-fill the
         # allowlist with enabled plugins to avoid subprocess OOM while keeping a
         # deterministic, inspectable allowlist.
@@ -1761,7 +1877,18 @@ class PluginRegistry:
                 if isinstance(user_plugins, dict):
                     user_plugins["quarantine"] = user_quarantine
             new_quarantines: list[str] = []
+            removed_quarantines: list[str] = []
             for pid in sorted(enabled_set):
+                if _is_core_plugin(pid):
+                    # Ensure stale quarantine entries do not disable core plugins.
+                    try:
+                        if isinstance(user_quarantine, dict) and pid in user_quarantine:
+                            user_quarantine.pop(pid, None)
+                            removed_quarantines.append(pid)
+                    except Exception:
+                        pass
+                    quarantine_ids.discard(pid)
+                    continue
                 if pid in quarantine_ids or pid in user_quarantine:
                     continue
                 try:
@@ -1783,12 +1910,13 @@ class PluginRegistry:
                         "window_s": int(crash_window_s),
                         "ts_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                     }
-            if new_quarantines:
+            if new_quarantines or removed_quarantines:
                 # Persist quarantine marks; do not delete old entries.
                 try:
                     atomic_write_json(user_path, user_cfg, sort_keys=True, indent=2)
                 except Exception:
                     pass
+            if new_quarantines:
                 enabled_set = {pid for pid in enabled_set if pid not in quarantine_ids}
 
         if (self.safe_mode or plugins_cfg.get("safe_mode", False)) and safe_mode_minimal:
@@ -1890,7 +2018,9 @@ class PluginRegistry:
                     entrypoints=entrypoints,
                     manifest=manifest,
                 )
-                network_allowed = bool(manifest.get("permissions", {}).get("network", False))
+                network_requested = bool(manifest.get("permissions", {}).get("network", False))
+                network_scope = self._network_scope_for_plugin(plugin_id, network_requested=network_requested)
+                network_allowed = network_scope != "none"
                 filesystem_policy = self._filesystem_policy(plugin_id, manifest, manifest_path.parent)
 
                 inproc = use_inproc(plugin_id)
@@ -1921,7 +2051,7 @@ class PluginRegistry:
                             module_path,
                             entry["callable"],
                             plugin_id,
-                            network_allowed,
+                            network_scope,
                             self.config,
                             plugin_config=plugin_settings,
                             capabilities=capabilities,
@@ -1958,7 +2088,16 @@ class PluginRegistry:
                                 cap_name = str(cap).strip()
                                 if cap_name and cap_name not in caps:
                                     caps[cap_name] = fallback_impl
+                    audit_run_id = str(self.config.get("runtime", {}).get("run_id", "") or "run")
                     for cap_name, impl in caps.items():
+                        audit_log = None
+                        try:
+                            from .host import RemoteCapability  # local import to avoid cycles
+
+                            if not isinstance(impl, RemoteCapability):
+                                audit_log = self._audit_log
+                        except Exception:
+                            audit_log = self._audit_log
                         proxy = CapabilityProxy(
                             impl,
                             network_allowed,
@@ -1971,6 +2110,10 @@ class PluginRegistry:
                             rng_enabled=self._rng_service.enabled,
                             plugin_id=plugin_id,
                             trace_hook=self._trace.record,
+                            audit_log=audit_log,
+                            audit_run_id=audit_run_id,
+                            audit_code_hash=code_hash,
+                            audit_settings_hash=settings_hash,
                             temp_dir=self._plugin_tmp_dirs.get(plugin_id),
                         )
                         local_providers.setdefault(cap_name, []).append((plugin_id, proxy))

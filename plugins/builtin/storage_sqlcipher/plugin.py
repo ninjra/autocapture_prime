@@ -6,6 +6,8 @@ import json
 import os
 import sqlite3
 import threading
+from datetime import datetime, timezone
+import shutil
 from typing import Any
 
 from dataclasses import dataclass
@@ -234,6 +236,7 @@ class SQLCipherStore:
         cur = self._conn.execute("PRAGMA table_info(metadata)")
         existing = {row[1] for row in cur.fetchall()}
         for column, col_type in (
+            ("payload", "TEXT"),
             ("record_type", "TEXT"),
             ("ts_utc", "TEXT"),
             ("run_id", "TEXT"),
@@ -298,7 +301,7 @@ class SQLCipherStore:
         self._ensure()
         cur = self._conn.execute("SELECT payload FROM metadata WHERE id = ?", (record_id,))
         row = cur.fetchone()
-        if not row:
+        if not row or row[0] is None:
             return default
         return json.loads(row[0])
 
@@ -447,9 +450,61 @@ class PlainSQLiteStore:
             self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        self._apply_fsync_policy(conn)
-        return conn
+        conn: sqlite3.Connection | None = None
+        try:
+            conn = sqlite3.connect(self._db_path)
+            self._apply_fsync_policy(conn)
+            return conn
+        except sqlite3.DatabaseError as exc:
+            # Recover from invalid sqlite files by archiving and recreating locally.
+            # This is non-destructive and keeps the raw artifact for investigation.
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            if "not a database" not in str(exc).lower():
+                raise
+            archive_path = self._archive_corrupt_db(str(exc))
+            conn = sqlite3.connect(self._db_path)
+            self._apply_fsync_policy(conn)
+            record_telemetry(
+                "storage.recovery",
+                {
+                    "run_id": self._run_id,
+                    "db_path": self._db_path,
+                    "archive_path": archive_path,
+                    "reason": str(exc),
+                },
+            )
+            return conn
+
+    def _archive_corrupt_db(self, reason: str) -> str:
+        if not os.path.exists(self._db_path):
+            raise sqlite3.DatabaseError(reason)
+        archive_dir = os.path.join(os.path.dirname(self._db_path), "corrupt")
+        os.makedirs(archive_dir, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        archive_path = os.path.join(archive_dir, f"{os.path.basename(self._db_path)}.{ts}.corrupt")
+        shutil.move(self._db_path, archive_path)
+        marker_path = f"{archive_path}.json"
+        _atomic_write_bytes(
+            marker_path,
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "record_type": "storage.recovery",
+                    "run_id": self._run_id,
+                    "ts_utc": datetime.now(timezone.utc).isoformat(),
+                    "src_path": self._db_path,
+                    "archive_path": archive_path,
+                    "reason": reason,
+                },
+                sort_keys=True,
+            ).encode("utf-8"),
+            fsync_policy=self._fsync_policy,
+        )
+        return archive_path
 
     def _apply_fsync_policy(self, conn: sqlite3.Connection) -> None:
         policy = self._fsync_policy
@@ -486,6 +541,7 @@ class PlainSQLiteStore:
         cur = self._conn.execute("PRAGMA table_info(metadata)")
         existing = {row[1] for row in cur.fetchall()}
         for column, col_type in (
+            ("payload", "TEXT"),
             ("record_type", "TEXT"),
             ("ts_utc", "TEXT"),
             ("run_id", "TEXT"),
@@ -550,7 +606,7 @@ class PlainSQLiteStore:
         self._ensure()
         cur = self._conn.execute("SELECT payload FROM metadata WHERE id = ?", (record_id,))
         row = cur.fetchone()
-        if not row:
+        if not row or row[0] is None:
             return default
         return json.loads(row[0])
 
@@ -1147,6 +1203,8 @@ class SQLCipherStoragePlugin(PluginBase):
         self._entity_persist = storage_cfg.get("entity_map", {}).get("persist", True)
         self._metadata_require_db = bool(storage_cfg.get("metadata_require_db", False))
         self._encryption_enabled = bool(encryption_enabled)
+        sqlcipher_cfg = storage_cfg.get("sqlcipher", {})
+        self._sqlcipher_enabled = bool(sqlcipher_cfg.get("enabled", False))
         self._lazy = _LazyStores(self._build_stores)
         self._metadata = _LazyProxy(self._lazy, "metadata")
         self._entity_map = _LazyProxy(self._lazy, "entity_map")
@@ -1156,17 +1214,22 @@ class SQLCipherStoragePlugin(PluginBase):
     def _build_stores(self):
         state_tape = None
         if self._encryption_enabled:
-            available, reason = _sqlcipher_available()
+            available = False
+            reason = "disabled by config"
+            if self._sqlcipher_enabled:
+                available, reason = _sqlcipher_available()
             if available:
-                _meta_id, meta_key = self._meta_provider.active()
-                store = SQLCipherStore(self._metadata_path, meta_key, self._run_id, self._fsync_policy)
-                metadata = ImmutableMetadataStore(store)
-                entity_map = EntityMapAdapter(store)
-            else:
+                try:
+                    _meta_id, meta_key = self._meta_provider.active()
+                    store = SQLCipherStore(self._metadata_path, meta_key, self._run_id, self._fsync_policy)
+                    metadata = ImmutableMetadataStore(store)
+                    entity_map = EntityMapAdapter(store)
+                except Exception as exc:
+                    available = False
+                    reason = f"open failed: {type(exc).__name__}: {exc}"
+            if not available:
                 if self._metadata_require_db:
-                    self.context.logger(
-                        f"SQLCipher unavailable ({reason}); using encrypted SQLite fallback"
-                    )
+                    self.context.logger(f"SQLCipher unavailable ({reason}); using encrypted SQLite fallback")
                 metadata_store = EncryptedSQLiteStore(
                     self._metadata_path,
                     self._meta_provider,

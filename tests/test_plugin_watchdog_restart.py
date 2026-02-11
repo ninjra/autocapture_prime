@@ -55,7 +55,7 @@ class PluginWatchdogTests(unittest.TestCase):
         # subprocess watchdog is only meaningful when subprocess hosting is enabled.
         if os.getenv("AUTOCAPTURE_PLUGINS_HOSTING_MODE", "").strip().lower() == "inproc":
             self.skipTest("subprocess hosting disabled in this environment")
-        with tempfile.TemporaryDirectory(dir=".") as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             plugin_id = "test.slow.watchdog"
             _write_slow_plugin(root, plugin_id)

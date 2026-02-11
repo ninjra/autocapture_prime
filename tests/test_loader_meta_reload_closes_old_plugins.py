@@ -27,14 +27,23 @@ class TestLoaderMetaReloadClosesOldPlugins(unittest.TestCase):
                 self.instance = DummyInstance(name)
 
         class DummyCaps:
+            def __init__(self) -> None:
+                # Kernel.boot() checks capabilities via `.all()` for required core writers.
+                # This test is about reload/cleanup semantics, so these are inert sentinels.
+                self._caps = {
+                    "journal.writer": object(),
+                    "ledger.writer": object(),
+                    "anchor.writer": object(),
+                }
+
             def get(self, _name):  # noqa: ANN001
-                return None
+                return self._caps.get(_name)
 
             def register(self, *_args, **_kwargs):
                 return None
 
             def all(self):
-                return {}
+                return dict(self._caps)
 
         class DummyRegistry:
             def __init__(self, config, safe_mode=False):  # noqa: ARG002
@@ -92,4 +101,3 @@ class TestLoaderMetaReloadClosesOldPlugins(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

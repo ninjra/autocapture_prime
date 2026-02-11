@@ -12,8 +12,8 @@
     "min_segment_seconds": 30
   },
   "capture": {
-    "auto_start": true,
-    "mode_preset": "memory_replacement_raw",
+    "auto_start": false,
+    "mode_preset": "",
     "diff_epsilon": 0,
     "duplicate_threshold": "exact_only",
     "always_store_fullres": true,
@@ -45,7 +45,7 @@
       "blocksize": 44100,
       "channels": 2,
       "device": null,
-      "enabled": true,
+      "enabled": false,
       "encoding": "wav",
       "ffmpeg_path": "",
       "microphone": true,
@@ -55,13 +55,13 @@
       "system_audio": true
     },
     "cursor": {
-      "enabled": true,
+      "enabled": false,
       "include_shape": true,
       "sample_hz": 5
     },
     "input_tracking": {
       "flush_interval_ms": 250,
-      "mode": "win32_idle",
+      "mode": "off",
       "store_derived": true
     },
     "clipboard": {
@@ -156,7 +156,7 @@
         "hash": "blake2b",
         "sample_bytes": 0
       },
-      "enabled": true,
+      "enabled": false,
       "fps_target": 2,
       "include_cursor": true,
       "include_cursor_shape": true,
@@ -167,7 +167,7 @@
       "resolution": "native"
     },
     "window_metadata": {
-      "enabled": true,
+      "enabled": false,
       "sample_hz": 5
     }
   },
@@ -801,10 +801,10 @@
       "builtin.anchor.basic": true,
       "builtin.answer.basic": true,
       "builtin.backpressure.basic": true,
-      "builtin.capture.audio.windows": true,
+      "builtin.capture.audio.windows": false,
       "builtin.capture.basic": false,
-      "builtin.capture.screenshot.windows": true,
-      "builtin.capture.windows": true,
+      "builtin.capture.screenshot.windows": false,
+      "builtin.capture.windows": false,
       "builtin.citation.basic": true,
       "builtin.cursor.windows": false,
       "builtin.devtools.ast_ir": true,
@@ -855,13 +855,13 @@
       "builtin.sst.track.cursor": false,
       "builtin.sst.ui.parse": false,
       "builtin.storage.encrypted": false,
-    "builtin.storage.sqlcipher": true,
-    "builtin.time.advanced": true,
-    "builtin.tracking.input.windows": true,
-    "builtin.tracking.clipboard.windows": false,
-    "builtin.tracking.file_activity.windows": false,
+      "builtin.storage.sqlcipher": true,
+      "builtin.time.advanced": true,
+      "builtin.tracking.input.windows": false,
+      "builtin.tracking.clipboard.windows": false,
+      "builtin.tracking.file_activity.windows": false,
       "builtin.vlm.basic": true,
-      "builtin.window.metadata.windows": true
+      "builtin.window.metadata.windows": false
     },
     "settings": {},
     "filesystem_defaults": {
@@ -1014,6 +1014,8 @@
     "permissions": {
       "network_allowed_plugin_ids": [
         "builtin.egress.gateway"
+      ],
+      "localhost_allowed_plugin_ids": [
       ]
     },
     "safe_mode": false,
@@ -1557,6 +1559,9 @@
     },
     "encryption_required": true,
     "encryption_enabled": true,
+    "sqlcipher": {
+      "enabled": false
+    },
     "entity_map": {
       "persist": true
     },

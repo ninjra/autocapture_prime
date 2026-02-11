@@ -10,6 +10,8 @@ from autocapture.indexing.factory import build_indexes
 from autocapture.retrieval.fusion import rrf_fusion
 from autocapture.retrieval.rerank import Reranker
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
+from autocapture_nx.kernel.ids import decode_record_id_component
+from autocapture_nx.kernel.providers import capability_providers
 
 
 class RetrievalStrategy(PluginBase):
@@ -22,9 +24,16 @@ class RetrievalStrategy(PluginBase):
         self._lexical = None
         self._vector = None
         self._indexes_ready = False
-        self._reranker = Reranker()
+        self._rerank_fallback = Reranker()
+        self._rerankers: list[tuple[str, Any]] = []
         self._last_trace: list[dict[str, Any]] = []
         self._index_meta: dict[str, Any] = {}
+        try:
+            cap = context.get_capability("retrieval.reranker")
+        except Exception:
+            cap = None
+        if cap is not None:
+            self._rerankers = capability_providers(cap, "retrieval.reranker")
 
     def capabilities(self) -> dict[str, Any]:
         return {"retrieval.strategy": self}
@@ -202,7 +211,22 @@ class RetrievalStrategy(PluginBase):
                 continue
             record = store.get(doc_id, {})
             docs.append({**item, "doc_id": doc_id, "text": record.get("text", "")})
-        return self._reranker.rerank(query, docs)
+        reranked = list(docs)
+        # Apply any plugin-provided rerankers first (late interaction, etc.),
+        # then always apply the deterministic overlap fallback to stabilize ties.
+        for _pid, rr in self._rerankers:
+            try:
+                if hasattr(rr, "rerank"):
+                    out = rr.rerank(query, reranked)
+                elif callable(rr):
+                    out = rr(query, reranked)
+                else:
+                    out = None
+            except Exception:
+                out = None
+            if isinstance(out, list) and out:
+                reranked = out
+        return self._rerank_fallback.rerank(query, reranked)
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> RetrievalStrategy:
@@ -291,6 +315,43 @@ def _map_candidates(
         if not doc_id:
             continue
         record = store.get(doc_id, {})
+        if not record:
+            # In subprocess hosting, capability-to-capability calls can be
+            # expensive and occasionally fragile for large derived payloads.
+            # For derived.text.* doc_ids we can infer the evidence/source_id
+            # deterministically from the encoded source suffix, then fetch only
+            # the (small) evidence record for ts/type.
+            try:
+                doc_str = str(doc_id)
+                parts = doc_str.split("/")
+                inferred_source: str | None = None
+                if len(parts) >= 3 and parts[1].startswith("derived.text."):
+                    inferred_source = decode_record_id_component(parts[-1])
+                if inferred_source and inferred_source != doc_str:
+                    source_record = store.get(inferred_source, {}) or {}
+                    ts = source_record.get("ts_utc")
+                    if not _within_window(ts, time_window):
+                        continue
+                    score = float(item.get("score", 0.0))
+                    record_type = str(source_record.get("record_type", ""))
+                    key = (str(inferred_source), str(doc_str))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    result = {
+                        "record_id": str(inferred_source),
+                        "score": score,
+                        "ts_utc": ts,
+                        "record_type": record_type,
+                        "derived_id": doc_str,
+                    }
+                    snippet = item.get("snippet")
+                    if snippet:
+                        result["snippet"] = snippet
+                    results.append(result)
+                    continue
+            except Exception:
+                pass
         if not record:
             continue
         source_id = record.get("source_id") or doc_id

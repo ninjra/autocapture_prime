@@ -50,7 +50,7 @@ class RpcSizeLimitTests(unittest.TestCase):
         # subprocess RPC boundary to enforce a max message size.
         if os.environ.get("AUTOCAPTURE_PLUGINS_HOSTING_MODE", "").strip().lower() == "inproc":
             self.skipTest("subprocess-only: rpc_max_message_bytes is enforced in host_runner IPC")
-        with tempfile.TemporaryDirectory(dir=".") as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             plugin_id = "test.rpc.size"
             _write_echo_plugin(root, plugin_id)

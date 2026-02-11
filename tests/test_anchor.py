@@ -42,6 +42,32 @@ class AnchorTests(unittest.TestCase):
             self.assertFalse(ok)
             self.assertTrue(errors)
 
+    def test_anchor_does_not_crash_when_keyring_unprotect_fails(self):
+        class _BrokenKeyring:
+            def active_key(self, _purpose: str):
+                raise RuntimeError("DPAPI unprotect requires Windows")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            anchor_path = os.path.join(tmp, "anchor", "anchors.ndjson")
+            config = {
+                "storage": {
+                    "data_dir": tmp,
+                    "anchor": {"path": anchor_path, "use_dpapi": False, "sign": True},
+                }
+            }
+            writer = AnchorWriter(
+                "anchor",
+                PluginContext(
+                    config=config,
+                    get_capability=lambda k: _BrokenKeyring() if k == "storage.keyring" else None,
+                    logger=lambda _m: None,
+                ),
+            )
+            record = writer.anchor("deadbeef")
+            self.assertEqual(record["ledger_head_hash"], "deadbeef")
+            self.assertNotIn("anchor_hmac", record)
+            self.assertTrue(os.path.exists(anchor_path))
+
 
 if __name__ == "__main__":
     unittest.main()

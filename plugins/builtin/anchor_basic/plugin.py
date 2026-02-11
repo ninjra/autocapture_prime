@@ -75,7 +75,17 @@ class AnchorWriter(PluginBase):
                 self._keyring = None
         if self._keyring is None:
             return None
-        key_id, root = self._keyring.active_key("anchor")
+        try:
+            key_id, root = self._keyring.active_key("anchor")
+        except Exception as exc:
+            # Fail-open for anchoring availability on non-Windows hosts where
+            # imported key material may be DPAPI-protected by the sidecar.
+            self._sign = False
+            try:
+                self.context.logger(f"anchor signing disabled: {type(exc).__name__}: {exc}")
+            except Exception:
+                pass
+            return None
         return key_id, derive_key(root, "anchor")
 
 

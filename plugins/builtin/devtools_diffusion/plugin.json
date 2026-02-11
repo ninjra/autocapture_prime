@@ -17,7 +17,8 @@
   ],
   "filesystem_policy": {
     "read": [
-      "{repo_root}/autocapture_nx"
+      "{repo_root}/autocapture_nx",
+      "{repo_root}/tools/hypervisor"
     ],
     "readwrite": [
       "{repo_root}/tools/hypervisor/runs"
