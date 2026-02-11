@@ -1,10 +1,10 @@
 {
   "contract_lock_hash": "7dc348c57fe09bc9e490a23337dfba5c7bddf62952809f5a772511f342c10266",
-  "generated_at": "2026-02-11T11:47:26.574826+00:00",
+  "generated_at": "2026-02-11T15:36:28.875438+00:00",
   "kernel_api_version": "0.1.0",
   "plugins": {
     "builtin.anchor.basic": {
-      "artifact_sha256": "9589ae01568ab53ce12bfd69245d8764124c798b0d9b200e900f34ea88620453",
+      "artifact_sha256": "78ad23ba0cd06b2b6d19a8d54ce08e76c364e8b36ca9d4f82a432156cb80c25c",
       "contract_lock_hash": "7dc348c57fe09bc9e490a23337dfba5c7bddf62952809f5a772511f342c10266",
       "kernel_api_version": "0.1.0",
       "manifest_sha256": "ee08659925ad98bdf8b65d7a571104257876fa61ca45f451a9b84a591b21d21a",
@@ -184,7 +184,7 @@
       }
     },
     "builtin.journal.basic": {
-      "artifact_sha256": "5521662d8e4e801887821005b2704ec02d1cab04141e5d9b0e2b5305cae58bea",
+      "artifact_sha256": "e860b1cd852936167540744f7a257652f3364bfa3d351e97a4af680b90daea50",
       "contract_lock_hash": "7dc348c57fe09bc9e490a23337dfba5c7bddf62952809f5a772511f342c10266",
       "kernel_api_version": "0.1.0",
       "manifest_sha256": "1a9647576ad96c94ec0db5c7817aea5d7a7fa651357855c71334908f5143d5ae",
@@ -194,7 +194,7 @@
       }
     },
     "builtin.ledger.basic": {
-      "artifact_sha256": "e737097412d30dedf2b2f8a5b085f53112ce63f8c8b4c5703d4b656beb43f316",
+      "artifact_sha256": "37f0a88d16b888f1271c10093e38c10877a3ec23ed1d49dba4178326c0ad4f5e",
       "contract_lock_hash": "7dc348c57fe09bc9e490a23337dfba5c7bddf62952809f5a772511f342c10266",
       "kernel_api_version": "0.1.0",
       "manifest_sha256": "55e412255b7ef4aea261e7ac47e0dbe8ce3ad1e52e2255986fe8540ee35a9947",
@@ -364,7 +364,7 @@
       }
     },
     "builtin.retrieval.basic": {
-      "artifact_sha256": "451b83b9fa4b591f18556df799f6c1fa0ea2110a0ec777302eb5e5c302c5cd78",
+      "artifact_sha256": "f4a77a5dd3677eea9a6716738f27b426c77819a3567f54dbd620c7a7bb5f3834",
       "contract_lock_hash": "7dc348c57fe09bc9e490a23337dfba5c7bddf62952809f5a772511f342c10266",
       "kernel_api_version": "0.1.0",
       "manifest_sha256": "e8251f21500cfbeb33c3f52169a8f75fce3229e54cd8ed17e11f491a89ce49a2",
@@ -554,7 +554,7 @@
       }
     },
     "builtin.sst.qa.answers": {
-      "artifact_sha256": "70b445b8995cb422555b53ea48b577b17cb088a11070b8c27f0faa6271e27a69",
+      "artifact_sha256": "1b58edefcd17a7ae908d9e9144ff711ae892b56d5504dda62d5d208c105441bf",
       "contract_lock_hash": "7dc348c57fe09bc9e490a23337dfba5c7bddf62952809f5a772511f342c10266",
       "kernel_api_version": "0.1.0",
       "manifest_sha256": "1c0741f72fa5ffde0a9bf0ea2234191805e631a8e3819db298668d27cdbb4ca2",
@@ -724,7 +724,7 @@
       }
     },
     "builtin.storage.sqlcipher": {
-      "artifact_sha256": "9d76c7b9db1216eb9a46d54c2c463fe6a3b2004950144996b4fdf21c258c9268",
+      "artifact_sha256": "ed1d7587260e111a6f1def019265a209c6b6f5016e56e95238e77462609e7796",
       "contract_lock_hash": "7dc348c57fe09bc9e490a23337dfba5c7bddf62952809f5a772511f342c10266",
       "kernel_api_version": "0.1.0",
       "manifest_sha256": "849ec2818c654c7f66503b7f99f1c6b00061ce17887737a9c40efd09900b06d5",

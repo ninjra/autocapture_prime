@@ -7,6 +7,7 @@ import hashlib
 import math
 import os
 import atexit
+import errno
 import platform
 import getpass
 import time
@@ -193,8 +194,15 @@ class Kernel:
         out_path = data_dir / "config.effective.json"
         payload = _canonicalize_config_for_hash(effective.data)
         text = json.dumps(payload, sort_keys=True, indent=2)
-        self._archive_if_different(out_path, text, ts_utc=str(ts_utc))
-        atomic_write_text(out_path, text, fsync=True)
+        try:
+            self._archive_if_different(out_path, text, ts_utc=str(ts_utc))
+            atomic_write_text(out_path, text, fsync=True)
+        except PermissionError:
+            return {}
+        except OSError as exc:
+            if exc.errno in (errno.EACCES, errno.EROFS, errno.EPERM):
+                return {}
+            raise
         return {"path": str(out_path), "sha256": effective.effective_hash}
 
     def _persist_policy_snapshot(self, *, ts_utc: str, metadata: Any | None = None) -> dict[str, Any]:
@@ -661,13 +669,21 @@ class Kernel:
         return {"events": cleaned, "safe_mode_until": safe_mode_until, "last_clean_utc": last_clean}
 
     def _write_crash_history(self, path: Path, history: dict[str, Any]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "events": list(history.get("events", [])),
-            "safe_mode_until": history.get("safe_mode_until"),
-            "last_clean_utc": history.get("last_clean_utc"),
-        }
-        atomic_write_json(path, payload, sort_keys=True, indent=None)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "events": list(history.get("events", [])),
+                "safe_mode_until": history.get("safe_mode_until"),
+                "last_clean_utc": history.get("last_clean_utc"),
+            }
+            atomic_write_json(path, payload, sort_keys=True, indent=None)
+        except PermissionError:
+            # Sidecar dataroots may be readable but deny temp-file writes.
+            return
+        except OSError as exc:
+            if exc.errno in (errno.EACCES, errno.EROFS, errno.EPERM):
+                return
+            raise
 
     def _crash_loop_policy(self, config: dict[str, Any]) -> dict[str, Any]:
         kernel_cfg = config.get("kernel", {}) if isinstance(config, dict) else {}
@@ -766,7 +782,13 @@ class Kernel:
 
         status.safe_mode_until = history.get("safe_mode_until")
         if write_history:
-            self._write_crash_history(history_path, history)
+            try:
+                self._write_crash_history(history_path, history)
+            except PermissionError:
+                pass
+            except OSError as exc:
+                if exc.errno not in (errno.EACCES, errno.EROFS, errno.EPERM):
+                    raise
         return status
 
     def crash_loop_status(self) -> dict[str, Any] | None:
@@ -801,7 +823,15 @@ class Kernel:
             safe_mode=safe_mode,
             safe_mode_reason=safe_mode_reason,
         )
-        write_run_state(path, payload)
+        try:
+            write_run_state(path, payload)
+        except PermissionError:
+            # Queries must still run when state files are not writable.
+            return
+        except OSError as exc:
+            if exc.errno in (errno.EACCES, errno.EROFS, errno.EPERM):
+                return
+            raise
 
     def _parse_ts(self, ts: str | None) -> datetime | None:
         if not ts:

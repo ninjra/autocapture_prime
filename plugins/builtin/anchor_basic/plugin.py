@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import base64
 import os
+import errno
 import hmac
 import hashlib
+import tempfile
 from datetime import datetime, timezone
 from typing import Any
 
@@ -26,12 +28,40 @@ class AnchorWriter(PluginBase):
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
         self._seq = 0
         self._keyring: KeyRing | None = None
-        if os.path.exists(self._path):
+        self._load_seq()
+
+    def _is_perm_error(self, exc: BaseException) -> bool:
+        if isinstance(exc, PermissionError):
+            return True
+        if isinstance(exc, OSError):
+            return exc.errno in (errno.EACCES, errno.EPERM, errno.EROFS)
+        return False
+
+    def _fallback_path(self) -> str:
+        digest = hashlib.sha256(self._path.encode("utf-8")).hexdigest()[:16]
+        root = os.path.join(tempfile.gettempdir(), "autocapture", "shadow_logs")
+        os.makedirs(root, exist_ok=True)
+        return os.path.join(root, f"{digest}.anchors.ndjson")
+
+    def _use_fallback_path(self) -> None:
+        fallback = self._fallback_path()
+        if fallback != self._path:
+            self._path = fallback
+
+    def _load_seq(self) -> None:
+        if not os.path.exists(self._path):
+            return
+        try:
             with open(self._path, "r", encoding="utf-8") as handle:
                 for line in handle:
                     if not line.strip():
                         continue
                     self._seq += 1
+        except Exception as exc:
+            if self._is_perm_error(exc):
+                self._use_fallback_path()
+                return
+            raise
 
     def capabilities(self) -> dict[str, Any]:
         return {"anchor.writer": self}
@@ -60,8 +90,15 @@ class AnchorWriter(PluginBase):
                 payload = b"DPAPI:" + base64.b64encode(payload)
             except Exception:
                 payload = dumps(record).encode("utf-8")
-        with open(self._path, "a", encoding="utf-8") as handle:
-            handle.write(payload.decode("utf-8") + "\n")
+        try:
+            with open(self._path, "a", encoding="utf-8") as handle:
+                handle.write(payload.decode("utf-8") + "\n")
+        except Exception as exc:
+            if not self._is_perm_error(exc):
+                raise
+            self._use_fallback_path()
+            with open(self._path, "a", encoding="utf-8") as handle:
+                handle.write(payload.decode("utf-8") + "\n")
         self._seq += 1
         return record
 

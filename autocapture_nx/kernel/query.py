@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import zipfile
 import time
+import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
@@ -68,9 +69,55 @@ def _ts_value(ts: str | None) -> float:
 
 
 def _evidence_candidates(metadata: Any, time_window: dict[str, Any] | None, limit: int) -> list[str]:
+    max_limit = max(0, int(limit))
+    if max_limit <= 0:
+        return []
     evidence: list[tuple[float, str]] = []
-    for record_id in getattr(metadata, "keys", lambda: [])():
-        record = metadata.get(record_id, {})
+    if hasattr(metadata, "latest"):
+        try:
+            per_type_limit = max(50, max_limit * 5)
+            for record_type in (
+                "evidence.capture.frame",
+                "evidence.capture.image",
+                "evidence.capture.video",
+                "evidence.capture.audio",
+            ):
+                for item in metadata.latest(record_type=record_type, limit=per_type_limit):
+                    if not isinstance(item, dict):
+                        continue
+                    record_id = str(item.get("record_id") or "")
+                    record = item.get("record")
+                    if not record_id or not isinstance(record, dict):
+                        continue
+                    ts = record.get("ts_start_utc") or record.get("ts_utc")
+                    if not _within_window(ts, time_window):
+                        continue
+                    evidence.append((_ts_value(ts), record_id))
+            if evidence:
+                evidence.sort(key=lambda item: (-item[0], item[1]))
+                dedup: list[str] = []
+                seen: set[str] = set()
+                for _ts, rid in evidence:
+                    if rid in seen:
+                        continue
+                    seen.add(rid)
+                    dedup.append(rid)
+                    if len(dedup) >= max_limit:
+                        break
+                return dedup
+        except Exception:
+            pass
+
+    max_scan = max(500, max_limit * 50)
+    for idx, record_id in enumerate(getattr(metadata, "keys", lambda: [])()):
+        if idx >= max_scan:
+            break
+        try:
+            record = metadata.get(record_id, {})
+        except Exception:
+            continue
+        if not isinstance(record, dict):
+            continue
         record_type = str(record.get("record_type", ""))
         if not record_type.startswith("evidence.capture."):
             continue
@@ -79,7 +126,37 @@ def _evidence_candidates(metadata: Any, time_window: dict[str, Any] | None, limi
             continue
         evidence.append((_ts_value(ts), str(record_id)))
     evidence.sort(key=lambda item: (-item[0], item[1]))
-    return [record_id for _ts, record_id in evidence[: max(0, int(limit))]]
+    if evidence:
+        return [record_id for _ts, record_id in evidence[:max_limit]]
+
+    # Final fallback: direct read-only sqlite query for sidecar-managed DBs where
+    # metadata capability reads are intermittently blocked by file locks.
+    db_path = None
+    try:
+        store = getattr(metadata, "_store", None)
+        db_path = getattr(store, "_db_path", None)
+    except Exception:
+        db_path = None
+    if isinstance(db_path, str) and db_path:
+        try:
+            con = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)
+            try:
+                cur = con.execute(
+                    "SELECT id, ts_utc FROM metadata WHERE record_type LIKE 'evidence.capture.%' ORDER BY ts_utc DESC, id DESC LIMIT ?",
+                    (max(100, max_limit * 10),),
+                )
+                rows = cur.fetchall()
+            finally:
+                con.close()
+            for rid, ts in rows:
+                if not _within_window(ts, time_window):
+                    continue
+                evidence.append((_ts_value(ts), str(rid)))
+            evidence.sort(key=lambda item: (-item[0], item[1]))
+            return [record_id for _ts, record_id in evidence[:max_limit]]
+        except Exception:
+            return []
+    return []
 
 
 def _capability_providers(capability: Any | None, default_provider: str) -> list[tuple[str, Any]]:
@@ -1121,6 +1198,8 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
     synth_claims: list[dict[str, Any]] = []
     synth_debug: dict[str, Any] = {}
     synth_error: str | None = None
+    query_cfg = system.config.get("query", {}) if hasattr(system, "config") else {}
+    synth_enabled = bool(query_cfg.get("enable_synthesizer", False)) if isinstance(query_cfg, dict) else False
     try:
         synthesizer = None
         if hasattr(system, "get"):
@@ -1128,7 +1207,7 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
                 synthesizer = _resolve_single_provider(system.get("answer.synthesizer"))
             except Exception:
                 synthesizer = None
-        if synthesizer is not None and metadata is not None and query_ledger_hash and anchor_ref:
+        if synth_enabled and synthesizer is not None and metadata is not None and query_ledger_hash and anchor_ref:
             evidence_items: list[dict[str, Any]] = []
             for item in (results[:10] if isinstance(results, list) else []):
                 rid = str(item.get("derived_id") or "").strip()
@@ -1253,6 +1332,8 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
         evidence_hash = evidence_record.get("content_hash") or evidence_record.get("payload_hash")
         if evidence_hash is None and evidence_record.get("text"):
             evidence_hash = hash_text(normalize_text(evidence_record.get("text", "")))
+        if evidence_hash is None:
+            evidence_hash = hash_text(normalize_text(str(text or evidence_id)))
         derived_hash = None
         span_ref = record.get("span_ref") if isinstance(record, dict) else None
         if derived_id:
@@ -1266,6 +1347,8 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
         locator_kind = "text_offsets" if span_kind == "text" else ("time_range" if isinstance(span_ref, dict) and span_ref.get("kind") == "time" else "record")
         locator_record_id = str(derived_id or evidence_id)
         locator_record_hash = str(derived_hash or evidence_hash or "")
+        if not locator_record_hash:
+            locator_record_hash = hash_text(normalize_text(str(text or locator_record_id)))
         locator: dict[str, Any] = _citation_locator(
             kind=locator_kind,
             record_id=locator_record_id,

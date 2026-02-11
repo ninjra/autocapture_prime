@@ -443,11 +443,50 @@ class PlainSQLiteStore:
         self._fsync_policy = str(fsync_policy or "").strip().lower() or "none"
         os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
         self._conn: sqlite3.Connection | None = None
+        self._read_only = False
+
+    def _is_readonly_error(self, exc: BaseException) -> bool:
+        if not isinstance(exc, sqlite3.OperationalError):
+            return False
+        text = str(exc).lower()
+        return "readonly" in text or "read-only" in text
 
     def _ensure(self) -> None:
         if self._conn is None:
             self._conn = self._connect()
-            self._init_schema()
+            try:
+                self._init_schema()
+            except Exception as exc:
+                if self._is_readonly_error(exc):
+                    self._read_only = True
+                    try:
+                        self._conn.close()
+                    except Exception:
+                        pass
+                    self._conn = self._connect_read_only()
+                    return
+                raise
+
+    def _connect_read_only(self) -> sqlite3.Connection:
+        return sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
+
+    def _reconnect_read_only(self) -> None:
+        self._read_only = True
+        try:
+            if self._conn is not None:
+                self._conn.close()
+        except Exception:
+            pass
+        self._conn = self._connect_read_only()
+
+    def _execute_read(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
+        try:
+            return self._conn.execute(sql, params)
+        except Exception as exc:
+            if not self._is_readonly_error(exc):
+                raise
+            self._reconnect_read_only()
+            return self._conn.execute(sql, params)
 
     def _connect(self) -> sqlite3.Connection:
         conn: sqlite3.Connection | None = None
@@ -565,6 +604,8 @@ class PlainSQLiteStore:
         import json
 
         self._ensure()
+        if self._read_only:
+            return
         record_type = None
         ts_utc = None
         run_id = self._run_id
@@ -573,16 +614,24 @@ class PlainSQLiteStore:
             ts_utc = value.get("ts_utc") or value.get("ts_start_utc") or value.get("ts_end_utc")
             run_id = value.get("run_id") or run_id
         payload = json.dumps(value, sort_keys=True)
-        self._conn.execute(
-            "INSERT OR REPLACE INTO metadata (id, payload, record_type, ts_utc, run_id) VALUES (?, ?, ?, ?, ?)",
-            (record_id, payload, record_type, ts_utc, run_id),
-        )
-        self._conn.commit()
+        try:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO metadata (id, payload, record_type, ts_utc, run_id) VALUES (?, ?, ?, ?, ?)",
+                (record_id, payload, record_type, ts_utc, run_id),
+            )
+            self._conn.commit()
+        except Exception as exc:
+            if self._is_readonly_error(exc):
+                self._read_only = True
+                return
+            raise
 
     def put_new(self, record_id: str, value: Any) -> None:
         import json
 
         self._ensure()
+        if self._read_only:
+            return
         record_type = None
         ts_utc = None
         run_id = self._run_id
@@ -599,12 +648,20 @@ class PlainSQLiteStore:
             self._conn.commit()
         except sqlite3.IntegrityError as exc:
             raise FileExistsError(f"Metadata record already exists: {record_id}") from exc
+        except Exception as exc:
+            if self._is_readonly_error(exc):
+                self._read_only = True
+                return
+            raise
 
     def get(self, record_id: str, default: Any = None) -> Any:
         import json
 
         self._ensure()
-        cur = self._conn.execute("SELECT payload FROM metadata WHERE id = ?", (record_id,))
+        try:
+            cur = self._execute_read("SELECT payload FROM metadata WHERE id = ?", (record_id,))
+        except Exception:
+            return default
         row = cur.fetchone()
         if not row or row[0] is None:
             return default
@@ -612,12 +669,18 @@ class PlainSQLiteStore:
 
     def keys(self) -> list[str]:
         self._ensure()
-        cur = self._conn.execute("SELECT id FROM metadata ORDER BY id")
+        try:
+            cur = self._execute_read("SELECT id FROM metadata ORDER BY id")
+        except Exception:
+            return []
         return [row[0] for row in cur.fetchall()]
 
     def count(self) -> int:
         self._ensure()
-        cur = self._conn.execute("SELECT COUNT(*) FROM metadata")
+        try:
+            cur = self._execute_read("SELECT COUNT(*) FROM metadata")
+        except Exception:
+            return 0
         row = cur.fetchone()
         return int(row[0]) if row else 0
 
@@ -643,7 +706,10 @@ class PlainSQLiteStore:
         if limit is not None:
             sql += " LIMIT ?"
             params.append(int(limit))
-        cur = self._conn.execute(sql, tuple(params))
+        try:
+            cur = self._execute_read(sql, tuple(params))
+        except Exception:
+            return []
         return [row[0] for row in cur.fetchall()]
 
     def latest(self, record_type: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
@@ -659,7 +725,10 @@ class PlainSQLiteStore:
         if limit is not None:
             sql += " LIMIT ?"
             params.append(int(limit))
-        cur = self._conn.execute(sql, tuple(params))
+        try:
+            cur = self._execute_read(sql, tuple(params))
+        except Exception:
+            return []
         rows = cur.fetchall()
         out: list[dict[str, Any]] = []
         for row in rows:
@@ -674,9 +743,17 @@ class PlainSQLiteStore:
 
     def delete(self, record_id: str) -> bool:
         self._ensure()
+        if self._read_only:
+            return False
         before = self._conn.total_changes
-        self._conn.execute("DELETE FROM metadata WHERE id = ?", (record_id,))
-        self._conn.commit()
+        try:
+            self._conn.execute("DELETE FROM metadata WHERE id = ?", (record_id,))
+            self._conn.commit()
+        except Exception as exc:
+            if self._is_readonly_error(exc):
+                self._read_only = True
+                return False
+            raise
         return self._conn.total_changes > before
 
     def entity_put(
@@ -690,18 +767,29 @@ class PlainSQLiteStore:
         first_seen_ts: str | None = None,
     ) -> None:
         self._ensure()
-        self._conn.execute(
-            "INSERT OR REPLACE INTO entity_map (token, value, kind, key_id, key_version, first_seen_ts) VALUES (?, ?, ?, ?, ?, ?)",
-            (token, value, kind, key_id, key_version, first_seen_ts),
-        )
-        self._conn.commit()
+        if self._read_only:
+            return
+        try:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO entity_map (token, value, kind, key_id, key_version, first_seen_ts) VALUES (?, ?, ?, ?, ?, ?)",
+                (token, value, kind, key_id, key_version, first_seen_ts),
+            )
+            self._conn.commit()
+        except Exception as exc:
+            if self._is_readonly_error(exc):
+                self._read_only = True
+                return
+            raise
 
     def entity_get(self, token: str) -> dict[str, Any] | None:
         self._ensure()
-        cur = self._conn.execute(
-            "SELECT value, kind, key_id, key_version, first_seen_ts FROM entity_map WHERE token = ?",
-            (token,),
-        )
+        try:
+            cur = self._execute_read(
+                "SELECT value, kind, key_id, key_version, first_seen_ts FROM entity_map WHERE token = ?",
+                (token,),
+            )
+        except Exception:
+            return None
         row = cur.fetchone()
         if not row:
             return None
@@ -715,7 +803,10 @@ class PlainSQLiteStore:
 
     def entity_items(self) -> dict[str, dict[str, Any]]:
         self._ensure()
-        cur = self._conn.execute("SELECT token, value, kind, key_id, key_version, first_seen_ts FROM entity_map")
+        try:
+            cur = self._execute_read("SELECT token, value, kind, key_id, key_version, first_seen_ts FROM entity_map")
+        except Exception:
+            return {}
         return {
             row[0]: {
                 "value": row[1],
@@ -732,8 +823,16 @@ class PlainSQLiteStore:
 
     def vacuum(self) -> None:
         self._ensure()
-        self._conn.execute("VACUUM")
-        self._conn.commit()
+        if self._read_only:
+            return
+        try:
+            self._conn.execute("VACUUM")
+            self._conn.commit()
+        except Exception as exc:
+            if self._is_readonly_error(exc):
+                self._read_only = True
+                return
+            raise
 
 
 class PlainBlobStore:

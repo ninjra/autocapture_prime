@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import hashlib
+import errno
+import tempfile
 import threading
 from dataclasses import dataclass
 from typing import Any
@@ -36,7 +38,30 @@ class LedgerWriter(PluginBase):
         self._path = os.path.join(data_dir, "ledger.ndjson")
         self._last_hash = None
         self._lock = threading.Lock()
-        if os.path.exists(self._path):
+        self._load_last_hash()
+
+    def _is_perm_error(self, exc: BaseException) -> bool:
+        if isinstance(exc, PermissionError):
+            return True
+        if isinstance(exc, OSError):
+            return exc.errno in (errno.EACCES, errno.EPERM, errno.EROFS)
+        return False
+
+    def _fallback_path(self) -> str:
+        digest = hashlib.sha256(self._path.encode("utf-8")).hexdigest()[:16]
+        root = os.path.join(tempfile.gettempdir(), "autocapture", "shadow_logs")
+        os.makedirs(root, exist_ok=True)
+        return os.path.join(root, f"{digest}.ledger.ndjson")
+
+    def _use_fallback_path(self) -> None:
+        fallback = self._fallback_path()
+        if fallback != self._path:
+            self._path = fallback
+
+    def _load_last_hash(self) -> None:
+        if not os.path.exists(self._path):
+            return
+        try:
             with open(self._path, "r", encoding="utf-8") as handle:
                 for line in handle:
                     if not line.strip():
@@ -54,6 +79,11 @@ class LedgerWriter(PluginBase):
                         self._last_hash = entry.get("entry_hash", self._last_hash)
                     except Exception:
                         continue
+        except Exception as exc:
+            if self._is_perm_error(exc):
+                self._use_fallback_path()
+                return
+            raise
 
     def capabilities(self) -> dict[str, Any]:
         return {"ledger.writer": self}
@@ -81,13 +111,25 @@ class LedgerWriter(PluginBase):
             tail = prev_hash or ""
             entry_hash = hashlib.sha256((canonical + tail).encode("utf-8")).hexdigest()
             payload["entry_hash"] = entry_hash
-            with open(self._path, "a", encoding="utf-8") as handle:
-                handle.write(f"{dumps(payload)}\n")
-                try:
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                except OSError:
-                    pass
+            try:
+                with open(self._path, "a", encoding="utf-8") as handle:
+                    handle.write(f"{dumps(payload)}\n")
+                    try:
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    except OSError:
+                        pass
+            except Exception as exc:
+                if not self._is_perm_error(exc):
+                    raise
+                self._use_fallback_path()
+                with open(self._path, "a", encoding="utf-8") as handle:
+                    handle.write(f"{dumps(payload)}\n")
+                    try:
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    except OSError:
+                        pass
             self._last_hash = entry_hash
             return entry_hash
 

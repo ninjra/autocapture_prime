@@ -270,7 +270,9 @@ def _count_inboxes(tokens: list[dict[str, Any]]) -> int:
     # Bias toward over-counting rather than under-counting: users asking "how many
     # inboxes do I have open" care more about missing a real open inbox than
     # counting an extra noisy hit, and downstream QA already clamps counts.
-    top_threshold_y = float(max_y2) * 0.28
+    # 0.40 captures tab strips and upper-pane docked inbox lists while still
+    # excluding deep sidebar/body "Inbox" labels in typical desktop layouts.
+    top_threshold_y = float(max_y2) * 0.40
 
     # Deduplicate by coarse x/y buckets to avoid double-counting overlapping OCR hits
     # for the same tab label while still allowing multiple distinct inbox tabs.

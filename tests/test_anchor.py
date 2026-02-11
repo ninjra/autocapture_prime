@@ -2,7 +2,9 @@ import os
 import json
 import tempfile
 import unittest
+import builtins
 from pathlib import Path
+from unittest.mock import patch
 
 from autocapture_nx.plugin_system.api import PluginContext
 from autocapture_nx.kernel.keyring import KeyRing
@@ -67,6 +69,33 @@ class AnchorTests(unittest.TestCase):
             self.assertEqual(record["ledger_head_hash"], "deadbeef")
             self.assertNotIn("anchor_hmac", record)
             self.assertTrue(os.path.exists(anchor_path))
+
+    def test_anchor_falls_back_when_primary_append_denied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            anchor_path = os.path.join(tmp, "anchor", "anchors.ndjson")
+            keyring_path = os.path.join(tmp, "vault", "keyring.json")
+            root_key_path = os.path.join(tmp, "vault", "root.key")
+            keyring = KeyRing.load(keyring_path, legacy_root_path=root_key_path, require_protection=False)
+            writer = AnchorWriter(
+                "anchor",
+                PluginContext(
+                    config={"storage": {"data_dir": tmp, "anchor": {"path": anchor_path, "use_dpapi": False}}},
+                    get_capability=lambda k: keyring if k == "storage.keyring" else None,
+                    logger=lambda _m: None,
+                ),
+            )
+            real_open = builtins.open
+
+            def fake_open(path, *args, **kwargs):
+                mode = args[0] if args else kwargs.get("mode", "r")
+                if path == anchor_path and "a" in str(mode):
+                    raise PermissionError("denied")
+                return real_open(path, *args, **kwargs)
+
+            with patch("plugins.builtin.anchor_basic.plugin.open", side_effect=fake_open):
+                record = writer.anchor("deadbeef")
+            self.assertEqual(record["ledger_head_hash"], "deadbeef")
+            self.assertNotEqual(writer._path, anchor_path)  # pylint: disable=protected-access
 
 
 if __name__ == "__main__":
