@@ -18,6 +18,30 @@ def _load_module():
 
 
 class QueryEvalSuiteExactTests(unittest.TestCase):
+    def test_answer_text_prefers_display_summary_and_bullets(self) -> None:
+        mod = _load_module()
+        result = {
+            "answer": {
+                "display": {
+                    "summary": "inboxes: 4",
+                    "bullets": ["signals: explicit_inbox_labels=2, mail_client_regions=2, total=4"],
+                },
+                "claims": [
+                    {
+                        "text": "Observation: open_inboxes_count=4. Open inboxes: 4",
+                        "citations": [{"evidence_id": "e1"}],
+                    }
+                ],
+                "state": "ok",
+                "errors": [],
+            }
+        }
+        text = mod._answer_text(result)
+        self.assertEqual(
+            text,
+            "inboxes: 4\n- signals: explicit_inbox_labels=2, mail_client_regions=2, total=4",
+        )
+
     def test_run_case_supports_exact_expectation(self) -> None:
         mod = _load_module()
         case = {

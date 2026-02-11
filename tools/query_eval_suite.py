@@ -46,6 +46,14 @@ def _load_cases(path: Path) -> list[dict[str, Any]]:
 
 def _answer_text(result: dict[str, Any]) -> str:
     answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
+    display = answer.get("display", {}) if isinstance(answer.get("display", {}), dict) else {}
+    summary = str(display.get("summary") or "").strip()
+    bullets = display.get("bullets", []) if isinstance(display.get("bullets", []), list) else []
+    bullet_lines = [str(x).strip() for x in bullets if str(x).strip()]
+    if summary:
+        if bullet_lines:
+            return "\n".join([summary] + [f"- {line}" for line in bullet_lines])
+        return summary
     claims = answer.get("claims", []) if isinstance(answer.get("claims", []), list) else []
     texts = []
     for claim in claims:
@@ -58,8 +66,17 @@ def _answer_text(result: dict[str, Any]) -> str:
 
 def _claim_texts(result: dict[str, Any]) -> list[str]:
     answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
-    claims = answer.get("claims", []) if isinstance(answer.get("claims", []), list) else []
+    display = answer.get("display", {}) if isinstance(answer.get("display", {}), dict) else {}
+    display_summary = str(display.get("summary") or "").strip()
+    display_bullets = display.get("bullets", []) if isinstance(display.get("bullets", []), list) else []
     texts: list[str] = []
+    if display_summary:
+        texts.append(display_summary)
+    for item in display_bullets:
+        txt = str(item or "").strip()
+        if txt:
+            texts.append(txt)
+    claims = answer.get("claims", []) if isinstance(answer.get("claims", []), list) else []
     for claim in claims:
         if not isinstance(claim, dict):
             continue
@@ -113,7 +130,9 @@ def _run_case(system, case: dict[str, Any]) -> CaseOutcome:  # type: ignore[no-u
     except Exception as exc:
         return CaseOutcome(case_id, query, False, "", f"query_failed:{type(exc).__name__}:{exc}", {})
     claim_texts = _claim_texts(result)
-    text = "\n".join(claim_texts)
+    text = _answer_text(result)
+    if not text:
+        text = "\n".join(claim_texts)
     low = text.lower()
     any_ok = True if not expects_any else any(token in low for token in expects_any)
     all_ok = all(token in low for token in expects_all)

@@ -1484,6 +1484,183 @@ def _query_tokens(query: str) -> set[str]:
     return {tok for tok in tokens}
 
 
+def _compact_line(text: str, *, limit: int = 180) -> str:
+    normalized = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(normalized) <= int(limit):
+        return normalized
+    return normalized[: max(0, int(limit) - 1)].rstrip() + "…"
+
+
+def _extract_first_match(patterns: list[str], texts: list[str]) -> str | None:
+    for text in texts:
+        for pattern in patterns:
+            m = re.search(pattern, text, flags=re.IGNORECASE)
+            if m:
+                value = str(m.group(1) or "").strip()
+                if value:
+                    return value
+    return None
+
+
+def _extract_observation_fields(claim_texts: list[str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    inboxes = _extract_first_match(
+        [r"\bopen_inboxes_count\s*=\s*(\d+)\b", r"\bopen inboxes:\s*(\d+)\b"],
+        claim_texts,
+    )
+    if inboxes:
+        out["open_inboxes"] = inboxes
+    vdi_time = _extract_first_match(
+        [r"\bvdi_clock_time\s*=\s*([0-9]{1,2}:[0-9]{2}\s*[AP]M)\b", r"\bvdi time:\s*([0-9]{1,2}:[0-9]{2}\s*[AP]M)\b"],
+        claim_texts,
+    )
+    if vdi_time:
+        out["vdi_time"] = vdi_time
+    song = _extract_first_match(
+        [r"\bcurrent_song\s*=\s*([^\n]+)", r"\bnow playing:\s*([^\n]+)"],
+        claim_texts,
+    )
+    if song:
+        song_clean = song.strip().rstrip(".")
+        if ". Now playing:" in song_clean:
+            tail = song_clean.split(". Now playing:", 1)[1].strip()
+            if tail:
+                song_clean = f"Now playing: {tail}"
+        out["song"] = song_clean
+    collaborator = _extract_first_match(
+        [
+            r"\bquorum_message_collaborator\s*=\s*([A-Za-z][A-Za-z '\-]{1,80})(?=$|[.;])",
+            r"\bquorum_task_collaborator\s*=\s*([A-Za-z][A-Za-z '\-]{1,80})(?=$|[.;])",
+            r"\bquorum (?:message|task) collaborator:\s*([A-Za-z][A-Za-z '\-]{1,80})(?=$|[.;])",
+        ],
+        claim_texts,
+    )
+    if collaborator:
+        out["quorum_collaborator"] = collaborator.strip().rstrip(".")
+    return out
+
+
+def _extract_inbox_trace_bullets(claim_texts: list[str]) -> list[str]:
+    trace_text = ""
+    for text in claim_texts:
+        if "Inbox count trace:" in text:
+            trace_text = text
+            break
+    if not trace_text:
+        return []
+    bullets: list[str] = []
+    metrics = re.search(
+        r"token_count=(\d+),\s*mail_context_count=(\d+),\s*line_count=(\d+),\s*final_count=(\d+)",
+        trace_text,
+        flags=re.IGNORECASE,
+    )
+    if metrics:
+        bullets.append(
+            "signals:"
+            f" explicit_inbox_labels={metrics.group(1)},"
+            f" mail_client_regions={metrics.group(2)},"
+            f" mail_lines={metrics.group(3)},"
+            f" total={metrics.group(4)}"
+        )
+    token_hits = re.findall(
+        r"token:\s*([^@|]+?)\s*@\s*\[([^\]]+)\]",
+        trace_text,
+        flags=re.IGNORECASE,
+    )
+    for idx, (label, bbox) in enumerate(token_hits[:4], start=1):
+        bullets.append(f"match_{idx}: {_compact_line(label, limit=48)} @ [{bbox}]")
+    return bullets
+
+
+def _build_answer_display(query: str, claim_texts: list[str]) -> dict[str, Any]:
+    low_query = str(query or "").casefold()
+    fields = _extract_observation_fields(claim_texts)
+    summary = ""
+    bullets: list[str] = []
+    structured = False
+    topic = "generic"
+
+    if "inbox" in low_query and fields.get("open_inboxes"):
+        summary = f"inboxes: {fields['open_inboxes']}"
+        bullets.extend(_extract_inbox_trace_bullets(claim_texts))
+        structured = True
+        topic = "inbox"
+    elif ("song" in low_query or "playing" in low_query) and fields.get("song"):
+        summary = f"song: {fields['song']}"
+        structured = True
+        topic = "song"
+    elif ("quorum" in low_query or "working with me" in low_query) and fields.get("quorum_collaborator"):
+        summary = f"quorum_collaborator: {fields['quorum_collaborator']}"
+        structured = True
+        topic = "quorum"
+    elif ("vdi" in low_query or "time" in low_query) and fields.get("vdi_time"):
+        summary = f"vdi_time: {fields['vdi_time']}"
+        structured = True
+        topic = "vdi"
+
+    if not summary:
+        if fields.get("open_inboxes"):
+            summary = f"inboxes: {fields['open_inboxes']}"
+            structured = True
+            topic = "inbox"
+        elif fields.get("quorum_collaborator"):
+            summary = f"quorum_collaborator: {fields['quorum_collaborator']}"
+            structured = True
+            topic = "quorum"
+        elif fields.get("song"):
+            summary = f"song: {fields['song']}"
+            structured = True
+            topic = "song"
+        elif fields.get("vdi_time"):
+            summary = f"vdi_time: {fields['vdi_time']}"
+            structured = True
+            topic = "vdi"
+
+    if not summary:
+        for text in claim_texts:
+            compact = _compact_line(text, limit=220)
+            if compact:
+                summary = compact
+                break
+
+    if not bullets and structured:
+        if topic == "song" and fields.get("song"):
+            bullets.append(f"track: {fields['song']}")
+        elif topic == "quorum" and fields.get("quorum_collaborator"):
+            bullets.append(f"collaborator: {fields['quorum_collaborator']}")
+        elif topic == "vdi" and fields.get("vdi_time"):
+            bullets.append(f"clock_readout: {fields['vdi_time']}")
+
+    if not bullets and not structured:
+        compact_claims = [_compact_line(t, limit=140) for t in claim_texts if str(t or "").strip()]
+        for text in compact_claims[:3]:
+            if text and text != summary:
+                bullets.append(text)
+
+    return {
+        "schema_version": 1,
+        "summary": summary,
+        "bullets": bullets,
+        "fields": fields,
+    }
+
+
+def _apply_answer_display(query: str, result: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        return result
+    answer = result.get("answer", {})
+    if not isinstance(answer, dict):
+        return result
+    claim_texts = _claim_texts(result)
+    display = _build_answer_display(query, claim_texts)
+    answer_obj = dict(answer)
+    answer_obj["display"] = display
+    answer_obj["summary"] = str(display.get("summary") or "")
+    result_obj = dict(result)
+    result_obj["answer"] = answer_obj
+    return result_obj
+
+
 def _claim_texts(result: dict[str, Any]) -> list[str]:
     answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
     claims = answer.get("claims", []) if isinstance(answer.get("claims", []), list) else []
@@ -1586,6 +1763,7 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
                 "classic_score": classic_score,
             }
             merged["processing"] = processing
+            merged = _apply_answer_display(query, merged)
             _append_query_metric(system, query=query, method="classic_arbitrated", result=merged)
             return merged
 
@@ -1597,8 +1775,10 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
             "classic_score": classic_score,
         }
         result["processing"] = processing
+        result = _apply_answer_display(query, result)
         _append_query_metric(system, query=query, method="state_arbitrated", result=result)
         return result
     result = run_query_without_state(system, query, schedule_extract=bool(schedule_extract))
+    result = _apply_answer_display(query, result)
     _append_query_metric(system, query=query, method="classic", result=result)
     return result

@@ -14,7 +14,7 @@
     "id": "quorum_collaborator",
     "query": "who is working with me on the flagged quorum message",
     "expects_any": [
-      "quorum task collaborator"
+      "quorum_collaborator"
     ],
     "expects_all": [],
     "expect_exact": "Quorum task collaborator: Ricardo Lopez",
@@ -24,7 +24,7 @@
     "id": "vdi_time",
     "query": "what time is it on the vdi",
     "expects_any": [
-      "vdi time"
+      "vdi_time"
     ],
     "expects_all": [],
     "expect_exact": "VDI time: 11:35 AM",
@@ -34,7 +34,7 @@
     "id": "inboxes_count",
     "query": "how many inboxes do i have open",
     "expects_any": [
-      "open inboxes"
+      "inboxes:"
     ],
     "expects_all": [],
     "expect_exact": "Open inboxes: 4",
