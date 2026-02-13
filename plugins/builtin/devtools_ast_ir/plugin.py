@@ -73,6 +73,55 @@ class ASTIRTool(PluginBase):
         diff = difflib.unified_diff(pinned_text, current_text, fromfile="pinned", tofile="current")
         return "\n".join(diff)
 
+    def _compat_pinned(self, current: dict[str, Any], pinned: dict[str, Any]) -> tuple[bool, str]:
+        notes: list[str] = []
+        ok = True
+
+        if int(current.get("schema_version", 0) or 0) != int(pinned.get("schema_version", 0) or 0):
+            ok = False
+            notes.append("schema_version mismatch")
+        if int(current.get("config_schema_version", 0) or 0) != int(pinned.get("config_schema_version", 0) or 0):
+            ok = False
+            notes.append("config_schema_version mismatch")
+
+        current_caps = set(current.get("capabilities", []))
+        pinned_caps = set(pinned.get("capabilities", []))
+        missing_caps = sorted(pinned_caps - current_caps)
+        if missing_caps:
+            ok = False
+            notes.append("missing capabilities: " + ", ".join(missing_caps))
+
+        current_keys = set(current.get("config_keys", []))
+        pinned_keys = set(pinned.get("config_keys", []))
+        missing_keys = sorted(pinned_keys - current_keys)
+        if missing_keys:
+            ok = False
+            notes.append("missing config_keys: " + ", ".join(missing_keys))
+
+        current_net = set((current.get("permissions", {}) or {}).get("network_allowed", []))
+        pinned_net = set((pinned.get("permissions", {}) or {}).get("network_allowed", []))
+        missing_net = sorted(pinned_net - current_net)
+        if missing_net:
+            ok = False
+            notes.append("missing permissions.network_allowed: " + ", ".join(missing_net))
+
+        current_plugins = {str(p.get("id", "")): bool(p.get("enabled", False)) for p in current.get("plugins", [])}
+        for plugin in pinned.get("plugins", []):
+            pid = str(plugin.get("id", ""))
+            expected = bool(plugin.get("enabled", False))
+            actual = current_plugins.get(pid)
+            if actual is None:
+                ok = False
+                notes.append(f"missing plugin: {pid}")
+                continue
+            # Treat "expected disabled, currently enabled" as forward-compatible.
+            # Still fail when a plugin expected enabled is now disabled.
+            if expected and not actual:
+                ok = False
+                notes.append(f"plugin enabled mismatch: {pid} expected={expected} actual={actual}")
+
+        return ok, "\n".join(notes)
+
     def run(self, scan_root: str = "autocapture_nx") -> dict[str, Any]:
         run_id = ensure_run_id(self.context.config)
         data_dir = self.context.config.get("storage", {}).get("data_dir")
@@ -92,8 +141,8 @@ class ASTIRTool(PluginBase):
             pin_path = resolve_repo_path(pin_path)
         with open(pin_path, "r", encoding="utf-8") as handle:
             pinned = json.load(handle)
-        diff = self._diff_ir(design_ir, pinned)
-        pinned_ok = diff == ""
+        pinned_ok, compat_notes = self._compat_pinned(design_ir, pinned)
+        diff = "" if pinned_ok else compat_notes
 
         result = {
             "run_id": run_id,

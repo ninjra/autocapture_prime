@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -364,6 +365,45 @@ def _plugin_timing_summary(trace: dict[str, Any]) -> dict[str, Any]:
     return {"rows": rows, "unique_keys": len(rows), "events": len(events)}
 
 
+def _env_bool(name: str, *, default: bool = False) -> bool:
+    raw = str(os.environ.get(name, "") or "").strip().casefold()
+    if not raw:
+        return bool(default)
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _safe_component(value: str) -> str:
+    text = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip())
+    text = text.strip("._-")
+    return text[:96] if text else ""
+
+
+def _emit_log(log_json: bool, event: str, **fields: Any) -> None:
+    if bool(log_json):
+        payload: dict[str, Any] = {
+            "ts_utc": datetime.now(timezone.utc).isoformat(),
+            "event": str(event),
+        }
+        for key, value in fields.items():
+            payload[str(key)] = value
+        print(json.dumps(payload, sort_keys=True), flush=True)
+        return
+    if fields:
+        extras = " ".join(f"{k}={v}" for k, v in fields.items())
+        print(f"[fixture] {event} {extras}".rstrip())
+    else:
+        print(f"[fixture] {event}")
+    sys.stdout.flush()
+
+
+def _write_ready_file(path: str, payload: dict[str, Any]) -> None:
+    if not path:
+        return
+    ready_path = _resolve_path(path)
+    ready_path.parent.mkdir(parents=True, exist_ok=True)
+    ready_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     if not os.environ.get("AUTOCAPTURE_PYTHON_EXE"):
         os.environ["AUTOCAPTURE_PYTHON_EXE"] = sys.executable
@@ -372,7 +412,12 @@ def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("AUTOCAPTURE_PLUGINS_HOSTING_MODE", "inproc")
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", default="docs/test sample/fixture_manifest.json")
-    parser.add_argument("--output-dir", default="artifacts/fixture_runs")
+    parser.add_argument("--output-dir", "--out", dest="output_dir", default=os.environ.get("AP_OUT_DIR", "artifacts/fixture_runs"))
+    parser.add_argument("--run-id", default=os.environ.get("AP_RUN_ID", ""))
+    parser.add_argument("--data-root", default=os.environ.get("AP_DATA_ROOT", ""))
+    parser.add_argument("--no-network", action="store_true", default=_env_bool("AP_NO_NETWORK", default=False))
+    parser.add_argument("--ready-file", default=os.environ.get("AP_READY_FILE", ""))
+    parser.add_argument("--log-json", action="store_true", default=_env_bool("AP_LOG_JSON", default=False))
     parser.add_argument("--config-template", default="tools/fixture_config_template.json")
     parser.add_argument("--capture-timeout-s", type=float, default=10.0)
     parser.add_argument("--idle-timeout-s", type=float, default=60.0)
@@ -414,10 +459,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: no frames found in {frames_dir}")
         return 2
 
-    run_dir = _resolve_path(args.output_dir) / _utc_stamp()
+    run_id_override = str(args.run_id or "").strip()
+    run_token = _safe_component(run_id_override) if run_id_override else _utc_stamp()
+    run_dir = _resolve_path(args.output_dir) / run_token
     config_dir = run_dir / "config"
-    data_dir = run_dir / "data"
-    run_id = f"fixture_{run_dir.name}"
+    if str(args.data_root or "").strip():
+        data_dir = _resolve_path(str(args.data_root).strip()) / run_token
+    else:
+        data_dir = run_dir / "data"
+    run_id = run_id_override if run_id_override else f"fixture_{run_dir.name}"
 
     user_config = build_user_config(
         args.config_template,
@@ -442,8 +492,15 @@ def main(argv: list[str] | None = None) -> int:
         storage_cfg = user_config.setdefault("storage", {})
         if isinstance(storage_cfg, dict):
             storage_cfg["data_dir"] = str(data_dir)
+            if bool(args.no_network):
+                storage_cfg["network_disabled"] = True
         plugins_cfg = user_config.setdefault("plugins", {})
         if isinstance(plugins_cfg, dict):
+            if bool(args.no_network):
+                enabled_cfg = plugins_cfg.setdefault("enabled", {})
+                if isinstance(enabled_cfg, dict):
+                    enabled_cfg["builtin.egress.gateway"] = False
+                    enabled_cfg["builtin.privacy.egress_sanitizer"] = False
             settings_cfg = plugins_cfg.setdefault("settings", {})
             if isinstance(settings_cfg, dict):
                 jepa_cfg = settings_cfg.setdefault("builtin.state.jepa.training", {})
@@ -451,6 +508,15 @@ def main(argv: list[str] | None = None) -> int:
                     storage_cfg = jepa_cfg.setdefault("storage", {})
                     if isinstance(storage_cfg, dict):
                         storage_cfg["data_dir"] = str(data_dir)
+        if bool(args.no_network):
+            privacy_cfg = user_config.setdefault("privacy", {})
+            if isinstance(privacy_cfg, dict):
+                egress_cfg = privacy_cfg.setdefault("egress", {})
+                if isinstance(egress_cfg, dict):
+                    egress_cfg["enabled"] = False
+                cloud_cfg = privacy_cfg.setdefault("cloud", {})
+                if isinstance(cloud_cfg, dict):
+                    cloud_cfg["enabled"] = False
         user_config = _replace_placeholder(user_config, "{data_dir}", str(data_dir))
     if args.force_idle and isinstance(user_config, dict):
         runtime_cfg = user_config.setdefault("runtime", {})
@@ -519,14 +585,19 @@ def main(argv: list[str] | None = None) -> int:
         "frame_count": len(frame_files),
         "run_id": run_id,
         "config_hash": config_hash,
+        "no_network": bool(args.no_network),
+        "log_json": bool(args.log_json),
+        "ready_file": str(args.ready_file or ""),
         "started_utc": datetime.now(timezone.utc).isoformat(),
     }
 
     exit_code = 0
     kernel = None
     try:
-        print(f"[fixture] run_dir={run_dir}")
-        sys.stdout.flush()
+        if bool(args.no_network):
+            os.environ["AUTO_CAPTURE_ALLOW_NETWORK"] = "0"
+            os.environ["AUTOCAPTURE_NO_NETWORK"] = "1"
+        _emit_log(bool(args.log_json), "run.start", run_dir=str(run_dir), run_id=run_id)
         audit_fixture_event(
             "fixture.run.start",
             outcome="ok",
@@ -550,10 +621,22 @@ def main(argv: list[str] | None = None) -> int:
         system = kernel.boot(start_conductor=False, fast_boot=True)
         faulthandler.cancel_dump_traceback_later()
         report["boot_elapsed_s"] = round(time.monotonic() - t0, 3)
-        print(f"[fixture] boot_elapsed_s={report['boot_elapsed_s']}")
-        sys.stdout.flush()
+        _emit_log(bool(args.log_json), "boot.done", boot_elapsed_s=report["boot_elapsed_s"])
         report["ocr"] = _ocr_report(system)
         report["plugins"] = {"load_report": collect_plugin_load_report(system)}
+        if str(args.ready_file or "").strip():
+            _write_ready_file(
+                str(args.ready_file),
+                {
+                    "schema_version": 1,
+                    "status": "ready",
+                    "run_id": run_id,
+                    "run_dir": str(run_dir),
+                    "config_dir": str(config_dir),
+                    "data_dir": str(data_dir),
+                    "ts_utc": datetime.now(timezone.utc).isoformat(),
+                },
+            )
 
         capture = system.get("capture.source") if system and hasattr(system, "get") else None
         if capture is None or not hasattr(capture, "start"):
@@ -584,8 +667,12 @@ def main(argv: list[str] | None = None) -> int:
             exit_code = 3
         capture.stop()
         report["capture_elapsed_s"] = round(time.monotonic() - t_cap, 3)
-        print(f"[fixture] capture_elapsed_s={report['capture_elapsed_s']} evidence_count={len(evidence_ids)}")
-        sys.stdout.flush()
+        _emit_log(
+            bool(args.log_json),
+            "capture.done",
+            capture_elapsed_s=report["capture_elapsed_s"],
+            evidence_count=len(evidence_ids),
+        )
         evidence_sample = None
         if evidence_ids and hasattr(metadata, "get"):
             try:
@@ -617,10 +704,13 @@ def main(argv: list[str] | None = None) -> int:
             faulthandler.cancel_dump_traceback_later()
             report["idle_elapsed_s"] = round(time.monotonic() - t_idle, 3)
             report["idle"] = idle_result
-            print(
-                f"[fixture] idle_elapsed_s={report['idle_elapsed_s']} done={idle_result.get('done')} blocked={bool(idle_result.get('blocked'))}"
+            _emit_log(
+                bool(args.log_json),
+                "idle.done",
+                idle_elapsed_s=report["idle_elapsed_s"],
+                done=bool(idle_result.get("done")),
+                blocked=bool(idle_result.get("blocked")),
             )
-            sys.stdout.flush()
             if not idle_result.get("done") and idle_result.get("blocked"):
                 exit_code = 4
 
@@ -642,10 +732,13 @@ def main(argv: list[str] | None = None) -> int:
                 if failures:
                     exit_code = 5
             report["queries_elapsed_s"] = round(time.monotonic() - t_queries, 3)
-            print(
-                f"[fixture] queries_elapsed_s={report['queries_elapsed_s']} count={report['queries']['count']} failures={report['queries']['failures']}"
+            _emit_log(
+                bool(args.log_json),
+                "queries.done",
+                queries_elapsed_s=report["queries_elapsed_s"],
+                count=report["queries"]["count"],
+                failures=report["queries"]["failures"],
             )
-            sys.stdout.flush()
         t_probe = time.monotonic()
         report["plugin_probe"] = probe_plugins(
             system,
@@ -653,14 +746,12 @@ def main(argv: list[str] | None = None) -> int:
             sample_record_id=(evidence_ids[0] if evidence_ids else None),
         )
         report["probe_elapsed_s"] = round(time.monotonic() - t_probe, 3)
-        print(f"[fixture] probe_elapsed_s={report['probe_elapsed_s']}")
-        sys.stdout.flush()
+        _emit_log(bool(args.log_json), "probe.done", probe_elapsed_s=report["probe_elapsed_s"])
         t_trace = time.monotonic()
         report["plugin_trace"] = collect_plugin_trace(system)
         report["trace_elapsed_s"] = round(time.monotonic() - t_trace, 3)
         report["plugin_timing"] = _plugin_timing_summary(report["plugin_trace"] if isinstance(report.get("plugin_trace"), dict) else {})
-        print(f"[fixture] trace_elapsed_s={report['trace_elapsed_s']}")
-        sys.stdout.flush()
+        _emit_log(bool(args.log_json), "trace.done", trace_elapsed_s=report["trace_elapsed_s"])
         plugin_status, skipped_without_reason = _build_plugin_status(
             manifests=manifests,
             load_report=report["plugins"]["load_report"],
@@ -683,8 +774,7 @@ def main(argv: list[str] | None = None) -> int:
             output_path = run_dir / "fixture_report.json"
             output_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
             report["report_path"] = str(output_path)
-            print(f"[fixture] report_path={output_path}")
-            sys.stdout.flush()
+            _emit_log(bool(args.log_json), "report.written", report_path=str(output_path))
         except Exception:
             pass
         if kernel is not None:
@@ -711,6 +801,19 @@ def main(argv: list[str] | None = None) -> int:
             "run_dir": str(run_dir),
         },
     )
+    if str(args.ready_file or "").strip():
+        _write_ready_file(
+            str(args.ready_file),
+            {
+                "schema_version": 1,
+                "status": "ok" if exit_code == 0 else "error",
+                "run_id": run_id,
+                "run_dir": str(run_dir),
+                "exit_code": int(exit_code),
+                "report_path": str(report.get("report_path") or ""),
+                "ts_utc": datetime.now(timezone.utc).isoformat(),
+            },
+        )
 
     if report.get("plugin_status"):
         print("PLUGIN STATUS:")
@@ -726,8 +829,10 @@ def main(argv: list[str] | None = None) -> int:
             print(msg)
 
     if exit_code == 0:
+        _emit_log(bool(args.log_json), "run.finish", outcome="ok", exit_code=0)
         print("OK: fixture pipeline")
     else:
+        _emit_log(bool(args.log_json), "run.finish", outcome="error", exit_code=int(exit_code))
         print(f"FAIL: fixture pipeline (code {exit_code})")
     return exit_code
 

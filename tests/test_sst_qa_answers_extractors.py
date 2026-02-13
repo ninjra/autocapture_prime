@@ -29,6 +29,29 @@ class SSTQAAnswersExtractorsTests(unittest.TestCase):
         # Two distinct top-bar inbox tabs should count as two open inboxes.
         self.assertEqual(qa._count_inboxes(tokens), 2)
 
+    def test_collect_inbox_signals_combines_token_and_line_contexts(self) -> None:
+        from plugins.builtin.sst_qa_answers import plugin as qa
+
+        tokens = [
+            {"text": "Inbox", "bbox": [1600, 320, 1900, 340]},
+            {"text": "Inbox", "bbox": [2200, 610, 2450, 630]},
+        ]
+        text_lines = [
+            {"text": "SiriusXM | Inbox | browser tabs", "bbox": [0, 320, 7600, 335]},
+            {"text": "Remote desktop | M Inbox | web client", "bbox": [0, 610, 7600, 625]},
+            {"text": "File New Home ChatGPT Email Send/Receive", "bbox": [0, 640, 7600, 655]},
+            {"text": "Received 7:41 AM Contractor Agency Email", "bbox": [0, 1330, 7600, 1345]},
+        ]
+
+        signals = qa._collect_inbox_signals(tokens, text_lines=text_lines)
+        self.assertEqual(int(signals.get("token_count", 0)), 2)
+        self.assertEqual(int(signals.get("line_count", 0)), 4)
+        self.assertEqual(int(signals.get("mail_context_count", 0)), 2)
+        self.assertEqual(int(signals.get("count", 0)), 4)
+        self.assertGreaterEqual(len(signals.get("token_hits", [])), 2)
+        self.assertGreaterEqual(len(signals.get("line_hits", [])), 4)
+        self.assertGreaterEqual(len(signals.get("mail_context_hits", [])), 2)
+
     def test_extract_quorum_collaborator_prefers_assignee_token(self) -> None:
         from plugins.builtin.sst_qa_answers import plugin as qa
 

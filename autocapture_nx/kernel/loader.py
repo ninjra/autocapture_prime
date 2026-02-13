@@ -7,6 +7,7 @@ import hashlib
 import math
 import os
 import atexit
+import errno
 import platform
 import getpass
 import time
@@ -19,7 +20,7 @@ from typing import Any, cast
 
 from autocapture_nx.kernel.config import ConfigPaths, load_config, validate_config
 from autocapture_nx.kernel.paths import default_config_dir, resolve_repo_path
-from autocapture_nx.kernel.errors import ConfigError
+from autocapture_nx.kernel.errors import ConfigError, PluginError
 from autocapture_nx.kernel.hashing import sha256_directory, sha256_file, sha256_text
 from autocapture_nx.kernel.canonical_json import dumps
 from autocapture_nx import __version__ as kernel_version
@@ -36,7 +37,7 @@ from autocapture_nx.kernel.policy_snapshot import persist_policy_snapshot
 from autocapture_nx.kernel.run_manifest import determinism_inputs
 from autocapture_nx.kernel.schema_registry import SchemaRegistry
 from autocapture_nx.plugin_system.registry import PluginRegistry
-from autocapture_nx.plugin_system.runtime import global_network_deny, set_global_network_deny
+from autocapture_nx.plugin_system.runtime import FilesystemPolicy, global_network_deny, set_global_network_deny
 from autocapture_nx.plugin_system.host import close_all_subprocess_hosts
 
 from .system import System
@@ -193,8 +194,15 @@ class Kernel:
         out_path = data_dir / "config.effective.json"
         payload = _canonicalize_config_for_hash(effective.data)
         text = json.dumps(payload, sort_keys=True, indent=2)
-        self._archive_if_different(out_path, text, ts_utc=str(ts_utc))
-        atomic_write_text(out_path, text, fsync=True)
+        try:
+            self._archive_if_different(out_path, text, ts_utc=str(ts_utc))
+            atomic_write_text(out_path, text, fsync=True)
+        except PermissionError:
+            return {}
+        except OSError as exc:
+            if exc.errno in (errno.EACCES, errno.EROFS, errno.EPERM):
+                return {}
+            raise
         return {"path": str(out_path), "sha256": effective.effective_hash}
 
     def _persist_policy_snapshot(self, *, ts_utc: str, metadata: Any | None = None) -> dict[str, Any]:
@@ -214,6 +222,22 @@ class Kernel:
             "record_id": result.record_id,
             "path": result.path,
         }
+
+    def _egress_approval_store_path(self) -> Path:
+        storage_cfg = self.config.get("storage", {}) if isinstance(self.config, dict) else {}
+        data_dir = str(storage_cfg.get("data_dir", "data"))
+        privacy_cfg = self.config.get("privacy", {}) if isinstance(self.config, dict) else {}
+        egress_cfg = privacy_cfg.get("egress", {}) if isinstance(privacy_cfg, dict) else {}
+        explicit = str(egress_cfg.get("approval_store_path") or "").strip()
+        if explicit:
+            return Path(explicit)
+        return Path(data_dir) / "egress" / "approvals.json"
+
+    def _egress_approval_store_policy(self) -> FilesystemPolicy:
+        approval_dir = self._egress_approval_store_path().parent
+        if str(approval_dir).strip() == "":
+            approval_dir = Path(".")
+        return FilesystemPolicy.from_paths(read=[approval_dir], readwrite=[approval_dir])
 
     def _atexit_shutdown(self) -> None:
         # Best-effort cleanup for callers that forget to call Kernel.shutdown().
@@ -291,6 +315,33 @@ class Kernel:
             plugins, capabilities = registry.load_plugins()
             profiler.mark("load_plugins_meta")
 
+        # Fail closed with actionable context if core capabilities are missing.
+        required_caps = ("journal.writer", "ledger.writer", "anchor.writer")
+        caps_all = capabilities.all()
+        missing = [cap for cap in required_caps if cap not in caps_all]
+        if missing:
+            report = None
+            try:
+                report = registry.load_report()
+            except Exception:
+                report = None
+            failed = []
+            if isinstance(report, dict):
+                for item in (report.get("failed") or [])[:8]:
+                    if not isinstance(item, dict):
+                        continue
+                    failed.append(
+                        {
+                            "plugin_id": item.get("plugin_id"),
+                            "phase": item.get("phase"),
+                            "error": item.get("error"),
+                        }
+                    )
+            detail = ""
+            if failed:
+                detail = f" plugin_load_failures={failed!r}"
+            raise PluginError(f"Missing capability: {', '.join(missing)}.{detail}")
+
         builder = EventBuilder(
             self.config,
             capabilities.get("journal.writer"),
@@ -324,7 +375,12 @@ class Kernel:
             from autocapture_nx.kernel.egress_approvals import EgressApprovalStore
 
             approval_store = EgressApprovalStore(self.config, builder)
-            capabilities.register("egress.approval_store", approval_store, network_allowed=False)
+            capabilities.register(
+                "egress.approval_store",
+                approval_store,
+                network_allowed=False,
+                filesystem_policy=self._egress_approval_store_policy(),
+            )
         except Exception:
             pass
         profiler.mark("egress_store")
@@ -375,7 +431,12 @@ class Kernel:
             capabilities.register("event.builder", builder, network_allowed=False)
         if self.system.has("egress.approval_store"):
             store = self.system.get("egress.approval_store")
-            capabilities.register("egress.approval_store", store, network_allowed=False)
+            capabilities.register(
+                "egress.approval_store",
+                store,
+                network_allowed=False,
+                filesystem_policy=self._egress_approval_store_policy(),
+            )
         if self.system.has("runtime.conductor"):
             conductor = self.system.get("runtime.conductor")
             capabilities.register("runtime.conductor", conductor, network_allowed=False)
@@ -634,13 +695,21 @@ class Kernel:
         return {"events": cleaned, "safe_mode_until": safe_mode_until, "last_clean_utc": last_clean}
 
     def _write_crash_history(self, path: Path, history: dict[str, Any]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "events": list(history.get("events", [])),
-            "safe_mode_until": history.get("safe_mode_until"),
-            "last_clean_utc": history.get("last_clean_utc"),
-        }
-        atomic_write_json(path, payload, sort_keys=True, indent=None)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "events": list(history.get("events", [])),
+                "safe_mode_until": history.get("safe_mode_until"),
+                "last_clean_utc": history.get("last_clean_utc"),
+            }
+            atomic_write_json(path, payload, sort_keys=True, indent=None)
+        except PermissionError:
+            # Sidecar dataroots may be readable but deny temp-file writes.
+            return
+        except OSError as exc:
+            if exc.errno in (errno.EACCES, errno.EROFS, errno.EPERM):
+                return
+            raise
 
     def _crash_loop_policy(self, config: dict[str, Any]) -> dict[str, Any]:
         kernel_cfg = config.get("kernel", {}) if isinstance(config, dict) else {}
@@ -739,7 +808,13 @@ class Kernel:
 
         status.safe_mode_until = history.get("safe_mode_until")
         if write_history:
-            self._write_crash_history(history_path, history)
+            try:
+                self._write_crash_history(history_path, history)
+            except PermissionError:
+                pass
+            except OSError as exc:
+                if exc.errno not in (errno.EACCES, errno.EROFS, errno.EPERM):
+                    raise
         return status
 
     def crash_loop_status(self) -> dict[str, Any] | None:
@@ -774,7 +849,15 @@ class Kernel:
             safe_mode=safe_mode,
             safe_mode_reason=safe_mode_reason,
         )
-        write_run_state(path, payload)
+        try:
+            write_run_state(path, payload)
+        except PermissionError:
+            # Queries must still run when state files are not writable.
+            return
+        except OSError as exc:
+            if exc.errno in (errno.EACCES, errno.EROFS, errno.EPERM):
+                return
+            raise
 
     def _parse_ts(self, ts: str | None) -> datetime | None:
         if not ts:
@@ -1974,27 +2057,56 @@ class Kernel:
                         detail=str(exc),
                     )
                 )
-        allowed_network = set(
-            config.get("plugins", {})
-            .get("permissions", {})
-            .get("network_allowed_plugin_ids", [])
+        perms_cfg = (
+            config.get("plugins", {}).get("permissions", {})
+            if isinstance(config.get("plugins", {}).get("permissions", {}), dict)
+            else {}
         )
-        if allowed_network != {"builtin.egress.gateway"}:
+        allowed_internet = set(perms_cfg.get("network_allowed_plugin_ids", []) or [])
+        allowed_localhost = set(perms_cfg.get("localhost_allowed_plugin_ids", []) or [])
+        # Internet access remains tightly scoped: only the egress gateway can
+        # reach non-loopback destinations (localhost-only network is separately
+        # allowlisted and still guarded at runtime).
+        if allowed_internet != {"builtin.egress.gateway"}:
             checks.append(
                 DoctorCheck(
-                    name="network_allowlist",
+                    name="network_allowlist_internet",
                     ok=False,
-                    detail="network allowlist must contain only builtin.egress.gateway",
+                    detail="plugins.permissions.network_allowed_plugin_ids must contain only builtin.egress.gateway",
                 )
             )
         else:
             checks.append(
                 DoctorCheck(
-                    name="network_allowlist",
+                    name="network_allowlist_internet",
                     ok=True,
                     detail="ok",
                 )
             )
+        checks.append(
+            DoctorCheck(
+                name="network_allowlist_localhost",
+                ok=True,
+                detail=f"count={len(allowed_localhost)}",
+            )
+        )
+        # Capture plugins are deprecated in this repo: sidecar is responsible for
+        # capture/ingest. Keep processing-only pipeline fail-closed.
+        enabled_map = config.get("plugins", {}).get("enabled", {}) if isinstance(config.get("plugins", {}).get("enabled", {}), dict) else {}
+        deprecated_capture = [
+            "builtin.capture.audio.windows",
+            "builtin.capture.screenshot.windows",
+            "builtin.capture.basic",
+            "builtin.capture.windows",
+        ]
+        enabled_deprecated = [pid for pid in deprecated_capture if bool(enabled_map.get(pid, False))]
+        checks.append(
+            DoctorCheck(
+                name="capture_plugins_deprecated",
+                ok=not enabled_deprecated,
+                detail=("enabled=" + ",".join(enabled_deprecated)) if enabled_deprecated else "ok",
+            )
+        )
         return checks
 
 

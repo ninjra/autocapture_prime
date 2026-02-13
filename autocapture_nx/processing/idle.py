@@ -26,8 +26,12 @@ from autocapture_nx.kernel.derived_records import (
 from autocapture_nx.kernel.frame_evidence import ensure_frame_evidence
 from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.ids import encode_record_id_component
+from autocapture_nx.kernel.model_output_records import (
+    build_model_output_record,
+    model_output_record_id,
+)
 from autocapture_nx.kernel.providers import capability_providers
-from autocapture_nx.processing.qa.fixture_answers import extract_fixture_answers
+from autocapture_nx.storage.facts_ndjson import append_fact_line
 
 
 @dataclass
@@ -91,6 +95,34 @@ def _derive_run_id(config: dict[str, Any], record_id: str) -> str:
     if "/" in record_id:
         return record_id.split("/", 1)[0]
     return str(config.get("runtime", {}).get("run_id", "run"))
+
+
+def _legacy_derived_text_record_id(*, kind: str, run_id: str, provider_id: str, source_id: str) -> str:
+    """Compatibility record id (pre-PERF-03) without model digest component."""
+
+    provider_component = encode_record_id_component(provider_id)
+    encoded_source = encode_record_id_component(source_id)
+    return f"{run_id}/derived.text.{kind}/{provider_component}/{encoded_source}"
+
+
+def _missing_derived_text(
+    metadata: Any,
+    *,
+    kind: str,
+    run_id: str,
+    provider_id: str,
+    source_id: str,
+    config: dict[str, Any],
+) -> tuple[bool, str]:
+    """Return (missing, derived_id_to_use). Treat legacy ids as a hit."""
+
+    derived_id = derived_text_record_id(kind=kind, run_id=run_id, provider_id=provider_id, source_id=source_id, config=config)
+    if not _is_missing_metadata_record(metadata.get(derived_id)):
+        return False, derived_id
+    legacy_id = _legacy_derived_text_record_id(kind=kind, run_id=run_id, provider_id=provider_id, source_id=source_id)
+    if not _is_missing_metadata_record(metadata.get(legacy_id)):
+        return False, derived_id
+    return True, derived_id
 
 
 def _ffmpeg_path(config: dict[str, Any]) -> str | None:
@@ -191,6 +223,14 @@ def _decode_first_frame_ffmpeg(blob: bytes, *, ffmpeg_path: str) -> bytes | None
 def _extract_frame(blob: bytes, record: dict[str, Any], *, config: dict[str, Any] | None = None) -> bytes | None:
     container = record.get("container", {})
     container_type = container.get("type")
+    # Mode B / sidecar contract commonly stores frames as raw PNG/JPEG bytes in
+    # the media blob store, with no container metadata. Treat those as already
+    # decoded frames.
+    if not container_type:
+        if blob.startswith(b"\x89PNG\r\n\x1a\n"):
+            return blob
+        if blob.startswith(b"\xff\xd8\xff"):
+            return blob
     if container_type == "avi_mjpeg":
         try:
             from autocapture_nx.capture.avi import AviMjpegReader
@@ -477,76 +517,6 @@ class IdleProcessor:
                 if self._logger is not None:
                     self._logger.log("index.vector_error", {"doc_id": doc_id, "error": str(exc)})
 
-    def _store_fixture_answer_doc(
-        self,
-        *,
-        item: _IdleWorkItem,
-        base_text: str,
-        provider_id: str,
-    ) -> None:
-        """Emit deterministic QA "answer doc" lines from extracted text.
-
-        This improves query reliability for common operator questions without
-        requiring query-time media reprocessing.
-        """
-        if self._metadata is None:
-            return
-        answers = extract_fixture_answers(base_text)
-        lines = answers.as_lines()
-        if not lines:
-            return
-        doc_text = "\n".join(lines).strip()
-        if not doc_text:
-            return
-        record_id = f"{item.run_id}/derived.text.qa/{encode_record_id_component(provider_id)}/{item.encoded_source}"
-        if self._metadata.get(record_id) is not None:
-            return
-        payload = build_text_record(
-            kind="qa",
-            text=doc_text,
-            source_id=item.record_id,
-            source_record=item.record,
-            provider_id=str(provider_id),
-            config=self._config,
-            ts_utc=item.ts_utc,
-        )
-        if not payload:
-            return
-        try:
-            if hasattr(self._metadata, "put_new"):
-                self._metadata.put_new(record_id, payload)
-            else:
-                self._metadata.put(record_id, payload)
-        except Exception:
-            return
-        # META-07: record artifact manifest for deterministic QA doc.
-        try:
-            run_id = str(payload.get("run_id") or item.run_id)
-            manifest_id = artifact_manifest_id(run_id, record_id)
-            artifact_hash = str(payload.get("payload_hash") or payload.get("content_hash") or "")
-            derived_from = {
-                "evidence_id": item.record_id,
-                "evidence_hash": item.record.get("content_hash"),
-                "model_digest": payload.get("model_digest"),
-            }
-            manifest = build_artifact_manifest(
-                run_id=run_id,
-                artifact_id=record_id,
-                artifact_sha256=artifact_hash,
-                derived_from=derived_from,
-                ts_utc=payload.get("ts_utc"),
-            )
-            if hasattr(self._metadata, "put_new"):
-                try:
-                    self._metadata.put_new(manifest_id, manifest)
-                except Exception:
-                    pass
-            else:
-                self._metadata.put(manifest_id, manifest)
-        except Exception:
-            pass
-        self._index_text(record_id, doc_text)
-
     def _run_provider_batch(
         self,
         extractor: Any,
@@ -756,25 +726,27 @@ class IdleProcessor:
             missing_count = 0
             if allow_ocr:
                 for provider_id, _extractor in ocr_providers:
-                    derived_id = derived_text_record_id(
+                    missing, _derived_id = _missing_derived_text(
+                        metadata,
                         kind="ocr",
                         run_id=_derive_run_id(self._config, record_id),
                         provider_id=str(provider_id),
                         source_id=record_id,
                         config=self._config,
                     )
-                    if _is_missing_metadata_record(metadata.get(derived_id)):
+                    if missing:
                         missing_count += 1
             if allow_vlm:
                 for provider_id, _extractor in vlm_providers:
-                    derived_id = derived_text_record_id(
+                    missing, _derived_id = _missing_derived_text(
+                        metadata,
                         kind="vlm",
                         run_id=_derive_run_id(self._config, record_id),
                         provider_id=str(provider_id),
                         source_id=record_id,
                         config=self._config,
                     )
-                    if _is_missing_metadata_record(metadata.get(derived_id)):
+                    if missing:
                         missing_count += 1
             needs_pipeline = False
             if pipeline_enabled:
@@ -833,10 +805,16 @@ class IdleProcessor:
             if expired():
                 break
             tasks: list[tuple[_IdleWorkItem, str]] = []
-            provider_component = encode_record_id_component(provider_id)
             for item in items:
-                derived_id = f"{item.run_id}/derived.text.{kind}/{provider_component}/{item.encoded_source}"
-                if _is_missing_metadata_record(self._metadata.get(derived_id)):
+                missing, derived_id = _missing_derived_text(
+                    self._metadata,
+                    kind=kind,
+                    run_id=item.run_id,
+                    provider_id=str(provider_id),
+                    source_id=item.record_id,
+                    config=self._config,
+                )
+                if missing:
                     tasks.append((item, derived_id))
             if not tasks:
                 continue
@@ -863,6 +841,19 @@ class IdleProcessor:
                         continue
                     texts = _response_texts(response)
                     if not texts:
+                        if kind == "vlm" and self._logger is not None and isinstance(response, dict):
+                            try:
+                                self._logger.log(
+                                    "idle.vlm_empty_response",
+                                    {
+                                        "provider_id": str(provider_id),
+                                        "source_id": item.record_id,
+                                        "backend": str(response.get("backend") or ""),
+                                        "model_error": str(response.get("model_error") or ""),
+                                    },
+                                )
+                            except Exception:
+                                pass
                         continue
                     text = "\n\n".join(texts)
                     payload = build_text_record(
@@ -886,15 +877,36 @@ class IdleProcessor:
                     )
                     if stored:
                         processed += 1
-                        # After storing OCR text for an item, also emit deterministic
-                        # fixture answer docs derived from that extracted text.
-                        if kind == "ocr":
-                            try:
-                                base_text = str(payload.get("text") or "")
-                                if base_text:
-                                    self._store_fixture_answer_doc(item=item, base_text=base_text, provider_id="qa.fixture")
-                            except Exception:
-                                pass
+                        # Canonical per-model output record + append-only facts sink.
+                        try:
+                            out_payload = build_model_output_record(
+                                modality=kind,
+                                provider_id=str(provider_id),
+                                response=response,
+                                extracted_text=str(payload.get("text") or ""),
+                                source_id=item.record_id,
+                                source_record=item.record,
+                                config=self._config,
+                                ts_utc=item.ts_utc,
+                            )
+                            out_id = model_output_record_id(
+                                modality=kind,
+                                run_id=item.run_id,
+                                provider_id=str(provider_id),
+                                source_id=item.record_id,
+                                model_digest=str(out_payload.get("model_digest") or payload.get("model_digest") or ""),
+                            )
+                            if _is_missing_metadata_record(self._metadata.get(out_id)):
+                                if hasattr(self._metadata, "put_new"):
+                                    try:
+                                        self._metadata.put_new(out_id, out_payload)
+                                    except Exception:
+                                        pass
+                                else:
+                                    self._metadata.put(out_id, out_payload)
+                            _ = append_fact_line(self._config, rel_path="model_outputs.ndjson", payload=out_payload)
+                        except Exception:
+                            pass
         return processed
 
     def process(self, *, should_abort: Callable[[], bool] | None = None) -> IdleProcessStats:

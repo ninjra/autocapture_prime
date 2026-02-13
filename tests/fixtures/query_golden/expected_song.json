@@ -7,27 +7,29 @@
             "anchor_ref": "anchor:test",
             "derived_hash": null,
             "derived_id": null,
-            "evidence_hash": "hash_song",
-            "evidence_id": "run_test/derived.text.ocr/test_provider/song",
+            "evidence_hash": "hash_song_obs",
+            "evidence_id": "run_test/derived.text.obs/test_provider/song",
             "ledger_head": "ledger:test",
             "locator": {
               "kind": "text_offsets",
-              "offset_end": 46,
+              "offset_end": 108,
               "offset_start": 0,
-              "record_hash": "",
-              "record_id": "run_test/derived.text.ocr/test_provider/song",
-              "span_sha256": "9145810499b8c71c12f3fce9834911369a9d13ce5db767d8f179a6e8b75ea2d7"
+              "record_hash": "hash_song_obs",
+              "record_id": "run_test/derived.text.obs/test_provider/song",
+              "span_sha256": "067ac92b3bab180d4f1fa34c7fd77b43c4e3e97aaee02b60b8ab870d245cf792"
             },
-            "offset_end": 46,
+            "offset_end": 108,
             "offset_start": 0,
             "schema_version": 1,
             "source": "local",
-            "span_id": "run_test/derived.text.ocr/test_provider/song",
+            "span_id": "run_test/derived.text.obs/test_provider/song",
             "span_kind": "text",
-            "span_ref": null
+            "span_ref": null,
+            "stale": false,
+            "stale_reason": null
           }
         ],
-        "text": "Now playing: Jennifer Doherty - Sunlight"
+        "text": "Observation: current_song=Now playing: Jennifer Doherty - Sunlight. Now playing: Jennifer Doherty - Sunlight"
       }
     ],
     "errors": [],
@@ -37,21 +39,29 @@
     "state": "ok"
   },
   "custom_claims": {
-    "count": 1,
+    "count": 0,
     "debug": {
-      "song_found_count": 1,
-      "song_hint_count": 1
+      "mode": "persisted_only",
+      "screen_pipeline": {
+        "attempted": 0,
+        "claims_built": 0,
+        "enabled": false,
+        "provider_ids": {},
+        "reason": "capability_missing"
+      }
     },
     "error": null
   },
   "evaluation": {
     "blocked_extract": true,
     "blocked_reason": "disabled",
-    "candidate_count": 0,
-    "coverage_ratio": 0.0,
+    "candidate_count": 1,
+    "coverage_ratio": 1.0,
     "freshness_newest_ts_utc": null,
     "missing_spans_count": 0,
-    "result_count": 0,
+    "result_count": 1,
+    "scheduled_extract_job_id": null,
+    "schema_error": "$: Additional properties are not allowed ('scheduled_extract_job_id' was unexpected)",
     "schema_version": 1
   },
   "intent": {
@@ -63,24 +73,43 @@
       "allowed": false,
       "blocked": true,
       "blocked_reason": "disabled",
-      "candidate_count": 0,
+      "candidate_count": 1,
       "extracted_count": 0,
       "idle_seconds": null,
       "idle_window_s": null,
       "ran": false,
-      "require_idle": true
+      "require_idle": true,
+      "scheduled_job_id": null
+    },
+    "policy": {
+      "filtered_claim_count": 1,
+      "raw_claim_count": 1,
+      "source_guard_applied": true,
+      "source_rejections": [],
+      "source_rejections_count": 0
     }
   },
   "provenance": {
     "anchor_ref": "anchor:test",
-    "contracts_lock_sha256": "b622d0456b87d5174a259d51980cf017e90995066b3edf9168d3abae4074515a",
+    "contracts_lock_sha256": "<hash>",
     "data_dir": null,
-    "effective_config_sha256": "507b87323850ec2c16548d8afe8a51785843904c6b2bc83a6e02e25107cfa29b",
+    "effective_config_sha256": "<hash>",
     "generated_at_utc": "<ts>",
-    "plugin_locks_sha256": "f0c9abb2de30442b6b8e3a11b97a81efaedbe0d0814c98175318ce7c844221c4",
+    "plugin_locks_sha256": "<hash>",
     "query_ledger_head": "ledger:test",
     "run_id": null,
     "schema_version": 1
   },
-  "results": []
+  "results": [
+    {
+      "derived_id": null,
+      "record_id": "run_test/derived.text.obs/test_provider/song"
+    }
+  ],
+  "scheduled_extract_job_id": null,
+  "synth_claims": {
+    "count": 0,
+    "debug": {},
+    "error": null
+  }
 }

@@ -51,7 +51,7 @@ class EnvSanitizationTests(unittest.TestCase):
         # mode we intentionally avoid spawning subprocess plugin hosts.
         if os.getenv("AUTOCAPTURE_PLUGINS_HOSTING_MODE", "").strip().lower() == "inproc":
             self.skipTest("subprocess hosting disabled in this environment")
-        with tempfile.TemporaryDirectory(dir=".") as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             plugin_id = "test.env.sanitize"
             _write_env_plugin(root, plugin_id)

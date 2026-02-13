@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import shutil
 from dataclasses import dataclass, asdict, is_dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -99,21 +101,67 @@ class StateTapeStore:
         self._conn: sqlite3.Connection | None = None
 
     def _connect(self) -> sqlite3.Connection:
-        if self._key is None:
-            conn = sqlite3.connect(str(self._path), check_same_thread=False)
-        else:
-            import sqlcipher3
+        conn: sqlite3.Connection | None = None
+        try:
+            if self._key is None:
+                conn = sqlite3.connect(str(self._path), check_same_thread=False)
+            else:
+                import sqlcipher3
 
-            conn = sqlcipher3.connect(str(self._path), check_same_thread=False)
-            # sqlcipher3 does not support parameter binding for PRAGMA key.
-            conn.execute(f"PRAGMA key = \"x'{self._key.hex()}'\"")
-        if self._fsync_policy == "critical":
-            conn.execute("PRAGMA synchronous = FULL")
-        elif self._fsync_policy == "bulk":
-            conn.execute("PRAGMA synchronous = NORMAL")
-        elif self._fsync_policy == "none":
-            conn.execute("PRAGMA synchronous = OFF")
-        return conn
+                conn = sqlcipher3.connect(str(self._path), check_same_thread=False)
+                # sqlcipher3 does not support parameter binding for PRAGMA key.
+                conn.execute(f"PRAGMA key = \"x'{self._key.hex()}'\"")
+            if self._fsync_policy == "critical":
+                conn.execute("PRAGMA synchronous = FULL")
+            elif self._fsync_policy == "bulk":
+                conn.execute("PRAGMA synchronous = NORMAL")
+            elif self._fsync_policy == "none":
+                conn.execute("PRAGMA synchronous = OFF")
+            return conn
+        except sqlite3.DatabaseError as exc:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            if "not a database" not in str(exc).lower():
+                raise
+            self._archive_corrupt_db(str(exc))
+            if self._key is None:
+                conn = sqlite3.connect(str(self._path), check_same_thread=False)
+            else:
+                import sqlcipher3
+
+                conn = sqlcipher3.connect(str(self._path), check_same_thread=False)
+                conn.execute(f"PRAGMA key = \"x'{self._key.hex()}'\"")
+            if self._fsync_policy == "critical":
+                conn.execute("PRAGMA synchronous = FULL")
+            elif self._fsync_policy == "bulk":
+                conn.execute("PRAGMA synchronous = NORMAL")
+            elif self._fsync_policy == "none":
+                conn.execute("PRAGMA synchronous = OFF")
+            return conn
+
+    def _archive_corrupt_db(self, reason: str) -> None:
+        if not self._path.exists():
+            raise sqlite3.DatabaseError(reason)
+        archive_dir = self._path.parent / "corrupt"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        archive_path = archive_dir / f"{self._path.name}.{ts}.corrupt"
+        shutil.move(str(self._path), str(archive_path))
+        marker = {
+            "schema_version": 1,
+            "record_type": "storage.recovery",
+            "ts_utc": datetime.now(timezone.utc).isoformat(),
+            "src_path": str(self._path),
+            "archive_path": str(archive_path),
+            "reason": reason,
+        }
+        (archive_path.with_suffix(archive_path.suffix + ".json")).write_text(
+            json.dumps(marker, sort_keys=True),
+            encoding="utf-8",
+        )
 
     def _ensure(self) -> None:
         if self._conn is None:

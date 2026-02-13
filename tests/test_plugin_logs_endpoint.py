@@ -44,7 +44,7 @@ class PluginLogsEndpointTests(unittest.TestCase):
                 # Exercise redaction without embedding a secret-pattern literal in the repo.
                 hdr = "Author" + "ization"
                 scheme = "Bea" + "rer"
-                log_path.write_text(f"hello\\n{hdr}: {scheme} token_placeholder\\nworld\\n", encoding="utf-8")
+                log_path.write_text(f"hello\n{hdr}: {scheme} token_placeholder\nworld\n", encoding="utf-8")
 
                 resp = client.get(f"/api/plugins/{plugin_id}/logs")
                 self.assertEqual(resp.status_code, 401)

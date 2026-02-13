@@ -11,6 +11,7 @@ from typing import Any
 
 from autocapture_nx.capture.screenshot import ScreenshotDeduper, encode_png
 from autocapture_nx.capture.overflow_spool import OverflowSpool, OverflowSpoolConfig
+from autocapture_nx.capture.spool_queue import enqueue_or_spool
 from autocapture_nx.capture.screenshot_policy import schedule_from_config
 from autocapture_nx.kernel.hashing import sha256_canonical
 from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
@@ -27,9 +28,8 @@ class ScreenshotCaptureWindows(PluginBase):
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._worker: threading.Thread | None = None
-        # Keep the queue small and block instead of dropping under backpressure.
-        # If storage is slower than capture, we prefer slowing capture (no-loss)
-        # over silently dropping evidence.
+        # Keep the queue small to cap memory, and prefer spooling to disk over
+        # dropping when storage is slower than capture (no-loss policy).
         self._store_queue: "queue.Queue[dict[str, Any] | None]" = queue.Queue(maxsize=2)
         self._seq = 0
         self._cursor_shape: CursorShape | None = None
@@ -93,13 +93,14 @@ class ScreenshotCaptureWindows(PluginBase):
         last_mode: str | None = None
         render_cursor = bool(cfg.get("render_cursor", cfg.get("include_cursor", True)))
 
+        overflow = OverflowSpool(OverflowSpoolConfig.from_config(self.context.config))
+        try:
+            overflow.ensure_dirs()
+        except Exception:
+            overflow = OverflowSpool(OverflowSpoolConfig(enabled=False, root="", drain_interval_s=2.0, max_drain_per_tick=0))
+
         def _store_worker() -> None:
             last_disk_level: str | None = None
-            overflow = OverflowSpool(OverflowSpoolConfig.from_config(self.context.config))
-            try:
-                overflow.ensure_dirs()
-            except Exception:
-                overflow = OverflowSpool(OverflowSpoolConfig(enabled=False, root="", drain_interval_s=2.0, max_drain_per_tick=0))
             while not self._stop.is_set():
                 # Drain overflow spooled items when the primary data_dir volume has recovered.
                 try:
@@ -395,20 +396,58 @@ class ScreenshotCaptureWindows(PluginBase):
                         "media_fsync_policy": media_fsync_policy,
                     }
                     # No-loss policy: never drop frames due to store backpressure.
-                    # If storage cannot keep up, block here until the worker drains.
-                    enqueue_start = time.perf_counter()
-                    while not self._stop.is_set():
+                    # Prefer spooling to overflow (different volume) over blocking the
+                    # capture loop when the in-memory store queue is full.
+                    def _spool() -> bool:
+                        if not overflow.enabled:
+                            return False
+                        # Ultralight backpressure path: do NOT PNG-encode in the capture thread.
+                        # Spool raw RGB bytes and let the drain/worker encode to canonical PNG.
                         try:
-                            self._store_queue.put(job, timeout=0.5)
-                            break
-                        except queue.Full:
-                            continue
+                            width = int(getattr(img, "width", 0) or 0)
+                            height = int(getattr(img, "height", 0) or 0)
+                            if width <= 0 or height <= 0:
+                                return False
+                            rgb_bytes = img.tobytes()
+                        except Exception:
+                            return False
+                        spool_payload = {
+                            "record_type": "spool.capture.screenshot.v1",
+                            "run_id": run_id,
+                            "ts_utc": ts_utc,
+                            "width": int(width),
+                            "height": int(height),
+                            "pixel_format": "RGB",
+                            "backend": "mss",
+                            "monitor_index": int(idx),
+                            "dedupe": dict(job.get("dedupe") or {}),
+                            "cursor": cursor_payload,
+                            "monitor_layout": monitor_layout,
+                            "window_ref": job.get("window_ref"),
+                            "input_ref": job.get("input_ref"),
+                            "render_cursor": bool(render_cursor),
+                            "png_level": int(png_level),
+                            "media_fsync_policy": media_fsync_policy,
+                        }
+                        overflow.write_item(record_id=record_id, payload=spool_payload, blob=rgb_bytes, blob_ext="rgb")
+                        try:
+                            deduper.mark_saved(fingerprint, now=time.monotonic())
+                        except Exception:
+                            pass
+                        return True
+
+                    decision = enqueue_or_spool(self._store_queue, job, spool_fn=_spool, block_timeout_s=0.5)
                     try:
-                        wait_ms = int(max(0.0, (time.perf_counter() - enqueue_start) * 1000.0))
+                        wait_ms = int(decision.waited_ms)
                         if wait_ms > 0:
                             record_telemetry(
                                 "capture.screenshot.backpressure_wait",
-                                {"ts_utc": ts_utc, "wait_ms": wait_ms, "mode": str(schedule.mode)},
+                                {
+                                    "ts_utc": ts_utc,
+                                    "wait_ms": wait_ms,
+                                    "mode": str(schedule.mode),
+                                    "spooled": bool(decision.spooled),
+                                },
                             )
                     except Exception:
                         pass
@@ -721,13 +760,26 @@ def _store_job_overflow(
     ts_utc = str(job.get("ts_utc") or "")
     try:
         png_bytes, payload, encode_ms, write_ms = _encode_and_build(job, event_builder=event_builder)
-    except Exception:
+    except Exception as exc:
+        try:
+            event_builder.failure_event(
+                "capture.screenshot_store_failed",
+                stage="encode",
+                error=exc,
+                inputs=[],
+                outputs=[record_id] if record_id else [],
+                payload={"record_id": record_id, "backend": str(job.get("backend") or "mss")},
+                ts_utc=ts_utc,
+                retryable=True,
+            )
+        except Exception:
+            pass
         return False
 
     # If primary disk is hard-halt, go straight to overflow spool.
     if primary_hard_halt and overflow.enabled:
         try:
-            overflow.write_item(record_id=record_id, payload=payload, blob=png_bytes)
+            overflow.write_item(record_id=record_id, payload=payload, blob=png_bytes, blob_ext="png")
             record_telemetry("capture.screenshot.overflow_write", {"ts_utc": ts_utc, "record_id": record_id})
         except Exception:
             return False
@@ -749,16 +801,42 @@ def _store_job_overflow(
         return True
     except FileExistsError:
         return True
-    except OSError:
+    except OSError as exc:
         # If overflow is configured, spool and continue capturing.
         if overflow.enabled:
             try:
-                overflow.write_item(record_id=record_id, payload=payload, blob=png_bytes)
+                overflow.write_item(record_id=record_id, payload=payload, blob=png_bytes, blob_ext="png")
                 record_telemetry("capture.screenshot.overflow_write", {"ts_utc": ts_utc, "record_id": record_id})
             except Exception:
                 return False
+        try:
+            event_builder.failure_event(
+                "capture.screenshot_store_failed",
+                stage="storage.oserror",
+                error=exc,
+                inputs=[],
+                outputs=[record_id] if record_id else [],
+                payload={"record_id": record_id, "backend": str(payload.get("backend") or "mss")},
+                ts_utc=ts_utc,
+                retryable=True,
+            )
+        except Exception:
+            pass
         return False
-    except Exception:
+    except Exception as exc:
+        try:
+            event_builder.failure_event(
+                "capture.screenshot_store_failed",
+                stage="commit",
+                error=exc,
+                inputs=[],
+                outputs=[record_id] if record_id else [],
+                payload={"record_id": record_id, "backend": str(payload.get("backend") or "mss")},
+                ts_utc=ts_utc,
+                retryable=True,
+            )
+        except Exception:
+            pass
         return False
 
 
@@ -843,19 +921,25 @@ def _commit_payload(
     media_fsync_policy = payload.get("media_fsync_policy")
 
     write_start = time.perf_counter()
-    if hasattr(storage_media, "put_new"):
-        storage_media.put_new(record_id, png_bytes, ts_utc=ts_utc, fsync_policy=media_fsync_policy)
-    else:
-        storage_media.put(record_id, png_bytes, ts_utc=ts_utc, fsync_policy=media_fsync_policy)
+    try:
+        if hasattr(storage_media, "put_new"):
+            storage_media.put_new(record_id, png_bytes, ts_utc=ts_utc, fsync_policy=media_fsync_policy)
+        else:
+            storage_media.put(record_id, png_bytes, ts_utc=ts_utc, fsync_policy=media_fsync_policy)
+    except Exception as exc:
+        raise RuntimeError(f"storage.media: {type(exc).__name__}: {exc}") from exc
     write_ms = int(max(0.0, (time.perf_counter() - write_start) * 1000.0))
     payload["write_ms"] = int(write_ms)
     payload["encode_ms"] = int(encode_ms)
     payload["content_size"] = int(len(png_bytes))
 
-    if hasattr(storage_meta, "put_new"):
-        storage_meta.put_new(record_id, payload)
-    else:
-        storage_meta.put(record_id, payload)
+    try:
+        if hasattr(storage_meta, "put_new"):
+            storage_meta.put_new(record_id, payload)
+        else:
+            storage_meta.put(record_id, payload)
+    except Exception as exc:
+        raise RuntimeError(f"storage.metadata: {type(exc).__name__}: {exc}") from exc
     event_builder.journal_event("capture.frame", payload, event_id=record_id, ts_utc=ts_utc)
     event_builder.ledger_entry(
         "capture.frame",
@@ -910,6 +994,54 @@ def _drain_overflow_item(
     payload = meta.get("payload")
     if not record_id or not isinstance(payload, dict):
         return False
+    # Spool entries may store raw pixels; convert to canonical PNG before commit.
+    if str(payload.get("record_type") or "") == "spool.capture.screenshot.v1":
+        try:
+            from PIL import Image  # type: ignore
+        except Exception:
+            return False
+        try:
+            width = int(payload.get("width") or 0)
+            height = int(payload.get("height") or 0)
+            if width <= 0 or height <= 0:
+                return False
+            pixel_format = str(payload.get("pixel_format") or "RGB").upper()
+            if pixel_format != "RGB":
+                return False
+            img = Image.frombytes("RGB", (width, height), blob)
+            job = {
+                "record_id": record_id,
+                "run_id": str(payload.get("run_id") or ""),
+                "ts_utc": str(payload.get("ts_utc") or ""),
+                "monitor_index": int(payload.get("monitor_index") or 0),
+                "backend": str(payload.get("backend") or "mss"),
+                "img": img,
+                "png_level": int(payload.get("png_level") or 0),
+                "cursor_payload": payload.get("cursor"),
+                "monitor_layout": payload.get("monitor_layout"),
+                "window_ref": payload.get("window_ref"),
+                "input_ref": payload.get("input_ref"),
+                "dedupe": payload.get("dedupe") if isinstance(payload.get("dedupe"), dict) else {},
+                "render_cursor": bool(payload.get("render_cursor", False)),
+                "media_fsync_policy": payload.get("media_fsync_policy"),
+            }
+            png_bytes, canonical_payload, encode_ms, _write_ms = _encode_and_build(job, event_builder=event_builder)
+            _commit_payload(
+                record_id,
+                canonical_payload,
+                png_bytes,
+                storage_media=storage_media,
+                storage_meta=storage_meta,
+                event_builder=event_builder,
+                logger=logger,
+                encode_ms=int(encode_ms),
+                write_ms=int(canonical_payload.get("write_ms", 0) or 0),
+            )
+            return True
+        except FileExistsError:
+            return True
+        except Exception:
+            return False
     try:
         _commit_payload(
             record_id,

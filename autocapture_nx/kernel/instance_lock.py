@@ -7,6 +7,9 @@ silently corrupt state and confuse operators.
 from __future__ import annotations
 
 import os
+import errno
+import hashlib
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -64,11 +67,36 @@ def _unlock_file(handle) -> None:
         return
 
 
+def _permission_denied(exc: BaseException) -> bool:
+    if isinstance(exc, PermissionError):
+        return True
+    if isinstance(exc, OSError):
+        return exc.errno in (errno.EACCES, errno.EPERM, errno.EROFS)
+    return False
+
+
+def _fallback_lock_path(root: Path) -> Path:
+    digest = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:16]
+    base = Path(tempfile.gettempdir()) / "autocapture" / "locks"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / f"{digest}.instance.lock"
+
+
+def _open_lock_handle(path: Path):
+    return path.open("a+", encoding="utf-8")
+
+
 def acquire_instance_lock(data_dir: str | Path) -> InstanceLock:
     root = Path(str(data_dir)).expanduser()
-    root.mkdir(parents=True, exist_ok=True)
     lock_path = root / ".autocapture.instance.lock"
-    handle = lock_path.open("a+", encoding="utf-8")
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        handle = _open_lock_handle(lock_path)
+    except Exception as exc:
+        if not _permission_denied(exc):
+            raise
+        lock_path = _fallback_lock_path(root)
+        handle = _open_lock_handle(lock_path)
     try:
         _lock_file(handle)
     except Exception:

@@ -42,12 +42,30 @@ def build_component_matrix(*, system: Any, checks: list[Any] | None = None) -> l
     components: list[ComponentHealth] = []
 
     # Pipeline capability checks (minimal, presence-based).
-    capture_ok = _has_cap(caps, "capture.source") or _has_cap(caps, "capture.audio")
+    # Capture is optional when disabled in config (sidecar mode). If this repo is
+    # configured to capture locally, require the relevant capture capabilities.
+    want_capture = True
+    try:
+        cfg = getattr(system, "config", None)
+        if isinstance(cfg, dict):
+            capture_cfg = cfg.get("capture", {}) if isinstance(cfg.get("capture"), dict) else {}
+            want_screenshot = bool((capture_cfg.get("screenshot") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_audio = bool((capture_cfg.get("audio") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_video = bool((capture_cfg.get("video") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_capture = bool(want_screenshot or want_audio or want_video)
+    except Exception:
+        want_capture = True
+    if want_capture:
+        capture_ok = _has_cap(caps, "capture.source") or _has_cap(caps, "capture.screenshot") or _has_cap(caps, "capture.audio")
+        capture_detail = "ok" if capture_ok else "missing capture.source/capture.screenshot/capture.audio"
+    else:
+        capture_ok = True
+        capture_detail = "disabled"
     components.append(
         ComponentHealth(
             name="capture",
             ok=bool(capture_ok),
-            detail="ok" if capture_ok else "missing capture.source/capture.audio",
+            detail=capture_detail,
             checked_at_utc=checked,
         )
     )
@@ -138,13 +156,22 @@ def build_health_report(*, system: Any, checks: list[Any]) -> dict[str, Any]:
     generated = _utc_now_iso()
     matrix = build_component_matrix(system=system, checks=checks)
     ok = all(bool(item.ok) for item in matrix) and all(bool(getattr(c, "ok", True)) for c in (checks or []))
+    failed_components = [item.name for item in matrix if not bool(item.ok)]
+    failed_checks = [str(getattr(c, "name", "")) for c in (checks or []) if getattr(c, "ok", True) is False]
     summary = {
         "ok": bool(ok),
+        "code": "ok" if ok else "degraded",
         "components_total": int(len(matrix)),
         "components_ok": int(sum(1 for item in matrix if item.ok)),
         "checks_total": int(len(checks or [])),
         "checks_failed": int(sum(1 for c in (checks or []) if getattr(c, "ok", True) is False)),
     }
+    summary["message"] = (
+        f"components_ok={summary['components_ok']}/{summary['components_total']} "
+        f"checks_failed={summary['checks_failed']}/{summary['checks_total']}"
+        + (f" failed_components={failed_components[:5]}" if failed_components else "")
+        + (f" failed_checks={failed_checks[:5]}" if failed_checks else "")
+    )
     return {
         "ok": bool(ok),
         "generated_at_utc": generated,
@@ -153,4 +180,3 @@ def build_health_report(*, system: Any, checks: list[Any]) -> dict[str, Any]:
         # Preserve raw checks for backwards compatibility.
         "checks": [getattr(check, "__dict__", {"name": getattr(check, "name", ""), "ok": getattr(check, "ok", False)}) for check in (checks or [])],
     }
-

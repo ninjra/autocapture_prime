@@ -75,6 +75,51 @@ def cmd_plugins_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_plugins_load_report(args: argparse.Namespace) -> int:
+    # Debug-only command used by soak scripts when capture+ingest fails to start.
+    # It intentionally attempts a real plugin load to surface missing deps,
+    # lock mismatches, and capability/provider gaps.
+    from autocapture_nx.plugin_system.registry import PluginRegistry
+    from autocapture_nx.kernel.paths import repo_root
+
+    paths = default_config_paths()
+    config = load_config(paths, safe_mode=bool(args.safe_mode))
+    registry = PluginRegistry(config, safe_mode=bool(args.safe_mode))
+    error = None
+    caps = []
+    try:
+        _plugins, capabilities = registry.load_plugins()
+        try:
+            caps = sorted((capabilities.all() or {}).keys())
+        except Exception:
+            caps = []
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        try:
+            caps = []
+        except Exception:
+            caps = []
+    report = {}
+    try:
+        report = registry.load_report()
+    except Exception:
+        report = {}
+    payload = {
+        "ok": error is None,
+        "error": error,
+        "repo_root": str(repo_root()),
+        "config_default": str(paths.default_path),
+        "config_user": str(paths.user_path),
+        "paths": config.get("paths") if isinstance(config, dict) else {},
+        "hosting_mode_env": os.getenv("AUTOCAPTURE_PLUGINS_HOSTING_MODE", ""),
+        "report": report,
+        "capabilities": caps,
+        "capabilities_count": int(len(caps)),
+    }
+    _print_json(payload)
+    return 0 if payload.get("ok") else 2
+
+
 def cmd_plugins_approve(_args: argparse.Namespace) -> int:
     facade = create_facade()
     facade.plugins_approve()
@@ -300,7 +345,20 @@ def cmd_consent_accept(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     facade = create_facade(persistent=True, safe_mode=args.safe_mode, auto_start_capture=False)
-    facade.run_start()
+    start_result = facade.run_start()
+    if not isinstance(start_result, dict) or not bool(start_result.get("ok", False)):
+        # Preserve structured details to support soak debugging.
+        if isinstance(start_result, dict):
+            payload = dict(start_result)
+            payload.setdefault("ok", False)
+            _print_json(payload)
+        else:
+            _print_json({"ok": False, "error": "run_start_failed"})
+        try:
+            facade.shutdown()
+        except Exception:
+            pass
+        return 2
     duration_s = int(getattr(args, "duration_s", 0) or 0)
     status_interval_s = int(getattr(args, "status_interval_s", 0) or 0)
     if duration_s > 0:
@@ -309,12 +367,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("Capture running. Press Ctrl+C to stop.")
     try:
         import time
-        started = time.monotonic()
-        last_status = started
+        started_mono = time.monotonic()
+        last_status = started_mono
         while True:
             time.sleep(1)
             now = time.monotonic()
-            if duration_s > 0 and (now - started) >= duration_s:
+            if duration_s > 0 and (now - started_mono) >= duration_s:
                 break
             if status_interval_s > 0 and (now - last_status) >= status_interval_s:
                 last_status = now
@@ -429,6 +487,17 @@ def cmd_state_jepa_archive(args: argparse.Namespace) -> int:
 def cmd_enrich(args: argparse.Namespace) -> int:
     facade = create_facade(safe_mode=args.safe_mode)
     result = facade.enrich(force=True)
+    _print_json(result)
+    return 0
+
+
+def cmd_batch_run(args: argparse.Namespace) -> int:
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.batch_run(
+        max_loops=int(args.max_loops),
+        sleep_ms=int(args.sleep_ms),
+        require_idle=bool(args.require_idle),
+    )
     _print_json(result)
     return 0
 
@@ -895,6 +964,8 @@ def build_parser() -> argparse.ArgumentParser:
     plugins_list = plugins_sub.add_parser("list")
     plugins_list.add_argument("--json", action="store_true", default=False)
     plugins_list.set_defaults(func=cmd_plugins_list)
+    plugins_load_report = plugins_sub.add_parser("load-report")
+    plugins_load_report.set_defaults(func=cmd_plugins_load_report)
     plugins_approve = plugins_sub.add_parser("approve")
     plugins_approve.set_defaults(func=cmd_plugins_approve)
     plugins_plan = plugins_sub.add_parser("plan")
@@ -1023,6 +1094,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     enrich_cmd = sub.add_parser("enrich")
     enrich_cmd.set_defaults(func=cmd_enrich)
+
+    batch_cmd = sub.add_parser("batch")
+    batch_sub = batch_cmd.add_subparsers(dest="batch_cmd", required=True)
+    batch_run = batch_sub.add_parser("run")
+    batch_run.add_argument("--max-loops", type=int, default=500)
+    batch_run.add_argument("--sleep-ms", type=int, default=200)
+    batch_run.add_argument("--require-idle", action=argparse.BooleanOptionalAction, default=True)
+    batch_run.set_defaults(func=cmd_batch_run)
 
     devtools = sub.add_parser("devtools")
     devtools_sub = devtools.add_subparsers(dest="devtools_cmd", required=True)

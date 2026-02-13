@@ -14,6 +14,21 @@
     "text": "A task was assigned to OpenInvoice",
     "content_hash": "hash_quorum",
     "payload_hash": "ph_quorum"
+  },
+  "run_test/derived.text.obs/test_provider/song": {
+    "record_type": "derived.text.obs",
+    "run_id": "run_test",
+    "ts_utc": "2026-02-09T00:00:02Z",
+    "text": "Observation: current_song=Now playing: Jennifer Doherty - Sunlight. Now playing: Jennifer Doherty - Sunlight",
+    "content_hash": "hash_song_obs",
+    "payload_hash": "ph_song_obs"
+  },
+  "run_test/derived.text.obs/test_provider/quorum": {
+    "record_type": "derived.text.obs",
+    "run_id": "run_test",
+    "ts_utc": "2026-02-09T00:00:03Z",
+    "text": "Observation: quorum_task_collaborator=Open Invoice. Quorum task collaborator: Open Invoice",
+    "content_hash": "hash_quorum_obs",
+    "payload_hash": "ph_quorum_obs"
   }
 }
-

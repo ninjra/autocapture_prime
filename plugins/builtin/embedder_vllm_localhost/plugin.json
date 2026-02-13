@@ -1,0 +1,63 @@
+{
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [],
+  "enabled": false,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "embedder.text",
+      "path": "plugin.py"
+    }
+  ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "permissions": {
+    "filesystem": "read",
+    "gpu": false,
+    "network": true,
+    "raw_input": false
+  },
+  "plugin_id": "builtin.embedder.vllm_localhost",
+  "provides": [
+    "embedder.text"
+  ],
+  "required_capabilities": [],
+  "default_settings": {
+    "base_url": "http://127.0.0.1:8000",
+    "api_key": "",
+    "model": "",
+    "timeout_s": 20.0,
+    "fallback_model": ""
+  },
+  "settings_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "base_url": {
+        "type": "string"
+      },
+      "api_key": {
+        "type": "string"
+      },
+      "model": {
+        "type": "string"
+      },
+      "timeout_s": {
+        "type": "number"
+      },
+      "fallback_model": {
+        "type": "string"
+      }
+    }
+  },
+  "version": "0.1.0"
+}
+

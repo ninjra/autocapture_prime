@@ -1,0 +1,111 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer"
+    },
+    "record_type": {
+      "const": "derived.model.output",
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "ts_utc": {
+      "type": "string"
+    },
+    "modality": {
+      "type": "string"
+    },
+    "source_id": {
+      "type": "string"
+    },
+    "parent_evidence_id": {
+      "type": "string"
+    },
+    "span_ref": {
+      "type": "object"
+    },
+    "provider_id": {
+      "type": "string"
+    },
+    "model_id": {
+      "type": "string"
+    },
+    "model_digest": {
+      "type": "string"
+    },
+    "model_provider": {
+      "type": "string"
+    },
+    "prompt_hash": {
+      "type": "string"
+    },
+    "prompt": {
+      "type": "string"
+    },
+    "output_text": {
+      "type": "string"
+    },
+    "output_json": {
+      "type": "string"
+    },
+    "output_sha256": {
+      "type": "string"
+    },
+    "embeddings": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "dims": {
+            "type": "integer"
+          },
+          "encoding": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "dims",
+          "encoding",
+          "sha256",
+          "ref"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "metrics": {
+      "type": "object"
+    },
+    "provenance": {
+      "type": "object"
+    },
+    "payload_hash": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "run_id",
+    "ts_utc",
+    "modality",
+    "source_id",
+    "provider_id",
+    "model_id",
+    "model_digest",
+    "output_sha256",
+    "payload_hash"
+  ],
+  "type": "object"
+}

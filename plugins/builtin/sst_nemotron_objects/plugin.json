@@ -1,0 +1,52 @@
+{
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [],
+  "enabled": false,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "processing.stage.hooks",
+      "path": "plugin.py"
+    }
+  ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "optional_deps": [
+    "torch",
+    "transformers"
+  ],
+  "permissions": {
+    "filesystem": "read",
+    "gpu": true,
+    "network": false,
+    "raw_input": false
+  },
+  "plugin_id": "builtin.sst.nemotron_objects",
+  "provides": [
+    "processing.stage.hooks"
+  ],
+  "required_capabilities": [],
+  "default_settings": {
+    "max_objects": 256
+  },
+  "settings_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "max_objects": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 4096
+      }
+    }
+  },
+  "version": "0.2.0"
+}

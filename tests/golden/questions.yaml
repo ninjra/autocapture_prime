@@ -1,0 +1,5 @@
+cases:
+  - id: QG-001
+    question: "what song is playing"
+    profile: "single_screenshot"
+    notes: "Baseline golden case for evidence-linked answer validation."

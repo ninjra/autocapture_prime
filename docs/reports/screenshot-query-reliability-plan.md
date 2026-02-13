@@ -138,3 +138,8 @@ The current screenshot-only pipeline produced OCR/VLM artifacts, but the query p
 - Keep previous query path intact behind a feature flag.
 - Revert retrieval changes if query latency or accuracy regresses.
 - Preserve stepwise artifacts for regression comparison.
+
+## Deprecated Tactical Paths (2026-02-11)
+- Removed idle-time tactical QA injection in `autocapture_nx/processing/idle.py` that wrote `derived.text.qa` directly from raw OCR text.
+- Removed module `autocapture_nx/processing/qa/fixture_answers.py` that hard-coded narrow query answer extraction logic.
+- Replaced query-time tactical helpers in `autocapture_nx/kernel/query.py` (song/quorum regex branches) with persisted-record-only answering and deterministic state/classic arbitration.

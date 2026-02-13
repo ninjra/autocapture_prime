@@ -1,0 +1,300 @@
+[
+  {
+    "id": "Q1",
+    "question": "Enumerate every distinct top-level window visible in the screenshot. For each window: app/product name, host-vs-VDI context, and whether it is fully visible or partially occluded. Return the list in front-to-back z-order.",
+    "improved": "Window detection; host/VDI attribution; occlusion + z-order reasoning",
+    "risked": "Merging overlapping windows; misclassifying VDI-contained UI as host; wrong z-order",
+    "enforcement_location": "Capture pipeline -> window segmentation + compositor/z-order logic",
+    "regression_detection": "Golden JSON: stable window count + ordered list; diff on name/context/order/occluded"
+  },
+  {
+    "id": "Q2",
+    "question": "Which window has keyboard/input focus? Provide 2 pieces of visual evidence (e.g., highlighted title bar, selected row, caret) and include the exact highlighted text for each evidence item.",
+    "improved": "Focus/active-window detection; evidence grounding",
+    "risked": "Incorrect focus under dark themes; false positives from hover/selection states",
+    "enforcement_location": "UI-state inference layer (focus heuristics + highlight detection)",
+    "regression_detection": "Assert (focused_window_id, evidence_text[]) matches baseline; require 2 evidence items"
+  },
+  {
+    "id": "Q3",
+    "question": "In the VDI Outlook reading pane showing a task/incident email: extract (a) email subject, (b) sender display name, (c) sender email domain only (do not return the full address), and (d) the labels of the primary action buttons in the embedded task card.",
+    "improved": "Small-font OCR; email header parsing; secure redaction behavior",
+    "risked": "OCR dropouts on dense UI; leaking full email address; missing embedded-card buttons",
+    "enforcement_location": "OCR + layout parser; PII redaction/sanitization stage",
+    "regression_detection": "Exact-string checks for subject/button labels; domain-only validation (reject '@' local-part leakage)"
+  },
+  {
+    "id": "Q4",
+    "question": "From that same task/incident view, extract the complete 'Record Activity' timeline: each entry\u2019s timestamp (including timezone if shown) and its associated text, in the same top-to-bottom order displayed.",
+    "improved": "Timeline extraction; timestamp parsing; multi-line association",
+    "risked": "Dropping one of the timeline rows; mixing timestamp with wrong activity text",
+    "enforcement_location": "Structured extraction -> timeline parser (row grouping + ordering)",
+    "regression_detection": "Golden list length + exact text per row; stable ordering; fail if any row missing"
+  },
+  {
+    "id": "Q5",
+    "question": "From the 'Details' section in the same VDI task/incident view, extract all visible field labels and their values as key-value pairs (include fields that are present-but-empty as empty strings). Preserve the on-screen ordering.",
+    "improved": "Form/table key-value extraction; label/value association",
+    "risked": "Mis-pairing labels to wrong values; skipping empty fields; unstable ordering",
+    "enforcement_location": "Layout-aware KV extractor (two-column form parsing)",
+    "regression_detection": "Schema check + ordered-keys snapshot test; verify empty fields retained"
+  },
+  {
+    "id": "Q6",
+    "question": "In the VDI right-side calendar/schedule pane: extract the displayed month+year, the currently selected date, and then list the first 5 visible scheduled items (top-to-bottom) with start time + title.",
+    "improved": "Calendar widget parsing; dense list OCR; selection-state recognition",
+    "risked": "Wrong selected day; time/title misalignment; skipping items due to low contrast",
+    "enforcement_location": "Calendar/schedule parser (selection + list-row extraction)",
+    "regression_detection": "Golden month/year + selected-date + first-5 (time,title) tuples; strict row count"
+  },
+  {
+    "id": "Q7",
+    "question": "In the Slack DM window: transcribe the last two visible messages as (sender, timestamp, exact text). Also describe what the embedded image thumbnail depicts in 1 sentence (do not infer beyond what is visible).",
+    "improved": "Chat transcript extraction; timestamp association; image-thumbnail description",
+    "risked": "Timestamp/sender mismatch; partial message transcription; hallucinated thumbnail details",
+    "enforcement_location": "Chat UI parser + captioning module with 'visible-only' constraint",
+    "regression_detection": "Exact text match for the 2 messages; thumbnail description must reference visible UI elements only"
+  },
+  {
+    "id": "Q8",
+    "question": "In the upper-left dev note/terminal-summary window: extract the full 'What changed' section (each line), the 'Files:' list, and the exact 'Tests:' command shown.",
+    "improved": "Code-oriented OCR; section boundary detection; path/command extraction",
+    "risked": "Missing section headers; dropping file paths; truncating command-line text",
+    "enforcement_location": "Document-structure parser (header -> section -> list extraction)",
+    "regression_detection": "Golden sections: exact header+lines; exact file-path list; exact test command string"
+  },
+  {
+    "id": "Q9",
+    "question": "In the console/log window that contains both red and green text: extract all visible lines and classify each line by its rendered color (red/green/other). Return counts per color and the full text of every red line.",
+    "improved": "Color-aware text extraction; error-line isolation; count accuracy",
+    "risked": "Losing color classification; merging wrapped lines incorrectly; miscounting",
+    "enforcement_location": "Renderer-aware OCR (color sampling per line) + line-wrapping logic",
+    "regression_detection": "Assert (count_red,count_green,count_other) + exact list of red-line strings matches baseline"
+  },
+  {
+    "id": "Q10",
+    "question": "For each visible browser window in the screenshot: extract the active tab title, the address-bar hostname (hostname only), and the count of visible tabs in that window\u2019s tab strip.",
+    "improved": "Browser chrome parsing; tab-title OCR; hostname normalization; multi-window disambiguation",
+    "risked": "Mixing tab strips between windows; wrong active tab; capturing full URL instead of hostname",
+    "enforcement_location": "Browser-UI parser (tab strip + address bar) + URL normalizer",
+    "regression_detection": "Golden per-window tuple: (active_title, hostname, visible_tab_count); validate hostname format (no path/query)"
+  },
+  {
+    "id": "H1",
+    "question": "Compute the incident\u2019s time-to-assignment in minutes by using (a) the \"Opened at\" timestamp in Details and (b) the \"State changed\" update timestamp in Record Activity. Return both timestamps and the elapsed minutes.",
+    "expected_answer": {
+      "opened_at": "Feb 02, 2026 - 12:06pm CST",
+      "state_changed_at": "Feb 02, 2026 - 12:08pm CST",
+      "elapsed_minutes": 2
+    },
+    "acceptance": {
+      "opened_at": "exact match",
+      "state_changed_at": "exact match",
+      "elapsed_minutes": "must equal 2"
+    },
+    "source": "docs/autocapture_prime_testquestions2.txt"
+  },
+  {
+    "id": "H2",
+    "question": "From the change summary, take the k preset values and compute their sum. Then verify whether each preset is valid under the documented server-side clamp range. Return sum, clamp_range, and a per-preset validity list.",
+    "expected_answer": {
+      "k_presets": [
+        32,
+        64,
+        128
+      ],
+      "k_presets_sum": 224,
+      "clamp_range_inclusive": [
+        1,
+        200
+      ],
+      "preset_validity": [
+        {
+          "k": 32,
+          "valid": true
+        },
+        {
+          "k": 64,
+          "valid": true
+        },
+        {
+          "k": 128,
+          "valid": true
+        }
+      ]
+    },
+    "acceptance": {
+      "k_presets": "must be [32,64,128]",
+      "k_presets_sum": "must equal 224",
+      "clamp_range_inclusive": "must be [1,200]",
+      "preset_validity": "all must be true"
+    },
+    "source": "docs/autocapture_prime_testquestions2.txt"
+  },
+  {
+    "id": "H3",
+    "question": "Cross-window reasoning: Slack mentions running a \"new converter\" at two sizes. Identify those two numbers from Slack, then infer the best-matching parameter in the dev note (k vs dimension). Finally, produce two example GET query strings using k=64 and those two values as the inferred parameter.",
+    "expected_answer": {
+      "slack_numbers": [
+        1800,
+        2600
+      ],
+      "inferred_parameter": "dimension",
+      "example_queries": [
+        "?k=64&dimension=1800",
+        "?k=64&dimension=2600"
+      ],
+      "rationale": "Dev note: Vectors GET accepts k and dimension; Slack numbers are large and pair-like, matching dimension variants more than k."
+    },
+    "acceptance": {
+      "slack_numbers": "must be [1800,2600]",
+      "inferred_parameter": "must be 'dimension'",
+      "example_queries": "must include k=64 and dimension=1800/2600 (path can be omitted)"
+    },
+    "source": "docs/autocapture_prime_testquestions2.txt"
+  },
+  {
+    "id": "H4",
+    "question": "Code reasoning: Summarize the endpoint-selection + retry logic shown in the colored script into pseudocode with explicit conditionals. Include (a) the condition that switches to $saltEndpoint and (b) the condition that triggers a retry after Invoke-Expression.",
+    "expected_answer": {
+      "pseudocode": [
+        "if Test-Endpoint(endpoint) fails and saltEndpoint exists and Test-Endpoint(saltEndpoint) succeeds: endpoint = saltEndpoint",
+        "run vectorCmd (Invoke-Expression); lastExit = $LASTEXITCODE",
+        "if lastExit != 0 and saltEndpoint exists and saltEndpoint != endpoint: endpoint = saltEndpoint; rerun vectorCmd; lastExit = $LASTEXITCODE",
+        "if lastExit != 0: print failure; exit 1",
+        "else: print success"
+      ]
+    },
+    "acceptance": {
+      "must_include": [
+        "a conditional switch to saltEndpoint gated by Test-Endpoint",
+        "a retry gated by lastExit != 0 and saltEndpoint != endpoint"
+      ],
+      "format": "any equivalent pseudocode is acceptable if logically equivalent"
+    },
+    "source": "docs/autocapture_prime_testquestions2.txt"
+  },
+  {
+    "id": "H5",
+    "question": "Find one correctness bug/inconsistency in the script\u2019s final success log line and provide the exact corrected line. (Hint: which variable is referenced in the message vs which endpoint may actually have succeeded?)",
+    "expected_answer": {
+      "bug": "Success message hardcodes $saltEndpoint even if validation succeeded against $endpoint (or if $saltEndpoint is empty).",
+      "corrected_line": "Write-Host \"Validation succeeded against $endpoint for $projectId\" -ForegroundColor Green"
+    },
+    "acceptance": {
+      "bug": "must mention $saltEndpoint vs $endpoint mismatch",
+      "corrected_line": "must reference $endpoint (not $saltEndpoint)"
+    },
+    "source": "docs/autocapture_prime_testquestions2.txt"
+  },
+  {
+    "id": "H6",
+    "question": "Data cleaning (Excel-like): In Details, the field label \"Cell Phone Number (Y / N)? Y / N\" has value \"NA\". Propose a normalized schema and a deterministic transform for this specific record (what values go into the normalized fields).",
+    "expected_answer": {
+      "normalized_schema": {
+        "has_cell_phone_number": "boolean|null",
+        "cell_phone_number": "string|null"
+      },
+      "transformed_record_values": {
+        "has_cell_phone_number": null,
+        "cell_phone_number": null
+      },
+      "note": "NA treated as unknown/missing rather than Yes/No."
+    },
+    "acceptance": {
+      "schema": "must split presence flag vs number",
+      "transformed_record_values": "must map NA -> null/unknown and number -> null"
+    },
+    "source": "docs/autocapture_prime_testquestions2.txt"
+  },
+  {
+    "id": "H7",
+    "question": "Reasoning over the worklog: Count how many completed checkboxes ([x]) are visible in the bottom-left notes window, and name the currently running action shown directly underneath the checklist.",
+    "expected_answer": {
+      "completed_checkbox_count": 5,
+      "currently_running_action": "Running test coverage mapping (in 3s - esc to interrupt)"
+    },
+    "acceptance": {
+      "completed_checkbox_count": "must equal 5",
+      "currently_running_action": "exact match"
+    },
+    "source": "docs/autocapture_prime_testquestions2.txt"
+  },
+  {
+    "id": "H8",
+    "question": "Vision + UI semantics (not OCR-only): In the Outlook message list (Today section), count how many rows show the blue unread indicator bar. Return the count only for Today (not Thursday/Last week).",
+    "expected_answer": {
+      "today_unread_indicator_count": 7
+    },
+    "acceptance": {
+      "today_unread_indicator_count": "must equal 7"
+    },
+    "source": "docs/autocapture_prime_testquestions2.txt"
+  },
+  {
+    "id": "H9",
+    "question": "Vision classification: In the SiriusXM carousel row at the bottom center, classify the 6 fully visible tiles into {talk/podcast, NCAA team, NFL event}. Return counts per class and list the titles/entities you used.",
+    "expected_answer": {
+      "counts": {
+        "talk_podcast": 1,
+        "ncaa_team": 4,
+        "nfl_event": 1
+      },
+      "classified_tiles": [
+        {
+          "entity": "Conan O'Brien Needs A Friend",
+          "class": "talk_podcast"
+        },
+        {
+          "entity": "Syracuse Orange",
+          "class": "ncaa_team"
+        },
+        {
+          "entity": "North Carolina",
+          "class": "ncaa_team"
+        },
+        {
+          "entity": "South Carolina",
+          "class": "ncaa_team"
+        },
+        {
+          "entity": "Texas A&M",
+          "class": "ncaa_team"
+        },
+        {
+          "entity": "Super Bowl Opening Night",
+          "class": "nfl_event"
+        }
+      ]
+    },
+    "acceptance": {
+      "counts": "must be 1/4/1 as shown",
+      "classified_tiles": "must contain these 6 entities with these classes (minor text variants ok)"
+    },
+    "source": "docs/autocapture_prime_testquestions2.txt"
+  },
+  {
+    "id": "H10",
+    "question": "Action grounding: Provide screenshot-normalized bounding boxes (x1,y1,x2,y2 in [0,1]) for the two task-card buttons in Outlook: COMPLETE and VIEW DETAILS. Coordinates are relative to the full screenshot (2048x575).",
+    "expected_answer": {
+      "COMPLETE": {
+        "x1": 0.749,
+        "y1": 0.3322,
+        "x2": 0.7729,
+        "y2": 0.3548
+      },
+      "VIEW_DETAILS": {
+        "x1": 0.7749,
+        "y1": 0.3322,
+        "x2": 0.7993,
+        "y2": 0.3548
+      },
+      "tolerance": "IoU >= 0.60 per box is acceptable"
+    },
+    "acceptance": {
+      "COMPLETE": "must overlap expected box with IoU >= 0.60",
+      "VIEW_DETAILS": "must overlap expected box with IoU >= 0.60"
+    },
+    "source": "docs/autocapture_prime_testquestions2.txt"
+  }
+]

@@ -12,8 +12,8 @@
     "min_segment_seconds": 30
   },
   "capture": {
-    "auto_start": true,
-    "mode_preset": "memory_replacement_raw",
+    "auto_start": false,
+    "mode_preset": "",
     "diff_epsilon": 0,
     "duplicate_threshold": "exact_only",
     "always_store_fullres": true,
@@ -45,7 +45,7 @@
       "blocksize": 44100,
       "channels": 2,
       "device": null,
-      "enabled": true,
+      "enabled": false,
       "encoding": "wav",
       "ffmpeg_path": "",
       "microphone": true,
@@ -55,13 +55,13 @@
       "system_audio": true
     },
     "cursor": {
-      "enabled": true,
+      "enabled": false,
       "include_shape": true,
       "sample_hz": 5
     },
     "input_tracking": {
       "flush_interval_ms": 250,
-      "mode": "activity",
+      "mode": "off",
       "store_derived": true
     },
     "clipboard": {
@@ -156,7 +156,7 @@
         "hash": "blake2b",
         "sample_bytes": 0
       },
-      "enabled": true,
+      "enabled": false,
       "fps_target": 2,
       "include_cursor": true,
       "include_cursor_shape": true,
@@ -167,7 +167,7 @@
       "resolution": "native"
     },
     "window_metadata": {
-      "enabled": true,
+      "enabled": false,
       "sample_hz": 5
     }
   },
@@ -368,6 +368,7 @@
       "builtin.embedder.basic",
       "builtin.journal.basic",
       "builtin.ledger.basic",
+      "builtin.observation.graph",
       "builtin.sst.qa.answers",
       "builtin.meta.configurator.noop",
       "builtin.meta.policy.noop",
@@ -395,6 +396,7 @@
       "builtin.vlm.qwen2_vl_2b",
       "builtin.vlm.llava_1_5_7b",
       "builtin.vlm.minicpm_v_2_6",
+      "builtin.vlm.vllm_localhost",
       "builtin.window.metadata.windows",
       "mx.core.capture_win",
       "mx.core.compression_and_verify",
@@ -722,7 +724,35 @@
         "max_providers": 8,
         "mode": "multi",
         "preferred": [
+          "builtin.vlm.vllm_localhost",
           "builtin.vlm.basic"
+        ],
+        "provider_ids": []
+      },
+      "screen.parse.v1": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.screen.parse.v1"
+        ],
+        "provider_ids": []
+      },
+      "screen.index.v1": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.screen.index.v1"
+        ],
+        "provider_ids": []
+      },
+      "screen.answer.v1": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.screen.answer.v1"
         ],
         "provider_ids": []
       },
@@ -759,8 +789,12 @@
       "builtin.journal.basic",
       "builtin.ledger.basic",
       "builtin.observability.basic",
+      "builtin.observation.graph",
       "builtin.ocr.basic",
       "builtin.privacy.egress_sanitizer",
+      "builtin.screen.parse.v1",
+      "builtin.screen.index.v1",
+      "builtin.screen.answer.v1",
       "builtin.processing.sst.pipeline",
       "builtin.prompt.bundle.default",
       "builtin.research.default",
@@ -780,6 +814,7 @@
       "builtin.time.advanced",
       "builtin.tracking.input.windows",
       "builtin.vlm.basic",
+      "builtin.vlm.vllm_localhost",
       "builtin.window.metadata.windows",
       "mx.core.capture_win",
       "mx.core.compression_and_verify",
@@ -801,10 +836,10 @@
       "builtin.anchor.basic": true,
       "builtin.answer.basic": true,
       "builtin.backpressure.basic": true,
-      "builtin.capture.audio.windows": true,
+      "builtin.capture.audio.windows": false,
       "builtin.capture.basic": false,
-      "builtin.capture.screenshot.windows": true,
-      "builtin.capture.windows": true,
+      "builtin.capture.screenshot.windows": false,
+      "builtin.capture.windows": false,
       "builtin.citation.basic": true,
       "builtin.cursor.windows": false,
       "builtin.devtools.ast_ir": true,
@@ -813,15 +848,19 @@
       "builtin.embedder.basic": true,
       "builtin.journal.basic": true,
       "builtin.ledger.basic": true,
+      "builtin.observation.graph": true,
       "builtin.meta.configurator.noop": false,
       "builtin.meta.policy.noop": false,
       "builtin.observability.basic": true,
       "builtin.ocr.basic": true,
       "builtin.privacy.egress_sanitizer": true,
+      "builtin.screen.parse.v1": true,
+      "builtin.screen.index.v1": true,
+      "builtin.screen.answer.v1": true,
       "builtin.processing.sst.pipeline": true,
       "builtin.prompt.bundle.default": true,
       "builtin.research.default": true,
-      "builtin.processing.sst.ui_vlm": false,
+      "builtin.processing.sst.ui_vlm": true,
       "builtin.reranker.basic": true,
       "builtin.retrieval.basic": true,
       "builtin.state.jepa_like": true,
@@ -854,14 +893,16 @@
       "builtin.sst.temporal.segment": false,
       "builtin.sst.track.cursor": false,
       "builtin.sst.ui.parse": false,
+      "builtin.sst.qa.answers": false,
       "builtin.storage.encrypted": false,
-    "builtin.storage.sqlcipher": true,
-    "builtin.time.advanced": true,
-    "builtin.tracking.input.windows": true,
-    "builtin.tracking.clipboard.windows": false,
-    "builtin.tracking.file_activity.windows": false,
+      "builtin.storage.sqlcipher": true,
+      "builtin.time.advanced": true,
+      "builtin.tracking.input.windows": false,
+      "builtin.tracking.clipboard.windows": false,
+      "builtin.tracking.file_activity.windows": false,
       "builtin.vlm.basic": true,
-      "builtin.window.metadata.windows": true
+      "builtin.vlm.vllm_localhost": true,
+      "builtin.window.metadata.windows": false
     },
     "settings": {},
     "filesystem_defaults": {
@@ -969,6 +1010,22 @@
         "readwrite": [
           "{repo_root}/tools/hypervisor/runs"
         ]
+      },
+      "builtin.vlm.qwen2_vl_2b": {
+        "read": [
+          "{data_dir}",
+          "/dev",
+          "/dev/null",
+          "/proc",
+          "/tmp",
+          "/mnt/d/autocapture/models"
+        ],
+        "readwrite": [
+          "{data_dir}",
+          "/dev",
+          "/dev/null",
+          "/tmp"
+        ]
       }
     },
     "hosting": {
@@ -982,6 +1039,7 @@
       },
       "mode": "subprocess",
       "wsl_force_lazy_start": true,
+      "wsl_force_inproc": true,
       "subprocess_spawn_concurrency": 1,
       "subprocess_max_hosts": 2,
       "subprocess_idle_ttl_s": 10.0,
@@ -1014,7 +1072,13 @@
     "permissions": {
       "network_allowed_plugin_ids": [
         "builtin.egress.gateway"
+      ],
+      "localhost_allowed_plugin_ids": [
+        "builtin.vlm.vllm_localhost"
       ]
+    },
+    "approvals": {
+      "required": false
     },
     "safe_mode": false,
     "safe_mode_minimal": false,
@@ -1349,12 +1413,12 @@
       "tile_refine_padding_px": 24,
       "ui_parse": {
         "enabled": true,
-        "fallback_detector": true,
+        "fallback_detector": false,
         "max_providers": 1,
-        "mode": "detector"
+        "mode": "vlm_json"
       },
       "ui_vlm": {
-        "enabled": false,
+        "enabled": true,
         "max_providers": 1
       }
     }
@@ -1532,7 +1596,7 @@
     "anchor": {
       "every_entries": 50,
       "every_minutes": 5,
-      "path": "data_anchor/anchors.ndjson",
+      "path": "anchor/anchors.ndjson",
       "sign": true,
       "use_dpapi": true
     },
@@ -1557,6 +1621,9 @@
     },
     "encryption_required": true,
     "encryption_enabled": true,
+    "sqlcipher": {
+      "enabled": false
+    },
     "entity_map": {
       "persist": true
     },

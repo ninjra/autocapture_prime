@@ -1,0 +1,69 @@
+{
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [],
+  "enabled": false,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "answer.synthesizer",
+      "path": "plugin.py"
+    }
+  ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "permissions": {
+    "filesystem": "read",
+    "gpu": true,
+    "network": true,
+    "raw_input": false
+  },
+  "plugin_id": "builtin.answer.synth_vllm_localhost",
+  "provides": [
+    "answer.synthesizer"
+  ],
+  "required_capabilities": [
+    "citation.validator"
+  ],
+  "default_settings": {
+    "base_url": "http://127.0.0.1:8000",
+    "api_key": "",
+    "model": "",
+    "timeout_s": 30.0,
+    "max_tokens": 512,
+    "max_evidence_chars": 2400
+  },
+  "settings_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "base_url": {
+        "type": "string"
+      },
+      "api_key": {
+        "type": "string"
+      },
+      "model": {
+        "type": "string"
+      },
+      "timeout_s": {
+        "type": "number"
+      },
+      "max_tokens": {
+        "type": "integer"
+      },
+      "max_evidence_chars": {
+        "type": "integer"
+      }
+    }
+  },
+  "version": "0.1.0"
+}
+

@@ -16,6 +16,7 @@ from .utils import hash_canonical
 
 
 IndexTextFn = Callable[[str, str], None]
+PostIndexFn = Callable[[str, str], None]
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class SSTPersistence:
         metadata: Any,
         event_builder: Any | None,
         index_text: IndexTextFn,
+        post_index: PostIndexFn | None = None,
         extractor_id: str,
         extractor_version: str,
         config_hash: str,
@@ -41,6 +43,7 @@ class SSTPersistence:
         self._metadata = metadata
         self._event_builder = event_builder
         self._index_text = index_text
+        self._post_index = post_index
         self._extractor = {
             "id": extractor_id,
             "version": extractor_version,
@@ -230,6 +233,11 @@ class SSTPersistence:
                 derived_records += 1
                 derived_ids.append(doc_id)
             self._index_text(doc_id, doc_text)
+            if self._post_index is not None:
+                try:
+                    self._post_index(doc_id, doc_text)
+                except Exception:
+                    pass
             indexed_docs += 1
             indexed_ids.append(doc_id)
 

@@ -24,6 +24,26 @@ class Issue:
     detail: str
 
 
+def _validator_class(path_text: str) -> str:
+    p = path_text.strip()
+    if not p:
+        return "empty"
+    if p.startswith("tests/"):
+        return "test"
+    if p.startswith("tools/"):
+        name = Path(p).name
+        if name.startswith("gate_"):
+            return "gate"
+        if p.endswith((".py", ".sh", ".ps1")):
+            return "tool"
+        return "tool_other"
+    if p.startswith(("autocapture/", "autocapture_nx/", "plugins/")):
+        return "code"
+    if p.startswith("docs/"):
+        return "doc"
+    return "other"
+
+
 def _expected_item_ids(repo_root: Path) -> set[str]:
     # Implementation matrix is the authoritative list of in-scope items.
     path = repo_root / "docs" / "reports" / "implementation_matrix.md"
@@ -78,14 +98,22 @@ def validate_traceability(repo_root: Path, traceability_path: Path) -> tuple[boo
             if not isinstance(validators, list) or not validators:
                 issues.append(Issue("missing_validators", f"{item_id}:{text[:60]}"))
                 continue
+            classes: list[str] = []
             for v in validators:
                 vp = str(v).strip()
                 if not vp:
                     issues.append(Issue("empty_validator", item_id))
                     continue
+                classes.append(_validator_class(vp))
                 p = repo_root / vp
                 if not p.exists():
                     issues.append(Issue("validator_missing_path", f"{item_id}:{vp}"))
+            # Require at least one executable validator per acceptance bullet.
+            if not any(c in {"test", "gate", "tool"} for c in classes):
+                issues.append(Issue("no_executable_validators", f"{item_id}:{text[:60]}"))
+            # Documentation-only validators are not acceptable as closure evidence.
+            if classes and all(c == "doc" for c in classes):
+                issues.append(Issue("doc_only_validators", f"{item_id}:{text[:60]}"))
 
     return not issues, issues
 
@@ -104,4 +132,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

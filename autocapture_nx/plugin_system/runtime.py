@@ -31,6 +31,7 @@ _fs_patched = False
 _fs_patch_lock = threading.Lock()
 _fs_policy_local = threading.local()
 _fs_policy_global = None
+_FS_POLICY_UNSET = object()
 _original_open = None
 _original_io_open = None
 _original_os_open = None
@@ -159,12 +160,12 @@ def _normalize_root_str(raw: str, os_name: str) -> str:
         # SEC-01: `os.path.realpath()` calls `os.lstat()`, which we patch to
         # enforce filesystem policies. Temporarily suspend the policy while we
         # normalize roots to avoid re-entrant recursion.
-        previous = _current_fs_policy()
+        previous = _fs_policy_local_raw()
         _set_fs_policy(None)
         try:
             return os.path.realpath(expanded)
         finally:
-            _set_fs_policy(previous)
+            _set_fs_policy_raw(previous)
     except Exception:
         try:
             return os.path.abspath(expanded)
@@ -183,12 +184,12 @@ def _normalize_root(path: Path) -> Path:
         # enforce policies. To avoid recursion, temporarily suspend the policy
         # while computing `realpath`.
         try:
-            previous = _current_fs_policy()
+            previous = _fs_policy_local_raw()
             _set_fs_policy(None)
             try:
                 return Path(os.path.realpath(str(candidate))).absolute()
             finally:
-                _set_fs_policy(previous)
+                _set_fs_policy_raw(previous)
         except Exception:
             return candidate
     except Exception:
@@ -281,14 +282,29 @@ class FilesystemPolicy:
 
 
 def _current_fs_policy() -> FilesystemPolicy | None:
-    local = getattr(_fs_policy_local, "policy", None)
-    if local is not None:
-        return local
+    # Important: a thread-local value of None means "disabled", not "inherit".
+    local = _fs_policy_local_raw()
+    if local is not _FS_POLICY_UNSET:
+        return cast(FilesystemPolicy | None, local)
     return _fs_policy_global
 
 
-def _set_fs_policy(policy: FilesystemPolicy | None) -> None:
+def _fs_policy_local_raw() -> object | FilesystemPolicy | None:
+    return getattr(_fs_policy_local, "policy", _FS_POLICY_UNSET)
+
+
+def _set_fs_policy_raw(policy: object | FilesystemPolicy | None) -> None:
+    if policy is _FS_POLICY_UNSET:
+        try:
+            delattr(_fs_policy_local, "policy")
+        except Exception:
+            pass
+        return
     setattr(_fs_policy_local, "policy", policy)
+
+
+def _set_fs_policy(policy: FilesystemPolicy | None) -> None:
+    _set_fs_policy_raw(policy)
 
 
 def _write_mode_from_open(mode: str | None) -> bool:
@@ -474,23 +490,23 @@ def filesystem_guard(policy: FilesystemPolicy | None):
         yield
         return
     _patch_filesystem()
-    previous = _current_fs_policy()
+    previous = _fs_policy_local_raw()
     _set_fs_policy(policy)
     try:
         yield
     finally:
-        _set_fs_policy(previous)
+        _set_fs_policy_raw(previous)
 
 
 @contextlib.contextmanager
 def filesystem_guard_suspended():
     """Temporarily disable filesystem policy for the current thread."""
-    previous = _current_fs_policy()
+    previous = _fs_policy_local_raw()
     _set_fs_policy(None)
     try:
         yield
     finally:
-        _set_fs_policy(previous)
+        _set_fs_policy_raw(previous)
 
 
 @contextlib.contextmanager

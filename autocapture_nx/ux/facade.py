@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import uuid
 from contextlib import contextmanager
@@ -25,6 +26,7 @@ from autocapture_nx.kernel.query import run_query
 from autocapture_nx.kernel.telemetry import telemetry_snapshot, percentile
 from autocapture_nx.kernel.atomic_write import atomic_write_json
 from autocapture_nx.kernel.doctor import build_health_report
+from autocapture_nx.kernel.activity_signal import load_activity_signal
 from autocapture_nx.kernel.logging import JsonlLogger
 from autocapture_nx.plugin_system.manager import PluginManager
 from autocapture_nx.processing.idle import _extract_frame, _get_media_blob
@@ -335,9 +337,17 @@ class UXFacade:
                 report = None
         if not isinstance(report, dict):
             ok = all(check.ok for check in checks)
+            failed = [str(getattr(c, "name", "")) for c in (checks or []) if getattr(c, "ok", True) is False]
             report = {
                 "ok": ok,
                 "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+                "summary": {
+                    "ok": bool(ok),
+                    "code": "ok" if ok else "degraded",
+                    "message": "ok" if ok else f"failed_checks={failed[:5]}",
+                    "checks_total": int(len(checks or [])),
+                    "checks_failed": int(len(failed)),
+                },
                 "checks": [check.__dict__ for check in checks],
             }
         if logger is not None:
@@ -822,21 +832,85 @@ class UXFacade:
     def plugins_logs(self, plugin_id: str, *, limit: int = 80) -> dict[str, Any]:
         # EXT-09: return per-plugin host_runner logs (best-effort, sanitized).
         limit = max(1, min(400, int(limit or 80)))
-        data_dir = str(self._config.get("storage", {}).get("data_dir", "data"))
-        run_id = str(self._config.get("runtime", {}).get("run_id") or "")
-        if not run_id:
-            run_id = str(self.status().get("run_id") or "run")
-        path = Path(data_dir) / "runs" / run_id / f"plugin_host_{plugin_id}.log"
-        if not path.exists():
-            return {"ok": True, "plugin_id": plugin_id, "path": str(path), "lines": [], "missing": True}
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        tail = lines[-limit:]
-        redacted: list[str] = []
-        for line in tail:
-            text = str(line)
-            if "OPENAI_API_KEY" in text or "Authorization:" in text:
+        data_dir = Path(str(self._config.get("storage", {}).get("data_dir", "data")))
+        filename = f"plugin_host_{plugin_id}.log"
+
+        run_ids: list[str] = []
+        config_run_id = str(self._config.get("runtime", {}).get("run_id") or "").strip()
+        if config_run_id:
+            run_ids.append(config_run_id)
+        status_run_id = str(self.status().get("run_id") or "").strip()
+        if status_run_id:
+            run_ids.append(status_run_id)
+        run_ids.append("run")
+        seen_run_ids: set[str] = set()
+        ordered_run_ids: list[str] = []
+        for run_id in run_ids:
+            if run_id in seen_run_ids:
                 continue
-            redacted.append(text[:2000])
+            seen_run_ids.add(run_id)
+            ordered_run_ids.append(run_id)
+
+        def _sanitize_plugin_id(value: str) -> str:
+            raw = value.strip() or "plugin"
+            raw = raw.replace("\\", "_").replace("/", "_")
+            return "".join(ch if (ch.isalnum() or ch in "._-") else "_" for ch in raw)
+
+        candidate_paths: list[Path] = []
+        env_host_log_dir = os.getenv("AUTOCAPTURE_HOST_LOG_DIR", "").strip()
+        if env_host_log_dir:
+            candidate_paths.append(Path(env_host_log_dir) / filename)
+        for run_id in ordered_run_ids:
+            candidate_paths.append(data_dir / "runs" / run_id / filename)
+        hosting_cfg = self._config.get("plugins", {}).get("hosting", {})
+        hosting_cache_raw = hosting_cfg.get("cache_dir") if isinstance(hosting_cfg, dict) else None
+        cache_root = Path(str(hosting_cache_raw)) if hosting_cache_raw else data_dir / "cache" / "plugins"
+        plugin_cache_root = cache_root / _sanitize_plugin_id(plugin_id)
+        candidate_paths.append(plugin_cache_root / "tmp" / filename)
+        candidate_paths.append(plugin_cache_root / filename)
+
+        unique_paths: list[Path] = []
+        seen_paths: set[str] = set()
+        for path in candidate_paths:
+            key = str(path)
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            unique_paths.append(path)
+
+        existing_paths = [path for path in unique_paths if path.exists()]
+        if not existing_paths:
+            primary = unique_paths[0] if unique_paths else data_dir / "runs" / "run" / filename
+            return {
+                "ok": True,
+                "plugin_id": plugin_id,
+                "path": str(primary),
+                "lines": [],
+                "missing": True,
+                "searched_paths": [str(path) for path in unique_paths],
+            }
+        chosen_path: Path | None = None
+        chosen_lines: list[str] = []
+        for candidate in unique_paths:
+            if not candidate.exists():
+                continue
+            lines = candidate.read_text(encoding="utf-8", errors="replace").splitlines()
+            tail = lines[-limit:]
+            redacted: list[str] = []
+            for line in tail:
+                text = str(line)
+                if "OPENAI_API_KEY" in text or "Authorization:" in text:
+                    continue
+                redacted.append(text[:2000])
+            if chosen_path is None:
+                chosen_path = candidate
+                chosen_lines = redacted
+            if redacted:
+                chosen_path = candidate
+                chosen_lines = redacted
+                break
+        path = chosen_path or existing_paths[0]
+        redacted = chosen_lines
         return {"ok": True, "plugin_id": plugin_id, "path": str(path), "lines": redacted, "missing": False}
 
     def plugins_capabilities_matrix(self) -> dict[str, Any]:
@@ -983,6 +1057,23 @@ class UXFacade:
         with self._kernel_mgr.session() as system:
             conductor = create_conductor(system)
             return conductor.run_once(force=force)
+
+    def batch_run(
+        self,
+        *,
+        max_loops: int = 500,
+        sleep_ms: int = 200,
+        require_idle: bool = True,
+    ) -> dict[str, Any]:
+        from autocapture_nx.runtime.batch import run_processing_batch
+
+        with self._kernel_mgr.session() as system:
+            return run_processing_batch(
+                system,
+                max_loops=int(max_loops),
+                sleep_ms=int(sleep_ms),
+                require_idle=bool(require_idle),
+            )
 
     def keys_rotate(self) -> dict[str, Any]:
         from autocapture_nx.kernel.key_rotation import rotate_keys
@@ -1196,52 +1287,185 @@ class UXFacade:
         controls_cfg = runtime_cfg.get("capture_controls", {}) if isinstance(runtime_cfg, dict) else {}
         return bool(controls_cfg.get("enabled", False))
 
-    def _start_components(self) -> None:
-        started = False
+    def _start_components(self) -> dict[str, Any]:
+        """Start capture-related components.
+
+        Fail closed for soak/ops: if required components can't start or the kernel
+        can't boot, bubble up a structured error so scripts don't "fake run".
+        """
+
+        errors: list[dict[str, Any]] = []
+        started_names: list[str] = []
+        kernel_error = None
+        # Ensure these are always defined, even if the session block errors early.
+        # This prevents ambiguous soak output like present={} wanted={} which hides
+        # whether capture was configured and which capabilities were missing.
+        present: dict[str, Any] = {
+            "capture.source": False,
+            "capture.screenshot": False,
+            "capture.audio": False,
+            "tracking.input": False,
+            "window.metadata": False,
+            "tracking.cursor": False,
+            "tracking.clipboard": False,
+            "tracking.file_activity": False,
+        }
+        wanted: dict[str, Any] = {}
+        # Compute "wanted" from config outside the kernel session so it is always
+        # populated even when boot fails.
+        capture_cfg = self._config.get("capture") if isinstance(self._config.get("capture"), dict) else {}
+        want_screenshot = bool((capture_cfg.get("screenshot") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        want_audio = bool((capture_cfg.get("audio") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        want_source = bool((capture_cfg.get("video") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        # Trackers are started only if enabled in config to reduce overhead during soak.
+        input_cfg = capture_cfg.get("input_tracking", {}) if isinstance(capture_cfg, dict) else {}
+        input_mode = str(input_cfg.get("mode") or "").strip().lower()
+        want_input = bool(input_mode and input_mode not in {"off", "disabled", "none"})
+        want_window_meta = bool((capture_cfg.get("window_metadata") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        want_cursor = bool((capture_cfg.get("cursor") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        want_clipboard = bool((capture_cfg.get("clipboard") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        want_file_activity = bool((capture_cfg.get("file_activity") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        wanted = {
+            "capture.source": want_source,
+            "capture.screenshot": want_screenshot,
+            "capture.audio": want_audio,
+            "tracking.input": want_input,
+            "window.metadata": want_window_meta,
+            "tracking.cursor": want_cursor,
+            "tracking.clipboard": want_clipboard,
+            "tracking.file_activity": want_file_activity,
+        }
+
+        def _providers(obj: Any) -> list[str] | None:
+            # Best-effort introspection for capability proxies (helps diagnose
+            # "no providers" cases where hasattr/getattr can raise).
+            if obj is None:
+                return None
+            if hasattr(obj, "provider_ids") and callable(getattr(obj, "provider_ids", None)):
+                try:
+                    ids = obj.provider_ids()
+                    if isinstance(ids, list):
+                        return [str(x) for x in ids]
+                except Exception:
+                    return None
+            if hasattr(obj, "plugin_id"):
+                try:
+                    pid = getattr(obj, "plugin_id")
+                    if isinstance(pid, str) and pid:
+                        return [pid]
+                except Exception:
+                    return None
+            return None
+
+        def _startable(obj: Any) -> tuple[bool, str | None]:
+            if obj is None:
+                return (False, "missing")
+            try:
+                attr = getattr(obj, "start", None)
+            except Exception as exc:
+                return (False, f"start_attr_error:{type(exc).__name__}:{exc}")
+            if not callable(attr):
+                return (False, "no_start_method")
+            return (True, None)
+
         with self._kernel_mgr.session() as system:
-            capture = system.get("capture.source") if system and hasattr(system, "get") else None
-            screenshot = (
-                system.get("capture.screenshot")
-                if system and hasattr(system, "has") and system.has("capture.screenshot")
-                else None
-            )
-            audio = system.get("capture.audio") if system and hasattr(system, "get") else None
-            input_tracker = system.get("tracking.input") if system and hasattr(system, "get") else None
-            window_meta = system.get("window.metadata") if system and hasattr(system, "get") else None
-            cursor_tracker = (
-                system.get("tracking.cursor")
-                if system and hasattr(system, "has") and system.has("tracking.cursor")
-                else None
-            )
-            clipboard = (
-                system.get("tracking.clipboard")
-                if system and hasattr(system, "has") and system.has("tracking.clipboard")
-                else None
-            )
-            file_activity = (
-                system.get("tracking.file_activity")
-                if system and hasattr(system, "has") and system.has("tracking.file_activity")
-                else None
-            )
-            for component in (
-                capture,
-                screenshot,
-                audio,
-                input_tracker,
-                window_meta,
-                cursor_tracker,
-                clipboard,
-                file_activity,
-            ):
+            if system is None:
+                kernel_error = self._kernel_mgr.last_error()
+                return {
+                    "ok": False,
+                    "error": "kernel_boot_failed",
+                    "kernel_error": kernel_error,
+                    "started": [],
+                    "errors": [],
+                    "present": present,
+                    "wanted": wanted,
+                }
+
+            # Pull capabilities with "has" checks where possible to avoid raising when a
+            # capability is not registered.
+            capture = system.get("capture.source") if hasattr(system, "has") and system.has("capture.source") else None
+            screenshot = system.get("capture.screenshot") if hasattr(system, "has") and system.has("capture.screenshot") else None
+            audio = system.get("capture.audio") if hasattr(system, "has") and system.has("capture.audio") else None
+            input_tracker = system.get("tracking.input") if hasattr(system, "has") and system.has("tracking.input") else None
+            window_meta = system.get("window.metadata") if hasattr(system, "has") and system.has("window.metadata") else None
+            cursor_tracker = system.get("tracking.cursor") if hasattr(system, "has") and system.has("tracking.cursor") else None
+            clipboard = system.get("tracking.clipboard") if hasattr(system, "has") and system.has("tracking.clipboard") else None
+            file_activity = system.get("tracking.file_activity") if hasattr(system, "has") and system.has("tracking.file_activity") else None
+
+            present = {
+                "capture.source": {"present": capture is not None, "providers": _providers(capture), "startable": _startable(capture)[0]},
+                "capture.screenshot": {"present": screenshot is not None, "providers": _providers(screenshot), "startable": _startable(screenshot)[0]},
+                "capture.audio": {"present": audio is not None, "providers": _providers(audio), "startable": _startable(audio)[0]},
+                "tracking.input": {"present": input_tracker is not None, "providers": _providers(input_tracker), "startable": _startable(input_tracker)[0]},
+                "window.metadata": {"present": window_meta is not None, "providers": _providers(window_meta), "startable": _startable(window_meta)[0]},
+                "tracking.cursor": {"present": cursor_tracker is not None, "providers": _providers(cursor_tracker), "startable": _startable(cursor_tracker)[0]},
+                "tracking.clipboard": {"present": clipboard is not None, "providers": _providers(clipboard), "startable": _startable(clipboard)[0]},
+                "tracking.file_activity": {"present": file_activity is not None, "providers": _providers(file_activity), "startable": _startable(file_activity)[0]},
+            }
+
+            # (name, component, should_start, required)
+            #
+            # Trackers are optional for capture+ingest: capture must never be blocked due
+            # to missing peripheral metadata providers. However, they still must respect
+            # config "wanted" flags (do not start when disabled).
+            components: list[tuple[str, Any, bool, bool]] = [
+                ("capture.source", capture, want_source, want_source),
+                ("capture.screenshot", screenshot, want_screenshot, want_screenshot),
+                ("capture.audio", audio, want_audio, want_audio),
+                ("tracking.input", input_tracker, want_input, False),
+                ("window.metadata", window_meta, want_window_meta, False),
+                ("tracking.cursor", cursor_tracker, want_cursor, False),
+                ("tracking.clipboard", clipboard, want_clipboard, False),
+                ("tracking.file_activity", file_activity, want_file_activity, False),
+            ]
+
+            for name, component, should_start, required in components:
                 if component is None:
+                    if required:
+                        errors.append({"component": name, "error": "missing"})
                     continue
-                if hasattr(component, "start"):
-                    try:
-                        component.start()
-                        started = True
-                    except Exception:
-                        continue
+                if not should_start:
+                    continue
+                ok_start, start_issue = _startable(component)
+                if not ok_start:
+                    if required:
+                        errors.append({"component": name, "error": start_issue or "not_startable"})
+                    continue
+                try:
+                    start_fn = getattr(component, "start")
+                except Exception as exc:
+                    if required:
+                        errors.append({"component": name, "error": f"start_attr_error:{type(exc).__name__}:{exc}"})
+                    continue
+                try:
+                    start_fn()
+                    started_names.append(name)
+                except Exception as exc:
+                    if required:
+                        errors.append({"component": name, "error": f"{type(exc).__name__}: {exc}"})
+                    continue
+
+        started = bool(started_names)
         self._run_active = started
+        if errors:
+            return {
+                "ok": False,
+                "error": "component_start_failed",
+                "started": started_names,
+                "errors": errors,
+                "present": present,
+                "wanted": wanted,
+            }
+        if not started:
+            return {
+                "ok": False,
+                "error": "no_components_started",
+                "started": [],
+                "errors": [],
+                "present": present,
+                "wanted": wanted,
+            }
+        return {"ok": True, "started": started_names, "errors": [], "present": present, "wanted": wanted}
 
     def _stop_components(self) -> None:
         with self._kernel_mgr.session() as system:
@@ -1279,6 +1503,31 @@ class UXFacade:
     def run_start(self) -> dict[str, Any]:
         with self._pause_lock:
             self._clear_pause_locked()
+        # If capture is not configured, fail fast with a clear message. This repo
+        # treats capture+ingest as an external (Windows sidecar) responsibility by
+        # default.
+        try:
+            capture_cfg = self._config.get("capture") if isinstance(self._config.get("capture"), dict) else {}
+            want_screenshot = bool((capture_cfg.get("screenshot") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_audio = bool((capture_cfg.get("audio") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_source = bool((capture_cfg.get("video") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            input_cfg = capture_cfg.get("input_tracking", {}) if isinstance(capture_cfg, dict) else {}
+            input_mode = str(input_cfg.get("mode") or "").strip().lower()
+            want_input = bool(input_mode and input_mode not in {"off", "disabled", "none"})
+            want_window_meta = bool((capture_cfg.get("window_metadata") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_cursor = bool((capture_cfg.get("cursor") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_clipboard = bool((capture_cfg.get("clipboard") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_file_activity = bool((capture_cfg.get("file_activity") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            if not any((want_source, want_screenshot, want_audio, want_input, want_window_meta, want_cursor, want_clipboard, want_file_activity)):
+                return {
+                    "ok": False,
+                    "error": "capture_disabled",
+                    "running": False,
+                    "hint": "use_windows_sidecar_contract",
+                }
+        except Exception:
+            # If config is malformed, fall through to existing error handling.
+            pass
         # Fail closed: require explicit capture consent if configured.
         try:
             privacy_cfg = self._config.get("privacy", {}) if isinstance(self._config, dict) else {}
@@ -1294,7 +1543,9 @@ class UXFacade:
         except Exception:
             return {"ok": False, "error": "consent_check_failed", "running": False}
 
-        self._start_components()
+        start_result = self._start_components()
+        if not bool(start_result.get("ok", False)):
+            return {"ok": False, "error": str(start_result.get("error") or "capture_start_failed"), "details": start_result, "running": False}
         # Ledger an operator capture start event (append-only).
         with self._kernel_mgr.session() as system:
             builder = system.get("event.builder") if system and hasattr(system, "get") else None
@@ -1308,7 +1559,7 @@ class UXFacade:
                     )
                 except Exception:
                     pass
-        return {"ok": True, "running": True}
+        return {"ok": True, "running": True, "started": start_result.get("started")}
 
     def run_stop(self, *, preserve_pause: bool = False) -> dict[str, Any]:
         if not self._capture_controls_enabled():
@@ -1363,7 +1614,12 @@ class UXFacade:
             self._clear_pause_locked()
         if self._run_active:
             return {"ok": True, "running": True, "resumed": False}
-        self._start_components()
+        start_result = self._start_components()
+        if not bool(start_result.get("ok", False)):
+            error = str(start_result.get("error") or "capture_start_failed")
+            if error in {"no_components_started", "capture_disabled"}:
+                return {"ok": True, "running": False, "resumed": False, "details": start_result}
+            return {"ok": False, "error": error, "details": start_result, "running": False}
         with self._kernel_mgr.session() as system:
             builder = system.get("event.builder") if system and hasattr(system, "get") else None
             if builder is not None and hasattr(builder, "ledger_entry"):
@@ -1418,7 +1674,7 @@ class UXFacade:
         with self._kernel_mgr.session() as system:
             config = system.config if hasattr(system, "config") else {}
             anchor_cfg = config.get("storage", {}).get("anchor", {})
-            anchor_path = Path(path) if path else Path(anchor_cfg.get("path", "data_anchor/anchors.ndjson"))
+            anchor_path = Path(path) if path else Path(anchor_cfg.get("path", "anchor/anchors.ndjson"))
             keyring = system.get("storage.keyring") if system and hasattr(system, "has") and system.has("storage.keyring") else None
             ok, errors = verify_anchors(anchor_path, keyring)
             return {"ok": ok, "errors": errors, "path": str(anchor_path)}
@@ -1440,7 +1696,7 @@ class UXFacade:
             storage_cfg = config.get("storage", {}) if isinstance(config, dict) else {}
             data_dir = Path(storage_cfg.get("data_dir", "data"))
             ledger_path = data_dir / "ledger.ndjson"
-            anchor_path = Path(storage_cfg.get("anchor", {}).get("path", "data_anchor/anchors.ndjson"))
+            anchor_path = Path(storage_cfg.get("anchor", {}).get("path", "anchor/anchors.ndjson"))
             keyring = system.get("storage.keyring") if system is not None and hasattr(system, "has") and system.has("storage.keyring") else None
             return integrity_scan(
                 ledger_path=ledger_path,
@@ -1473,7 +1729,7 @@ class UXFacade:
             storage_cfg = config.get("storage", {}) if isinstance(config, dict) else {}
             data_dir = storage_cfg.get("data_dir", "data")
             ledger_path = Path(data_dir) / "ledger.ndjson"
-            anchor_path = Path(storage_cfg.get("anchor", {}).get("path", "data_anchor/anchors.ndjson"))
+            anchor_path = Path(storage_cfg.get("anchor", {}).get("path", "anchor/anchors.ndjson"))
             report = export_proof_bundle(
                 metadata=system.get("storage.metadata"),
                 media=system.get("storage.media"),
@@ -1955,8 +2211,17 @@ class UXFacade:
                         idle_seconds = 0.0
                     can_run = idle_seconds >= idle_window
                 else:
-                    assume_idle = bool(system.config.get("runtime", {}).get("activity", {}).get("assume_idle_when_missing", False))
-                    can_run = assume_idle
+                    signal = None
+                    try:
+                        signal = load_activity_signal(system.config)
+                    except Exception:
+                        signal = None
+                    if signal is not None:
+                        idle_seconds = float(signal.idle_seconds)
+                        can_run = idle_seconds >= idle_window
+                    else:
+                        assume_idle = bool(system.config.get("runtime", {}).get("activity", {}).get("assume_idle_when_missing", False))
+                        can_run = assume_idle
             if not can_run:
                 return {
                     "ok": False,

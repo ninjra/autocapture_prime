@@ -252,7 +252,7 @@ class CitationValidator(PluginBase):
     def _anchor_path(self) -> str:
         storage_cfg = self.context.config.get("storage", {}) if isinstance(self.context.config, dict) else {}
         anchor_cfg = storage_cfg.get("anchor", {}) if isinstance(storage_cfg, dict) else {}
-        return anchor_cfg.get("path", os.path.join("data_anchor", "anchors.ndjson"))
+        return anchor_cfg.get("path", os.path.join("anchor", "anchors.ndjson"))
 
     def _verify_ledger(self, expected_head: str) -> bool:
         path = self._ledger_path()

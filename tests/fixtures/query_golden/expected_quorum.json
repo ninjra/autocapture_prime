@@ -7,27 +7,29 @@
             "anchor_ref": "anchor:test",
             "derived_hash": null,
             "derived_id": null,
-            "evidence_hash": "hash_quorum",
-            "evidence_id": "run_test/derived.text.ocr/test_provider/quorum",
+            "evidence_hash": "hash_quorum_obs",
+            "evidence_id": "run_test/derived.text.obs/test_provider/quorum",
             "ledger_head": "ledger:test",
             "locator": {
               "kind": "text_offsets",
-              "offset_end": 34,
-              "offset_start": 11,
-              "record_hash": "",
-              "record_id": "run_test/derived.text.ocr/test_provider/quorum",
-              "span_sha256": "819542c958b627814429a79918031114946835f2cb10419dc9241d699375bb04"
+              "offset_end": 90,
+              "offset_start": 0,
+              "record_hash": "hash_quorum_obs",
+              "record_id": "run_test/derived.text.obs/test_provider/quorum",
+              "span_sha256": "794d7e9ac36dd1363cabb081a673a8e05c255b79f799dd618b83212f7024003a"
             },
-            "offset_end": 34,
-            "offset_start": 11,
+            "offset_end": 90,
+            "offset_start": 0,
             "schema_version": 1,
             "source": "local",
-            "span_id": "run_test/derived.text.ocr/test_provider/quorum",
+            "span_id": "run_test/derived.text.obs/test_provider/quorum",
             "span_kind": "text",
-            "span_ref": null
+            "span_ref": null,
+            "stale": false,
+            "stale_reason": null
           }
         ],
-        "text": "Quorum task collaborator: Open Invoice"
+        "text": "Observation: quorum_task_collaborator=Open Invoice. Quorum task collaborator: Open Invoice"
       }
     ],
     "errors": [],
@@ -37,21 +39,29 @@
     "state": "ok"
   },
   "custom_claims": {
-    "count": 1,
+    "count": 0,
     "debug": {
-      "quorum_found_count": 1,
-      "quorum_hint_count": 1
+      "mode": "persisted_only",
+      "screen_pipeline": {
+        "attempted": 0,
+        "claims_built": 0,
+        "enabled": false,
+        "provider_ids": {},
+        "reason": "capability_missing"
+      }
     },
     "error": null
   },
   "evaluation": {
     "blocked_extract": true,
     "blocked_reason": "disabled",
-    "candidate_count": 0,
-    "coverage_ratio": 0.0,
+    "candidate_count": 1,
+    "coverage_ratio": 1.0,
     "freshness_newest_ts_utc": null,
     "missing_spans_count": 0,
-    "result_count": 0,
+    "result_count": 1,
+    "scheduled_extract_job_id": null,
+    "schema_error": "$: Additional properties are not allowed ('scheduled_extract_job_id' was unexpected)",
     "schema_version": 1
   },
   "intent": {
@@ -63,24 +73,43 @@
       "allowed": false,
       "blocked": true,
       "blocked_reason": "disabled",
-      "candidate_count": 0,
+      "candidate_count": 1,
       "extracted_count": 0,
       "idle_seconds": null,
       "idle_window_s": null,
       "ran": false,
-      "require_idle": true
+      "require_idle": true,
+      "scheduled_job_id": null
+    },
+    "policy": {
+      "filtered_claim_count": 1,
+      "raw_claim_count": 1,
+      "source_guard_applied": true,
+      "source_rejections": [],
+      "source_rejections_count": 0
     }
   },
   "provenance": {
     "anchor_ref": "anchor:test",
-    "contracts_lock_sha256": "b622d0456b87d5174a259d51980cf017e90995066b3edf9168d3abae4074515a",
+    "contracts_lock_sha256": "<hash>",
     "data_dir": null,
-    "effective_config_sha256": "507b87323850ec2c16548d8afe8a51785843904c6b2bc83a6e02e25107cfa29b",
+    "effective_config_sha256": "<hash>",
     "generated_at_utc": "<ts>",
-    "plugin_locks_sha256": "f0c9abb2de30442b6b8e3a11b97a81efaedbe0d0814c98175318ce7c844221c4",
+    "plugin_locks_sha256": "<hash>",
     "query_ledger_head": "ledger:test",
     "run_id": null,
     "schema_version": 1
   },
-  "results": []
+  "results": [
+    {
+      "derived_id": null,
+      "record_id": "run_test/derived.text.obs/test_provider/quorum"
+    }
+  ],
+  "scheduled_extract_job_id": null,
+  "synth_claims": {
+    "count": 0,
+    "debug": {},
+    "error": null
+  }
 }

@@ -2,7 +2,9 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from autocapture_nx.kernel import instance_lock
 from autocapture_nx.kernel.config import ConfigPaths
 from autocapture_nx.kernel.errors import ConfigError
 from autocapture_nx.kernel.loader import Kernel
@@ -82,6 +84,26 @@ class InstanceLockTests(unittest.TestCase):
                     k2.boot(start_conductor=False, fast_boot=True)
             finally:
                 k1.shutdown()
+
+    def test_instance_lock_falls_back_when_data_dir_lock_is_unwritable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "readonly-data"
+            root.mkdir(parents=True, exist_ok=True)
+            primary = root / ".autocapture.instance.lock"
+            real_open = instance_lock._open_lock_handle  # pylint: disable=protected-access
+
+            def fake_open(path: Path):
+                if path == primary:
+                    raise PermissionError("denied")
+                return real_open(path)
+
+            with patch("autocapture_nx.kernel.instance_lock._open_lock_handle", side_effect=fake_open):
+                lock = instance_lock.acquire_instance_lock(root)
+            try:
+                self.assertNotEqual(lock.path, primary)
+                self.assertIn("autocapture/locks", lock.path.as_posix())
+            finally:
+                lock.close()
 
 
 if __name__ == "__main__":

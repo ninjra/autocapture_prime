@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import importlib.util
 import os
 import shutil
@@ -9,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 import socket
+from datetime import datetime, timezone
 
 
 def _tool_python() -> str | None:
@@ -44,6 +46,54 @@ def _network_available() -> bool:
     return True
 
 
+def _parse_ts_utc(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _load_ignored_vuln_ids(path: Path, *, now: datetime | None = None) -> tuple[list[str], list[str]]:
+    if not path.exists():
+        return ([], [])
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return ([], [f"invalid_json:{path}"])
+    entries = payload.get("ignored_ids", []) if isinstance(payload, dict) else []
+    if not isinstance(entries, list):
+        return ([], [f"invalid_schema:{path}"])
+    at = now or datetime.now(timezone.utc)
+    active: list[str] = []
+    errors: list[str] = []
+    for idx, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            errors.append(f"invalid_entry:{idx}")
+            continue
+        vuln_id = str(entry.get("id") or "").strip()
+        if not vuln_id:
+            errors.append(f"missing_id:{idx}")
+            continue
+        expires_raw = str(entry.get("expires_utc") or "").strip()
+        expires = _parse_ts_utc(expires_raw) if expires_raw else None
+        if expires_raw and expires is None:
+            errors.append(f"invalid_expiry:{vuln_id}")
+            continue
+        if expires is not None and expires <= at:
+            errors.append(f"expired:{vuln_id}")
+            continue
+        active.append(vuln_id)
+    return (sorted(set(active)), errors)
+
+
 def main() -> int:
     runner = _runner()
     if runner is None:
@@ -52,9 +102,15 @@ def main() -> int:
     if not _network_available():
         print("SKIP: vulnerability scan (no network / DNS unavailable)")
         return 0
+    ignored_ids, ignore_errors = _load_ignored_vuln_ids(Path("config") / "vuln_allowlist.json")
+    if ignore_errors:
+        print(f"FAIL: invalid vulnerability allowlist entries: {', '.join(ignore_errors)}")
+        return 1
     cache_dir = Path(".dev") / "cache" / "pip_audit"
     cache_dir.mkdir(parents=True, exist_ok=True)
     cmd = [*runner, "--local", "--progress-spinner", "off", "--cache-dir", str(cache_dir)]
+    for vuln_id in ignored_ids:
+        cmd.extend(["--ignore-vuln", vuln_id])
     result = subprocess.run(cmd)
     if result.returncode != 0:
         print("FAIL: vulnerability scan")

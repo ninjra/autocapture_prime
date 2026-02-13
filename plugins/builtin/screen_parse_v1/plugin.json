@@ -1,0 +1,41 @@
+{
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [],
+  "enabled": false,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "screen.parse.v1",
+      "path": "plugin.py"
+    }
+  ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "io_contracts": {
+    "screen.parse.v1": {
+      "parse": {
+        "output_schema_path": "docs/schemas/ui_graph.schema.json"
+      }
+    }
+  },
+  "permissions": {
+    "filesystem": "read",
+    "gpu": false,
+    "network": false,
+    "raw_input": false
+  },
+  "plugin_id": "builtin.screen.parse.v1",
+  "provides": [
+    "screen.parse.v1"
+  ],
+  "required_capabilities": [],
+  "version": "0.1.0"
+}

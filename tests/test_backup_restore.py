@@ -4,11 +4,8 @@ def test_backup_create_and_restore_archives_conflicts(tmp_path, monkeypatch):
     repo.mkdir()
     (repo / "pyproject.toml").write_text("[build-system]\nrequires=[]\n", encoding="utf-8")
     (repo / "config").mkdir()
-    (repo / "data_anchor").mkdir()
     lockfile = repo / "config" / "plugin_locks.json"
     lockfile.write_text('{"locks": []}\n', encoding="utf-8")
-    anchors = repo / "data_anchor" / "anchors.ndjson"
-    anchors.write_text('{"ts":"t","h":"x"}\n', encoding="utf-8")
 
     config_dir = tmp_path / "cfg"
     config_dir.mkdir()
@@ -17,8 +14,10 @@ def test_backup_create_and_restore_archives_conflicts(tmp_path, monkeypatch):
 
     data_dir = tmp_path / "data"
     (data_dir / "vault").mkdir(parents=True)
+    (data_dir / "anchor").mkdir(parents=True)
     (data_dir / "ledger.ndjson").write_text('{"h":"a"}\n', encoding="utf-8")
     (data_dir / "journal.ndjson").write_text('{"t":"j"}\n', encoding="utf-8")
+    (data_dir / "anchor" / "anchors.ndjson").write_text('{"ts":"t","h":"x"}\n', encoding="utf-8")
 
     # Make repo_root() resolve to our fake repo for any indirect calls.
     monkeypatch.setenv("AUTOCAPTURE_ROOT", str(repo))

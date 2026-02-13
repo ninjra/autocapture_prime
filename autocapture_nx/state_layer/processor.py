@@ -118,6 +118,7 @@ class StateTapeProcessor:
             return
         ts_utc = datetime.now(timezone.utc).isoformat()
         payload = {
+            "schema_version": 1,
             "record_type": "derived.state_tape.checkpoint",
             "run_id": run_id,
             "ts_utc": ts_utc,
