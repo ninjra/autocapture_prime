@@ -41,7 +41,14 @@
   "custom_claims": {
     "count": 0,
     "debug": {
-      "mode": "persisted_only"
+      "mode": "persisted_only",
+      "screen_pipeline": {
+        "attempted": 0,
+        "claims_built": 0,
+        "enabled": false,
+        "provider_ids": {},
+        "reason": "capability_missing"
+      }
     },
     "error": null
   },

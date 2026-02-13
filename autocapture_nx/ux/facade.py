@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import uuid
 from contextlib import contextmanager
@@ -831,21 +832,85 @@ class UXFacade:
     def plugins_logs(self, plugin_id: str, *, limit: int = 80) -> dict[str, Any]:
         # EXT-09: return per-plugin host_runner logs (best-effort, sanitized).
         limit = max(1, min(400, int(limit or 80)))
-        data_dir = str(self._config.get("storage", {}).get("data_dir", "data"))
-        run_id = str(self._config.get("runtime", {}).get("run_id") or "")
-        if not run_id:
-            run_id = str(self.status().get("run_id") or "run")
-        path = Path(data_dir) / "runs" / run_id / f"plugin_host_{plugin_id}.log"
-        if not path.exists():
-            return {"ok": True, "plugin_id": plugin_id, "path": str(path), "lines": [], "missing": True}
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        tail = lines[-limit:]
-        redacted: list[str] = []
-        for line in tail:
-            text = str(line)
-            if "OPENAI_API_KEY" in text or "Authorization:" in text:
+        data_dir = Path(str(self._config.get("storage", {}).get("data_dir", "data")))
+        filename = f"plugin_host_{plugin_id}.log"
+
+        run_ids: list[str] = []
+        config_run_id = str(self._config.get("runtime", {}).get("run_id") or "").strip()
+        if config_run_id:
+            run_ids.append(config_run_id)
+        status_run_id = str(self.status().get("run_id") or "").strip()
+        if status_run_id:
+            run_ids.append(status_run_id)
+        run_ids.append("run")
+        seen_run_ids: set[str] = set()
+        ordered_run_ids: list[str] = []
+        for run_id in run_ids:
+            if run_id in seen_run_ids:
                 continue
-            redacted.append(text[:2000])
+            seen_run_ids.add(run_id)
+            ordered_run_ids.append(run_id)
+
+        def _sanitize_plugin_id(value: str) -> str:
+            raw = value.strip() or "plugin"
+            raw = raw.replace("\\", "_").replace("/", "_")
+            return "".join(ch if (ch.isalnum() or ch in "._-") else "_" for ch in raw)
+
+        candidate_paths: list[Path] = []
+        env_host_log_dir = os.getenv("AUTOCAPTURE_HOST_LOG_DIR", "").strip()
+        if env_host_log_dir:
+            candidate_paths.append(Path(env_host_log_dir) / filename)
+        for run_id in ordered_run_ids:
+            candidate_paths.append(data_dir / "runs" / run_id / filename)
+        hosting_cfg = self._config.get("plugins", {}).get("hosting", {})
+        hosting_cache_raw = hosting_cfg.get("cache_dir") if isinstance(hosting_cfg, dict) else None
+        cache_root = Path(str(hosting_cache_raw)) if hosting_cache_raw else data_dir / "cache" / "plugins"
+        plugin_cache_root = cache_root / _sanitize_plugin_id(plugin_id)
+        candidate_paths.append(plugin_cache_root / "tmp" / filename)
+        candidate_paths.append(plugin_cache_root / filename)
+
+        unique_paths: list[Path] = []
+        seen_paths: set[str] = set()
+        for path in candidate_paths:
+            key = str(path)
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            unique_paths.append(path)
+
+        existing_paths = [path for path in unique_paths if path.exists()]
+        if not existing_paths:
+            primary = unique_paths[0] if unique_paths else data_dir / "runs" / "run" / filename
+            return {
+                "ok": True,
+                "plugin_id": plugin_id,
+                "path": str(primary),
+                "lines": [],
+                "missing": True,
+                "searched_paths": [str(path) for path in unique_paths],
+            }
+        chosen_path: Path | None = None
+        chosen_lines: list[str] = []
+        for candidate in unique_paths:
+            if not candidate.exists():
+                continue
+            lines = candidate.read_text(encoding="utf-8", errors="replace").splitlines()
+            tail = lines[-limit:]
+            redacted: list[str] = []
+            for line in tail:
+                text = str(line)
+                if "OPENAI_API_KEY" in text or "Authorization:" in text:
+                    continue
+                redacted.append(text[:2000])
+            if chosen_path is None:
+                chosen_path = candidate
+                chosen_lines = redacted
+            if redacted:
+                chosen_path = candidate
+                chosen_lines = redacted
+                break
+        path = chosen_path or existing_paths[0]
+        redacted = chosen_lines
         return {"ok": True, "plugin_id": plugin_id, "path": str(path), "lines": redacted, "missing": False}
 
     def plugins_capabilities_matrix(self) -> dict[str, Any]:
