@@ -47,6 +47,10 @@ def _run_query(root: Path, query: str, cfg: str, data: str) -> dict[str, Any]:
     env["AUTOCAPTURE_DATA_DIR"] = str(data)
     env.setdefault("AUTOCAPTURE_HARD_VLM_DEBUG", "1")
     env["AUTOCAPTURE_VLM_BASE_URL"] = EXTERNAL_VLLM_BASE_URL
+    if not str(env.get("AUTOCAPTURE_VLM_MODEL") or "").strip():
+        model = _configured_vlm_model(Path(cfg))
+        if model:
+            env["AUTOCAPTURE_VLM_MODEL"] = model
     existing = str(env.get("PYTHONPATH") or "").strip()
     env["PYTHONPATH"] = f"{root}{os.pathsep}{existing}" if existing else str(root)
     proc = subprocess.run(
@@ -63,6 +67,19 @@ def _run_query(root: Path, query: str, cfg: str, data: str) -> dict[str, Any]:
         return json.loads(proc.stdout)
     except Exception as exc:
         raise RuntimeError(f"query_output_not_json: {type(exc).__name__}: {exc}")
+
+
+def _configured_vlm_model(config_dir: Path) -> str:
+    try:
+        path = config_dir / "user.json"
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    plugins_cfg = raw.get("plugins", {}) if isinstance(raw, dict) else {}
+    settings = plugins_cfg.get("settings", {}) if isinstance(plugins_cfg, dict) else {}
+    vllm = settings.get("builtin.vlm.vllm_localhost", {}) if isinstance(settings, dict) else {}
+    model = str(vllm.get("model") or "").strip() if isinstance(vllm, dict) else ""
+    return model
 
 
 def _summary(result: dict[str, Any]) -> tuple[str, list[str]]:

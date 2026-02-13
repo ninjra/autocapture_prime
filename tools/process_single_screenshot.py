@@ -220,7 +220,11 @@ def main(argv: list[str] | None = None) -> int:
             vllm_settings = settings.setdefault("builtin.vlm.vllm_localhost", {})
             if isinstance(vllm_settings, dict):
                 vllm_settings["base_url"] = remote_vlm_base_url
-                model = str(os.environ.get("AUTOCAPTURE_VLM_MODEL") or "").strip()
+                model = str(
+                    os.environ.get("AUTOCAPTURE_VLM_MODEL")
+                    or vllm_settings.get("model")
+                    or "/mnt/d/autocapture/models/qwen2-vl-2b-instruct"
+                ).strip()
                 if model:
                     vllm_settings["model"] = model
                 vllm_settings["timeout_s"] = float(os.environ.get("AUTOCAPTURE_VLM_TIMEOUT_S", "60"))

@@ -111,6 +111,9 @@ def main() -> int:
                 f"[{provider_id}] backend={response.get('backend')} layout_elements={len(elements)} "
                 f"text_len={len(text)} keys={sorted(response.keys())}"
             )
+            model_error = str(response.get("model_error") or "").strip()
+            if model_error:
+                print(f"[{provider_id}] model_error={model_error}")
             if text:
                 head = text[:220].replace("\n", " ")
                 print(f"[{provider_id}] text_head={head}")
