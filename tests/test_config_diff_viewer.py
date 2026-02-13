@@ -51,8 +51,8 @@ class ConfigDiffViewerTests(unittest.TestCase):
                 self.assertTrue(data.get("ok", True) or data.get("error") is None)
 
                 diff2 = client.get("/api/config/diff").json()
-                user_diff = diff2.get("diff_user_to_effective", [])
-                paths = {row.get("path") for row in user_diff if isinstance(row, dict)}
+                default_diff = diff2.get("diff_default_to_effective", [])
+                paths = {row.get("path") for row in default_diff if isinstance(row, dict)}
                 self.assertIn("time.timezone", paths)
             finally:
                 try:
@@ -72,4 +72,3 @@ class ConfigDiffViewerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

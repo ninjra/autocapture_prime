@@ -4,9 +4,9 @@
 This matrix is generated from the full-repo miss inventory and represents every currently detected miss marker across all scanned files.
 
 ## Scan Metadata
-- Generated (matrix): `2026-02-13T18:21:37.897912+00:00`
-- Inventory generated: `2026-02-13T18:21:28.868678+00:00`
-- Scanned files: `1385`
+- Generated (matrix): `2026-02-13T19:28:30.959903+00:00`
+- Inventory generated: `2026-02-13T19:28:25.195851+00:00`
+- Scanned files: `1387`
 - Miss rows: `0`
 - Gate failures: `0`
 
@@ -69,10 +69,10 @@ This matrix is generated from the full-repo miss inventory and represents every 
 | `A8` | 40 | RAG evaluation + benchmark kit (RAGAs + RAGBench) | 1 | docs/reports/four_pillars_traceability_map.md:55:- A8) mapped to deterministic RAG-style regression harness: |
 | `A9` | 44 | Late-interaction retrieval (ColBERT) for higher-precision span retrieval | 1 | docs/reports/four_pillars_traceability_map.md:61:- A9) mapped to late-interaction retrieval pathway: |
 | `A10` | 48 | Local serving performance: vLLM V1 + optional FlashInfer backend | 1 | docs/reports/four_pillars_traceability_map.md:67:- A10) mapped to localhost vLLM integration and throughput-safe routing: |
-| `A-CORE-01` | 56 | Frame → UI IR extraction pipeline (OmniParser adapter) | 4 | optimal-implementation-order-plan.md:157:### Task 4.1: Implement A-CORE-01 UI-IR contract first; docs/reports/four_pillars_traceability_map.md:16:  - Superseded by: `A-CORE-01`, `A-GROUND-01`; docs/reports/four_pillars_traceability_map.md:22:  - Superseded by: `A-CORE-01`, `A-GROUND-01` |
-| `A-GROUND-01` | 66 | Grounding stage with verifier (GUI-Actor style contract) | 5 | docs/reports/four_pillars_traceability_map.md:16:  - Superseded by: `A-CORE-01`, `A-GROUND-01`; docs/reports/four_pillars_traceability_map.md:22:  - Superseded by: `A-CORE-01`, `A-GROUND-01`; docs/reports/four_pillars_traceability_map.md:35:  - Superseded by: `A-GROUND-01` |
-| `A-RAG-01` | 75 | Multimodal RAG evaluation harness (RAG-Check / RAGAs style) | 5 | optimal-implementation-order-plan.md:177:### Task 4.3: Implement A-INDEX-01 retrieval abstraction before A-RAG-01; optimal-implementation-order-plan.md:187:### Task 4.4: Implement A-RAG-01 evaluation harness against abstracted retrieval; docs/reports/four_pillars_traceability_map.md:47:  - Superseded by: `A-RAG-01` |
-| `A-INDEX-01` | 83 | Retrieval backend abstraction (dense + ColBERT optional) | 2 | docs/reports/four_pillars_traceability_map.md:65:  - Superseded by: `A-INDEX-01`; optimal-implementation-order-plan.md:177:### Task 4.3: Implement A-INDEX-01 retrieval abstraction before A-RAG-01 |
+| `A-CORE-01` | 56 | Frame → UI IR extraction pipeline (OmniParser adapter) | 4 | docs/reports/four_pillars_traceability_map.md:16:  - Superseded by: `A-CORE-01`, `A-GROUND-01`; docs/reports/four_pillars_traceability_map.md:22:  - Superseded by: `A-CORE-01`, `A-GROUND-01`; docs/reports/four_pillars_traceability_map.md:29:  - Superseded by: `A-CORE-01` |
+| `A-GROUND-01` | 66 | Grounding stage with verifier (GUI-Actor style contract) | 5 | optimal-implementation-order-plan.md:167:### Task 4.2: Implement A-GROUND-01 on top of IR (not before); docs/reports/four_pillars_traceability_map.md:16:  - Superseded by: `A-CORE-01`, `A-GROUND-01`; docs/reports/four_pillars_traceability_map.md:22:  - Superseded by: `A-CORE-01`, `A-GROUND-01` |
+| `A-RAG-01` | 75 | Multimodal RAG evaluation harness (RAG-Check / RAGAs style) | 5 | docs/reports/four_pillars_traceability_map.md:47:  - Superseded by: `A-RAG-01`; docs/reports/four_pillars_traceability_map.md:53:  - Superseded by: `A-RAG-01`; docs/reports/four_pillars_traceability_map.md:59:  - Superseded by: `A-RAG-01` |
+| `A-INDEX-01` | 83 | Retrieval backend abstraction (dense + ColBERT optional) | 2 | optimal-implementation-order-plan.md:177:### Task 4.3: Implement A-INDEX-01 retrieval abstraction before A-RAG-01; docs/reports/four_pillars_traceability_map.md:65:  - Superseded by: `A-INDEX-01` |
 | `A-PERF-01` | 91 | Background batch scheduler w/ budgets | 3 | docs/reports/four_pillars_traceability_map.md:72:  - Superseded by: `A-PERF-01`; optimal-implementation-order-plan.md:39:  - Resolution rule: no A-PERF-01 work before A-CORE/A-GROUND/A-INDEX/A-RAG contracts and tests are green.; optimal-implementation-order-plan.md:197:### Task 4.5: Implement A-PERF-01 scheduling/budget enforcement last |
 
 ## Regenerated Misses (Actionable Clusters)

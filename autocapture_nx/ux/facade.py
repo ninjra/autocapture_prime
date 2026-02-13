@@ -1551,7 +1551,10 @@ class UXFacade:
             return {"ok": True, "running": True, "resumed": False}
         start_result = self._start_components()
         if not bool(start_result.get("ok", False)):
-            return {"ok": False, "error": str(start_result.get("error") or "capture_start_failed"), "details": start_result, "running": False}
+            error = str(start_result.get("error") or "capture_start_failed")
+            if error in {"no_components_started", "capture_disabled"}:
+                return {"ok": True, "running": False, "resumed": False, "details": start_result}
+            return {"ok": False, "error": error, "details": start_result, "running": False}
         with self._kernel_mgr.session() as system:
             builder = system.get("event.builder") if system and hasattr(system, "get") else None
             if builder is not None and hasattr(builder, "ledger_entry"):

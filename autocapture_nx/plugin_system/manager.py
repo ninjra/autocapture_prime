@@ -162,9 +162,11 @@ class PluginManager:
 
     def _enabled_plugin_ids(self, manifests: list[PluginManifest]) -> set[str]:
         alias_map = self._alias_map(manifests)
-        allowlist = set(self._normalize_ids(self.config.get("plugins", {}).get("allowlist", []), alias_map))
-        enabled_map = self._normalize_enabled_map(self.config.get("plugins", {}).get("enabled", {}), alias_map)
-        default_pack = set(self._normalize_ids(self.config.get("plugins", {}).get("default_pack", []), alias_map))
+        merged_cfg = deep_merge(self.config, self._load_user_config())
+        plugins_cfg = merged_cfg.get("plugins", {}) if isinstance(merged_cfg, dict) else {}
+        allowlist = set(self._normalize_ids(plugins_cfg.get("allowlist", []), alias_map))
+        enabled_map = self._normalize_enabled_map(plugins_cfg.get("enabled", {}), alias_map)
+        default_pack = set(self._normalize_ids(plugins_cfg.get("default_pack", []), alias_map))
         enabled: set[str] = set()
         for manifest in manifests:
             pid = manifest.plugin_id
@@ -473,6 +475,12 @@ class PluginManager:
                 raise RuntimeError(f"plugin_not_locked:{plugin_id}")
         user_cfg = self._load_user_config()
         plugins_cfg = user_cfg.setdefault("plugins", {})
+        allowlist = plugins_cfg.setdefault("allowlist", [])
+        if not isinstance(allowlist, list):
+            allowlist = []
+            plugins_cfg["allowlist"] = allowlist
+        if plugin_id not in [str(item) for item in allowlist]:
+            allowlist.append(plugin_id)
         enabled_map = plugins_cfg.setdefault("enabled", {})
         enabled_map[plugin_id] = True
         self._write_user_config(user_cfg)

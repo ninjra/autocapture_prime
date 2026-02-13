@@ -1039,6 +1039,7 @@
       },
       "mode": "subprocess",
       "wsl_force_lazy_start": true,
+      "wsl_force_inproc": true,
       "subprocess_spawn_concurrency": 1,
       "subprocess_max_hosts": 2,
       "subprocess_idle_ttl_s": 10.0,
@@ -1075,6 +1076,9 @@
       "localhost_allowed_plugin_ids": [
         "builtin.vlm.vllm_localhost"
       ]
+    },
+    "approvals": {
+      "required": false
     },
     "safe_mode": false,
     "safe_mode_minimal": false,

@@ -70,7 +70,7 @@ class EgressGatewayTests(unittest.TestCase):
                     },
                     "privacy": {
                         "cloud": {"enabled": True},
-                        "egress": {"default_sanitize": True},
+                        "egress": {"default_sanitize": True, "approval_required": False},
                     },
                 }
                 with open(paths.user_path, "w", encoding="utf-8") as handle:
