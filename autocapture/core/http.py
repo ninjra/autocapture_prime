@@ -49,6 +49,7 @@ class EgressClient:
         decision = self.policy_gate.enforce(
             plugin_id,
             payload,
+            url=url,
             allow_raw_egress=allow_raw_egress,
             allow_images=allow_images,
         )

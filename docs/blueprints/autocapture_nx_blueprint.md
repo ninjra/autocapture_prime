@@ -75,136 +75,136 @@ Phases are ordered; later phases may start only when earlier phase exit criteria
 
 Each item appears exactly once in the phase details below.
 
-- [ ] **I001** (Phase 1) — [Eliminate floats from journal/ledger payloads](#i001)
-- [ ] **I002** (Phase 1) — [Make backpressure actually affect capture rate](#i002)
-- [ ] **I003** (Phase 1) — [Stop buffering whole segments in RAM; stream segments](#i003)
-- [ ] **I004** (Phase 1) — [Do not write to storage from realtime audio callback](#i004)
-- [ ] **I005** (Phase 1) — [Stop mutating primary evidence metadata during query](#i005)
-- [ ] **I006** (Phase 1) — [Introduce globally unique run/session identifier; prefix all record IDs](#i006)
-- [ ] **I007** (Phase 1) — [Make ledger writing thread-safe](#i007)
-- [ ] **I008** (Phase 1) — [Make journal writing thread-safe; centralize sequences](#i008)
-- [ ] **I009** (Phase 1) — [Fail closed if DPAPI protection fails when encryption_required](#i009)
-- [ ] **I010** (Phase 1) — [Sort all store keys deterministically](#i010)
-- [ ] **I011** (Phase 1) — [Use monotonic clocks for segment duration](#i011)
-- [ ] **I012** (Phase 1) — [Align default config with implemented capture backend](#i012)
-- [ ] **I013** (Phase 1) — [Remove hard-coded model paths; config-driven + portable](#i013)
-- [ ] **I014** (Phase 1) — [Enforce plugin compat.requires_kernel / schema versions](#i014)
-- [ ] **I015** (Phase 1) — [Verify contract lock at boot/doctor](#i015)
-- [ ] **I016** (Phase 2) — [Split capture into grab → encode/pack → encrypt/write pipeline](#i016)
-- [ ] **I017** (Phase 2) — [Bounded queues with explicit drop policies](#i017)
-- [ ] **I018** (Phase 2) — [Replace zip-of-JPEG with real video container for primary artifact](#i018)
-- [ ] **I019** (Phase 2) — [Add GPU-accelerated capture/encode backend (NVENC/DD)](#i019)
-- [ ] **I020** (Phase 2) — [Record segment start/end timestamps](#i020)
-- [ ] **I021** (Phase 2) — [Record capture parameters per segment](#i021)
-- [ ] **I022** (Phase 2) — [Correlate frames with active window via synchronized timeline](#i022)
-- [ ] **I023** (Phase 2) — [Add cursor/input correlation timeline references](#i023)
-- [ ] **I024** (Phase 2) — [Disk pressure degrades capture quality before stopping](#i024)
-- [ ] **I025** (Phase 2) — [Atomic segment writes (temp + os.replace)](#i025)
-- [ ] **I026** (Phase 3) — [Default to SQLCipher for metadata when available](#i026)
-- [ ] **I027** (Phase 3) — [Add DB indexes on ts_utc, record_type, run_id](#i027)
-- [ ] **I028** (Phase 3) — [Store media in binary encrypted format (not base64 JSON)](#i028)
-- [ ] **I029** (Phase 3) — [Stream encryption (avoid whole-segment in memory)](#i029)
-- [ ] **I030** (Phase 3) — [Immutability/versioning in stores (put_new vs put_replace)](#i030)
-- [ ] **I031** (Phase 3) — [Make record ID encoding reversible (no lossy mapping)](#i031)
-- [ ] **I032** (Phase 3) — [Shard media/metadata directories by date/run](#i032)
-- [ ] **I033** (Phase 3) — [Add per-run storage manifest records](#i033)
-- [ ] **I034** (Phase 3) — [Configurable fsync policy (critical vs bulk)](#i034)
-- [ ] **I035** (Phase 4) — [Replace full-scan query with tiered indexed retrieval](#i035)
-- [ ] **I036** (Phase 4) — [Deterministic retrieval ordering (stable sort keys)](#i036)
-- [ ] **I037** (Phase 4) — [Candidate-first extraction (retrieve then extract)](#i037)
-- [ ] **I038** (Phase 4) — [Derived artifact records for OCR/VLM outputs](#i038)
-- [ ] **I039** (Phase 4) — [Ledger query executions (inputs/outputs)](#i039)
-- [ ] **I040** (Phase 4) — [Ledger extraction operations (inputs/outputs)](#i040)
-- [ ] **I041** (Phase 4) — [Citations point to immutable evidence IDs + spans](#i041)
-- [ ] **I042** (Phase 4) — [Citation resolver validates hashes/anchors/spans](#i042)
-- [ ] **I043** (Phase 4) — [Fail closed if citations do not resolve](#i043)
-- [ ] **I044** (Phase 5) — [Real scheduler plugin gates heavy work on user activity](#i044)
-- [ ] **I045** (Phase 5) — [Input tracker exposes activity signals (not only journal)](#i045)
-- [ ] **I046** (Phase 5) — [Capture emits telemetry (queues, drops, lag, CPU)](#i046)
-- [ ] **I047** (Phase 5) — [Governor outputs feed backpressure and job admission](#i047)
-- [ ] **I048** (Phase 5) — [Immediate ramp down on user input (cancel/deprioritize heavy jobs)](#i048)
-- [ ] **I049** (Phase 6) — [Egress gateway must be subprocess-hosted; kernel network-denied](#i049)
-- [ ] **I050** (Phase 6) — [Minimize inproc_allowlist; prefer subprocess hosting](#i050)
-- [ ] **I051** (Phase 6) — [Capability bridging for subprocess plugins (real capability plumbing)](#i051)
-- [ ] **I052** (Phase 6) — [Enforce least privilege per plugin manifest](#i052)
-- [ ] **I053** (Phase 6) — [Enforce filesystem permission policy declared by plugins](#i053)
-- [ ] **I054** (Phase 6) — [Strengthen Windows job object restrictions (limits)](#i054)
-- [ ] **I055** (Phase 6) — [Sanitize subprocess env; pin caches; disable proxies](#i055)
-- [ ] **I056** (Phase 6) — [Plugin RPC timeouts and watchdogs](#i056)
-- [ ] **I057** (Phase 6) — [Max message size limits in plugin RPC protocol](#i057)
-- [ ] **I058** (Phase 6) — [Harden hashing against symlinks / filesystem nondeterminism](#i058)
-- [ ] **I059** (Phase 6) — [Secure vault file permissions (Windows ACLs)](#i059)
-- [ ] **I060** (Phase 6) — [Separate keys by purpose (metadata/media/tokenization/anchor)](#i060)
-- [ ] **I061** (Phase 6) — [Anchor signing (HMAC/signature) with separate key domain](#i061)
-- [ ] **I062** (Phase 6) — [Add verify commands (ledger/anchors/evidence)](#i062)
-- [ ] **I063** (Phase 6) — [Audit security events in ledger (key rotations, lock updates, config)](#i063)
-- [ ] **I064** (Phase 6) — [Dependency pinning + hash checking (supply chain)](#i064)
-- [ ] **I065** (Phase 4) — [Define canonical evidence model (EvidenceObject)](#i065)
-- [ ] **I066** (Phase 4) — [Hash everything that matters (media/metadata/derived)](#i066)
-- [ ] **I067** (Phase 4) — [Ledger every state transition](#i067)
-- [ ] **I068** (Phase 4) — [Anchor on schedule (N entries or M minutes)](#i068)
-- [ ] **I069** (Phase 4) — [Immutable per-run manifest (config+locks+versions)](#i069)
-- [ ] **I070** (Phase 4) — [Citation objects carry verifiable pointers](#i070)
-- [ ] **I071** (Phase 4) — [Citation resolver CLI/API](#i071)
-- [ ] **I072** (Phase 4) — [Metadata immutable by default; derived never overwrites](#i072)
-- [ ] **I073** (Phase 4) — [Persist derivation graphs (parent→child links)](#i073)
-- [ ] **I074** (Phase 4) — [Record model identity for ML outputs](#i074)
-- [ ] **I075** (Phase 4) — [Deterministic text normalization before hashing](#i075)
-- [ ] **I076** (Phase 4) — [Proof bundles export (evidence + ledger slice + anchors)](#i076)
-- [ ] **I077** (Phase 4) — [Replay mode validates citations without model calls](#i077)
-- [ ] **I078** (Phase 7) — [FastAPI UX facade as canonical interface](#i078)
-- [ ] **I079** (Phase 7) — [CLI parity: CLI calls shared UX facade functions](#i079)
-- [ ] **I080** (Phase 7) — [Web Console UI (status/timeline/query/proof/plugins/keys)](#i080)
-- [ ] **I081** (Phase 7) — [Alerts panel driven by journal events](#i081)
-- [ ] **I082** (Phase 7) — [Local-only auth boundary (bind localhost + token)](#i082)
-- [ ] **I083** (Phase 7) — [Websocket for live telemetry](#i083)
-- [ ] **I084** (Phase 0) — [Split heavy ML dependencies into optional extras](#i084)
-- [ ] **I085** (Phase 0) — [Make resource paths package-safe (no CWD dependence)](#i085)
-- [ ] **I086** (Phase 0) — [Use OS-appropriate default data/config dirs (platformdirs)](#i086)
-- [ ] **I087** (Phase 0) — [Package builtin plugins as package data](#i087)
-- [ ] **I088** (Phase 0) — [Add reproducible dependency lockfile (hash-locked)](#i088)
-- [ ] **I089** (Phase 0) — [Add canonical-json safety tests for journal/ledger payloads](#i089)
-- [ ] **I090** (Phase 0) — [Add concurrency tests for ledger/journal append correctness](#i090)
-- [ ] **I091** (Phase 0) — [Add golden chain test: ledger verify + anchor verify](#i091)
-- [ ] **I092** (Phase 0) — [Add performance regression tests (capture latency/memory/query latency)](#i092)
-- [ ] **I093** (Phase 0) — [Add security regression tests (DPAPI fail-closed, network guard, no raw egress)](#i093)
-- [ ] **I094** (Phase 0) — [Static analysis: ruff + typing + vuln scan](#i094)
-- [ ] **I095** (Phase 0) — [Doctor validates locks, storage, anchors, and network policy](#i095)
-- [ ] **I096** (Phase 1) — [Fail loud on decrypt errors when encryption_required](#i096)
-- [ ] **I097** (Phase 1) — [Add record type fields everywhere](#i097)
-- [ ] **I098** (Phase 1) — [Add unified EventBuilder helper](#i098)
-- [ ] **I099** (Phase 1) — [Stamp every journal event with run_id](#i099)
-- [ ] **I100** (Phase 1) — [Cache policy snapshot hashing per run](#i100)
-- [ ] **I101** (Phase 3) — [Add content_hash to metadata for every media put](#i101)
-- [ ] **I102** (Phase 3) — [Track partial failures explicitly in journal/ledger](#i102)
-- [ ] **I103** (Phase 3) — [Add segment sealing ledger entry after successful write](#i103)
-- [ ] **I104** (Phase 3) — [Add startup recovery scanner to reconcile stores](#i104)
-- [ ] **I105** (Phase 2) — [If keeping zips, use ZIP_STORED for JPEG frames](#i105)
-- [ ] **I106** (Phase 2) — [If keeping zips, stream ZipFile writes to a real file](#i106)
-- [ ] **I107** (Phase 2) — [Batch input events to reduce write overhead](#i107)
-- [ ] **I108** (Phase 3) — [Add compact binary input log (derived) + JSON summary](#i108)
-- [ ] **I109** (Phase 2) — [Add WASAPI loopback option for system audio capture](#i109)
-- [ ] **I110** (Phase 2) — [Store audio as PCM/FLAC/Opus derived artifact](#i110)
-- [ ] **I111** (Phase 2) — [Normalize active window process paths (device → drive paths)](#i111)
-- [ ] **I112** (Phase 2) — [Capture window.rect and monitor mapping](#i112)
-- [ ] **I113** (Phase 2) — [Optional cursor position+shape capture](#i113)
-- [ ] **I114** (Phase 8) — [Clipboard capture plugin (local-only, append-only)](#i114)
-- [ ] **I115** (Phase 8) — [File activity capture plugin (USN journal / watcher)](#i115)
-- [ ] **I116** (Phase 5) — [Model execution budgets per idle window](#i116)
-- [ ] **I117** (Phase 5) — [Preemption/chunking for long jobs](#i117)
-- [ ] **I118** (Phase 4) — [Index versioning for retrieval reproducibility](#i118)
-- [ ] **I119** (Phase 6) — [Persist entity-tokenizer key id/version; version tokenization](#i119)
-- [ ] **I120** (Phase 6) — [Ledger sanitized egress packets (hash + schema version)](#i120)
-- [ ] **I121** (Phase 7) — [Egress approval workflow in UI](#i121)
-- [ ] **I122** (Phase 8) — [Plugin hot-reload with hash verification and safe swap](#i122)
-- [ ] **I123** (Phase 1) — [Write kernel boot ledger entry system.start](#i123)
-- [ ] **I124** (Phase 1) — [Write kernel shutdown ledger entry system.stop](#i124)
-- [ ] **I125** (Phase 1) — [Write crash ledger entry on next startup](#i125)
-- [ ] **I126** (Phase 0) — [Make sha256_directory path sorting deterministic across OSes](#i126)
-- [ ] **I127** (Phase 4) — [Record python/OS/package versions into run manifest](#i127)
-- [ ] **I128** (Phase 3) — [Tooling to migrate data_dir safely (copy+verify, no delete)](#i128)
-- [ ] **I129** (Phase 3) — [Disk usage forecasting (days remaining) + alerts](#i129)
-- [ ] **I130** (Phase 3) — [Storage compaction for derived artifacts only](#i130)
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
+[x]
 
 ## Phase 0: Scaffolding and gates
 

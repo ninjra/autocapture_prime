@@ -1,0 +1,2710 @@
+{
+  "items": [
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Fixture pipeline CLI ingests deterministic fixtures and produces queryable metadata without requiring network.",
+          "validators": [
+            "tools/run_fixture_pipeline.py",
+            "tests/test_fixture_pipeline_cli.py",
+            "tests/test_fixture_query_coverage.py"
+          ]
+        },
+        {
+          "text": "Fixture query validation asserts answers include citations and verifiable evidence paths.",
+          "validators": [
+            "tools/run_fixture_pipeline.py",
+            "tests/test_fixture_pipeline_cli.py",
+            "tests/test_fixture_query_coverage.py"
+          ]
+        },
+        {
+          "text": "Fixture pipeline emits deterministic plugin status reporting suitable for debugging.",
+          "validators": [
+            "tools/run_fixture_pipeline.py",
+            "tests/test_fixture_pipeline_cli.py",
+            "tests/test_fixture_query_coverage.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "tools/run_fixture_pipeline.py",
+        "autocapture_nx/ux/fixture.py",
+        "tools/fixture_config_template.json",
+        "tests/test_fixture_pipeline_cli.py",
+        "tests/test_fixture_query_coverage.py"
+      ],
+      "id": "FX001",
+      "phase": "Phase 0: Fixture validation",
+      "status": "complete",
+      "title": "CLI fixture pipeline for screenshot processing + query validation"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Model prep and reprocess workflow is deterministic and auditable (no remote binding, no deletion).",
+          "validators": [
+            "tests/test_model_manifest_validation.py",
+            "tests/test_model_identity_overrides.py",
+            "tests/test_runtime_fixture_override_audit.py",
+            "tests/test_reprocess_plugin_status.py"
+          ]
+        },
+        {
+          "text": "All plugins load/execute in reprocess/query modes without sandbox permission errors under configured policies.",
+          "validators": [
+            "tests/test_model_manifest_validation.py",
+            "tests/test_model_identity_overrides.py",
+            "tests/test_runtime_fixture_override_audit.py",
+            "tests/test_reprocess_plugin_status.py"
+          ]
+        },
+        {
+          "text": "Model manifest and identity overrides are validated deterministically.",
+          "validators": [
+            "tests/test_model_manifest_validation.py",
+            "tests/test_model_identity_overrides.py",
+            "tests/test_runtime_fixture_override_audit.py",
+            "tests/test_reprocess_plugin_status.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "tools/reprocess_models.py",
+        "tools/reprocess_models.ps1",
+        "tools/reprocess_config_template.json",
+        "tools/model_prep.ps1",
+        "tools/model_manifest.json",
+        "tools/validate_model_manifest.py",
+        "plugins/builtin/ocr_rapid/plugin.py",
+        "plugins/builtin/ocr_rapid/plugin.json",
+        "plugins/builtin/vlm_deepseek_ocr2/*",
+        "plugins/builtin/vlm_qwen2_vl_7b/*",
+        "plugins/builtin/vlm_qwen2_vl_2b/*",
+        "plugins/builtin/vlm_llava_1_5_7b/*",
+        "plugins/builtin/vlm_minicpm_v_2_6/*",
+        "tests/test_model_manifest_validation.py",
+        "tests/test_model_identity_overrides.py",
+        "tests/test_runtime_fixture_override_audit.py",
+        "tests/test_reprocess_plugin_status.py"
+      ],
+      "id": "FX002",
+      "phase": "Phase 0: Fixture validation",
+      "status": "complete",
+      "title": "Model update + reprocess workflow (all plugins, audit, localhost-only)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "No runtime path emits floats into canonical JSON; CI enforces.",
+          "validators": [
+            "tests/test_canonical_payloads.py",
+            "tests/test_canonical_json.py",
+            "tools/gate_canon.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/canonical_json.py",
+        "autocapture_nx/kernel/event_builder.py",
+        "plugins/builtin/journal_basic/plugin.py",
+        "plugins/builtin/ledger_basic/plugin.py",
+        "tests/test_canonical_payloads.py",
+        "tests/test_canonical_json.py",
+        "tools/gate_canon.py"
+      ],
+      "id": "I001",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Eliminate floats from journal/ledger payloads"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "When disk/queue pressure rises, capture rate drops within 1 second.",
+          "validators": [
+            "tests/test_backpressure.py",
+            "tests/test_capture_rate.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/backpressure_basic/plugin.py",
+        "plugins/builtin/capture_windows/plugin.py",
+        "autocapture_nx/windows/win_capture.py",
+        "tests/test_backpressure.py",
+        "tests/test_capture_rate.py"
+      ],
+      "id": "I002",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Make backpressure actually affect capture rate"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Capture can run indefinitely without unbounded memory growth.",
+          "validators": [
+            "tests/test_capture_streaming.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/capture_windows/plugin.py",
+        "plugins/builtin/storage_encrypted/plugin.py",
+        "plugins/builtin/storage_memory/plugin.py",
+        "tests/test_capture_streaming.py"
+      ],
+      "id": "I003",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Stop buffering whole segments in RAM; stream segments"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Audio callback is realtime-safe and never blocks on IO.",
+          "validators": [
+            "tests/test_audio_callback_queue.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/audio_windows/plugin.py",
+        "tests/test_audio_callback_queue.py"
+      ],
+      "id": "I004",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Do not write to storage from realtime audio callback"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "No query path mutates primary evidence; citations remain stable over time.",
+          "validators": [
+            "tests/test_query_derived_records.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/query.py",
+        "autocapture_nx/kernel/metadata_store.py",
+        "tests/test_query_derived_records.py"
+      ],
+      "id": "I005",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Stop mutating primary evidence metadata during query"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Replaying a second run never overwrites or collides with prior data.",
+          "validators": [
+            "tests/test_journal_run_id.py",
+            "tests/test_run_state_entries.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/ids.py",
+        "autocapture_nx/kernel/event_builder.py",
+        "plugins/builtin/capture_windows/plugin.py",
+        "plugins/builtin/audio_windows/plugin.py",
+        "plugins/builtin/input_windows/plugin.py",
+        "plugins/builtin/window_metadata_windows/plugin.py",
+        "tests/test_journal_run_id.py",
+        "tests/test_run_state_entries.py"
+      ],
+      "id": "I006",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Introduce globally unique run/session identifier; prefix all record IDs"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Ledger chain remains valid under concurrent plugin writes.",
+          "validators": [
+            "tests/test_ledger_journal_concurrency.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/ledger_basic/plugin.py",
+        "tests/test_ledger_journal_concurrency.py"
+      ],
+      "id": "I007",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Make ledger writing thread-safe"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "All plugins emit events through EventBuilder+JournalWriter with stable schema.",
+          "validators": [
+            "tests/test_ledger_journal_concurrency.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/journal_basic/plugin.py",
+        "tests/test_ledger_journal_concurrency.py"
+      ],
+      "id": "I008",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Make journal writing thread-safe; centralize sequences"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "No path silently falls back to unprotected key bytes when encryption_required.",
+          "validators": [
+            "tests/test_encrypted_store_fail_loud.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/keyring.py",
+        "plugins/builtin/storage_encrypted/plugin.py",
+        "tests/test_encrypted_store_fail_loud.py"
+      ],
+      "id": "I009",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Fail closed if DPAPI protection fails when encryption_required"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Iteration order is stable and deterministic across runs.",
+          "validators": [
+            "tests/test_storage_encrypted.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/storage_encrypted/plugin.py",
+        "plugins/builtin/storage_memory/plugin.py",
+        "plugins/builtin/storage_sqlcipher/plugin.py",
+        "tests/test_storage_encrypted.py"
+      ],
+      "id": "I010",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Sort all store keys deterministically"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Capture schedule is robust to wall-clock adjustments.",
+          "validators": [
+            "tests/test_capture_monotonic.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/capture_windows/plugin.py",
+        "tests/test_capture_monotonic.py"
+      ],
+      "id": "I011",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Use monotonic clocks for segment duration"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Out-of-the-box config matches real implementation.",
+          "validators": [
+            "tests/test_capture_backend_default.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "config/default.json",
+        "plugins/builtin/capture_windows/plugin.py",
+        "tests/test_capture_backend_default.py"
+      ],
+      "id": "I012",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Align default config with implemented capture backend"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Repo works on fresh machine without editing hard-coded paths.",
+          "validators": [
+            "tests/test_model_paths_config.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "config/default.json",
+        "plugins/builtin/embedder_stub/plugin.py",
+        "plugins/builtin/reranker_stub/plugin.py",
+        "plugins/builtin/vlm_stub/plugin.py",
+        "tests/test_model_paths_config.py"
+      ],
+      "id": "I013",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Remove hard-coded model paths; config-driven + portable"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "No plugin can run against incompatible kernel/schema without explicit override.",
+          "validators": [
+            "tests/test_plugin_loader.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/plugin_system/registry.py",
+        "tests/test_plugin_loader.py"
+      ],
+      "id": "I014",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Enforce plugin compat.requires_kernel / schema versions"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Contracts cannot drift silently; every drift is detected.",
+          "validators": [
+            "tests/test_contract_pins.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/loader.py",
+        "tests/test_contract_pins.py"
+      ],
+      "id": "I015",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Verify contract lock at boot/doctor"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Capture remains stable under load and isolates slow disk/encode paths.",
+          "validators": [
+            "tests/test_capture_streaming.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/capture/pipeline.py",
+        "plugins/builtin/capture_windows/plugin.py",
+        "tests/test_capture_streaming.py"
+      ],
+      "id": "I016",
+      "phase": "Phase 2: Capture pipeline refactor",
+      "status": "complete",
+      "title": "Split capture into grab \u2192 encode/pack \u2192 encrypt/write pipeline"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "System remains bounded; any fidelity loss is explicit and auditable.",
+          "validators": [
+            "tests/test_capture_drop_event.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/capture/queues.py",
+        "autocapture_nx/capture/pipeline.py",
+        "tests/test_capture_drop_event.py"
+      ],
+      "id": "I017",
+      "phase": "Phase 2: Capture pipeline refactor",
+      "status": "complete",
+      "title": "Bounded queues with explicit drop policies"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Primary capture evidence is efficient to store and seek deterministically.",
+          "validators": [
+            "tests/test_capture_streaming.py",
+            "tests/test_capture_zip_container.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/capture/pipeline.py",
+        "tests/test_capture_streaming.py",
+        "tests/test_capture_zip_container.py"
+      ],
+      "id": "I018",
+      "phase": "Phase 2: Capture pipeline refactor",
+      "status": "complete",
+      "title": "Replace zip-of-JPEG with real video container for primary artifact"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "On capable GPUs, capture runs with minimal CPU while maintaining fidelity.",
+          "validators": [
+            "tests/test_capture_container_resolution.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/capture/pipeline.py",
+        "autocapture_nx/windows/win_capture.py",
+        "tests/test_capture_container_resolution.py"
+      ],
+      "id": "I019",
+      "phase": "Phase 2: Capture pipeline refactor",
+      "status": "complete",
+      "title": "Add GPU-accelerated capture/encode backend (NVENC/DD)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Every segment is time-bounded and usable for timeline queries.",
+          "validators": [
+            "tests/test_capture_monotonic.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/capture/pipeline.py",
+        "tests/test_capture_monotonic.py"
+      ],
+      "id": "I020",
+      "phase": "Phase 2: Capture pipeline refactor",
+      "status": "complete",
+      "title": "Record segment start/end timestamps"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Segments are self-describing for reproducibility and debugging.",
+          "validators": [
+            "tests/test_capture_streaming.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/capture/pipeline.py",
+        "tests/test_capture_streaming.py"
+      ],
+      "id": "I021",
+      "phase": "Phase 2: Capture pipeline refactor",
+      "status": "complete",
+      "title": "Record capture parameters per segment"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Answers can cite which window/app a frame belonged to at a time.",
+          "validators": [
+            "tests/test_capture_window_input_refs.py",
+            "tests/test_monitor_selection.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/window_metadata_windows/plugin.py",
+        "autocapture_nx/capture/pipeline.py",
+        "tests/test_capture_window_input_refs.py",
+        "tests/test_monitor_selection.py"
+      ],
+      "id": "I022",
+      "phase": "Phase 2: Capture pipeline refactor",
+      "status": "complete",
+      "title": "Correlate frames with active window via synchronized timeline"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Investigations can align what was seen with what was done (time-synced).",
+          "validators": [
+            "tests/test_input_batching.py",
+            "tests/test_capture_window_input_refs.py",
+            "tests/test_retrieval_timeline_refs.py",
+            "tests/test_cursor_timeline_plugin.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/input_windows/plugin.py",
+        "plugins/builtin/cursor_windows/plugin.py",
+        "plugins/builtin/retrieval_basic/plugin.py",
+        "autocapture_nx/capture/pipeline.py",
+        "tests/test_input_batching.py",
+        "tests/test_capture_window_input_refs.py",
+        "tests/test_retrieval_timeline_refs.py",
+        "tests/test_cursor_timeline_plugin.py"
+      ],
+      "id": "I023",
+      "phase": "Phase 2: Capture pipeline refactor",
+      "status": "complete",
+      "title": "Add cursor/input correlation timeline references"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Capture fails gracefully and predictably under storage pressure.",
+          "validators": [
+            "tests/test_capture_disk_pressure_degrade.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/capture/pipeline.py",
+        "tests/test_capture_disk_pressure_degrade.py"
+      ],
+      "id": "I024",
+      "phase": "Phase 2: Capture pipeline refactor",
+      "status": "complete",
+      "title": "Disk pressure degrades capture quality before stopping"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "No partial evidence becomes 'valid' without explicit seal.",
+          "validators": [
+            "tests/test_capture_streaming.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/capture/pipeline.py",
+        "tests/test_capture_streaming.py"
+      ],
+      "id": "I025",
+      "phase": "Phase 2: Capture pipeline refactor",
+      "status": "complete",
+      "title": "Atomic segment writes (temp + os.replace)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Metadata operations scale; encryption remains enforced.",
+          "validators": [
+            "tests/test_sqlcipher_indexes.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/storage_sqlcipher/plugin.py",
+        "config/default.json",
+        "tests/test_sqlcipher_indexes.py"
+      ],
+      "id": "I026",
+      "phase": "Phase 3: Storage scaling + durability",
+      "status": "complete",
+      "title": "Default to SQLCipher for metadata when available"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Time-bounded queries are sub-linear and predictable.",
+          "validators": [
+            "tests/test_sqlcipher_indexes.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/storage_sqlcipher/plugin.py",
+        "tests/test_sqlcipher_indexes.py"
+      ],
+      "id": "I027",
+      "phase": "Phase 3: Storage scaling + durability",
+      "status": "complete",
+      "title": "Add DB indexes on ts_utc, record_type, run_id"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Media storage is efficient and unambiguous; supports streaming.",
+          "validators": [
+            "tests/test_encrypted_blob_store.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/storage_encrypted/plugin.py",
+        "plugins/builtin/storage_sqlcipher/plugin.py",
+        "tests/test_encrypted_blob_store.py"
+      ],
+      "id": "I028",
+      "phase": "Phase 3: Storage scaling + durability",
+      "status": "complete",
+      "title": "Store media in binary encrypted format (not base64 JSON)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Large artifacts are written/read with bounded memory and strong integrity.",
+          "validators": [
+            "tests/test_encrypted_blob_store.py",
+            "tests/test_capture_streaming.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/storage_encrypted/plugin.py",
+        "autocapture_nx/capture/pipeline.py",
+        "tests/test_encrypted_blob_store.py",
+        "tests/test_capture_streaming.py"
+      ],
+      "id": "I029",
+      "phase": "Phase 3: Storage scaling + durability",
+      "status": "complete",
+      "title": "Stream encryption (avoid whole-segment in memory)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Evidence immutability is enforced by API, not convention.",
+          "validators": [
+            "tests/test_metadata_immutability.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/storage_encrypted/plugin.py",
+        "plugins/builtin/storage_sqlcipher/plugin.py",
+        "autocapture_nx/kernel/metadata_store.py",
+        "tests/test_metadata_immutability.py"
+      ],
+      "id": "I030",
+      "phase": "Phase 3: Storage scaling + durability",
+      "status": "complete",
+      "title": "Immutability/versioning in stores (put_new vs put_replace)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "IDs remain canonical and collision-free while being filesystem-safe.",
+          "validators": [
+            "tests/test_record_id_encoding.py",
+            "tests/test_query_derived_records.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/ids.py",
+        "autocapture_nx/processing/idle.py",
+        "autocapture_nx/kernel/query.py",
+        "autocapture_nx/capture/pipeline.py",
+        "tests/test_record_id_encoding.py",
+        "tests/test_query_derived_records.py"
+      ],
+      "id": "I031",
+      "phase": "Phase 3: Storage scaling + durability",
+      "status": "complete",
+      "title": "Make record ID encoding reversible (no lossy mapping)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Storage remains performant as record count grows.",
+          "validators": [
+            "tests/test_encrypted_blob_store.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/storage_encrypted/plugin.py",
+        "tests/test_encrypted_blob_store.py"
+      ],
+      "id": "I032",
+      "phase": "Phase 3: Storage scaling + durability",
+      "status": "complete",
+      "title": "Shard media/metadata directories by date/run"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Each run is reproducible/auditable from a single manifest.",
+          "validators": [
+            "tests/test_run_manifest.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/loader.py",
+        "tests/test_run_manifest.py"
+      ],
+      "id": "I033",
+      "phase": "Phase 3: Storage scaling + durability",
+      "status": "complete",
+      "title": "Add per-run storage manifest records"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Durability is explicit, configurable, and does not compromise provenance.",
+          "validators": [
+            "tests/test_run_manifest.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/storage_encrypted/plugin.py",
+        "plugins/builtin/journal_basic/plugin.py",
+        "plugins/builtin/ledger_basic/plugin.py",
+        "tests/test_run_manifest.py"
+      ],
+      "id": "I034",
+      "phase": "Phase 3: Storage scaling + durability",
+      "status": "complete",
+      "title": "Configurable fsync policy (critical vs bulk)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Queries scale without full scans and remain deterministic.",
+          "validators": [
+            "tests/test_retrieval_indexed_hits.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/retrieval_basic/plugin.py",
+        "autocapture/indexing/lexical.py",
+        "autocapture/indexing/vector.py",
+        "tests/test_retrieval_indexed_hits.py"
+      ],
+      "id": "I035",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Replace full-scan query with tiered indexed retrieval"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Retrieval ordering is stable and reproducible.",
+          "validators": [
+            "tests/test_retrieval_indexed_hits.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/retrieval_basic/plugin.py",
+        "tests/test_retrieval_indexed_hits.py"
+      ],
+      "id": "I036",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Deterministic retrieval ordering (stable sort keys)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Extraction cost is bounded and targeted; no random scans.",
+          "validators": [
+            "tests/test_extract_on_demand_candidates.py",
+            "tests/test_extract_on_demand_ledger.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/query.py",
+        "tests/test_extract_on_demand_candidates.py",
+        "tests/test_extract_on_demand_ledger.py"
+      ],
+      "id": "I037",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Candidate-first extraction (retrieve then extract)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "All extraction outputs are provenance-tracked derived artifacts.",
+          "validators": [
+            "tests/test_derived_records.py",
+            "tests/test_query_derived_records.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/derived_records.py",
+        "autocapture_nx/kernel/query.py",
+        "autocapture_nx/processing/idle.py",
+        "tests/test_derived_records.py",
+        "tests/test_query_derived_records.py"
+      ],
+      "id": "I038",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Derived artifact records for OCR/VLM outputs"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Every answer can be tied to a ledgered query execution record.",
+          "validators": [
+            "tests/test_query_ledger_entry.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/query.py",
+        "autocapture_nx/kernel/event_builder.py",
+        "tests/test_query_ledger_entry.py"
+      ],
+      "id": "I039",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Ledger query executions (inputs/outputs)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Derivations are verifiable and reconstructable.",
+          "validators": [
+            "tests/test_extract_on_demand_ledger.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/query.py",
+        "tests/test_extract_on_demand_ledger.py"
+      ],
+      "id": "I040",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Ledger extraction operations (inputs/outputs)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Citations are independently verifiable pointers, not best-effort strings.",
+          "validators": [
+            "tests/test_citation_validator_metadata.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "contracts/citation.schema.json",
+        "plugins/builtin/citation_basic/plugin.py",
+        "autocapture_nx/kernel/query.py",
+        "tests/test_citation_validator_metadata.py"
+      ],
+      "id": "I041",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Citations point to immutable evidence IDs + spans"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Every citation displayed in UI can be validated locally on demand.",
+          "validators": [
+            "tests/test_citation_validator_metadata.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/citation_basic/plugin.py",
+        "tests/test_citation_validator_metadata.py"
+      ],
+      "id": "I042",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Citation resolver validates hashes/anchors/spans"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "System never asserts unsupported answers; failure modes are explicit.",
+          "validators": [
+            "tests/test_answer_builder.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/answer_basic/plugin.py",
+        "tests/test_answer_builder.py"
+      ],
+      "id": "I043",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Fail closed if citations do not resolve"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "No heavy processing occurs while user active; enrichment happens predictably when allowed.",
+          "validators": [
+            "tests/test_runtime_conductor.py",
+            "tests/test_governor_gating.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture/runtime/conductor.py",
+        "autocapture/runtime/scheduler.py",
+        "autocapture/runtime/governor.py",
+        "autocapture/runtime/budgets.py",
+        "plugins/builtin/runtime_scheduler/plugin.py",
+        "plugins/builtin/runtime_governor/plugin.py",
+        "tests/test_runtime_conductor.py",
+        "tests/test_governor_gating.py"
+      ],
+      "id": "I044",
+      "phase": "Phase 5: Scheduler/governor",
+      "status": "complete",
+      "title": "Real scheduler plugin gates heavy work on user activity"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Scheduler has an authoritative, low-latency activity signal.",
+          "validators": [
+            "tests/test_input_activity_signal.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/input_windows/plugin.py",
+        "tests/test_input_activity_signal.py"
+      ],
+      "id": "I045",
+      "phase": "Phase 5: Scheduler/governor",
+      "status": "complete",
+      "title": "Input tracker exposes activity signals (not only journal)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Performance issues are observable without instrumenting code manually.",
+          "validators": [
+            "tests/test_capture_telemetry.py",
+            "tests/test_metrics_endpoint_exposes_counters.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/capture/pipeline.py",
+        "autocapture_nx/kernel/telemetry.py",
+        "autocapture/web/routes/metrics.py",
+        "tests/test_capture_telemetry.py",
+        "tests/test_metrics_endpoint_exposes_counters.py"
+      ],
+      "id": "I046",
+      "phase": "Phase 5: Scheduler/governor",
+      "status": "complete",
+      "title": "Capture emits telemetry (queues, drops, lag, CPU)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "System responds quickly and deterministically to activity and pressure changes.",
+          "validators": [
+            "tests/test_capture_governor_influence.py",
+            "tests/test_runtime_conductor.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/capture/pipeline.py",
+        "autocapture/runtime/conductor.py",
+        "tests/test_capture_governor_influence.py",
+        "tests/test_runtime_conductor.py"
+      ],
+      "id": "I047",
+      "phase": "Phase 5: Scheduler/governor",
+      "status": "complete",
+      "title": "Governor outputs feed backpressure and job admission"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "User interaction immediately restores invisibility by halting heavy work.",
+          "validators": [
+            "tests/test_governor_gating.py",
+            "tests/test_runtime_conductor.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture/runtime/governor.py",
+        "autocapture/runtime/scheduler.py",
+        "autocapture/runtime/conductor.py",
+        "autocapture_nx/processing/idle.py",
+        "tests/test_governor_gating.py",
+        "tests/test_runtime_conductor.py"
+      ],
+      "id": "I048",
+      "phase": "Phase 5: Scheduler/governor",
+      "status": "complete",
+      "title": "Immediate ramp down on user input (cancel/deprioritize heavy jobs)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Network access is centralized, auditable, and policy-controlled.",
+          "validators": [
+            "tests/test_kernel_network_deny.py",
+            "tests/test_plugin_network_block.py",
+            "tests/test_egress_gateway.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/loader.py",
+        "autocapture_nx/plugin_system/runtime.py",
+        "autocapture_nx/plugin_system/host_runner.py",
+        "autocapture_nx/plugin_system/registry.py",
+        "config/default.json",
+        "tests/test_kernel_network_deny.py",
+        "tests/test_plugin_network_block.py",
+        "tests/test_egress_gateway.py"
+      ],
+      "id": "I049",
+      "phase": "Phase 6: Security + egress hardening",
+      "status": "complete",
+      "title": "Egress gateway must be subprocess-hosted; kernel network-denied"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Kernel attack surface reduced while keeping capture performance.",
+          "validators": [
+            "tests/test_plugin_network_block.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "config/default.json",
+        "autocapture_nx/plugin_system/registry.py",
+        "tests/test_plugin_network_block.py"
+      ],
+      "id": "I050",
+      "phase": "Phase 6: Security + egress hardening",
+      "status": "complete",
+      "title": "Minimize inproc_allowlist; prefer subprocess hosting"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Subprocess plugins are first-class and do not require inproc hosting to function.",
+          "validators": [
+            "tests/test_subprocess_capability_bridging.py",
+            "tests/test_plugin_capability_policies.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/plugin_system/runtime.py",
+        "autocapture_nx/plugin_system/host_runner.py",
+        "autocapture_nx/plugin_system/registry.py",
+        "tests/test_subprocess_capability_bridging.py",
+        "tests/test_plugin_capability_policies.py"
+      ],
+      "id": "I051",
+      "phase": "Phase 6: Security + egress hardening",
+      "status": "complete",
+      "title": "Capability bridging for subprocess plugins (real capability plumbing)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Least privilege is enforced mechanically.",
+          "validators": [
+            "tests/test_plugin_capability_policies.py",
+            "tests/test_plugin_loader.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "contracts/plugin_manifest.schema.json",
+        "plugins/builtin/*/plugin.json",
+        "autocapture_nx/plugin_system/registry.py",
+        "tests/test_plugin_capability_policies.py",
+        "tests/test_plugin_loader.py"
+      ],
+      "id": "I052",
+      "phase": "Phase 6: Security + egress hardening",
+      "status": "complete",
+      "title": "Enforce least privilege per plugin manifest"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Plugins cannot exfiltrate or tamper with files beyond their declared scope.",
+          "validators": [
+            "tests/test_plugin_filesystem_policy.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/plugin_system/registry.py",
+        "autocapture_nx/plugin_system/host_runner.py",
+        "autocapture_nx/plugin_system/runtime.py",
+        "tests/test_plugin_filesystem_policy.py"
+      ],
+      "id": "I053",
+      "phase": "Phase 6: Security + egress hardening",
+      "status": "complete",
+      "title": "Enforce filesystem permission policy declared by plugins"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Untrusted/hung plugins are contained without harming system stability.",
+          "validators": [
+            "tests/test_win_sandbox_limits.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/windows/win_sandbox.py",
+        "autocapture_nx/plugin_system/host.py",
+        "config/default.json",
+        "tests/test_win_sandbox_limits.py"
+      ],
+      "id": "I054",
+      "phase": "Phase 6: Security + egress hardening",
+      "status": "complete",
+      "title": "Strengthen Windows job object restrictions (limits)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Plugin behavior is deterministic and not affected by ambient environment.",
+          "validators": [
+            "tests/test_plugin_env_sanitization.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/plugin_system/host.py",
+        "tests/test_plugin_env_sanitization.py"
+      ],
+      "id": "I055",
+      "phase": "Phase 6: Security + egress hardening",
+      "status": "complete",
+      "title": "Sanitize subprocess env; pin caches; disable proxies"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Plugin failures do not stall capture or UI.",
+          "validators": [
+            "tests/test_plugin_watchdog_restart.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/plugin_system/host.py",
+        "tests/test_plugin_watchdog_restart.py"
+      ],
+      "id": "I056",
+      "phase": "Phase 6: Security + egress hardening",
+      "status": "complete",
+      "title": "Plugin RPC timeouts and watchdogs"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "IPC is resilient and cannot be abused for memory exhaustion.",
+          "validators": [
+            "tests/test_plugin_rpc_size_limit.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/plugin_system/host.py",
+        "autocapture_nx/plugin_system/host_runner.py",
+        "tests/test_plugin_rpc_size_limit.py"
+      ],
+      "id": "I057",
+      "phase": "Phase 6: Security + egress hardening",
+      "status": "complete",
+      "title": "Max message size limits in plugin RPC protocol"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Hashing cannot be bypassed via filesystem tricks.",
+          "validators": [
+            "tests/test_hashing_symlink.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/hashing.py",
+        "tests/test_hashing_symlink.py"
+      ],
+      "id": "I058",
+      "phase": "Phase 6: Security + egress hardening",
+      "status": "complete",
+      "title": "Harden hashing against symlinks / filesystem nondeterminism"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Secrets and encrypted stores are protected by OS permissions.",
+          "validators": [
+            "tests/test_acl_hardening.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/windows/acl.py",
+        "autocapture_nx/kernel/crypto.py",
+        "autocapture_nx/kernel/keyring.py",
+        "tests/test_acl_hardening.py"
+      ],
+      "id": "I059",
+      "phase": "Phase 6: Security + egress hardening",
+      "status": "complete",
+      "title": "Secure vault file permissions (Windows ACLs)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Key separation limits blast radius and supports safe rotation.",
+          "validators": [
+            "tests/test_keyring_purpose_rotation.py",
+            "tests/test_key_export_import_roundtrip.py",
+            "tests/test_keyring_status.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/keyring.py",
+        "autocapture/storage/blob_store.py",
+        "autocapture/storage/database.py",
+        "autocapture/storage/keys.py",
+        "autocapture/storage/sqlcipher.py",
+        "plugins/builtin/anchor_basic/plugin.py",
+        "plugins/builtin/egress_sanitizer/plugin.py",
+        "plugins/builtin/storage_encrypted/plugin.py",
+        "tests/test_keyring_purpose_rotation.py",
+        "tests/test_key_export_import_roundtrip.py",
+        "tests/test_keyring_status.py"
+      ],
+      "id": "I060",
+      "phase": "Phase 6: Security + egress hardening",
+      "status": "complete",
+      "title": "Separate keys by purpose (metadata/media/tokenization/anchor)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Anchors provide tamper evidence independent of ledger storage.",
+          "validators": [
+            "tests/test_anchor.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/anchor_basic/plugin.py",
+        "autocapture_nx/kernel/keyring.py",
+        "autocapture/pillars/citable.py",
+        "tests/test_anchor.py"
+      ],
+      "id": "I061",
+      "phase": "Phase 6: Security + egress hardening",
+      "status": "complete",
+      "title": "Anchor signing (HMAC/signature) with separate key domain"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Users can validate integrity with deterministic tooling.",
+          "validators": [
+            "tests/test_verify_integrity.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/cli.py",
+        "autocapture/pillars/citable.py",
+        "autocapture/ux/facade.py",
+        "autocapture/web/routes/verify.py",
+        "plugins/builtin/ledger_basic/plugin.py",
+        "plugins/builtin/journal_basic/plugin.py",
+        "tests/test_verify_integrity.py"
+      ],
+      "id": "I062",
+      "phase": "Phase 6: Security + egress hardening",
+      "status": "complete",
+      "title": "Add verify commands (ledger/anchors/evidence)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Security posture changes are auditable and tamper-evident.",
+          "validators": [
+            "tests/test_security_ledger_events.py",
+            "tests/test_key_rotation.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/key_rotation.py",
+        "autocapture_nx/kernel/loader.py",
+        "plugins/builtin/ledger_basic/plugin.py",
+        "tests/test_security_ledger_events.py",
+        "tests/test_key_rotation.py"
+      ],
+      "id": "I063",
+      "phase": "Phase 6: Security + egress hardening",
+      "status": "complete",
+      "title": "Audit security events in ledger (key rotations, lock updates, config)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Supply chain drift is detected and controlled.",
+          "validators": [
+            "tests/test_dependency_pinning.py",
+            "tools/gate_deps_lock.py",
+            "tools/gate_doctor.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/loader.py",
+        "requirements.lock.json",
+        "tests/test_dependency_pinning.py",
+        "tools/gate_deps_lock.py",
+        "tools/gate_doctor.py"
+      ],
+      "id": "I064",
+      "phase": "Phase 6: Security + egress hardening",
+      "status": "complete",
+      "title": "Dependency pinning + hash checking (supply chain)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Evidence model is consistent and contract-checked.",
+          "validators": [
+            "tests/test_metadata_record_type.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "contracts/evidence.schema.json",
+        "autocapture_nx/kernel/metadata_store.py",
+        "tests/test_metadata_record_type.py"
+      ],
+      "id": "I065",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Define canonical evidence model (EvidenceObject)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Every evidence/derived object is hash-addressable and verifiable.",
+          "validators": [
+            "tests/test_capture_content_hash.py",
+            "tests/test_derived_records.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/capture/pipeline.py",
+        "autocapture_nx/kernel/derived_records.py",
+        "plugins/builtin/window_metadata_windows/plugin.py",
+        "tests/test_capture_content_hash.py",
+        "tests/test_derived_records.py"
+      ],
+      "id": "I066",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Hash everything that matters (media/metadata/derived)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Ledger provides complete provenance coverage for the system's actions.",
+          "validators": [
+            "tests/test_capture_drop_event.py",
+            "tests/test_capture_disk_pressure_degrade.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/capture/pipeline.py",
+        "tests/test_capture_drop_event.py",
+        "tests/test_capture_disk_pressure_degrade.py"
+      ],
+      "id": "I067",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Ledger every state transition"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Ledger heads are periodically sealed for tamper evidence.",
+          "validators": [
+            "tests/test_anchor_schedule.py",
+            "tests/test_ledger_anchor_golden.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/event_builder.py",
+        "config/default.json",
+        "tests/test_anchor_schedule.py",
+        "tests/test_ledger_anchor_golden.py"
+      ],
+      "id": "I068",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Anchor on schedule (N entries or M minutes)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "A single manifest summarizes and identifies the full run context.",
+          "validators": [
+            "tests/test_run_manifest.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/loader.py",
+        "tests/test_run_manifest.py"
+      ],
+      "id": "I069",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Immutable per-run manifest (config+locks+versions)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Citations are self-contained verification units.",
+          "validators": [
+            "tests/test_citation_validator_metadata.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "contracts/citation.schema.json",
+        "plugins/builtin/citation_basic/plugin.py",
+        "tests/test_citation_validator_metadata.py"
+      ],
+      "id": "I070",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Citation objects carry verifiable pointers"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Users can verify citations with one command.",
+          "validators": [
+            "tests/test_citation_resolver_api.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/cli.py",
+        "autocapture/web/routes/citations.py",
+        "autocapture/ux/facade.py",
+        "tests/test_citation_resolver_api.py"
+      ],
+      "id": "I071",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Citation resolver CLI/API"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Immutability is enforced uniformly across the codebase.",
+          "validators": [
+            "tests/test_metadata_immutability.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/metadata_store.py",
+        "tests/test_metadata_immutability.py"
+      ],
+      "id": "I072",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Metadata immutable by default; derived never overwrites"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Any derived output can be traced back to its precise evidence parents.",
+          "validators": [
+            "tests/test_derived_records.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/derived_records.py",
+        "autocapture_nx/kernel/query.py",
+        "tests/test_derived_records.py"
+      ],
+      "id": "I073",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Persist derivation graphs (parent\u2192child links)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "ML outputs are reproducible and attributable to exact model artifacts.",
+          "validators": [
+            "tests/test_derived_records.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/derived_records.py",
+        "tests/test_derived_records.py"
+      ],
+      "id": "I074",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Record model identity for ML outputs"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Text hashes and indexes are stable and reproducible.",
+          "validators": [
+            "tests/test_derived_records.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture/core/hashing.py",
+        "autocapture_nx/kernel/derived_records.py",
+        "tests/test_derived_records.py"
+      ],
+      "id": "I075",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Deterministic text normalization before hashing"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Bundles are self-contained, verifiable, and suitable for audit/sharing (sanitized).",
+          "validators": [
+            "tests/test_proof_bundle_replay.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/proof_bundle.py",
+        "autocapture_nx/cli.py",
+        "autocapture/ux/facade.py",
+        "tests/test_proof_bundle_replay.py"
+      ],
+      "id": "I076",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Proof bundles export (evidence + ledger slice + anchors)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Citations can be validated deterministically offline.",
+          "validators": [
+            "tests/test_proof_bundle_replay.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/replay.py",
+        "autocapture_nx/cli.py",
+        "tests/test_proof_bundle_replay.py"
+      ],
+      "id": "I077",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Replay mode validates citations without model calls"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "All user interactions route through a single, testable facade.",
+          "validators": [
+            "tests/test_ux_facade_parity.py",
+            "tests/test_trace_facade.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/ux/facade.py",
+        "autocapture/web/api.py",
+        "autocapture/web/routes",
+        "tests/test_ux_facade_parity.py",
+        "tests/test_trace_facade.py"
+      ],
+      "id": "I078",
+      "phase": "Phase 7: FastAPI UX facade + Web Console",
+      "status": "complete",
+      "title": "FastAPI UX facade as canonical interface"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "UI/CLI parity is enforced and drift is prevented.",
+          "validators": [
+            "tests/test_ux_facade_parity.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/cli.py",
+        "autocapture_nx/ux/facade.py",
+        "tests/test_ux_facade_parity.py"
+      ],
+      "id": "I079",
+      "phase": "Phase 7: FastAPI UX facade + Web Console",
+      "status": "complete",
+      "title": "CLI parity: CLI calls shared UX facade functions"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Web UI covers all critical workflows without requiring CLI.",
+          "validators": [
+            "tests/test_ui_routes.py",
+            "tests/test_ui_accessibility.py",
+            "tests/test_settings_ui_contract.py",
+            "tests/test_status_banner_ui.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture/web/ui",
+        "autocapture/web/api.py",
+        "tests/test_ui_routes.py",
+        "tests/test_ui_accessibility.py",
+        "tests/test_settings_ui_contract.py",
+        "tests/test_status_banner_ui.py"
+      ],
+      "id": "I080",
+      "phase": "Phase 7: FastAPI UX facade + Web Console",
+      "status": "complete",
+      "title": "Web Console UI (status/timeline/query/proof/plugins/keys)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Operational problems are visible immediately with actionable context.",
+          "validators": [
+            "tests/test_watchdog_alerts.py",
+            "tests/test_silence_alerts.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/alerts.py",
+        "autocapture/web/routes/alerts.py",
+        "autocapture/web/ui",
+        "tests/test_watchdog_alerts.py",
+        "tests/test_silence_alerts.py"
+      ],
+      "id": "I081",
+      "phase": "Phase 7: FastAPI UX facade + Web Console",
+      "status": "complete",
+      "title": "Alerts panel driven by journal events"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Local API is not accidentally exposed or writable without authorization.",
+          "validators": [
+            "tests/test_localhost_binding.py",
+            "tests/test_web_auth_middleware.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture/web/auth.py",
+        "autocapture_nx/kernel/auth.py",
+        "config/default.json",
+        "tests/test_localhost_binding.py",
+        "tests/test_web_auth_middleware.py"
+      ],
+      "id": "I082",
+      "phase": "Phase 7: FastAPI UX facade + Web Console",
+      "status": "complete",
+      "title": "Local-only auth boundary (bind localhost + token)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "UI can display live status without polling overhead.",
+          "validators": [
+            "tests/test_websocket_telemetry.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture/web/routes/telemetry.py",
+        "autocapture/web/ui",
+        "tests/test_websocket_telemetry.py"
+      ],
+      "id": "I083",
+      "phase": "Phase 7: FastAPI UX facade + Web Console",
+      "status": "complete",
+      "title": "Websocket for live telemetry"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Base installation captures and queries metadata without importing heavy ML deps.",
+          "validators": [
+            "tests/test_optional_deps_imports.py",
+            "tests/test_optional_dependency_imports.py"
+          ]
+        },
+        {
+          "text": "Installing extras enables the associated plugins with no code changes.",
+          "validators": [
+            "tests/test_optional_deps_imports.py",
+            "tests/test_optional_dependency_imports.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "pyproject.toml",
+        "plugins/builtin/*/plugin.json",
+        "tests/test_optional_deps_imports.py",
+        "tests/test_optional_dependency_imports.py"
+      ],
+      "id": "I084",
+      "phase": "Phase 0: Scaffolding and gates",
+      "status": "complete",
+      "title": "Split heavy ML dependencies into optional extras"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Running from any directory yields identical behavior and finds assets.",
+          "validators": [
+            "tests/test_paths_package_safe.py",
+            "tests/test_packaged_resources.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/paths.py",
+        "tests/test_paths_package_safe.py",
+        "tests/test_packaged_resources.py"
+      ],
+      "id": "I085",
+      "phase": "Phase 0: Scaffolding and gates",
+      "status": "complete",
+      "title": "Make resource paths package-safe (no CWD dependence)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Default paths are correct on Windows and do not depend on CWD.",
+          "validators": [
+            "tests/test_platform_paths.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/paths.py",
+        "tests/test_platform_paths.py",
+        "config/default.json"
+      ],
+      "id": "I086",
+      "phase": "Phase 0: Scaffolding and gates",
+      "status": "complete",
+      "title": "Use OS-appropriate default data/config dirs (platformdirs)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Installed wheel runs with builtin plugins without requiring repo checkout.",
+          "validators": [
+            "tests/test_packaged_resources.py",
+            "tests/test_plugin_package_data.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "pyproject.toml",
+        "tests/test_packaged_resources.py",
+        "tests/test_plugin_package_data.py"
+      ],
+      "id": "I087",
+      "phase": "Phase 0: Scaffolding and gates",
+      "status": "complete",
+      "title": "Package builtin plugins as package data"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "CI can build and install deterministically from lockfile.",
+          "validators": [
+            "tools/gate_deps_lock.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "requirements.lock.json",
+        "tools/generate_dep_lock.py",
+        "tools/gate_deps_lock.py"
+      ],
+      "id": "I088",
+      "phase": "Phase 0: Scaffolding and gates",
+      "status": "complete",
+      "title": "Add reproducible dependency lockfile (hash-locked)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "All emitted events pass canonical-json validation in CI.",
+          "validators": [
+            "tests/test_canonical_payloads.py",
+            "tests/test_canonical_json.py",
+            "tools/gate_canon.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "tests/test_canonical_payloads.py",
+        "tests/test_canonical_json.py",
+        "tools/gate_canon.py"
+      ],
+      "id": "I089",
+      "phase": "Phase 0: Scaffolding and gates",
+      "status": "complete",
+      "title": "Add canonical-json safety tests for journal/ledger payloads"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Ledger/journal remain valid under concurrent writes.",
+          "validators": [
+            "tests/test_ledger_journal_concurrency.py",
+            "tools/gate_concurrency.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "tests/test_ledger_journal_concurrency.py",
+        "tools/gate_concurrency.py"
+      ],
+      "id": "I090",
+      "phase": "Phase 0: Scaffolding and gates",
+      "status": "complete",
+      "title": "Add concurrency tests for ledger/journal append correctness"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Verification reliably detects tampering and passes on untampered goldens.",
+          "validators": [
+            "tests/test_ledger_anchor_golden.py",
+            "tools/gate_ledger.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "tests/test_ledger_anchor_golden.py",
+        "tools/gate_ledger.py"
+      ],
+      "id": "I091",
+      "phase": "Phase 0: Scaffolding and gates",
+      "status": "complete",
+      "title": "Add golden chain test: ledger verify + anchor verify"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Perf gate is deterministic and prevents accidental regressions.",
+          "validators": [
+            "tools/gate_perf.py",
+            "tools/run_all_tests.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "tools/gate_perf.py",
+        "tools/run_all_tests.py"
+      ],
+      "id": "I092",
+      "phase": "Phase 0: Scaffolding and gates",
+      "status": "complete",
+      "title": "Add performance regression tests (capture latency/memory/query latency)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Security regressions are caught automatically.",
+          "validators": [
+            "tools/gate_security.py",
+            "tests/test_network_guard.py",
+            "tests/test_plugin_network_block.py",
+            "tests/test_encrypted_store_fail_loud.py",
+            "tests/test_policy_gate.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "tools/gate_security.py",
+        "tests/test_network_guard.py",
+        "tests/test_plugin_network_block.py",
+        "tests/test_encrypted_store_fail_loud.py",
+        "tests/test_policy_gate.py"
+      ],
+      "id": "I093",
+      "phase": "Phase 0: Scaffolding and gates",
+      "status": "complete",
+      "title": "Add security regression tests (DPAPI fail-closed, network guard, no raw egress)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Main branch stays lint/type clean; security issues surfaced early.",
+          "validators": [
+            "tools/gate_static.py",
+            "tools/gate_vuln.py",
+            "tools/run_all_tests.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "tools/gate_static.py",
+        "tools/gate_vuln.py",
+        "pyproject.toml",
+        "tools/run_all_tests.py"
+      ],
+      "id": "I094",
+      "phase": "Phase 0: Scaffolding and gates",
+      "status": "complete",
+      "title": "Static analysis: ruff + typing + vuln scan"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Doctor reliably detects misconfigurations before runtime failures.",
+          "validators": [
+            "tools/gate_doctor.py",
+            "tests/test_doctor_locks.py",
+            "tests/test_doctor_report_schema.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/loader.py",
+        "tools/gate_doctor.py",
+        "tests/test_doctor_locks.py",
+        "tests/test_doctor_report_schema.py"
+      ],
+      "id": "I095",
+      "phase": "Phase 0: Scaffolding and gates",
+      "status": "complete",
+      "title": "Doctor validates locks, storage, anchors, and network policy"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Corruption is surfaced deterministically and does not produce false data.",
+          "validators": [
+            "tests/test_encrypted_store_fail_loud.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/keyring.py",
+        "plugins/builtin/storage_encrypted/plugin.py",
+        "plugins/builtin/storage_sqlcipher/plugin.py",
+        "tests/test_encrypted_store_fail_loud.py"
+      ],
+      "id": "I096",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Fail loud on decrypt errors when encryption_required"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Every stored record can be typed without inspecting arbitrary fields.",
+          "validators": [
+            "tests/test_metadata_record_type.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/metadata_store.py",
+        "plugins/builtin/capture_windows/plugin.py",
+        "plugins/builtin/window_metadata_windows/plugin.py",
+        "tests/test_metadata_record_type.py"
+      ],
+      "id": "I097",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Add record type fields everywhere"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Plugins emit consistent, validated events via a single API.",
+          "validators": [
+            "tests/test_event_builder.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/event_builder.py",
+        "autocapture_nx/kernel/loader.py",
+        "plugins/builtin/capture_windows/plugin.py",
+        "plugins/builtin/audio_windows/plugin.py",
+        "tests/test_event_builder.py"
+      ],
+      "id": "I098",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Add unified EventBuilder helper"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Journal is always partitionable by run_id.",
+          "validators": [
+            "tests/test_journal_run_id.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/journal_basic/plugin.py",
+        "autocapture_nx/kernel/event_builder.py",
+        "tests/test_journal_run_id.py"
+      ],
+      "id": "I099",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Stamp every journal event with run_id"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Policy hashing overhead is removed from hot path.",
+          "validators": [
+            "tests/test_event_builder.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/event_builder.py",
+        "tests/test_event_builder.py"
+      ],
+      "id": "I100",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Cache policy snapshot hashing per run"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Evidence can be verified end-to-end by hash.",
+          "validators": [
+            "tests/test_capture_content_hash.py",
+            "tests/test_capture_streaming.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/capture/pipeline.py",
+        "plugins/builtin/audio_windows/plugin.py",
+        "plugins/builtin/input_windows/plugin.py",
+        "tests/test_capture_content_hash.py",
+        "tests/test_capture_streaming.py"
+      ],
+      "id": "I101",
+      "phase": "Phase 3: Storage scaling + durability",
+      "status": "complete",
+      "title": "Add content_hash to metadata for every media put"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Failures are visible, auditable, and do not silently corrupt state.",
+          "validators": [
+            "tests/test_capture_partial_failure.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/capture/pipeline.py",
+        "tests/test_capture_partial_failure.py"
+      ],
+      "id": "I102",
+      "phase": "Phase 3: Storage scaling + durability",
+      "status": "complete",
+      "title": "Track partial failures explicitly in journal/ledger"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "A segment is only considered valid if sealed.",
+          "validators": [
+            "tests/test_capture_streaming.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/capture/pipeline.py",
+        "tests/test_capture_streaming.py"
+      ],
+      "id": "I103",
+      "phase": "Phase 3: Storage scaling + durability",
+      "status": "complete",
+      "title": "Add segment sealing ledger entry after successful write"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "System self-heals from crashes without silently losing provenance.",
+          "validators": [
+            "tests/test_storage_recovery_scanner.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/loader.py",
+        "tests/test_storage_recovery_scanner.py"
+      ],
+      "id": "I104",
+      "phase": "Phase 3: Storage scaling + durability",
+      "status": "complete",
+      "title": "Add startup recovery scanner to reconcile stores"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Legacy zip path is less CPU-expensive and remains correct.",
+          "validators": [
+            "tests/test_capture_zip_container.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/capture/pipeline.py",
+        "tests/test_capture_zip_container.py"
+      ],
+      "id": "I105",
+      "phase": "Phase 2: Capture pipeline refactor",
+      "status": "complete",
+      "title": "If keeping zips, use ZIP_STORED for JPEG frames"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Zip mode does not require segment-sized RAM buffers.",
+          "validators": [
+            "tests/test_capture_zip_container.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/capture/pipeline.py",
+        "tests/test_capture_zip_container.py"
+      ],
+      "id": "I106",
+      "phase": "Phase 2: Capture pipeline refactor",
+      "status": "complete",
+      "title": "If keeping zips, stream ZipFile writes to a real file"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Input capture is scalable without overwhelming IO.",
+          "validators": [
+            "tests/test_input_batching.py",
+            "tests/test_journal_batch.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/input_windows/plugin.py",
+        "plugins/builtin/journal_basic/plugin.py",
+        "tests/test_input_batching.py",
+        "tests/test_journal_batch.py"
+      ],
+      "id": "I107",
+      "phase": "Phase 2: Capture pipeline refactor",
+      "status": "complete",
+      "title": "Batch input events to reduce write overhead"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Input data scales without losing queryability or provenance.",
+          "validators": [
+            "tests/test_input_batching.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/input_windows/plugin.py",
+        "tests/test_input_batching.py"
+      ],
+      "id": "I108",
+      "phase": "Phase 3: Storage scaling + durability",
+      "status": "complete",
+      "title": "Add compact binary input log (derived) + JSON summary"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "System audio can be captured as a first-class source when enabled.",
+          "validators": [
+            "tests/test_audio_encoding.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/audio_windows/plugin.py",
+        "tests/test_audio_encoding.py"
+      ],
+      "id": "I109",
+      "phase": "Phase 2: Capture pipeline refactor",
+      "status": "complete",
+      "title": "Add WASAPI loopback option for system audio capture"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Audio artifacts are decodable, time-aligned, and provenance-tracked.",
+          "validators": [
+            "tests/test_audio_encoding.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/audio_windows/plugin.py",
+        "tests/test_audio_encoding.py"
+      ],
+      "id": "I110",
+      "phase": "Phase 2: Capture pipeline refactor",
+      "status": "complete",
+      "title": "Store audio as PCM/FLAC/Opus derived artifact"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Process paths are searchable and consistent across sessions.",
+          "validators": [
+            "tests/test_window_path_normalization.py",
+            "tests/test_window_metadata_payload.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/windows/win_window.py",
+        "plugins/builtin/window_metadata_windows/plugin.py",
+        "tests/test_window_path_normalization.py",
+        "tests/test_window_metadata_payload.py"
+      ],
+      "id": "I111",
+      "phase": "Phase 2: Capture pipeline refactor",
+      "status": "complete",
+      "title": "Normalize active window process paths (device \u2192 drive paths)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Window location can be correlated with capture frames deterministically.",
+          "validators": [
+            "tests/test_monitor_selection.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/windows/win_window.py",
+        "plugins/builtin/window_metadata_windows/plugin.py",
+        "tests/test_monitor_selection.py"
+      ],
+      "id": "I112",
+      "phase": "Phase 2: Capture pipeline refactor",
+      "status": "complete",
+      "title": "Capture window.rect and monitor mapping"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Cursor timeline is accurate when enabled and has bounded overhead.",
+          "validators": [
+            "tests/test_capture_cursor_metadata.py",
+            "tests/test_cursor_timeline_plugin.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/windows/win_cursor.py",
+        "plugins/builtin/cursor_windows/plugin.py",
+        "autocapture_nx/capture/pipeline.py",
+        "tests/test_capture_cursor_metadata.py",
+        "tests/test_cursor_timeline_plugin.py"
+      ],
+      "id": "I113",
+      "phase": "Phase 2: Capture pipeline refactor",
+      "status": "complete",
+      "title": "Optional cursor position+shape capture"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Clipboard history is captured locally with provenance and controlled overhead.",
+          "validators": [
+            "tests/test_clipboard_capture.py",
+            "tests/test_optional_plugins_disabled.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/clipboard_windows",
+        "tests/test_clipboard_capture.py",
+        "tests/test_optional_plugins_disabled.py"
+      ],
+      "id": "I114",
+      "phase": "Phase 8: Optional expansion plugins",
+      "status": "complete",
+      "title": "Clipboard capture plugin (local-only, append-only)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "File activity timeline can be correlated with other evidence by time.",
+          "validators": [
+            "tests/test_file_activity_capture.py",
+            "tests/test_optional_plugins_disabled.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/file_activity_windows",
+        "tests/test_file_activity_capture.py",
+        "tests/test_optional_plugins_disabled.py"
+      ],
+      "id": "I115",
+      "phase": "Phase 8: Optional expansion plugins",
+      "status": "complete",
+      "title": "File activity capture plugin (USN journal / watcher)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "ML workloads are bounded and cannot starve the system.",
+          "validators": [
+            "tests/test_governor_gating.py",
+            "tests/test_idle_processor_chunking.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture/runtime/governor.py",
+        "autocapture/runtime/scheduler.py",
+        "autocapture/runtime/budgets.py",
+        "autocapture/runtime/conductor.py",
+        "autocapture_nx/processing/idle.py",
+        "tests/test_governor_gating.py",
+        "tests/test_idle_processor_chunking.py"
+      ],
+      "id": "I116",
+      "phase": "Phase 5: Scheduler/governor",
+      "status": "complete",
+      "title": "Model execution budgets per idle window"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Heavy processing is preemptible and resumes deterministically.",
+          "validators": [
+            "tests/test_idle_processor_chunking.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture/runtime/conductor.py",
+        "autocapture_nx/processing/idle.py",
+        "autocapture/research/runner.py",
+        "tests/test_idle_processor_chunking.py"
+      ],
+      "id": "I117",
+      "phase": "Phase 5: Scheduler/governor",
+      "status": "complete",
+      "title": "Preemption/chunking for long jobs"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Answers can identify which index snapshot they used.",
+          "validators": [
+            "tests/test_index_manifest.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture/indexing/manifest.py",
+        "autocapture/indexing/lexical.py",
+        "autocapture/indexing/vector.py",
+        "plugins/builtin/retrieval_basic/plugin.py",
+        "tests/test_index_manifest.py"
+      ],
+      "id": "I118",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Index versioning for retrieval reproducibility"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Tokenization is reproducible and rotation-aware.",
+          "validators": [
+            "tests/test_tokenizer_versioning.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/egress_sanitizer/plugin.py",
+        "plugins/builtin/storage_sqlcipher/plugin.py",
+        "plugins/builtin/storage_encrypted/plugin.py",
+        "plugins/builtin/storage_memory/plugin.py",
+        "tests/test_tokenizer_versioning.py"
+      ],
+      "id": "I119",
+      "phase": "Phase 6: Security + egress hardening",
+      "status": "complete",
+      "title": "Persist entity-tokenizer key id/version; version tokenization"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Outbound actions are fully auditable without storing raw sensitive payloads.",
+          "validators": [
+            "tests/test_egress_packet_ledger.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "plugins/builtin/egress_gateway/plugin.py",
+        "autocapture_nx/kernel/egress_approvals.py",
+        "tests/test_egress_packet_ledger.py"
+      ],
+      "id": "I120",
+      "phase": "Phase 6: Security + egress hardening",
+      "status": "complete",
+      "title": "Ledger sanitized egress packets (hash + schema version)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Outbound actions are user-controlled, auditable, and sanitized by default.",
+          "validators": [
+            "tests/test_egress_approval_store.py",
+            "tests/test_egress_approval_workflow.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/egress_approvals.py",
+        "autocapture/web/routes/egress.py",
+        "autocapture/web/ui",
+        "tests/test_egress_approval_store.py",
+        "tests/test_egress_approval_workflow.py"
+      ],
+      "id": "I121",
+      "phase": "Phase 7: FastAPI UX facade + Web Console",
+      "status": "complete",
+      "title": "Egress approval workflow in UI"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Plugins can be updated without downtime while preserving security and determinism.",
+          "validators": [
+            "tests/test_plugin_hot_reload_nx.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/plugin_system/registry.py",
+        "autocapture_nx/kernel/loader.py",
+        "tests/test_plugin_hot_reload_nx.py"
+      ],
+      "id": "I122",
+      "phase": "Phase 8: Optional expansion plugins",
+      "status": "complete",
+      "title": "Plugin hot-reload with hash verification and safe swap"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Every run has a verifiable origin entry in the ledger.",
+          "validators": [
+            "tests/test_run_state_entries.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/loader.py",
+        "tests/test_run_state_entries.py"
+      ],
+      "id": "I123",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Write kernel boot ledger entry system.start"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Every clean run has an explicit termination entry.",
+          "validators": [
+            "tests/test_run_state_entries.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/loader.py",
+        "tests/test_run_state_entries.py"
+      ],
+      "id": "I124",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Write kernel shutdown ledger entry system.stop"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Crashes are recorded and do not silently break provenance.",
+          "validators": [
+            "tests/test_run_state_entries.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/loader.py",
+        "tests/test_run_state_entries.py"
+      ],
+      "id": "I125",
+      "phase": "Phase 1: Correctness + immutability blockers",
+      "status": "complete",
+      "title": "Write crash ledger entry on next startup"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Hashing is deterministic across OS and filesystem orderings.",
+          "validators": [
+            "tests/test_directory_hashing.py",
+            "tests/test_hashing_directory_deterministic.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/hashing.py",
+        "tests/test_directory_hashing.py",
+        "tests/test_hashing_directory_deterministic.py"
+      ],
+      "id": "I126",
+      "phase": "Phase 0: Scaffolding and gates",
+      "status": "complete",
+      "title": "Make sha256_directory path sorting deterministic across OSes"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Runs are attributable to an environment fingerprint for debugging and audits.",
+          "validators": [
+            "tests/test_run_manifest.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture_nx/kernel/loader.py",
+        "tests/test_run_manifest.py"
+      ],
+      "id": "I127",
+      "phase": "Phase 4: Retrieval + provenance + citations",
+      "status": "complete",
+      "title": "Record python/OS/package versions into run manifest"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Users can move data safely without data loss or provenance breakage.",
+          "validators": [
+            "tests/test_storage_migrate.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture/storage/migrate.py",
+        "autocapture_nx/cli.py",
+        "tests/test_storage_migrate.py"
+      ],
+      "id": "I128",
+      "phase": "Phase 3: Storage scaling + durability",
+      "status": "complete",
+      "title": "Tooling to migrate data_dir safely (copy+verify, no delete)"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "System warns before disk exhaustion and informs mitigation choices.",
+          "validators": [
+            "tests/test_storage_forecast.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture/storage/pressure.py",
+        "autocapture/storage/forecast.py",
+        "autocapture/runtime/conductor.py",
+        "autocapture_nx/kernel/loader.py",
+        "autocapture_nx/cli.py",
+        "tests/test_storage_forecast.py"
+      ],
+      "id": "I129",
+      "phase": "Phase 3: Storage scaling + durability",
+      "status": "complete",
+      "title": "Disk usage forecasting (days remaining) + alerts"
+    },
+    {
+      "acceptance_bullets": [
+        {
+          "text": "Storage is optimized without compromising evidence immutability or citations.",
+          "validators": [
+            "tests/test_storage_compaction.py"
+          ]
+        }
+      ],
+      "evidence_paths": [
+        "autocapture/storage/compaction.py",
+        "autocapture_nx/kernel/metadata_store.py",
+        "autocapture_nx/cli.py",
+        "tests/test_storage_compaction.py"
+      ],
+      "id": "I130",
+      "phase": "Phase 3: Storage scaling + durability",
+      "status": "complete",
+      "title": "Storage compaction for derived artifacts only"
+    }
+  ],
+  "version": 1
+}

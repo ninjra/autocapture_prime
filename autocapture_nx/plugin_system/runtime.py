@@ -4,14 +4,22 @@ from __future__ import annotations
 
 import contextlib
 import ipaddress
+import io
 import os
 import socket
 import threading
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, cast
 
 from autocapture_nx.kernel.errors import PermissionError
+
+try:  # SEC-01 (Windows path hardening)
+    from autocapture_nx.windows.win_paths import normalize_windows_path_str, windows_is_within
+except Exception:  # pragma: no cover
+    normalize_windows_path_str = None  # type: ignore[assignment]
+    windows_is_within = None  # type: ignore[assignment]
 
 _original_socket = socket.socket
 _original_create_connection = socket.create_connection
@@ -23,7 +31,9 @@ _fs_patched = False
 _fs_patch_lock = threading.Lock()
 _fs_policy_local = threading.local()
 _fs_policy_global = None
+_FS_POLICY_UNSET = object()
 _original_open = None
+_original_io_open = None
 _original_os_open = None
 _original_os_listdir = None
 _original_os_scandir = None
@@ -133,9 +143,55 @@ def _ensure_patched() -> None:
         _patched = True
 
 
+@lru_cache(maxsize=8192)
+def _normalize_root_str(raw: str, os_name: str) -> str:
+    # Keep this fast: called for every plugin filesystem root during boot.
+    # We still resolve symlinks (realpath) for security, but we memoize heavily.
+    try:
+        expanded = str(Path(raw).expanduser())
+    except Exception:
+        expanded = str(raw)
+    if os_name == "nt" and normalize_windows_path_str is not None:
+        try:
+            return normalize_windows_path_str(expanded)
+        except Exception:
+            return expanded
+    try:
+        # SEC-01: `os.path.realpath()` calls `os.lstat()`, which we patch to
+        # enforce filesystem policies. Temporarily suspend the policy while we
+        # normalize roots to avoid re-entrant recursion.
+        previous = _fs_policy_local_raw()
+        _set_fs_policy(None)
+        try:
+            return os.path.realpath(expanded)
+        finally:
+            _set_fs_policy_raw(previous)
+    except Exception:
+        try:
+            return os.path.abspath(expanded)
+        except Exception:
+            return expanded
+
+
 def _normalize_root(path: Path) -> Path:
     try:
-        return path.expanduser().absolute()
+        normalized = _normalize_root_str(str(path), os.name)
+        candidate = Path(normalized).absolute()
+        # SEC-01: resolve symlinks to prevent traversal via symlinked paths that
+        # appear inside an allowed root but escape to a different target.
+        #
+        # IMPORTANT: `Path.resolve()` calls `os.stat`, which we patch below to
+        # enforce policies. To avoid recursion, temporarily suspend the policy
+        # while computing `realpath`.
+        try:
+            previous = _fs_policy_local_raw()
+            _set_fs_policy(None)
+            try:
+                return Path(os.path.realpath(str(candidate))).absolute()
+            finally:
+                _set_fs_policy_raw(previous)
+        except Exception:
+            return candidate
     except Exception:
         return path
 
@@ -180,11 +236,18 @@ class FilesystemPolicy:
             return False
         candidate = _normalize_root(path)
         for root in roots:
-            try:
-                candidate.relative_to(root)
-                return True
-            except ValueError:
-                continue
+            if os.name == "nt" and windows_is_within is not None:
+                try:
+                    if windows_is_within(str(root), str(candidate)):
+                        return True
+                except Exception:
+                    continue
+            else:
+                try:
+                    candidate.relative_to(root)
+                    return True
+                except ValueError:
+                    continue
         return False
 
     def allow_read(self, path: Path, *, allow_ancestor: bool = False) -> bool:
@@ -194,11 +257,18 @@ class FilesystemPolicy:
             return False
         candidate = _normalize_root(path)
         for root in self.read_roots:
-            try:
-                root.relative_to(candidate)
-                return True
-            except ValueError:
-                continue
+            if os.name == "nt" and windows_is_within is not None:
+                try:
+                    if windows_is_within(str(candidate), str(root)):
+                        return True
+                except Exception:
+                    continue
+            else:
+                try:
+                    root.relative_to(candidate)
+                    return True
+                except ValueError:
+                    continue
         return False
 
     def allow_write(self, path: Path) -> bool:
@@ -212,14 +282,29 @@ class FilesystemPolicy:
 
 
 def _current_fs_policy() -> FilesystemPolicy | None:
-    local = getattr(_fs_policy_local, "policy", None)
-    if local is not None:
-        return local
+    # Important: a thread-local value of None means "disabled", not "inherit".
+    local = _fs_policy_local_raw()
+    if local is not _FS_POLICY_UNSET:
+        return cast(FilesystemPolicy | None, local)
     return _fs_policy_global
 
 
-def _set_fs_policy(policy: FilesystemPolicy | None) -> None:
+def _fs_policy_local_raw() -> object | FilesystemPolicy | None:
+    return getattr(_fs_policy_local, "policy", _FS_POLICY_UNSET)
+
+
+def _set_fs_policy_raw(policy: object | FilesystemPolicy | None) -> None:
+    if policy is _FS_POLICY_UNSET:
+        try:
+            delattr(_fs_policy_local, "policy")
+        except Exception:
+            pass
+        return
     setattr(_fs_policy_local, "policy", policy)
+
+
+def _set_fs_policy(policy: FilesystemPolicy | None) -> None:
+    _set_fs_policy_raw(policy)
 
 
 def _write_mode_from_open(mode: str | None) -> bool:
@@ -259,6 +344,17 @@ def _check_fs(path: str | Path | int | None, *, write: bool, allow_ancestor: boo
         raise PermissionError("Filesystem access denied: invalid path")
     if write:
         allowed = policy.allow_write(candidate)
+        if not allowed and allow_ancestor:
+            # Allow directory creation along the path to an allowed readwrite root
+            # (e.g. `os.makedirs(data_dir)` needs to create intermediate parents).
+            cand_norm = _normalize_root(candidate)
+            for root in policy.readwrite_roots:
+                try:
+                    _normalize_root(root).relative_to(cand_norm)
+                    allowed = True
+                    break
+                except ValueError:
+                    continue
     else:
         allowed = policy.allow_read(candidate, allow_ancestor=allow_ancestor)
     if not allowed:
@@ -275,12 +371,13 @@ def _patch_filesystem() -> None:
             return
         import builtins
 
-        global _original_open, _original_os_open, _original_os_listdir, _original_os_scandir
+        global _original_open, _original_io_open, _original_os_open, _original_os_listdir, _original_os_scandir
         global _original_os_stat, _original_os_lstat, _original_os_mkdir, _original_os_makedirs
         global _original_os_remove, _original_os_unlink, _original_os_rename, _original_os_replace
         global _original_os_rmdir
 
         _original_open = builtins.open
+        _original_io_open = io.open
         _original_os_open = os.open
         _original_os_listdir = os.listdir
         _original_os_scandir = os.scandir
@@ -303,6 +400,15 @@ def _patch_filesystem() -> None:
             _check_fs(path, write=_write_mode_from_open(str(mode)))
             return _original_open(path, *args, **kwargs)
 
+        def _io_open(path, *args, **kwargs):
+            mode = None
+            if args:
+                mode = args[0] if args else None
+            if mode is None:
+                mode = kwargs.get("mode", "r")
+            _check_fs(path, write=_write_mode_from_open(str(mode)))
+            return _original_io_open(path, *args, **kwargs)
+
         def _os_open(path, flags, *args, **kwargs):
             _check_fs(path, write=_write_mode_from_flags(int(flags)))
             return _original_os_open(path, flags, *args, **kwargs)
@@ -324,11 +430,11 @@ def _patch_filesystem() -> None:
             return _original_os_lstat(path, *args, **kwargs)
 
         def _os_mkdir(path, *args, **kwargs):
-            _check_fs(path, write=True)
+            _check_fs(path, write=True, allow_ancestor=True)
             return _original_os_mkdir(path, *args, **kwargs)
 
         def _os_makedirs(path, *args, **kwargs):
-            _check_fs(path, write=True)
+            _check_fs(path, write=True, allow_ancestor=True)
             return _original_os_makedirs(path, *args, **kwargs)
 
         def _os_remove(path, *args, **kwargs):
@@ -354,6 +460,7 @@ def _patch_filesystem() -> None:
             return _original_os_rmdir(path, *args, **kwargs)
 
         builtins.open = cast(Any, _open)
+        io.open = cast(Any, _io_open)
         os.open = _os_open
         os.listdir = _os_listdir
         os.scandir = _os_scandir
@@ -383,23 +490,23 @@ def filesystem_guard(policy: FilesystemPolicy | None):
         yield
         return
     _patch_filesystem()
-    previous = _current_fs_policy()
+    previous = _fs_policy_local_raw()
     _set_fs_policy(policy)
     try:
         yield
     finally:
-        _set_fs_policy(previous)
+        _set_fs_policy_raw(previous)
 
 
 @contextlib.contextmanager
 def filesystem_guard_suspended():
     """Temporarily disable filesystem policy for the current thread."""
-    previous = _current_fs_policy()
+    previous = _fs_policy_local_raw()
     _set_fs_policy(None)
     try:
         yield
     finally:
-        _set_fs_policy(previous)
+        _set_fs_policy_raw(previous)
 
 
 @contextlib.contextmanager

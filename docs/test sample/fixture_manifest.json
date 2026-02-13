@@ -5,7 +5,7 @@
     "screenshots": [
       {
         "id": "screenshot_1",
-        "path": "D:\\projects\\autocapture_prime\\docs\\test sample\\Screenshot 2026-02-02 113519.png"
+        "path": "/mnt/d/projects/autocapture_prime/docs/test sample/Screenshot 2026-02-02 113519.png"
       }
     ]
   },
@@ -70,8 +70,39 @@
         "your"
       ]
     },
-    "explicit": [],
-    "mode": "auto",
+    "explicit": [
+      {
+        "query": "what time is it on the vdi",
+        "expect": "VDI time:",
+        "match_mode": "contains"
+      },
+      {
+        "query": "who is working with me on the quorum task",
+        "expect": "Quorum task collaborator:",
+        "match_mode": "contains"
+      },
+      {
+        "query": "how many inboxes I have open",
+        "expect": "Open inboxes:",
+        "match_mode": "contains"
+      },
+      {
+        "query": "what song is playing",
+        "expect": "Now playing:",
+        "match_mode": "contains"
+      },
+      {
+        "query": "Master Cylinder",
+        "expect": "Master Cylinder",
+        "match_mode": "contains"
+      },
+      {
+        "query": "what time is it on the vdi, and who is working with me on the quorum task. Lastly tell me how many inboxes I have open.",
+        "expect": "Quorum task collaborator:",
+        "match_mode": "contains"
+      }
+    ],
+    "mode": "explicit",
     "require_citations": true,
     "require_state": "ok"
   },

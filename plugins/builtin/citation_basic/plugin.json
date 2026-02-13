@@ -15,6 +15,12 @@
       "path": "plugin.py"
     }
   ],
+  "filesystem_policy": {
+    "read": [
+      "{data_dir}",
+      "{anchor_dir}"
+    ]
+  },
   "hash_lock": {
     "artifact_sha256": "",
     "manifest_sha256": ""
@@ -26,6 +32,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.citation.basic",
+  "provides": [
+    "citation.validator"
+  ],
   "required_capabilities": [
     "storage.keyring",
     "storage.metadata"
@@ -33,11 +42,5 @@
   "settings_paths": [
     "storage"
   ],
-  "version": "0.1.0",
-  "filesystem_policy": {
-    "read": [
-      "{data_dir}",
-      "{anchor_dir}"
-    ]
-  }
+  "version": "0.1.0"
 }

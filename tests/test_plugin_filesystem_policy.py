@@ -1,9 +1,10 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
-from autocapture_nx.kernel.errors import PluginError
+from autocapture_nx.kernel.errors import PluginError, PermissionError
 from autocapture_nx.plugin_system.registry import PluginRegistry
 
 
@@ -46,7 +47,12 @@ def _write_fs_plugin(root: Path, plugin_id: str, allowed_root: str) -> None:
 
 class FilesystemPolicyTests(unittest.TestCase):
     def test_filesystem_policy_blocks_outside_roots(self) -> None:
-        with tempfile.TemporaryDirectory(dir=".") as tmp:
+        # MOD-021 low-resource mode forces in-proc hosting for WSL stability; the
+        # subprocess filesystem guard is only meaningful when subprocess hosting
+        # is enabled.
+        if os.getenv("AUTOCAPTURE_PLUGINS_HOSTING_MODE", "").strip().lower() == "inproc":
+            self.skipTest("subprocess-only: filesystem policy enforced in host_runner sandbox")
+        with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             allowed_dir = root / "allowed"
             denied_dir = root / "denied"
@@ -71,6 +77,7 @@ class FilesystemPolicyTests(unittest.TestCase):
             plugins["filesystem_defaults"] = {"read": [], "readwrite": []}
             hosting = plugins.setdefault("hosting", {})
             hosting["mode"] = "subprocess"
+            hosting["wsl_force_inproc"] = False
             hosting["inproc_allowlist"] = []
             hosting["rpc_timeout_s"] = 2
             hosting["rpc_max_message_bytes"] = 2_000_000
@@ -81,11 +88,14 @@ class FilesystemPolicyTests(unittest.TestCase):
             _loaded, caps = registry.load_plugins()
             fs_cap = caps.get("fs.cap")
             self.assertEqual(fs_cap.read_text(str(allowed_file)), "ok")
-            with self.assertRaises(PluginError):
+            # In subprocess hosting, the permission failure is surfaced as PluginError
+            # (stringified exception across IPC). In in-proc hosting, it raises the
+            # kernel PermissionError directly.
+            with self.assertRaises((PluginError, PermissionError)):
                 fs_cap.read_text(str(denied_file))
 
     def test_filesystem_policy_expands_anchor_dir(self) -> None:
-        with tempfile.TemporaryDirectory(dir=".") as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             anchor_dir = root / "anchor_store"
             anchor_path = anchor_dir / "anchors.ndjson"

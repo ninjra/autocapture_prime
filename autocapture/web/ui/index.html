@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/ui/styles.css" />
   </head>
   <body>
+    <a class="skip-link" href="#panel-capture">Skip to content</a>
     <div class="app">
       <header class="mast">
         <div class="brand">
@@ -37,6 +38,14 @@
           <div class="status-item">
             <p class="label">Disk</p>
             <p id="captureBannerDisk" class="badge off">—</p>
+          </div>
+          <div class="status-item">
+            <p class="label">CPU</p>
+            <p id="captureBannerCpu" class="badge off">—</p>
+          </div>
+          <div class="status-item">
+            <p class="label">RAM</p>
+            <p id="captureBannerRam" class="badge off">—</p>
           </div>
         </div>
       </header>
@@ -521,6 +530,20 @@
               </div>
             </article>
 
+            <article class="card" id="safeModeCard" data-safe-mode-banner hidden>
+              <div class="card-header">
+                <h2>Safe Mode</h2>
+              </div>
+              <div class="status-line" id="safeModeReason">—</div>
+              <ol class="list" id="safeModeChecklist">
+                <li>Check `status` for `safe_mode_reason` and crash-loop fields.</li>
+                <li>Run `autocapture doctor`.</li>
+                <li>Run `autocapture integrity scan`.</li>
+                <li>If crash-loop is active, wait for `safe_mode_until` or investigate `kernel_error`.</li>
+                <li>Collect diagnostics bundle if needed.</li>
+              </ol>
+            </article>
+
             <article class="card" id="alertsCard">
               <div class="card-header">
                 <h2>Alerts</h2>
@@ -553,6 +576,10 @@
               <div class="card-header">
                 <h2>Query</h2>
                 <button id="runQuery">Ask</button>
+              </div>
+              <div id="queryStatus" class="status-line"></div>
+              <div class="actions">
+                <button id="queryScheduleExtract" class="ghost" disabled>Schedule extraction now</button>
               </div>
               <textarea id="queryInput" placeholder="Ask a question about your captured timeline..."></textarea>
               <div id="queryOutput" class="output"></div>

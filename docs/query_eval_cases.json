@@ -1,0 +1,53 @@
+[
+  {
+    "id": "song_now_playing",
+    "query": "what song is playing",
+    "expects_any": [
+      "now playing",
+      "song"
+    ],
+    "expects_all": [],
+    "expect_exact": "Now playing: Master Cylinder - Jung At Heart",
+    "require_citations": true
+  },
+  {
+    "id": "quorum_collaborator",
+    "query": "who is working with me on the flagged quorum message",
+    "expects_any": [
+      "quorum task collaborator"
+    ],
+    "expects_all": [],
+    "expect_exact": "Quorum task collaborator: Nikki M",
+    "require_citations": true
+  },
+  {
+    "id": "vdi_time",
+    "query": "what time is it on the vdi",
+    "expects_any": [
+      "vdi time"
+    ],
+    "expects_all": [],
+    "expect_exact": "VDI time: 11:35 AM",
+    "require_citations": true
+  },
+  {
+    "id": "inboxes_count",
+    "query": "how many inboxes do i have open",
+    "expects_any": [
+      "inboxes:"
+    ],
+    "expects_all": [],
+    "expect_exact": "Open inboxes: 4",
+    "require_citations": true
+  },
+  {
+    "id": "background_color",
+    "query": "what color is the background",
+    "expects_any": [
+      "background color"
+    ],
+    "expects_all": [],
+    "expect_exact": "Background color: black",
+    "require_citations": true
+  }
+]

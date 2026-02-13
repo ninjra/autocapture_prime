@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import inspect
+import os
 from typing import Any
 
 try:
@@ -39,20 +40,55 @@ class RapidOcrPlugin(PluginBase):
         self._det_use_cuda = rapid_cfg.get("det_use_cuda")
         self._rec_use_cuda = rapid_cfg.get("rec_use_cuda")
         self._cls_use_cuda = rapid_cfg.get("cls_use_cuda")
+        # Resource safety defaults (WSL-friendly). These can be overridden via config:
+        # models.rapidocr.max_image_side, models.rapidocr.max_threads.
+        self._max_image_side = int(rapid_cfg.get("max_image_side") or rapid_cfg.get("max_side_len") or 1600)
+        self._max_threads = int(rapid_cfg.get("max_threads") or 1)
         self._engine = None
         self._init_error: str | None = None
-        self._init_engine()
 
     def capabilities(self) -> dict[str, Any]:
         return {"ocr.engine": self}
 
+    def _limit_threads(self) -> None:
+        # Best-effort: cap native thread pools for OpenMP/BLAS/ORT. This is critical
+        # on WSL where default thread fanout can exceed CPU/RAM budgets.
+        n = max(1, int(self._max_threads))
+        env_defaults = {
+            "OMP_NUM_THREADS": str(n),
+            "OPENBLAS_NUM_THREADS": str(n),
+            "MKL_NUM_THREADS": str(n),
+            "NUMEXPR_NUM_THREADS": str(n),
+            "VECLIB_MAXIMUM_THREADS": str(n),
+            "OMP_WAIT_POLICY": "PASSIVE",
+        }
+        for k, v in env_defaults.items():
+            os.environ.setdefault(k, v)
+        try:
+            import cv2  # type: ignore
+
+            cv2.setNumThreads(n)
+        except Exception:
+            pass
+
+    def _ensure_engine(self) -> None:
+        if self._engine is not None or self._init_error is not None:
+            return
+        self._init_engine()
+
     def _init_engine(self) -> None:
+        self._limit_threads()
         try:
             from rapidocr_onnxruntime import RapidOCR  # type: ignore
         except Exception as exc:  # pragma: no cover - dependency guard
             self._init_error = f"rapidocr_missing:{exc}"
             return
         kwargs: dict[str, Any] = {}
+        # Force onnxruntime thread pools to respect our WSL-friendly cap. RapidOCR
+        # supports these keys via its config.yaml UpdateParameters.
+        n = max(1, int(self._max_threads))
+        kwargs["intra_op_num_threads"] = n
+        kwargs["inter_op_num_threads"] = n
         if self._det_model_path:
             kwargs["det_model_path"] = str(self._det_model_path)
         if self._rec_model_path:
@@ -74,8 +110,12 @@ class RapidOcrPlugin(PluginBase):
                 kwargs["cls_use_cuda"] = bool(self._cls_use_cuda)
         try:
             sig = inspect.signature(RapidOCR)
-            allowed = set(sig.parameters.keys())
-            kwargs = {k: v for k, v in kwargs.items() if k in allowed}
+            # RapidOCR declares `**kwargs`, so accepted keys are not visible via
+            # inspect.signature; do not filter in that case.
+            has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+            if not has_var_kw:
+                allowed = set(sig.parameters.keys())
+                kwargs = {k: v for k, v in kwargs.items() if k in allowed}
         except Exception:
             pass
         try:
@@ -87,12 +127,26 @@ class RapidOcrPlugin(PluginBase):
     def extract_tokens(self, image_bytes: bytes) -> list[dict[str, Any]]:
         if not image_bytes or not _PIL_AVAILABLE:
             return []
+        self._ensure_engine()
         if self._engine is None:
             return []
         try:
             image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         except Exception:
             return []
+        orig_w, orig_h = image.size
+        scale = 1.0
+        max_side = max(1, int(self._max_image_side))
+        if max_side > 0:
+            longest = max(orig_w, orig_h)
+            if longest > max_side:
+                scale = max_side / float(longest)
+                new_w = max(1, int(round(orig_w * scale)))
+                new_h = max(1, int(round(orig_h * scale)))
+                try:
+                    image = image.resize((new_w, new_h), resample=getattr(Image, "BILINEAR", 2))
+                except Exception:
+                    pass
         try:
             import numpy as np  # type: ignore
         except Exception:
@@ -104,6 +158,7 @@ class RapidOcrPlugin(PluginBase):
             return []
         items = result[0] if isinstance(result, tuple) else result
         tokens: list[dict[str, Any]] = []
+        inv_scale = 1.0 / scale if scale and scale > 0 else 1.0
         for item in items or []:
             if not isinstance(item, (list, tuple)) or len(item) < 2:
                 continue
@@ -111,6 +166,15 @@ class RapidOcrPlugin(PluginBase):
             text = item[1]
             score = item[2] if len(item) > 2 else 0.0
             x0, y0, x1, y1 = _bbox_from_item(bbox)
+            if inv_scale != 1.0:
+                x0 = int(round(x0 * inv_scale))
+                y0 = int(round(y0 * inv_scale))
+                x1 = int(round(x1 * inv_scale))
+                y1 = int(round(y1 * inv_scale))
+                x0 = max(0, min(x0, orig_w))
+                x1 = max(0, min(x1, orig_w))
+                y0 = max(0, min(y0, orig_h))
+                y1 = max(0, min(y1, orig_h))
             tokens.append(
                 {
                     "text": str(text or ""),

@@ -26,6 +26,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.retrieval.basic",
+  "provides": [
+    "retrieval.strategy"
+  ],
   "required_capabilities": [
     "storage.metadata",
     "tracking.input"

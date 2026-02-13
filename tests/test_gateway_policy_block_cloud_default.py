@@ -1,37 +1,39 @@
-import os
-import tempfile
-import unittest
-
-from fastapi.testclient import TestClient
-
-from autocapture.gateway.app import get_app
+from __future__ import annotations
 
 
-class GatewayPolicyBlockTests(unittest.TestCase):
-    def test_cloud_blocked_by_default(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            original_config = os.environ.get("AUTOCAPTURE_CONFIG_DIR")
-            original_data = os.environ.get("AUTOCAPTURE_DATA_DIR")
-            os.environ["AUTOCAPTURE_CONFIG_DIR"] = tmp
-            os.environ["AUTOCAPTURE_DATA_DIR"] = tmp
-            try:
-                client = TestClient(get_app())
-                payload = {
-                    "messages": [{"role": "user", "content": "hello"}],
-                    "use_cloud": True,
-                }
-                resp = client.post("/v1/chat/completions", json=payload)
-                self.assertEqual(resp.status_code, 403)
-            finally:
-                if original_config is None:
-                    os.environ.pop("AUTOCAPTURE_CONFIG_DIR", None)
-                else:
-                    os.environ["AUTOCAPTURE_CONFIG_DIR"] = original_config
-                if original_data is None:
-                    os.environ.pop("AUTOCAPTURE_DATA_DIR", None)
-                else:
-                    os.environ["AUTOCAPTURE_DATA_DIR"] = original_data
+def _base_config() -> dict:
+    return {
+        "plugins": {"permissions": {"network_allowed_plugin_ids": ["mx.core.llm_openai_compat"]}},
+        "privacy": {
+            "egress": {
+                "enabled": True,
+                "approval_required": True,
+                "default_sanitize": True,
+                "destination_allowlist": ["https://api.openai.com"],
+            },
+            "cloud": {"enabled": False, "allow_images": False},
+        },
+    }
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_policy_gate_blocks_cloud_by_default():
+    from autocapture.plugins.policy_gate import PolicyGate
+
+    class Sanitizer:
+        def sanitize_payload(self, payload):
+            out = dict(payload)
+            out["schema_version"] = int(out.get("schema_version", 1) or 1)
+            return out
+
+        def leak_check(self, _payload):
+            return True
+
+    gate = PolicyGate(_base_config(), Sanitizer())
+    decision = gate.enforce(
+        "mx.core.llm_openai_compat",
+        {"schema_version": 1, "messages": [{"role": "user", "content": "hi"}]},
+        url="https://api.openai.com",
+    )
+    assert not decision.ok
+    assert decision.reason == "cloud_disabled"
+

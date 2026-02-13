@@ -34,7 +34,8 @@
           }
         },
         "sha256": {"type": "string"},
-        "redaction_applied": {"type": "boolean"}
+        "redaction_applied": {"type": "boolean"},
+        "policy": {"type": "object", "additionalProperties": true}
       }
     },
     "ProvenanceRecord": {
@@ -59,7 +60,8 @@
           "type": "array",
           "items": {"type": "string"}
         },
-        "created_ts_ms": {"type": "integer"}
+        "created_ts_ms": {"type": "integer"},
+        "policy": {"type": "object", "additionalProperties": true}
       }
     },
     "StateSpan": {

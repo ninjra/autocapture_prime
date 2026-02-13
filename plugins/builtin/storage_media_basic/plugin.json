@@ -1,0 +1,43 @@
+{
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [],
+  "enabled": false,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "storage.media_store",
+      "path": "plugin.py"
+    }
+  ],
+  "filesystem_policy": {
+    "readwrite": [
+      "{media_dir}"
+    ]
+  },
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "permissions": {
+    "filesystem": "readwrite",
+    "gpu": false,
+    "network": false,
+    "raw_input": false
+  },
+  "plugin_id": "builtin.storage.media.basic",
+  "provides": [
+    "storage.media"
+  ],
+  "required_capabilities": [],
+  "settings_paths": [
+    "storage"
+  ],
+  "version": "0.1.0"
+}
+

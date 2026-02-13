@@ -21,11 +21,28 @@ def is_derived_record(record: dict[str, Any]) -> bool:
     return record_type.startswith("derived.")
 
 
+def _normalize_evidence_like(value: dict[str, Any]) -> None:
+    """Normalize evidence-like payloads before validation/persistence.
+
+    Producers should set these fields, but we normalize here to avoid silently
+    losing evidence due to missing required keys and to keep hashes consistent
+    with the stored payload (citeability).
+    """
+
+    if "schema_version" not in value:
+        value["schema_version"] = 1
+
+    # Ensure payload_hash matches the stored payload. This also covers older
+    # producers that didn't compute a payload_hash yet.
+    value["payload_hash"] = sha256_canonical({k: v for k, v in value.items() if k != "payload_hash"})
+
+
 def _validate_record(value: dict[str, Any], record_id: str) -> None:
     record_type = str(value.get("record_type", ""))
     if not record_type:
         raise ValueError(f"Metadata record {record_id} missing record_type")
     if is_evidence_like(value):
+        _normalize_evidence_like(value)
         validate_evidence_record(value, record_id)
 
 
@@ -134,6 +151,7 @@ def build_unavailable_record(
     details: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
+        "schema_version": 1,
         "record_type": "evidence.capture.unavailable",
         "run_id": run_id,
         "ts_utc": ts_utc,

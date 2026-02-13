@@ -10,6 +10,8 @@ from autocapture.indexing.factory import build_indexes
 from autocapture.retrieval.fusion import rrf_fusion
 from autocapture.retrieval.rerank import Reranker
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
+from autocapture_nx.kernel.ids import decode_record_id_component
+from autocapture_nx.kernel.providers import capability_providers
 
 
 class RetrievalStrategy(PluginBase):
@@ -22,9 +24,16 @@ class RetrievalStrategy(PluginBase):
         self._lexical = None
         self._vector = None
         self._indexes_ready = False
-        self._reranker = Reranker()
+        self._rerank_fallback = Reranker()
+        self._rerankers: list[tuple[str, Any]] = []
         self._last_trace: list[dict[str, Any]] = []
         self._index_meta: dict[str, Any] = {}
+        try:
+            cap = context.get_capability("retrieval.reranker")
+        except Exception:
+            cap = None
+        if cap is not None:
+            self._rerankers = capability_providers(cap, "retrieval.reranker")
 
     def capabilities(self) -> dict[str, Any]:
         return {"retrieval.strategy": self}
@@ -39,8 +48,8 @@ class RetrievalStrategy(PluginBase):
         query_text = str(query or "").strip()
         if not query_text:
             return []
+        retrieval_cfg = self._config.get("retrieval", {}) if isinstance(self._config, dict) else {}
         trace: list[dict[str, Any]] = []
-        window_events, input_summaries, cursor_samples = _collect_timelines(store)
         candidate_ids = _time_window_candidates(store, time_window, self._config)
         if candidate_ids is not None:
             trace.append(
@@ -72,7 +81,10 @@ class RetrievalStrategy(PluginBase):
                 str(r.get("derived_id", "")),
             )
         )
-        _attach_timelines(results, store, window_events, input_summaries, cursor_samples)
+        if bool(retrieval_cfg.get("attach_timelines", True)):
+            timeline_limit = int(retrieval_cfg.get("timeline_scan_limit", 5000))
+            window_events, input_summaries, cursor_samples = _collect_timelines(store, limit=timeline_limit)
+            _attach_timelines(results, store, window_events, input_summaries, cursor_samples)
         self._last_trace = trace
         return results
 
@@ -83,7 +95,9 @@ class RetrievalStrategy(PluginBase):
         if not self._config:
             return
         logger = self.context.logger if callable(getattr(self.context, "logger", None)) else None
-        self._lexical, self._vector = build_indexes(self._config, logger=logger)
+        # Retrieval runs under a read-only filesystem sandbox (see plugin manifest).
+        # Index creation and writes happen in the SST pipeline; retrieval only reads.
+        self._lexical, self._vector = build_indexes(self._config, logger=logger, read_only=True)
         self._index_meta = {}
         if self._lexical is not None and hasattr(self._lexical, "identity"):
             try:
@@ -104,6 +118,15 @@ class RetrievalStrategy(PluginBase):
         trace: list[dict[str, Any]],
         candidate_ids: set[str] | None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        def _source_id_for(doc_id: str) -> str:
+            try:
+                record = store.get(doc_id, {})
+            except Exception:
+                record = {}
+            if isinstance(record, dict):
+                return str(record.get("source_id") or doc_id)
+            return str(doc_id)
+
         self._ensure_indexes()
         if self._lexical is None and self._vector is None:
             return [], trace
@@ -119,7 +142,16 @@ class RetrievalStrategy(PluginBase):
             except Exception:
                 lexical_hits = []
         if candidate_ids is not None:
-            lexical_hits = [hit for hit in lexical_hits if hit.get("doc_id") in candidate_ids]
+            # Candidate IDs are evidence/source IDs; lexical index doc_ids are often
+            # derived doc IDs. Filter by the derived doc's source_id mapping.
+            filtered = []
+            for hit in lexical_hits:
+                doc_id = hit.get("doc_id")
+                if not doc_id:
+                    continue
+                if _source_id_for(str(doc_id)) in candidate_ids:
+                    filtered.append(hit)
+            lexical_hits = filtered
         trace.append({"tier": "LEXICAL", "result_count": len(lexical_hits), "index": self._index_meta.get("lexical")})
         if self._vector is not None:
             vector_ok, reason = _allow_vector(self.context, self._config)
@@ -130,7 +162,14 @@ class RetrievalStrategy(PluginBase):
                 except Exception:
                     vector_hits = []
                 if candidate_ids is not None:
-                    vector_hits = [hit for hit in vector_hits if hit.get("doc_id") in candidate_ids]
+                    filtered = []
+                    for hit in vector_hits:
+                        doc_id = hit.get("doc_id")
+                        if not doc_id:
+                            continue
+                        if _source_id_for(str(doc_id)) in candidate_ids:
+                            filtered.append(hit)
+                    vector_hits = filtered
                 trace.append({"tier": "VECTOR", "result_count": len(vector_hits), "index": self._index_meta.get("vector")})
             else:
                 trace.append({"tier": "VECTOR_SKIPPED", "reason": reason})
@@ -173,9 +212,26 @@ class RetrievalStrategy(PluginBase):
             doc_id = item.get("doc_id") or item.get("record_id")
             if not doc_id:
                 continue
-            record = store.get(doc_id, {})
+            record = _store_get_safe(store, str(doc_id), {})
+            if not isinstance(record, dict):
+                record = {}
             docs.append({**item, "doc_id": doc_id, "text": record.get("text", "")})
-        return self._reranker.rerank(query, docs)
+        reranked = list(docs)
+        # Apply any plugin-provided rerankers first (late interaction, etc.),
+        # then always apply the deterministic overlap fallback to stabilize ties.
+        for _pid, rr in self._rerankers:
+            try:
+                if hasattr(rr, "rerank"):
+                    out = rr.rerank(query, reranked)
+                elif callable(rr):
+                    out = rr(query, reranked)
+                else:
+                    out = None
+            except Exception:
+                out = None
+            if isinstance(out, list) and out:
+                reranked = out
+        return self._rerank_fallback.rerank(query, reranked)
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> RetrievalStrategy:
@@ -184,12 +240,50 @@ def create_plugin(plugin_id: str, context: PluginContext) -> RetrievalStrategy:
 
 def _collect_timelines(
     store: Any,
+    *,
+    limit: int = 5000,
 ) -> tuple[list[tuple[float, str, dict[str, Any]]], list[tuple[float, float, str]], list[tuple[float, str]]]:
     window_events: list[tuple[float, str, dict[str, Any]]] = []
     input_summaries: list[tuple[float, float, str]] = []
     cursor_samples: list[tuple[float, str]] = []
-    for record_id in getattr(store, "keys", lambda: [])():
-        record = store.get(record_id, {})
+    if hasattr(store, "latest"):
+        try:
+            for item in store.latest("evidence.window.meta", limit=limit):
+                rid = str(item.get("record_id", ""))
+                record = item.get("record")
+                if not rid or not isinstance(record, dict):
+                    continue
+                ts_val = _ts_key(record.get("ts_utc"))
+                if ts_val is not None:
+                    window_events.append((ts_val, rid, record))
+            for item in store.latest("derived.input.summary", limit=limit):
+                rid = str(item.get("record_id", ""))
+                record = item.get("record")
+                if not rid or not isinstance(record, dict):
+                    continue
+                start_ts = _ts_key(record.get("start_ts_utc") or record.get("ts_start_utc"))
+                end_ts = _ts_key(record.get("end_ts_utc") or record.get("ts_end_utc"))
+                if start_ts is not None and end_ts is not None:
+                    input_summaries.append((start_ts, end_ts, rid))
+            for item in store.latest("derived.cursor.sample", limit=limit):
+                rid = str(item.get("record_id", ""))
+                record = item.get("record")
+                if not rid or not isinstance(record, dict):
+                    continue
+                ts_val = _ts_key(record.get("ts_utc"))
+                if ts_val is not None:
+                    cursor_samples.append((ts_val, rid))
+            return window_events, input_summaries, cursor_samples
+        except Exception:
+            pass
+
+    max_records = max(0, int(limit))
+    for idx, record_id in enumerate(_store_keys_safe(store)):
+        if max_records and idx >= max_records:
+            break
+        record = _store_get_safe(store, record_id, {})
+        if not isinstance(record, dict):
+            continue
         record_type = str(record.get("record_type", ""))
         if record_type == "evidence.window.meta":
             ts_val = _ts_key(record.get("ts_utc"))
@@ -229,11 +323,13 @@ def _scan_metadata(
     candidate_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
-    record_ids = list(getattr(store, "keys", lambda: [])())
+    record_ids = _store_keys_safe(store)
     if candidate_ids is not None:
         record_ids = [rid for rid in record_ids if rid in candidate_ids]
     for record_id in record_ids:
-        record = store.get(record_id, {})
+        record = _store_get_safe(store, record_id, {})
+        if not isinstance(record, dict):
+            continue
         text = str(record.get("text", "")).lower()
         if not query_lower or query_lower not in text:
             continue
@@ -254,37 +350,86 @@ def _map_candidates(
     store: Any,
     time_window: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
-    mapped: dict[str, dict[str, Any]] = {}
+    # Keep multiple derived hits per evidence. Collapsing to one-per-source can
+    # hide important derived docs (e.g., deterministic QA extra docs) that answer
+    # different facets of the same screenshot.
+    results: list[dict[str, Any]] = []
+    seen: set[tuple[str, str | None]] = set()
     for item in candidates:
         doc_id = item.get("doc_id") or item.get("record_id")
         if not doc_id:
             continue
-        record = store.get(doc_id, {})
+        doc_id = str(doc_id)
+        record = _store_get_safe(store, doc_id, {})
+        if not isinstance(record, dict):
+            record = {}
+        if not record:
+            # In subprocess hosting, capability-to-capability calls can be
+            # expensive and occasionally fragile for large derived payloads.
+            # For derived.text.* doc_ids we can infer the evidence/source_id
+            # deterministically from the encoded source suffix, then fetch only
+            # the (small) evidence record for ts/type.
+            try:
+                doc_str = str(doc_id)
+                parts = doc_str.split("/")
+                inferred_source: str | None = None
+                if len(parts) >= 3 and parts[1].startswith("derived.text."):
+                    inferred_source = decode_record_id_component(parts[-1])
+                if inferred_source and inferred_source != doc_str:
+                    source_record = _store_get_safe(store, inferred_source, {}) or {}
+                    if not isinstance(source_record, dict):
+                        source_record = {}
+                    if not source_record:
+                        continue
+                    ts = source_record.get("ts_utc")
+                    if not _within_window(ts, time_window):
+                        continue
+                    score = float(item.get("score", 0.0))
+                    record_type = str(source_record.get("record_type", ""))
+                    key = (str(inferred_source), str(doc_str))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    result = {
+                        "record_id": str(inferred_source),
+                        "score": score,
+                        "ts_utc": ts,
+                        "record_type": record_type,
+                        "derived_id": doc_str,
+                    }
+                    snippet = item.get("snippet")
+                    if snippet:
+                        result["snippet"] = snippet
+                    results.append(result)
+                    continue
+            except Exception:
+                pass
         if not record:
             continue
         source_id = record.get("source_id") or doc_id
-        source_record = record if source_id == doc_id else store.get(source_id, {})
+        source_record = record if source_id == doc_id else _store_get_safe(store, str(source_id), {})
+        if not isinstance(source_record, dict):
+            source_record = {}
+        if source_id != doc_id and not source_record:
+            continue
         ts = record.get("ts_utc") or source_record.get("ts_utc")
         if not _within_window(ts, time_window):
             continue
         score = float(item.get("score", 0.0))
         record_type = str(source_record.get("record_type", ""))
-        result = {"record_id": source_id, "score": score, "ts_utc": ts, "record_type": record_type}
-        if source_id != doc_id:
-            result["derived_id"] = doc_id
+        derived_id = str(doc_id) if source_id != doc_id else None
+        key = (str(source_id), derived_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        result = {"record_id": str(source_id), "score": score, "ts_utc": ts, "record_type": record_type}
+        if derived_id is not None:
+            result["derived_id"] = derived_id
         snippet = item.get("snippet")
         if snippet:
             result["snippet"] = snippet
-        existing = mapped.get(source_id)
-        if existing is None:
-            mapped[source_id] = result
-        else:
-            existing_score = float(existing.get("score", 0.0))
-            if score > existing_score:
-                mapped[source_id] = result
-            elif score == existing_score and result.get("derived_id") and not existing.get("derived_id"):
-                mapped[source_id] = result
-    return list(mapped.values())
+        results.append(result)
+    return results
 
 
 def _ts_key(ts: str | None) -> float | None:
@@ -319,7 +464,9 @@ def _attach_timelines(
         record_id = result.get("record_id")
         if not record_id:
             continue
-        record = store.get(record_id, {})
+        record = _store_get_safe(store, str(record_id), {})
+        if not isinstance(record, dict):
+            continue
         record_type = str(record.get("record_type", ""))
         if not record_type.startswith("evidence.capture."):
             continue
@@ -379,6 +526,24 @@ def _time_window_candidates(
         except Exception:
             return None
     return None
+
+
+def _store_keys_safe(store: Any) -> list[str]:
+    try:
+        keys = getattr(store, "keys", lambda: [])()
+    except Exception:
+        return []
+    try:
+        return sorted(str(k) for k in keys)
+    except Exception:
+        return []
+
+
+def _store_get_safe(store: Any, record_id: str, default: Any) -> Any:
+    try:
+        return store.get(record_id, default)
+    except Exception:
+        return default
 
 
 def _allow_vector(context: PluginContext, config: dict[str, Any]) -> tuple[bool, str]:

@@ -154,6 +154,7 @@ class RuntimeGovernor:
         user_active = bool(signals.get("user_active", False)) or activity_score >= 0.5 or activity_recent
         fullscreen_active = bool(signals.get("fullscreen_active", False))
         query_intent = bool(signals.get("query_intent", False))
+        fixture_override = bool(signals.get("fixture_override", False))
         suspend_workers = bool(signals.get("suspend_workers", self.suspend_workers))
         allow_active = bool(self._budgets.allow_heavy_during_active)
         min_idle = max(0, int(self._budgets.min_idle_seconds))
@@ -161,6 +162,12 @@ class RuntimeGovernor:
         ram_util = signals.get("ram_utilization")
         cpu_limit = float(self._budgets.cpu_max_utilization)
         ram_limit = float(self._budgets.ram_max_utilization)
+
+        # Fixture runs (explicitly enabled via config) must be deterministic and
+        # should not be gated by ambient CPU/RAM utilization, which is highly
+        # variable on CI/WSL. This is a strict opt-in used by harnesses only.
+        if fixture_override:
+            return "IDLE_DRAIN", "fixture_override", idle_seconds, activity_score
 
         if fullscreen_active:
             return "ACTIVE_CAPTURE_ONLY", "fullscreen", idle_seconds, activity_score

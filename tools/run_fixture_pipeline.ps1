@@ -2,6 +2,11 @@ param(
     [string]$Manifest = "docs\\test sample\\fixture_manifest.json",
     [string]$InputDir = "",
     [string]$OutputDir = "artifacts\\fixture_runs",
+    [string]$RunId = "",
+    [string]$DataRoot = "",
+    [switch]$NoNetwork,
+    [string]$ReadyFile = "",
+    [switch]$LogJson,
     [string]$ConfigTemplate = "tools\\fixture_config_template.json",
     [switch]$UseWsl,
     [switch]$SkipModelPrep,
@@ -292,14 +297,11 @@ function Resolve-ModelPath {
     return [string]$Model.id
 }
 
-function Start-VllmServer {
+function Ensure-ExternalVllmEndpoint {
     param(
         [string]$ManifestPath,
-        [string]$RootDir,
-        [string]$RepoRoot,
         [string]$ModelId,
         [string]$PreferKind,
-        [int]$WaitSeconds,
         [string]$RunLogPath
     )
     if (-not (Test-Path $ManifestPath)) {
@@ -327,183 +329,16 @@ function Start-VllmServer {
         base_url = $baseUrl
         host = $vllmHost
         port = $vllmPort
+        mode = "external_only"
     }
     if (Test-VllmServer -BaseUrl $baseUrl) {
-        Write-Host "vLLM already running at $baseUrl"
-        Write-RunLog -Path $RunLogPath -Event "vllm.already_running" -Data @{ base_url = $baseUrl }
+        Write-Host "External vLLM reachable at $baseUrl"
+        Write-RunLog -Path $RunLogPath -Event "vllm.external_ok" -Data @{ base_url = $baseUrl }
         return
     }
-    $wslCmd = Get-Command wsl.exe -ErrorAction SilentlyContinue
-    $wslExe = $null
-    if ($wslCmd) {
-        $wslExe = $wslCmd.Source
-    } else {
-        $fallback = Join-Path $env:SystemRoot "System32\\wsl.exe"
-        if (Test-Path $fallback) { $wslExe = $fallback }
-    }
-    Write-RunLog -Path $RunLogPath -Event "vllm.wsl_check" -Data @{
-        found = [bool]$wslExe
-        path = $wslExe
-    }
-    if (-not $wslExe) {
-        Write-Host "ERROR: wsl.exe not available to start vLLM"
-        Write-RunLog -Path $RunLogPath -Event "vllm.wsl_missing" -Data @{}
-        exit 2
-    }
-
-    $models = @((Get-ManifestValue -Manifest $vllm -Key "models"))
-    $flat = New-Object System.Collections.Generic.List[object]
-    foreach ($entry in $models) {
-        if ($null -eq $entry) { continue }
-        if ($entry -is [System.Array]) { foreach ($item in $entry) { $flat.Add($item) } }
-        else { $flat.Add($entry) }
-    }
-    $models = $flat.ToArray()
-    $serve = Get-ManifestValue -Manifest $vllm -Key "serve"
-    if (-not $PreferKind) {
-        $PreferKind = [string](Get-ManifestValue -Manifest $serve -Key "prefer_kind")
-    }
-    $target = Select-VllmModel -Models $models -ModelId $ModelId -PreferKind $PreferKind
-    if ($null -eq $target) {
-        Write-Host "ERROR: No vLLM model available to serve"
-        Write-RunLog -Path $RunLogPath -Event "vllm.model_select_failed" -Data @{
-            requested_model = $ModelId
-            prefer_kind = $PreferKind
-            available = ($models | ForEach-Object { [string](Get-ManifestValue -Manifest $_ -Key "id") })
-        }
-        exit 2
-    }
-
-    $rootResolved = Resolve-ModelRoot -RootDir $RootDir -Manifest $manifest
-    $modelPath = Resolve-ModelPath -Model $target -Manifest $manifest -RootDir $rootResolved
-    if (-not $modelPath) {
-        Write-Host "ERROR: Could not resolve vLLM model path"
-        exit 2
-    }
-    if ($modelPath -match '^[A-Za-z]:\\' -and -not (Test-Path $modelPath)) {
-        if ($RepoRoot) {
-            $prepScript = Join-Path $RepoRoot "tools\\model_prep.ps1"
-            if (Test-Path $prepScript) {
-                Write-Host "vLLM model missing; running model prep (SkipVllm) to download..."
-                Write-RunLog -Path $RunLogPath -Event "model_prep.start" -Data @{ manifest = $ManifestPath; root = $rootResolved }
-                & $prepScript -Manifest $ManifestPath -RootDir $rootResolved -SkipVllm
-                Write-RunLog -Path $RunLogPath -Event "model_prep.finish" -Data @{ exit_code = $LASTEXITCODE }
-            }
-        }
-        if (-not (Test-Path $modelPath)) {
-            Write-Host "ERROR: vLLM model path not found: $modelPath"
-            Write-Host "Run model prep first: D:\\projects\\autocapture_prime\\tools\\model_prep.ps1"
-            Write-RunLog -Path $RunLogPath -Event "vllm.model_missing" -Data @{ model_path = $modelPath }
-            exit 2
-        }
-    }
-    $modelWsl = $modelPath
-    if ($modelPath -match '^[A-Za-z]:\\') {
-        $modelWsl = Convert-ToWslPath -Path $modelPath
-    }
-    $cacheDir = Join-Path $rootResolved "_hf_cache"
-    if ($cacheDir -match '^[A-Za-z]:\\') {
-        $cacheDir = Convert-ToWslPath -Path $cacheDir
-    }
-
-    $engineArgs = @()
-    if ($serve) {
-        $cfgArgs = Get-ManifestValue -Manifest $serve -Key "engine_args"
-        if ($cfgArgs) { $engineArgs = @($cfgArgs) }
-    }
-    if (-not $engineArgs -or $engineArgs.Count -eq 0) {
-        $engineArgs = @("--dtype", "auto", "--gpu-memory-utilization", "0.9", "--max-model-len", "2048")
-    }
-    $engineArgString = ($engineArgs | ForEach-Object { $_.ToString() }) -join " "
-    $servedId = [string](Get-ManifestValue -Manifest $target -Key "served_id")
-    $apiKey = [string](Get-ManifestValue -Manifest $server -Key "api_key")
-    $servedArg = ""
-    if ($servedId) { $servedArg = "--served-model-name $servedId" }
-    $apiArg = ""
-    if ($apiKey) { $apiArg = "--api-key $apiKey" }
-    $modelArg = "--model '$modelWsl'"
-
-    $vllmCmd = "vllm serve"
-    $hasVllm = $false
-    try {
-        $check = & $wslExe -e bash -lc "command -v vllm"
-        if ($LASTEXITCODE -eq 0 -and $check) { $hasVllm = $true }
-    } catch {
-        $hasVllm = $false
-    }
-    if (-not $hasVllm) {
-        $vllmCmd = "python3 -m vllm.entrypoints.openai.api_server"
-    }
-    $launchCmd = "HF_HOME=$cacheDir TRANSFORMERS_CACHE=$cacheDir TOKENIZERS_PARALLELISM=false " +
-        "$vllmCmd --host 127.0.0.1 --port $vllmPort $apiArg $servedArg $modelArg $engineArgString"
-
-    Write-Host "Starting vLLM in WSL (model: $($target.id))"
-    Write-RunLog -Path $RunLogPath -Event "vllm.start" -Data @{
-        model_id = [string](Get-ManifestValue -Manifest $target -Key "id")
-        served_id = $servedId
-        model_path = $modelPath
-        base_url = $baseUrl
-        engine_args = $engineArgs
-        prefer_kind = $PreferKind
-    }
-    Write-RunLog -Path $RunLogPath -Event "vllm.launch_cmd" -Data @{
-        cmd = $launchCmd
-        model_wsl = $modelWsl
-        cache_dir = $cacheDir
-    }
-    $bashCmd = "nohup $launchCmd > /tmp/vllm_autocapture.log 2>&1 &"
-    & $wslExe -e bash -lc "$bashCmd"
-
-    $idleWindowSeconds = 30
-    $startTime = Get-Date
-    $deadline = $startTime.AddSeconds($WaitSeconds)
-    $lastLogMtime = 0
-    while ((Get-Date) -lt $deadline) {
-        Start-Sleep -Seconds 2
-        $elapsed = [int]((Get-Date) - $startTime).TotalSeconds
-        if (Test-VllmServer -BaseUrl $baseUrl) {
-            Write-Host "vLLM is up at $baseUrl"
-            Write-RunLog -Path $RunLogPath -Event "vllm.ready" -Data @{ base_url = $baseUrl; elapsed_s = $elapsed }
-            return
-        }
-        if ($elapsed % 4 -eq 0) {
-            try {
-                $mtimeOut = & $wslExe -e bash -lc "stat -c %Y /tmp/vllm_autocapture.log 2>/dev/null"
-                if ($LASTEXITCODE -eq 0 -and $mtimeOut) {
-                    $mtime = [int64]($mtimeOut | Select-Object -First 1)
-                    if ($mtime -gt $lastLogMtime) {
-                        $lastLogMtime = $mtime
-                        $deadline = [DateTime]::Max($deadline, (Get-Date).AddSeconds($idleWindowSeconds))
-                        Write-RunLog -Path $RunLogPath -Event "vllm.log_activity" -Data @{ mtime = $mtime; elapsed_s = $elapsed }
-                    }
-                }
-            } catch {
-                Write-RunLog -Path $RunLogPath -Event "vllm.log_activity_error" -Data @{ error = $_.Exception.Message }
-            }
-        }
-    }
-    Write-Host "ERROR: vLLM failed to start (idle window elapsed)"
-    Write-RunLog -Path $RunLogPath -Event "vllm.timeout" -Data @{ base_url = $baseUrl; wait_seconds = $WaitSeconds; idle_window_s = $idleWindowSeconds }
-    try {
-        $tail = & $wslExe -e bash -lc "tail -n 200 /tmp/vllm_autocapture.log"
-        if ($tail) {
-            Write-RunLog -Path $RunLogPath -Event "vllm.log_tail" -Data @{
-                lines = ($tail | Out-String)
-            }
-        }
-    } catch {
-        Write-RunLog -Path $RunLogPath -Event "vllm.log_tail_error" -Data @{ error = $_.Exception.Message }
-    }
-    try {
-        $procs = & $wslExe -e bash -lc "ps -ef | grep -i vllm | grep -v grep"
-        if ($procs) {
-            Write-RunLog -Path $RunLogPath -Event "vllm.ps" -Data @{
-                lines = ($procs | Out-String)
-            }
-        }
-    } catch {
-        Write-RunLog -Path $RunLogPath -Event "vllm.ps_error" -Data @{ error = $_.Exception.Message }
-    }
+    Write-RunLog -Path $RunLogPath -Event "vllm.external_unavailable" -Data @{ base_url = $baseUrl }
+    Write-Host "ERROR: External vLLM unavailable at $baseUrl"
+    Write-Host "This repo no longer starts vLLM locally. Start vLLM from the sidecar/hypervisor repo."
     exit 2
 }
 
@@ -555,7 +390,7 @@ if (-not $SkipVllmStart) {
     if (-not (Test-Path $manifestPath)) {
         $manifestPath = Join-Path $repoRoot $ModelManifest
     }
-    Start-VllmServer -ManifestPath $manifestPath -RootDir "" -RepoRoot $repoRoot -ModelId $VllmModelId -PreferKind $VllmPreferKind -WaitSeconds $VllmWaitSeconds -RunLogPath $runLog
+    Ensure-ExternalVllmEndpoint -ManifestPath $manifestPath -ModelId $VllmModelId -PreferKind $VllmPreferKind -RunLogPath $runLog
 }
 
 if (-not $SkipModelPrep) {
@@ -578,6 +413,21 @@ $argsList = @("--manifest", $Manifest, "--output-dir", $OutputDir, "--config-tem
 if ($InputDir) {
     $argsList += @("--input-dir", $InputDir)
 }
+if ($RunId) {
+    $argsList += @("--run-id", $RunId)
+}
+if ($DataRoot) {
+    $argsList += @("--data-root", $DataRoot)
+}
+if ($NoNetwork) {
+    $argsList += "--no-network"
+}
+if ($ReadyFile) {
+    $argsList += @("--ready-file", $ReadyFile)
+}
+if ($LogJson) {
+    $argsList += "--log-json"
+}
 if ($ForceIdle) {
     $argsList += "--force-idle"
 }
@@ -594,6 +444,23 @@ if ($UseWsl) {
     if ($InputDir) {
         $inputWsl = Convert-ToWslPath -Path $InputDir
         $wslArgs += @("--input-dir", $inputWsl)
+    }
+    if ($RunId) {
+        $wslArgs += @("--run-id", $RunId)
+    }
+    if ($DataRoot) {
+        $dataRootWsl = Convert-ToWslPath -Path $DataRoot
+        $wslArgs += @("--data-root", $dataRootWsl)
+    }
+    if ($NoNetwork) {
+        $wslArgs += "--no-network"
+    }
+    if ($ReadyFile) {
+        $readyFileWsl = Convert-ToWslPath -Path $ReadyFile
+        $wslArgs += @("--ready-file", $readyFileWsl)
+    }
+    if ($LogJson) {
+        $wslArgs += "--log-json"
     }
     if ($ForceIdle) {
         $wslArgs += "--force-idle"

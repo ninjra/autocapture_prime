@@ -4,7 +4,7 @@
 Provide a repo-agnostic, single-command developer harness for local use and CI.
 
 ## Principles
-- Fail closed: do **not** guess commands. If a command cannot be inferred from repo evidence, the harness must stop with a clear TODO.
+- Fail closed: do **not** guess commands. If a command cannot be inferred from repo evidence, the harness must stop with a clear action item.
 - Additive only: existing scripts and workflows remain intact.
 - Idempotent lifecycle: `dev up` and `dev down` are safe to run repeatedly.
 - Stable state: logs, PIDs, and state live under `.dev/`.
@@ -47,7 +47,7 @@ Examples:
 - `DEV_UI_PORT`: TCP port used by the UI.
 - `DEV_UI_BACKEND_URL`: optional UI-to-backend base URL (if supported by the UI).
 
-If any required command is missing, the harness exits non-zero with a TODO.
+If any required command is missing, the harness exits non-zero with a clear action item.
 
 ## .dev layout
 `.dev/` is harness-local state and is ignored by git:

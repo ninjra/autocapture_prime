@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import hmac
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -13,8 +14,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from autocapture_nx.kernel.canonical_json import dumps
+from autocapture_nx.kernel.crypto import derive_key
 from autocapture_nx.kernel.hashing import sha256_text
 from autocapture_nx.kernel.ids import encode_record_id_component
+from autocapture_nx.kernel.policy_snapshot import policy_snapshot_hash as _policy_hash
 from autocapture_nx.plugin_system.api import PluginContext
 from plugins.builtin.citation_basic.plugin import CitationValidator
 
@@ -99,17 +102,37 @@ def export_proof_bundle(
         blob_manifest: dict[str, dict[str, Any]] = {}
         blob_count = 0
         for record_id in evidence_list:
-            try:
-                data = media.get(record_id)
-            except Exception:
-                data = None
-            if not data:
-                warnings.append(f"blob_missing:{record_id}")
-                continue
             blob_name = f"{encode_record_id_component(record_id)}.bin"
             blob_path = blobs_dir / blob_name
-            blob_path.write_bytes(data)
-            blob_hash = hashlib.sha256(data).hexdigest()
+            blob_hash = None
+            wrote = False
+            # PERF-06: prefer streaming reads when available to keep peak memory low.
+            stream_fn = getattr(media, "open_stream", None)
+            if callable(stream_fn):
+                try:
+                    hasher = hashlib.sha256()
+                    with stream_fn(record_id) as handle:
+                        with blob_path.open("wb") as out:
+                            while True:
+                                chunk = handle.read(1024 * 1024)
+                                if not chunk:
+                                    break
+                                out.write(chunk)
+                                hasher.update(chunk)
+                    blob_hash = hasher.hexdigest()
+                    wrote = True
+                except Exception:
+                    wrote = False
+            if not wrote:
+                try:
+                    data = media.get(record_id)
+                except Exception:
+                    data = None
+                if not data:
+                    warnings.append(f"blob_missing:{record_id}")
+                    continue
+                blob_path.write_bytes(data)
+                blob_hash = hashlib.sha256(data).hexdigest()
             blob_manifest[record_id] = {"file": f"blobs/{blob_name}", "sha256": blob_hash}
             blob_count += 1
 
@@ -121,6 +144,36 @@ def export_proof_bundle(
 
         anchor_out = tmp_root / "anchors.ndjson"
         _write_jsonl(anchor_out, anchors)
+
+        # META-06: include full policy snapshots referenced by the ledger entries.
+        policy_hashes = sorted(
+            {
+                str(entry.get("policy_snapshot_hash"))
+                for entry in ledger_entries
+                if isinstance(entry, dict) and entry.get("policy_snapshot_hash")
+            }
+        )
+        policy_dir = tmp_root / "policy_snapshots"
+        if policy_hashes:
+            policy_dir.mkdir(parents=True, exist_ok=True)
+        for policy_hash in policy_hashes:
+            record_id = f"policy_snapshot/{policy_hash}"
+            record = None
+            try:
+                record = metadata.get(record_id)
+            except Exception:
+                record = None
+            if not isinstance(record, dict):
+                warnings.append(f"policy_snapshot_missing:{policy_hash}")
+                continue
+            payload = record.get("payload") if isinstance(record.get("payload"), dict) else None
+            if payload is None:
+                warnings.append(f"policy_snapshot_invalid:{policy_hash}")
+                continue
+            (policy_dir / f"{policy_hash}.json").write_text(
+                json.dumps(payload, sort_keys=True, indent=2),
+                encoding="utf-8",
+            )
 
         if blob_manifest:
             (blobs_dir / "manifest.json").write_text(
@@ -146,6 +199,7 @@ def export_proof_bundle(
             encoding="utf-8",
         )
 
+        bundle_files = _bundle_files_manifest(tmp_root)
         manifest = {
             "schema_version": 1,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -156,6 +210,8 @@ def export_proof_bundle(
             "ledger_entries": len(ledger_entries),
             "anchors": len(anchors),
             "blobs": blob_count,
+            "policy_snapshot_hashes": policy_hashes,
+            "bundle_files": bundle_files,
             "files": {
                 "metadata": "metadata.jsonl",
                 "ledger": "ledger.ndjson",
@@ -163,12 +219,19 @@ def export_proof_bundle(
                 "verification": "verification.json",
                 "blobs_manifest": "blobs/manifest.json" if blob_manifest else None,
                 "citations": "citations.json" if citations is not None else None,
+                "policy_snapshots_dir": "policy_snapshots" if policy_hashes else None,
             },
         }
         (tmp_root / "manifest.json").write_text(
             json.dumps(manifest, sort_keys=True, indent=2),
             encoding="utf-8",
         )
+        sig = _sign_manifest(tmp_root / "manifest.json", keyring)
+        if sig is not None:
+            (tmp_root / "manifest.sig.json").write_text(
+                json.dumps(sig, sort_keys=True, indent=2),
+                encoding="utf-8",
+            )
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -200,7 +263,7 @@ def _collect_records(
     derived_ids: set[str] = set()
     edge_ids: set[str] = set()
     missing: list[str] = []
-    keys = list(getattr(metadata, "keys", lambda: [])())
+    keys = sorted(list(getattr(metadata, "keys", lambda: [])()))
     evidence_set = set(evidence_ids)
     for record_id in evidence_ids:
         record = metadata.get(record_id)
@@ -346,6 +409,36 @@ def _build_verification_report(
         result = validator.resolve(citations)
         report["citations_ok"] = bool(result.get("ok"))
         report["citations_errors"] = result.get("errors", [])
+
+    # META-06: verify policy snapshots exist and match the hashes referenced in the ledger.
+    missing: list[str] = []
+    mismatched: list[str] = []
+    try:
+        for line in ledger_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            entry = json.loads(line)
+            ph = entry.get("policy_snapshot_hash")
+            if not ph:
+                continue
+            record_id = f"policy_snapshot/{ph}"
+            rec = metadata.get(record_id) if hasattr(metadata, "get") else None
+            if not isinstance(rec, dict) or not isinstance(rec.get("payload"), dict):
+                missing.append(str(ph))
+                continue
+            payload = rec["payload"]
+            expected = _policy_hash(payload)
+            if expected != str(ph):
+                mismatched.append(str(ph))
+    except Exception:
+        # Best-effort: keep verification report stable even if policy snapshot checks fail.
+        missing = missing
+        mismatched = mismatched
+    report["policy_snapshot"] = {
+        "ok": (not missing and not mismatched),
+        "missing": sorted(set(missing)),
+        "mismatched": sorted(set(mismatched)),
+    }
     return report
 
 
@@ -441,3 +534,125 @@ def _decode_anchor_line(line: str) -> dict[str, Any] | None:
         return json.loads(line)
     except Exception:
         return None
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(8192), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _bundle_files_manifest(root: Path) -> list[dict[str, Any]]:
+    """Deterministic file list for tamper detection (SEC-07/QA-08)."""
+
+    files: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("*")):
+        if path.is_dir():
+            continue
+        rel = path.relative_to(root).as_posix()
+        try:
+            files.append({"path": rel, "sha256": _sha256_file(path), "bytes": int(path.stat().st_size)})
+        except Exception:
+            continue
+    files.sort(key=lambda row: (str(row.get("path") or ""), str(row.get("sha256") or "")))
+    return files
+
+
+def _sign_manifest(manifest_path: Path, keyring: Any | None) -> dict[str, Any] | None:
+    """Sign manifest.json with an HMAC derived from the anchor key."""
+
+    if keyring is None:
+        return None
+    try:
+        key_id, root = keyring.active_key("anchor")
+        key = derive_key(root, "proof_bundle_manifest")
+    except Exception:
+        return None
+    try:
+        manifest_bytes = manifest_path.read_bytes()
+    except Exception:
+        return None
+    manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+    signature_hex = hmac.new(key, manifest_sha.encode("utf-8"), hashlib.sha256).hexdigest()
+    return {
+        "schema_version": 1,
+        "algo": "hmac-sha256",
+        "key_id": str(key_id),
+        "manifest_sha256": str(manifest_sha),
+        "signature_hex": str(signature_hex),
+    }
+
+
+def verify_proof_bundle(bundle_path: str | Path, *, keyring: Any | None) -> dict[str, Any]:
+    """Verify proof bundle integrity (SEC-07/QA-08)."""
+
+    path = Path(bundle_path)
+    if not path.exists():
+        return {"ok": False, "error": "bundle_missing"}
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            manifest_bytes = zf.read("manifest.json")
+            sig_raw = zf.read("manifest.sig.json")
+    except KeyError:
+        return {"ok": False, "error": "signature_missing"}
+    except Exception as exc:
+        return {"ok": False, "error": f"bundle_read_failed:{type(exc).__name__}"}
+    try:
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+    except Exception:
+        return {"ok": False, "error": "manifest_invalid_json"}
+    if not isinstance(manifest, dict):
+        return {"ok": False, "error": "manifest_invalid_shape"}
+    try:
+        sig = json.loads(sig_raw.decode("utf-8"))
+    except Exception:
+        return {"ok": False, "error": "signature_invalid_json"}
+    if not isinstance(sig, dict):
+        return {"ok": False, "error": "signature_invalid_shape"}
+    if sig.get("algo") != "hmac-sha256":
+        return {"ok": False, "error": "signature_algo_unsupported"}
+    manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+    if str(sig.get("manifest_sha256") or "") != manifest_sha:
+        return {"ok": False, "error": "manifest_sha256_mismatch"}
+    if keyring is None:
+        return {"ok": False, "error": "keyring_missing"}
+    key_id = str(sig.get("key_id") or "").strip()
+    signature_hex = str(sig.get("signature_hex") or "").strip()
+    if not key_id or not signature_hex:
+        return {"ok": False, "error": "signature_missing_fields"}
+    try:
+        root = keyring.key_for("anchor", key_id)
+        key = derive_key(root, "proof_bundle_manifest")
+    except Exception:
+        return {"ok": False, "error": "signature_key_unavailable"}
+    expected = hmac.new(key, manifest_sha.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature_hex):
+        return {"ok": False, "error": "signature_mismatch"}
+
+    expected_files = manifest.get("bundle_files", [])
+    if not isinstance(expected_files, list):
+        return {"ok": False, "error": "bundle_files_missing"}
+    expected_map: dict[str, dict[str, Any]] = {}
+    for row in expected_files:
+        if not isinstance(row, dict):
+            continue
+        rel = str(row.get("path") or "")
+        if rel:
+            expected_map[rel] = row
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            for rel, row in sorted(expected_map.items()):
+                try:
+                    data = zf.read(rel)
+                except KeyError:
+                    return {"ok": False, "error": f"bundle_file_missing:{rel}"}
+                sha = hashlib.sha256(data).hexdigest()
+                if sha != str(row.get("sha256") or ""):
+                    return {"ok": False, "error": f"bundle_file_sha256_mismatch:{rel}"}
+                if int(len(data)) != int(row.get("bytes") or 0):
+                    return {"ok": False, "error": f"bundle_file_size_mismatch:{rel}"}
+    except Exception as exc:
+        return {"ok": False, "error": f"bundle_verify_failed:{type(exc).__name__}"}
+    return {"ok": True, "manifest_sha256": manifest_sha, "key_id": key_id}

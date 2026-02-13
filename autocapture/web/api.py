@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from autocapture_nx.ux.facade import create_facade
+from autocapture_nx.kernel.logging import JsonlLogger
 from autocapture.web.auth import check_request_token, require_local, token_required
 from autocapture.web.routes import (
     alerts,
@@ -32,6 +33,7 @@ from autocapture.web.routes import (
     media,
     trace,
     state,
+    doctor,
 )
 
 
@@ -40,8 +42,13 @@ def get_app() -> FastAPI:
     app.state.facade = create_facade(
         persistent=True,
         start_conductor=False,
-        auto_start_capture=True,
+        # Web console must be safe to import and test; capture start is an explicit action.
+        auto_start_capture=False,
     )
+    try:
+        app.state.logger = JsonlLogger.from_config(app.state.facade.config, name="web")
+    except Exception:
+        app.state.logger = None
     ui_dir = Path(__file__).resolve().parent / "ui"
     if ui_dir.exists():
         app.mount("/ui", StaticFiles(directory=ui_dir, html=True), name="ui")
@@ -57,9 +64,35 @@ def get_app() -> FastAPI:
             return JSONResponse(status_code=403, content={"ok": False, "error": "remote_not_allowed"})
         if token_required(request.method) and not check_request_token(request, config):
             return JSONResponse(status_code=401, content={"ok": False, "error": "unauthorized"})
-        return await call_next(request)
+        logger = getattr(request.app.state, "logger", None)
+        if logger is not None:
+            try:
+                logger.event(
+                    event="web.request",
+                    run_id=str(config.get("runtime", {}).get("run_id") or ""),
+                    level="info",
+                    method=request.method,
+                    path=str(request.url.path),
+                )
+            except Exception:
+                pass
+        resp = await call_next(request)
+        if logger is not None:
+            try:
+                logger.event(
+                    event="web.response",
+                    run_id=str(config.get("runtime", {}).get("run_id") or ""),
+                    level="info",
+                    method=request.method,
+                    path=str(request.url.path),
+                    status_code=getattr(resp, "status_code", None),
+                )
+            except Exception:
+                pass
+        return resp
 
     app.include_router(health.router)
+    app.include_router(doctor.router)
     app.include_router(status.router)
     app.include_router(run.router)
     app.include_router(query.router)

@@ -6,6 +6,8 @@ import json
 import os
 import sqlite3
 import threading
+from datetime import datetime, timezone
+import shutil
 from typing import Any
 
 from dataclasses import dataclass
@@ -13,6 +15,9 @@ from dataclasses import dataclass
 from autocapture_nx.kernel.crypto import EncryptedBlob, decrypt_bytes, encrypt_bytes
 from autocapture_nx.kernel.keyring import KeyRing
 from autocapture_nx.kernel.metadata_store import ImmutableMetadataStore
+from autocapture_nx.kernel.telemetry import record_telemetry
+from autocapture_nx.storage.spillover import SpilloverStore
+from autocapture_nx.storage.migrations import record_baseline
 from autocapture_nx.state_layer.store_sqlite import StateTapeStore
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 from plugins.builtin.storage_encrypted.plugin import (
@@ -182,8 +187,9 @@ class SQLCipherStore:
             import sqlcipher3
         except Exception as exc:
             raise RuntimeError(f"Missing SQLCipher dependency: {exc}")
-        conn = sqlcipher3.connect(self._db_path)
-        conn.execute("PRAGMA key = ?", (self._key.hex(),))
+        conn = sqlcipher3.connect(self._db_path, check_same_thread=False)
+        # sqlcipher3 does not support parameter binding for PRAGMA key.
+        conn.execute(f"PRAGMA key = \"x'{self._key.hex()}'\"")
         self._apply_fsync_policy(conn)
         return conn
 
@@ -213,12 +219,24 @@ class SQLCipherStore:
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_metadata_run_id ON metadata(run_id)"
         )
+        # Common access patterns:
+        # - latest(record_type): WHERE record_type ORDER BY ts_utc DESC
+        # FND-08: baseline schema migrations table for operator visibility.
+        try:
+            record_baseline(self._conn, version=1, name="metadata.baseline")
+        except Exception:
+            pass
+        # - query filters: record_type + time window
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_metadata_record_type_ts ON metadata(record_type, ts_utc, id)"
+        )
         self._conn.commit()
 
     def _ensure_columns(self) -> None:
         cur = self._conn.execute("PRAGMA table_info(metadata)")
         existing = {row[1] for row in cur.fetchall()}
         for column, col_type in (
+            ("payload", "TEXT"),
             ("record_type", "TEXT"),
             ("ts_utc", "TEXT"),
             ("run_id", "TEXT"),
@@ -283,7 +301,7 @@ class SQLCipherStore:
         self._ensure()
         cur = self._conn.execute("SELECT payload FROM metadata WHERE id = ?", (record_id,))
         row = cur.fetchone()
-        if not row:
+        if not row or row[0] is None:
             return default
         return json.loads(row[0])
 
@@ -425,16 +443,107 @@ class PlainSQLiteStore:
         self._fsync_policy = str(fsync_policy or "").strip().lower() or "none"
         os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
         self._conn: sqlite3.Connection | None = None
+        self._read_only = False
+
+    def _is_readonly_error(self, exc: BaseException) -> bool:
+        if not isinstance(exc, sqlite3.OperationalError):
+            return False
+        text = str(exc).lower()
+        return "readonly" in text or "read-only" in text
 
     def _ensure(self) -> None:
         if self._conn is None:
             self._conn = self._connect()
-            self._init_schema()
+            try:
+                self._init_schema()
+            except Exception as exc:
+                if self._is_readonly_error(exc):
+                    self._read_only = True
+                    try:
+                        self._conn.close()
+                    except Exception:
+                        pass
+                    self._conn = self._connect_read_only()
+                    return
+                raise
+
+    def _connect_read_only(self) -> sqlite3.Connection:
+        return sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
+
+    def _reconnect_read_only(self) -> None:
+        self._read_only = True
+        try:
+            if self._conn is not None:
+                self._conn.close()
+        except Exception:
+            pass
+        self._conn = self._connect_read_only()
+
+    def _execute_read(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
+        try:
+            return self._conn.execute(sql, params)
+        except Exception as exc:
+            if not self._is_readonly_error(exc):
+                raise
+            self._reconnect_read_only()
+            return self._conn.execute(sql, params)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        self._apply_fsync_policy(conn)
-        return conn
+        conn: sqlite3.Connection | None = None
+        try:
+            conn = sqlite3.connect(self._db_path)
+            self._apply_fsync_policy(conn)
+            return conn
+        except sqlite3.DatabaseError as exc:
+            # Recover from invalid sqlite files by archiving and recreating locally.
+            # This is non-destructive and keeps the raw artifact for investigation.
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            if "not a database" not in str(exc).lower():
+                raise
+            archive_path = self._archive_corrupt_db(str(exc))
+            conn = sqlite3.connect(self._db_path)
+            self._apply_fsync_policy(conn)
+            record_telemetry(
+                "storage.recovery",
+                {
+                    "run_id": self._run_id,
+                    "db_path": self._db_path,
+                    "archive_path": archive_path,
+                    "reason": str(exc),
+                },
+            )
+            return conn
+
+    def _archive_corrupt_db(self, reason: str) -> str:
+        if not os.path.exists(self._db_path):
+            raise sqlite3.DatabaseError(reason)
+        archive_dir = os.path.join(os.path.dirname(self._db_path), "corrupt")
+        os.makedirs(archive_dir, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        archive_path = os.path.join(archive_dir, f"{os.path.basename(self._db_path)}.{ts}.corrupt")
+        shutil.move(self._db_path, archive_path)
+        marker_path = f"{archive_path}.json"
+        _atomic_write_bytes(
+            marker_path,
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "record_type": "storage.recovery",
+                    "run_id": self._run_id,
+                    "ts_utc": datetime.now(timezone.utc).isoformat(),
+                    "src_path": self._db_path,
+                    "archive_path": archive_path,
+                    "reason": reason,
+                },
+                sort_keys=True,
+            ).encode("utf-8"),
+            fsync_policy=self._fsync_policy,
+        )
+        return archive_path
 
     def _apply_fsync_policy(self, conn: sqlite3.Connection) -> None:
         policy = self._fsync_policy
@@ -462,12 +571,16 @@ class PlainSQLiteStore:
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_metadata_run_id ON metadata(run_id)"
         )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_metadata_record_type_ts ON metadata(record_type, ts_utc, id)"
+        )
         self._conn.commit()
 
     def _ensure_columns(self) -> None:
         cur = self._conn.execute("PRAGMA table_info(metadata)")
         existing = {row[1] for row in cur.fetchall()}
         for column, col_type in (
+            ("payload", "TEXT"),
             ("record_type", "TEXT"),
             ("ts_utc", "TEXT"),
             ("run_id", "TEXT"),
@@ -491,6 +604,8 @@ class PlainSQLiteStore:
         import json
 
         self._ensure()
+        if self._read_only:
+            return
         record_type = None
         ts_utc = None
         run_id = self._run_id
@@ -499,16 +614,24 @@ class PlainSQLiteStore:
             ts_utc = value.get("ts_utc") or value.get("ts_start_utc") or value.get("ts_end_utc")
             run_id = value.get("run_id") or run_id
         payload = json.dumps(value, sort_keys=True)
-        self._conn.execute(
-            "INSERT OR REPLACE INTO metadata (id, payload, record_type, ts_utc, run_id) VALUES (?, ?, ?, ?, ?)",
-            (record_id, payload, record_type, ts_utc, run_id),
-        )
-        self._conn.commit()
+        try:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO metadata (id, payload, record_type, ts_utc, run_id) VALUES (?, ?, ?, ?, ?)",
+                (record_id, payload, record_type, ts_utc, run_id),
+            )
+            self._conn.commit()
+        except Exception as exc:
+            if self._is_readonly_error(exc):
+                self._read_only = True
+                return
+            raise
 
     def put_new(self, record_id: str, value: Any) -> None:
         import json
 
         self._ensure()
+        if self._read_only:
+            return
         record_type = None
         ts_utc = None
         run_id = self._run_id
@@ -525,25 +648,39 @@ class PlainSQLiteStore:
             self._conn.commit()
         except sqlite3.IntegrityError as exc:
             raise FileExistsError(f"Metadata record already exists: {record_id}") from exc
+        except Exception as exc:
+            if self._is_readonly_error(exc):
+                self._read_only = True
+                return
+            raise
 
     def get(self, record_id: str, default: Any = None) -> Any:
         import json
 
         self._ensure()
-        cur = self._conn.execute("SELECT payload FROM metadata WHERE id = ?", (record_id,))
+        try:
+            cur = self._execute_read("SELECT payload FROM metadata WHERE id = ?", (record_id,))
+        except Exception:
+            return default
         row = cur.fetchone()
-        if not row:
+        if not row or row[0] is None:
             return default
         return json.loads(row[0])
 
     def keys(self) -> list[str]:
         self._ensure()
-        cur = self._conn.execute("SELECT id FROM metadata ORDER BY id")
+        try:
+            cur = self._execute_read("SELECT id FROM metadata ORDER BY id")
+        except Exception:
+            return []
         return [row[0] for row in cur.fetchall()]
 
     def count(self) -> int:
         self._ensure()
-        cur = self._conn.execute("SELECT COUNT(*) FROM metadata")
+        try:
+            cur = self._execute_read("SELECT COUNT(*) FROM metadata")
+        except Exception:
+            return 0
         row = cur.fetchone()
         return int(row[0]) if row else 0
 
@@ -569,7 +706,10 @@ class PlainSQLiteStore:
         if limit is not None:
             sql += " LIMIT ?"
             params.append(int(limit))
-        cur = self._conn.execute(sql, tuple(params))
+        try:
+            cur = self._execute_read(sql, tuple(params))
+        except Exception:
+            return []
         return [row[0] for row in cur.fetchall()]
 
     def latest(self, record_type: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
@@ -585,7 +725,10 @@ class PlainSQLiteStore:
         if limit is not None:
             sql += " LIMIT ?"
             params.append(int(limit))
-        cur = self._conn.execute(sql, tuple(params))
+        try:
+            cur = self._execute_read(sql, tuple(params))
+        except Exception:
+            return []
         rows = cur.fetchall()
         out: list[dict[str, Any]] = []
         for row in rows:
@@ -600,9 +743,17 @@ class PlainSQLiteStore:
 
     def delete(self, record_id: str) -> bool:
         self._ensure()
+        if self._read_only:
+            return False
         before = self._conn.total_changes
-        self._conn.execute("DELETE FROM metadata WHERE id = ?", (record_id,))
-        self._conn.commit()
+        try:
+            self._conn.execute("DELETE FROM metadata WHERE id = ?", (record_id,))
+            self._conn.commit()
+        except Exception as exc:
+            if self._is_readonly_error(exc):
+                self._read_only = True
+                return False
+            raise
         return self._conn.total_changes > before
 
     def entity_put(
@@ -616,18 +767,29 @@ class PlainSQLiteStore:
         first_seen_ts: str | None = None,
     ) -> None:
         self._ensure()
-        self._conn.execute(
-            "INSERT OR REPLACE INTO entity_map (token, value, kind, key_id, key_version, first_seen_ts) VALUES (?, ?, ?, ?, ?, ?)",
-            (token, value, kind, key_id, key_version, first_seen_ts),
-        )
-        self._conn.commit()
+        if self._read_only:
+            return
+        try:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO entity_map (token, value, kind, key_id, key_version, first_seen_ts) VALUES (?, ?, ?, ?, ?, ?)",
+                (token, value, kind, key_id, key_version, first_seen_ts),
+            )
+            self._conn.commit()
+        except Exception as exc:
+            if self._is_readonly_error(exc):
+                self._read_only = True
+                return
+            raise
 
     def entity_get(self, token: str) -> dict[str, Any] | None:
         self._ensure()
-        cur = self._conn.execute(
-            "SELECT value, kind, key_id, key_version, first_seen_ts FROM entity_map WHERE token = ?",
-            (token,),
-        )
+        try:
+            cur = self._execute_read(
+                "SELECT value, kind, key_id, key_version, first_seen_ts FROM entity_map WHERE token = ?",
+                (token,),
+            )
+        except Exception:
+            return None
         row = cur.fetchone()
         if not row:
             return None
@@ -641,7 +803,10 @@ class PlainSQLiteStore:
 
     def entity_items(self) -> dict[str, dict[str, Any]]:
         self._ensure()
-        cur = self._conn.execute("SELECT token, value, kind, key_id, key_version, first_seen_ts FROM entity_map")
+        try:
+            cur = self._execute_read("SELECT token, value, kind, key_id, key_version, first_seen_ts FROM entity_map")
+        except Exception:
+            return {}
         return {
             row[0]: {
                 "value": row[1],
@@ -658,8 +823,16 @@ class PlainSQLiteStore:
 
     def vacuum(self) -> None:
         self._ensure()
-        self._conn.execute("VACUUM")
-        self._conn.commit()
+        if self._read_only:
+            return
+        try:
+            self._conn.execute("VACUUM")
+            self._conn.commit()
+        except Exception as exc:
+            if self._is_readonly_error(exc):
+                self._read_only = True
+                return
+            raise
 
 
 class PlainBlobStore:
@@ -716,29 +889,59 @@ class PlainBlobStore:
                 except OSError:
                     pass
 
-    def put(self, record_id: str, data: bytes, *, ts_utc: str | None = None) -> None:
-        self.put_replace(record_id, data, ts_utc=ts_utc)
+    def put(
+        self,
+        record_id: str,
+        data: bytes,
+        *,
+        ts_utc: str | None = None,
+        fsync_policy: str | None = None,
+    ) -> None:
+        self.put_replace(record_id, data, ts_utc=ts_utc, fsync_policy=fsync_policy)
 
-    def put_replace(self, record_id: str, data: bytes, *, ts_utc: str | None = None) -> None:
+    def put_replace(
+        self,
+        record_id: str,
+        data: bytes,
+        *,
+        ts_utc: str | None = None,
+        fsync_policy: str | None = None,
+    ) -> None:
         path = self._path_for_write(record_id, ts_utc, stream=False)
         existed = any(os.path.exists(path) for path in self._path_candidates(record_id))
         self._remove_existing(record_id)
-        _atomic_write_bytes(path, data, fsync_policy=self._fsync_policy)
+        policy = _FsyncPolicy.normalize(fsync_policy) if fsync_policy else self._fsync_policy
+        _atomic_write_bytes(path, data, fsync_policy=policy)
         self._index[record_id] = path
         if self._count_cache is not None and not existed:
             self._count_cache += 1
 
-    def put_new(self, record_id: str, data: bytes, *, ts_utc: str | None = None) -> None:
+    def put_new(
+        self,
+        record_id: str,
+        data: bytes,
+        *,
+        ts_utc: str | None = None,
+        fsync_policy: str | None = None,
+    ) -> None:
         for path in self._path_candidates(record_id):
             if os.path.exists(path):
                 raise FileExistsError(f"Blob record already exists: {record_id}")
-        self.put_replace(record_id, data, ts_utc=ts_utc)
+        self.put_replace(record_id, data, ts_utc=ts_utc, fsync_policy=fsync_policy)
 
-    def put_stream(self, record_id: str, stream, chunk_size: int = 1024 * 1024, *, ts_utc: str | None = None) -> None:
+    def put_stream(
+        self,
+        record_id: str,
+        stream,
+        chunk_size: int = 1024 * 1024,
+        *,
+        ts_utc: str | None = None,
+        fsync_policy: str | None = None,
+    ) -> None:
         for path in self._path_candidates(record_id):
             if os.path.exists(path):
                 raise FileExistsError(f"Blob record already exists: {record_id}")
-        self.put_stream_replace(record_id, stream, chunk_size=chunk_size, ts_utc=ts_utc)
+        self.put_stream_replace(record_id, stream, chunk_size=chunk_size, ts_utc=ts_utc, fsync_policy=fsync_policy)
 
     def put_stream_replace(
         self,
@@ -747,10 +950,12 @@ class PlainBlobStore:
         chunk_size: int = 1024 * 1024,
         *,
         ts_utc: str | None = None,
+        fsync_policy: str | None = None,
     ) -> None:
         path = self._path_for_write(record_id, ts_utc, stream=True)
         existed = any(os.path.exists(path) for path in self._path_candidates(record_id))
         self._remove_existing(record_id)
+        policy = _FsyncPolicy.normalize(fsync_policy) if fsync_policy else self._fsync_policy
         tmp_path = f"{path}.tmp"
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(tmp_path, "wb") as handle:
@@ -759,16 +964,23 @@ class PlainBlobStore:
                 if not chunk:
                     break
                 handle.write(chunk)
-            _fsync_file(handle, self._fsync_policy)
+            _fsync_file(handle, policy)
         os.replace(tmp_path, path)
-        _fsync_dir(path, self._fsync_policy)
+        _fsync_dir(path, policy)
         self._index[record_id] = path
         if self._count_cache is not None and not existed:
             self._count_cache += 1
 
-    def put_path(self, record_id: str, path: str, *, ts_utc: str | None = None) -> None:
+    def put_path(
+        self,
+        record_id: str,
+        path: str,
+        *,
+        ts_utc: str | None = None,
+        fsync_policy: str | None = None,
+    ) -> None:
         with open(path, "rb") as handle:
-            self.put_stream_replace(record_id, handle, ts_utc=ts_utc)
+            self.put_stream_replace(record_id, handle, ts_utc=ts_utc, fsync_policy=fsync_policy)
 
     def get(self, record_id: str, default: bytes | None = None) -> bytes | None:
         for path in self._path_candidates(record_id):
@@ -1090,6 +1302,8 @@ class SQLCipherStoragePlugin(PluginBase):
         self._entity_persist = storage_cfg.get("entity_map", {}).get("persist", True)
         self._metadata_require_db = bool(storage_cfg.get("metadata_require_db", False))
         self._encryption_enabled = bool(encryption_enabled)
+        sqlcipher_cfg = storage_cfg.get("sqlcipher", {})
+        self._sqlcipher_enabled = bool(sqlcipher_cfg.get("enabled", False))
         self._lazy = _LazyStores(self._build_stores)
         self._metadata = _LazyProxy(self._lazy, "metadata")
         self._entity_map = _LazyProxy(self._lazy, "entity_map")
@@ -1099,17 +1313,22 @@ class SQLCipherStoragePlugin(PluginBase):
     def _build_stores(self):
         state_tape = None
         if self._encryption_enabled:
-            available, reason = _sqlcipher_available()
+            available = False
+            reason = "disabled by config"
+            if self._sqlcipher_enabled:
+                available, reason = _sqlcipher_available()
             if available:
-                _meta_id, meta_key = self._meta_provider.active()
-                store = SQLCipherStore(self._metadata_path, meta_key, self._run_id, self._fsync_policy)
-                metadata = ImmutableMetadataStore(store)
-                entity_map = EntityMapAdapter(store)
-            else:
+                try:
+                    _meta_id, meta_key = self._meta_provider.active()
+                    store = SQLCipherStore(self._metadata_path, meta_key, self._run_id, self._fsync_policy)
+                    metadata = ImmutableMetadataStore(store)
+                    entity_map = EntityMapAdapter(store)
+                except Exception as exc:
+                    available = False
+                    reason = f"open failed: {type(exc).__name__}: {exc}"
+            if not available:
                 if self._metadata_require_db:
-                    self.context.logger(
-                        f"SQLCipher unavailable ({reason}); using encrypted SQLite fallback"
-                    )
+                    self.context.logger(f"SQLCipher unavailable ({reason}); using encrypted SQLite fallback")
                 metadata_store = EncryptedSQLiteStore(
                     self._metadata_path,
                     self._meta_provider,
@@ -1127,6 +1346,14 @@ class SQLCipherStoragePlugin(PluginBase):
                 require_decrypt=self._require_decrypt,
                 fsync_policy=self._fsync_policy,
             )
+            media = _maybe_wrap_spillover_media(
+                media,
+                config=getattr(self.context, "config", {}) if self.context is not None else {},
+                run_id=self._run_id,
+                fsync_policy=self._fsync_policy,
+                encrypted=True,
+                media_provider=self._media_provider,
+            )
             state_key = None
             if available:
                 _state_id, state_key = self._state_provider.active()
@@ -1141,6 +1368,14 @@ class SQLCipherStoragePlugin(PluginBase):
         metadata = ImmutableMetadataStore(store)
         entity_map = EntityMapAdapter(store)
         media = PlainBlobStore(self._media_dir, self._run_id, self._fsync_policy)
+        media = _maybe_wrap_spillover_media(
+            media,
+            config=getattr(self.context, "config", {}) if self.context is not None else {},
+            run_id=self._run_id,
+            fsync_policy=self._fsync_policy,
+            encrypted=False,
+            media_provider=None,
+        )
         state_tape = StateTapeStore(self._state_tape_path, key=None, fsync_policy=self._fsync_policy)
         return metadata, media, entity_map, state_tape
 
@@ -1156,3 +1391,56 @@ class SQLCipherStoragePlugin(PluginBase):
 
 def create_plugin(plugin_id: str, context: PluginContext) -> SQLCipherStoragePlugin:
     return SQLCipherStoragePlugin(plugin_id, context)
+
+
+def _maybe_wrap_spillover_media(
+    media_store: Any,
+    *,
+    config: dict[str, Any],
+    run_id: str,
+    fsync_policy: str,
+    encrypted: bool,
+    media_provider: DerivedKeyProvider | None,
+) -> Any:
+    storage_cfg = config.get("storage", {}) if isinstance(config, dict) else {}
+    spill_cfg = storage_cfg.get("spillover", {}) if isinstance(storage_cfg, dict) else {}
+    spill_cfg = spill_cfg if isinstance(spill_cfg, dict) else {}
+    enabled = bool(spill_cfg.get("enabled", False))
+    dirs = spill_cfg.get("media_dirs", [])
+    if not enabled or not isinstance(dirs, list) or not [d for d in dirs if str(d).strip()]:
+        return media_store
+
+    # Prefer spillover directories inside data_dir (portability via junction/mountpoint).
+    stores: list[tuple[str, Any]] = [(str(storage_cfg.get("media_dir") or ""), media_store)]
+    primary_root = stores[0][0] or getattr(media_store, "_root", "")  # best-effort
+    stores = [(primary_root, media_store)]
+
+    for raw in dirs:
+        path = str(raw or "").strip()
+        if not path:
+            continue
+        try:
+            if encrypted:
+                if media_provider is None:
+                    continue
+                alt = EncryptedBlobStore(
+                    path,
+                    media_provider,
+                    run_id,
+                    require_decrypt=bool(storage_cfg.get("encryption_required", False)),
+                    fsync_policy=fsync_policy,
+                )
+            else:
+                alt = PlainBlobStore(path, run_id, fsync_policy)
+        except Exception:
+            continue
+        stores.append((path, alt))
+
+    if len(stores) <= 1:
+        return media_store
+
+    return SpilloverStore(
+        config=config,
+        stores=stores,
+        telemetry=lambda event, payload: record_telemetry(event, payload),
+    )

@@ -12,7 +12,6 @@ from typing import Any
 
 from autocapture.core.hashing import canonical_dumps
 from autocapture_nx.kernel.crypto import derive_key
-from autocapture_nx.kernel.evidence import is_evidence_like
 from autocapture_nx.kernel.hashing import sha256_canonical
 from autocapture_nx.kernel.canonical_json import dumps as canonical_dumps_nx
 from autocapture_nx.kernel.keyring import KeyRing
@@ -145,7 +144,11 @@ def verify_evidence(metadata: Any, media: Any) -> tuple[bool, list[str]]:
             record = metadata.get(record_id)
         except Exception:
             continue
-        if not isinstance(record, dict) or not is_evidence_like(record):
+        if not isinstance(record, dict):
+            continue
+        record_type = str(record.get("record_type") or "")
+        # Only evidence records require a corresponding media blob.
+        if not record_type.startswith("evidence."):
             continue
         payload_hash = record.get("payload_hash")
         if payload_hash:
@@ -166,6 +169,82 @@ def verify_evidence(metadata: Any, media: Any) -> tuple[bool, list[str]]:
             if str(content_hash) != actual:
                 errors.append(f"content_hash_mismatch:{media_id}")
     return len(errors) == 0, errors
+
+
+def verify_metadata_refs(metadata: Any) -> tuple[bool, list[str]]:
+    """Verify internal reference integrity inside the metadata store.
+
+    This is intentionally conservative and lightweight:
+    - derived records that declare `source_id` must reference an existing evidence-like record
+    - optional `parent_evidence_id` must reference an existing evidence-like record
+    - optional `span_ref.source_id` must reference the evidence-like record
+    """
+    errors: list[str] = []
+    if metadata is None:
+        return False, ["metadata_missing"]
+    try:
+        record_ids = metadata.keys()
+    except Exception:
+        return False, ["metadata_keys_failed"]
+
+    # Preload evidence ids for O(1) checks.
+    evidence_like: set[str] = set()
+    for record_id in record_ids:
+        try:
+            record = metadata.get(record_id)
+        except Exception:
+            continue
+        if isinstance(record, dict):
+            record_type = str(record.get("record_type") or "")
+            if record_type.startswith("evidence."):
+                evidence_like.add(str(record_id))
+
+    for record_id in record_ids:
+        try:
+            record = metadata.get(record_id)
+        except Exception:
+            continue
+        if not isinstance(record, dict):
+            continue
+        source_id = record.get("source_id")
+        if source_id is not None:
+            if str(source_id) not in evidence_like:
+                errors.append(f"source_id_missing:{record_id}")
+        parent_id = record.get("parent_evidence_id")
+        if parent_id is not None:
+            if str(parent_id) not in evidence_like:
+                errors.append(f"parent_evidence_id_missing:{record_id}")
+        span_ref = record.get("span_ref")
+        if isinstance(span_ref, dict):
+            span_source = span_ref.get("source_id")
+            if span_source is not None and str(span_source) not in evidence_like:
+                errors.append(f"span_ref_source_missing:{record_id}")
+
+    return len(errors) == 0, errors
+
+
+def integrity_scan(
+    *,
+    ledger_path: str | Path,
+    anchor_path: str | Path,
+    metadata: Any,
+    media: Any,
+    keyring: KeyRing | None = None,
+) -> dict[str, Any]:
+    """Full integrity scan used by gates and operator tooling."""
+    ledger_ok, ledger_errors = verify_ledger(ledger_path)
+    anchors_ok, anchors_errors = verify_anchors(anchor_path, keyring)
+    evidence_ok, evidence_errors = verify_evidence(metadata, media)
+    refs_ok, refs_errors = verify_metadata_refs(metadata)
+
+    checks = [
+        {"name": "ledger", "ok": ledger_ok, "errors": ledger_errors, "path": str(ledger_path)},
+        {"name": "anchors", "ok": anchors_ok, "errors": anchors_errors, "path": str(anchor_path)},
+        {"name": "evidence", "ok": evidence_ok, "errors": evidence_errors},
+        {"name": "metadata_refs", "ok": refs_ok, "errors": refs_errors},
+    ]
+    ok = bool(ledger_ok and anchors_ok and evidence_ok and refs_ok)
+    return {"ok": ok, "checks": checks}
 
 
 def _decode_anchor_line(line: str) -> dict[str, Any] | None:

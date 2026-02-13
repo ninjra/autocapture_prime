@@ -41,10 +41,14 @@ const statusRunId = qs("runId");
 const statusLedger = qs("ledgerHead");
 const statusCapture = qs("captureState");
 const kernelStatus = qs("kernelStatus");
+const safeModeCard = qs("safeModeCard");
+const safeModeReason = qs("safeModeReason");
 const captureBannerState = qs("captureBannerState");
 const processingBannerState = qs("processingBannerState");
 const captureBannerLast = qs("captureBannerLast");
 const captureBannerDisk = qs("captureBannerDisk");
+const captureBannerCpu = qs("captureBannerCpu");
+const captureBannerRam = qs("captureBannerRam");
 const alertsList = qs("alertsList");
 const sloSummary = qs("sloSummary");
 const sloList = qs("sloList");
@@ -65,6 +69,8 @@ const clearJepaReport = qs("clearJepaReport");
 const keysPayload = qs("keysPayload");
 const queryInput = qs("queryInput");
 const queryOutput = qs("queryOutput");
+const queryStatus = qs("queryStatus");
+const queryScheduleExtract = qs("queryScheduleExtract");
 const verifyOutput = qs("verifyOutput");
 const configPatch = qs("configPatch");
 const configOutput = qs("configOutput");
@@ -265,6 +271,7 @@ async function refreshStatus() {
   }
   updateQuickControls();
   renderStatusBanner();
+  renderSafeModeCard();
   renderSlo();
 }
 
@@ -331,6 +338,46 @@ function renderStatusBanner() {
       captureBannerDisk.classList.toggle("critical", false);
       captureBannerDisk.classList.toggle("off", true);
     }
+  }
+  const resources = state.status.resources || {};
+  if (captureBannerCpu) {
+    const cpu = resources.cpu_utilization;
+    if (typeof cpu === "number") {
+      const pct = Math.round(cpu * 100);
+      captureBannerCpu.textContent = `${pct}%`;
+      captureBannerCpu.classList.toggle("warn", pct >= 50);
+      captureBannerCpu.classList.toggle("off", false);
+    } else {
+      captureBannerCpu.textContent = "—";
+      captureBannerCpu.classList.toggle("warn", false);
+      captureBannerCpu.classList.toggle("off", true);
+    }
+  }
+  if (captureBannerRam) {
+    const ram = resources.ram_utilization;
+    if (typeof ram === "number") {
+      const pct = Math.round(ram * 100);
+      captureBannerRam.textContent = `${pct}%`;
+      captureBannerRam.classList.toggle("warn", pct >= 50);
+      captureBannerRam.classList.toggle("off", false);
+    } else {
+      captureBannerRam.textContent = "—";
+      captureBannerRam.classList.toggle("warn", false);
+      captureBannerRam.classList.toggle("off", true);
+    }
+  }
+}
+
+function renderSafeModeCard() {
+  if (!safeModeCard) return;
+  const safeMode = Boolean(state.status.safe_mode);
+  safeModeCard.hidden = !safeMode;
+  if (!safeMode) return;
+  if (safeModeReason) {
+    const reason = state.status.safe_mode_reason ? String(state.status.safe_mode_reason) : "unknown";
+    const crash = state.status.crash_loop || {};
+    const until = crash.safe_mode_until ? ` · until ${crash.safe_mode_until}` : "";
+    safeModeReason.textContent = `Reason: ${reason}${until}`;
   }
 }
 
@@ -2129,6 +2176,11 @@ async function runQuery() {
   const query = (queryInput.value || "").trim();
   if (!query) return;
   queryOutput.textContent = "";
+  if (queryStatus) queryStatus.textContent = "";
+  if (queryScheduleExtract) {
+    queryScheduleExtract.disabled = true;
+    queryScheduleExtract.onclick = null;
+  }
   const resp = await apiFetch("/api/query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -2136,6 +2188,43 @@ async function runQuery() {
   });
   const data = await readJson(resp);
   queryOutput.textContent = JSON.stringify(data, null, 2);
+
+  // UX-04: surface extraction completeness and offer scheduling when blocked.
+  const extraction = data?.processing?.extraction || {};
+  const blocked = Boolean(extraction?.blocked);
+  const reason = extraction?.blocked_reason || extraction?.reason || "";
+  const scheduledId = data?.scheduled_extract_job_id || extraction?.scheduled_extract_job_id || "";
+  if (queryStatus) {
+    if (scheduledId) {
+      queryStatus.textContent = `Extraction scheduled (${scheduledId})`;
+    } else if (blocked) {
+      queryStatus.textContent = `Extraction blocked: ${reason || "policy"}`;
+    } else if (extraction?.ran) {
+      queryStatus.textContent = "Extraction ran";
+    } else {
+      queryStatus.textContent = "Extraction unchanged";
+    }
+  }
+  if (queryScheduleExtract) {
+    if (blocked && !scheduledId) {
+      queryScheduleExtract.disabled = false;
+      queryScheduleExtract.onclick = async () => {
+        queryScheduleExtract.disabled = true;
+        if (queryStatus) queryStatus.textContent = "Scheduling extraction...";
+        const r2 = await apiFetch("/api/query", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, schedule_extract: true }),
+        });
+        const d2 = await readJson(r2);
+        queryOutput.textContent = JSON.stringify(d2, null, 2);
+        const sid = d2?.scheduled_extract_job_id || "";
+        if (queryStatus) queryStatus.textContent = sid ? `Extraction scheduled (${sid})` : "Schedule failed";
+      };
+    } else {
+      queryScheduleExtract.disabled = true;
+    }
+  }
 }
 
 async function runVerify(endpoint) {

@@ -133,136 +133,137 @@ Source_Document: docs/spec/autocapture_nx_blueprint_2026-01-24.md
 - SRC-130: I130 (Phase 3) - Storage compaction for derived artifacts only
 
 # 2. Coverage_Map
-- SRC-001: FS-001
-- SRC-002: FS-001
-- SRC-003: FS-001
-- SRC-004: FS-001
-- SRC-005: FS-001
-- SRC-006: FS-001
-- SRC-007: FS-001
-- SRC-008: FS-001
-- SRC-009: FS-001
-- SRC-010: FS-001
-- SRC-011: FS-001
-- SRC-012: FS-001
-- SRC-013: FS-001
-- SRC-014: FS-001
-- SRC-015: FS-001
-- SRC-016: FS-001
-- SRC-017: FS-001
-- SRC-018: FS-001
-- SRC-019: FS-001
-- SRC-020: FS-001
-- SRC-021: FS-001
-- SRC-022: FS-001
-- SRC-023: FS-001
-- SRC-024: FS-001
-- SRC-025: FS-001
-- SRC-026: FS-001
-- SRC-027: FS-001
-- SRC-028: FS-001
-- SRC-029: FS-001
-- SRC-030: FS-001
-- SRC-031: FS-001
-- SRC-032: FS-001
-- SRC-033: FS-001
-- SRC-034: FS-001
-- SRC-035: FS-001
-- SRC-036: FS-001
-- SRC-037: FS-001
-- SRC-038: FS-001
-- SRC-039: FS-001
-- SRC-040: FS-001
-- SRC-041: FS-001
-- SRC-042: FS-001
-- SRC-043: FS-001
-- SRC-044: FS-001
-- SRC-045: FS-001
-- SRC-046: FS-001
-- SRC-047: FS-001
-- SRC-048: FS-001
-- SRC-049: FS-001
-- SRC-050: FS-001
-- SRC-051: FS-001
-- SRC-052: FS-001
-- SRC-053: FS-001
-- SRC-054: FS-001
-- SRC-055: FS-001
-- SRC-056: FS-001
-- SRC-057: FS-001
-- SRC-058: FS-001
-- SRC-059: FS-001
-- SRC-060: FS-001
-- SRC-061: FS-001
-- SRC-062: FS-001
-- SRC-063: FS-001
-- SRC-064: FS-001
-- SRC-065: FS-001
-- SRC-066: FS-001
-- SRC-067: FS-001
-- SRC-068: FS-001
-- SRC-069: FS-001
-- SRC-070: FS-001
-- SRC-071: FS-001
-- SRC-072: FS-001
-- SRC-073: FS-001
-- SRC-074: FS-001
-- SRC-075: FS-001
-- SRC-076: FS-001
-- SRC-077: FS-001
-- SRC-078: FS-001
-- SRC-079: FS-001
-- SRC-080: FS-001
-- SRC-081: FS-001
-- SRC-082: FS-001
-- SRC-083: FS-001
-- SRC-084: FS-001
-- SRC-085: FS-001
-- SRC-086: FS-001
-- SRC-087: FS-001
-- SRC-088: FS-001
-- SRC-089: FS-001
-- SRC-090: FS-001
-- SRC-091: FS-001
-- SRC-092: FS-001
-- SRC-093: FS-001
-- SRC-094: FS-001
-- SRC-095: FS-001
-- SRC-096: FS-001
-- SRC-097: FS-001
-- SRC-098: FS-001
-- SRC-099: FS-001
-- SRC-100: FS-001
-- SRC-101: FS-001
-- SRC-102: FS-001
-- SRC-103: FS-001
-- SRC-104: FS-001
-- SRC-105: FS-001
-- SRC-106: FS-001
-- SRC-107: FS-001
-- SRC-108: FS-001
-- SRC-109: FS-001
-- SRC-110: FS-001
-- SRC-111: FS-001
-- SRC-112: FS-001
-- SRC-113: FS-001
-- SRC-114: FS-001
-- SRC-115: FS-001
-- SRC-116: FS-001
-- SRC-117: FS-001
-- SRC-118: FS-001
-- SRC-119: FS-001
-- SRC-120: FS-001
-- SRC-121: FS-001
-- SRC-122: FS-001
-- SRC-123: FS-001
-- SRC-124: FS-001
-- SRC-125: FS-001
-- SRC-126: FS-001
-- SRC-127: FS-001
-- SRC-128: FS-001
-- SRC-129: FS-001
-- SRC-130: FS-001
+
+- SRC-001: implemented; autocapture_nx/kernel/canonical_json.py; autocapture_nx/kernel/event_builder.py; plugins/builtin/journal_basic/plugin.py; plugins/builtin/ledger_basic/plugin.py; tests/test_canonical_payloads.py
+- SRC-002: implemented; plugins/builtin/backpressure_basic/plugin.py; plugins/builtin/capture_windows/plugin.py; autocapture_nx/windows/win_capture.py; tests/test_backpressure.py; tests/test_capture_rate.py
+- SRC-003: implemented; plugins/builtin/capture_windows/plugin.py; plugins/builtin/storage_encrypted/plugin.py; plugins/builtin/storage_memory/plugin.py; tests/test_capture_streaming.py
+- SRC-004: implemented; plugins/builtin/audio_windows/plugin.py; tests/test_audio_callback_queue.py
+- SRC-005: implemented; autocapture_nx/kernel/query.py; autocapture_nx/kernel/metadata_store.py; tests/test_query_derived_records.py
+- SRC-006: implemented; autocapture_nx/kernel/ids.py; autocapture_nx/kernel/event_builder.py; plugins/builtin/capture_windows/plugin.py; plugins/builtin/audio_windows/plugin.py; plugins/builtin/input_windows/plugin.py; plugins/builtin/window_metadata_windows/plugin.py; tests/test_journal_run_id.py; tests/test_run_state_entries.py
+- SRC-007: implemented; plugins/builtin/ledger_basic/plugin.py; tests/test_ledger_journal_concurrency.py
+- SRC-008: implemented; plugins/builtin/journal_basic/plugin.py; tests/test_ledger_journal_concurrency.py
+- SRC-009: implemented; autocapture_nx/kernel/keyring.py; plugins/builtin/storage_encrypted/plugin.py; tests/test_encrypted_store_fail_loud.py
+- SRC-010: implemented; plugins/builtin/storage_encrypted/plugin.py; plugins/builtin/storage_memory/plugin.py; plugins/builtin/storage_sqlcipher/plugin.py; tests/test_storage_encrypted.py
+- SRC-011: implemented; plugins/builtin/capture_windows/plugin.py; tests/test_capture_monotonic.py
+- SRC-012: implemented; config/default.json; plugins/builtin/capture_windows/plugin.py; tests/test_capture_backend_default.py
+- SRC-013: implemented; config/default.json; plugins/builtin/embedder_stub/plugin.py; plugins/builtin/reranker_stub/plugin.py; plugins/builtin/vlm_stub/plugin.py; tests/test_model_paths_config.py
+- SRC-014: implemented; autocapture_nx/plugin_system/registry.py; tests/test_plugin_loader.py
+- SRC-015: implemented; autocapture_nx/kernel/loader.py; tests/test_contract_pins.py
+- SRC-016: implemented; autocapture_nx/capture/pipeline.py; plugins/builtin/capture_windows/plugin.py
+- SRC-017: implemented; autocapture_nx/capture/queues.py; autocapture_nx/capture/pipeline.py
+- SRC-018: implemented; autocapture_nx/capture/pipeline.py
+- SRC-019: implemented; autocapture_nx/capture/pipeline.py; autocapture_nx/windows/win_capture.py
+- SRC-020: implemented; autocapture_nx/capture/pipeline.py
+- SRC-021: implemented; autocapture_nx/capture/pipeline.py
+- SRC-022: implemented; plugins/builtin/window_metadata_windows/plugin.py; autocapture_nx/capture/pipeline.py
+- SRC-023: implemented; plugins/builtin/input_windows/plugin.py; plugins/builtin/cursor_windows/plugin.py; plugins/builtin/retrieval_basic/plugin.py; autocapture_nx/capture/pipeline.py
+- SRC-024: implemented; autocapture_nx/capture/pipeline.py
+- SRC-025: implemented; autocapture_nx/capture/pipeline.py
+- SRC-026: implemented; plugins/builtin/storage_sqlcipher/plugin.py; config/default.json
+- SRC-027: implemented; plugins/builtin/storage_sqlcipher/plugin.py
+- SRC-028: implemented; plugins/builtin/storage_encrypted/plugin.py; plugins/builtin/storage_sqlcipher/plugin.py
+- SRC-029: implemented; plugins/builtin/storage_encrypted/plugin.py; autocapture_nx/capture/pipeline.py
+- SRC-030: implemented; plugins/builtin/storage_encrypted/plugin.py; plugins/builtin/storage_sqlcipher/plugin.py; autocapture_nx/kernel/metadata_store.py
+- SRC-031: implemented; autocapture_nx/kernel/ids.py; autocapture_nx/processing/idle.py; autocapture_nx/kernel/query.py; autocapture_nx/capture/pipeline.py
+- SRC-032: implemented; plugins/builtin/storage_encrypted/plugin.py
+- SRC-033: implemented; autocapture_nx/kernel/loader.py
+- SRC-034: implemented; plugins/builtin/storage_encrypted/plugin.py; plugins/builtin/journal_basic/plugin.py; plugins/builtin/ledger_basic/plugin.py
+- SRC-035: implemented; plugins/builtin/retrieval_basic/plugin.py; autocapture/indexing/lexical.py; autocapture/indexing/vector.py
+- SRC-036: implemented; plugins/builtin/retrieval_basic/plugin.py
+- SRC-037: implemented; autocapture_nx/kernel/query.py
+- SRC-038: implemented; autocapture_nx/kernel/derived_records.py; autocapture_nx/kernel/query.py; autocapture_nx/processing/idle.py
+- SRC-039: implemented; autocapture_nx/kernel/query.py; autocapture_nx/kernel/event_builder.py
+- SRC-040: implemented; autocapture_nx/kernel/query.py
+- SRC-041: implemented; contracts/citation.schema.json; plugins/builtin/citation_basic/plugin.py; autocapture_nx/kernel/query.py
+- SRC-042: implemented; plugins/builtin/citation_basic/plugin.py
+- SRC-043: implemented; plugins/builtin/answer_basic/plugin.py
+- SRC-044: implemented; autocapture/runtime/conductor.py; autocapture/runtime/scheduler.py; autocapture/runtime/governor.py; autocapture/runtime/budgets.py; plugins/builtin/runtime_scheduler/plugin.py; plugins/builtin/runtime_governor/plugin.py
+- SRC-045: implemented; plugins/builtin/input_windows/plugin.py
+- SRC-046: implemented; autocapture_nx/capture/pipeline.py; autocapture_nx/kernel/telemetry.py; autocapture/web/routes/metrics.py
+- SRC-047: implemented; autocapture_nx/capture/pipeline.py; autocapture/runtime/conductor.py
+- SRC-048: implemented; autocapture/runtime/governor.py; autocapture/runtime/scheduler.py; autocapture/runtime/conductor.py; autocapture_nx/processing/idle.py
+- SRC-049: implemented; autocapture_nx/kernel/loader.py; autocapture_nx/plugin_system/runtime.py; autocapture_nx/plugin_system/host_runner.py; autocapture_nx/plugin_system/registry.py; config/default.json
+- SRC-050: implemented; config/default.json; autocapture_nx/plugin_system/registry.py
+- SRC-051: implemented; autocapture_nx/plugin_system/runtime.py; autocapture_nx/plugin_system/host_runner.py; autocapture_nx/plugin_system/registry.py
+- SRC-052: implemented; contracts/plugin_manifest.schema.json; plugins/builtin/*/plugin.json; autocapture_nx/plugin_system/registry.py
+- SRC-053: implemented; autocapture_nx/plugin_system/registry.py; autocapture_nx/plugin_system/host_runner.py; autocapture_nx/plugin_system/runtime.py
+- SRC-054: implemented; autocapture_nx/windows/win_sandbox.py; autocapture_nx/plugin_system/host.py; config/default.json
+- SRC-055: implemented; autocapture_nx/plugin_system/host.py
+- SRC-056: implemented; autocapture_nx/plugin_system/host.py
+- SRC-057: implemented; autocapture_nx/plugin_system/host.py; autocapture_nx/plugin_system/host_runner.py
+- SRC-058: implemented; autocapture_nx/kernel/hashing.py
+- SRC-059: implemented; autocapture_nx/windows/acl.py; autocapture_nx/kernel/crypto.py; autocapture_nx/kernel/keyring.py
+- SRC-060: implemented; autocapture_nx/kernel/keyring.py; autocapture/storage/blob_store.py; autocapture/storage/database.py; autocapture/storage/keys.py; autocapture/storage/sqlcipher.py; plugins/builtin/anchor_basic/plugin.py; plugins/builtin/egress_sanitizer/plugin.py; plugins/builtin/storage_encrypted/plugin.py
+- SRC-061: implemented; plugins/builtin/anchor_basic/plugin.py; autocapture_nx/kernel/keyring.py; autocapture/pillars/citable.py
+- SRC-062: implemented; autocapture_nx/cli.py; autocapture/pillars/citable.py; autocapture/ux/facade.py; autocapture/web/routes/verify.py; plugins/builtin/ledger_basic/plugin.py; plugins/builtin/journal_basic/plugin.py
+- SRC-063: implemented; autocapture_nx/kernel/key_rotation.py; autocapture_nx/kernel/loader.py; plugins/builtin/ledger_basic/plugin.py
+- SRC-064: implemented; autocapture_nx/kernel/loader.py; requirements.lock.json
+- SRC-065: implemented; contracts/evidence.schema.json; autocapture_nx/kernel/metadata_store.py
+- SRC-066: implemented; autocapture_nx/capture/pipeline.py; autocapture_nx/kernel/derived_records.py; plugins/builtin/window_metadata_windows/plugin.py
+- SRC-067: implemented; autocapture_nx/capture/pipeline.py
+- SRC-068: implemented; autocapture_nx/kernel/event_builder.py; config/default.json
+- SRC-069: implemented; autocapture_nx/kernel/loader.py
+- SRC-070: implemented; contracts/citation.schema.json; plugins/builtin/citation_basic/plugin.py
+- SRC-071: implemented; autocapture_nx/cli.py; autocapture/web/routes/citations.py; autocapture/ux/facade.py
+- SRC-072: implemented; autocapture_nx/kernel/metadata_store.py
+- SRC-073: implemented; autocapture_nx/kernel/derived_records.py; autocapture_nx/kernel/query.py
+- SRC-074: implemented; autocapture_nx/kernel/derived_records.py
+- SRC-075: implemented; autocapture/core/hashing.py; autocapture_nx/kernel/derived_records.py
+- SRC-076: implemented; autocapture_nx/kernel/proof_bundle.py; autocapture_nx/cli.py; autocapture/ux/facade.py
+- SRC-077: implemented; autocapture_nx/kernel/replay.py; autocapture_nx/cli.py
+- SRC-078: implemented; autocapture_nx/ux/facade.py; autocapture/web/api.py; autocapture/web/routes
+- SRC-079: implemented; autocapture_nx/cli.py; autocapture_nx/ux/facade.py
+- SRC-080: implemented; autocapture/web/ui; autocapture/web/api.py
+- SRC-081: implemented; autocapture_nx/kernel/alerts.py; autocapture/web/routes/alerts.py; autocapture/web/ui
+- SRC-082: implemented; autocapture/web/auth.py; autocapture_nx/kernel/auth.py; config/default.json
+- SRC-083: implemented; autocapture/web/routes/telemetry.py; autocapture/web/ui
+- SRC-084: implemented; pyproject.toml; plugins/builtin/*/plugin.json; tests/test_optional_deps_imports.py; tests/test_optional_dependency_imports.py
+- SRC-085: implemented; autocapture_nx/kernel/paths.py; tests/test_paths_package_safe.py; tests/test_packaged_resources.py
+- SRC-086: implemented; autocapture_nx/kernel/paths.py; tests/test_platform_paths.py; config/default.json
+- SRC-087: implemented; pyproject.toml; tests/test_packaged_resources.py; tests/test_plugin_package_data.py
+- SRC-088: implemented; requirements.lock.json; tools/generate_dep_lock.py; tools/gate_deps_lock.py
+- SRC-089: implemented; tests/test_canonical_payloads.py; tests/test_canonical_json.py; tools/gate_canon.py
+- SRC-090: implemented; tests/test_ledger_journal_concurrency.py; tools/gate_concurrency.py
+- SRC-091: implemented; tests/test_ledger_anchor_golden.py; tools/gate_ledger.py
+- SRC-092: implemented; tools/gate_perf.py; tools/run_all_tests.py
+- SRC-093: implemented; tools/gate_security.py; tests/test_network_guard.py; tests/test_plugin_network_block.py; tests/test_encrypted_store_fail_loud.py; tests/test_policy_gate.py
+- SRC-094: implemented; tools/gate_static.py; tools/gate_vuln.py; pyproject.toml; tools/run_all_tests.py
+- SRC-095: implemented; autocapture_nx/kernel/loader.py; tools/gate_doctor.py; tests/test_doctor_locks.py; tests/test_doctor_report_schema.py
+- SRC-096: implemented; autocapture_nx/kernel/keyring.py; plugins/builtin/storage_encrypted/plugin.py; plugins/builtin/storage_sqlcipher/plugin.py; tests/test_encrypted_store_fail_loud.py
+- SRC-097: implemented; autocapture_nx/kernel/metadata_store.py; plugins/builtin/capture_windows/plugin.py; plugins/builtin/window_metadata_windows/plugin.py; tests/test_metadata_record_type.py
+- SRC-098: implemented; autocapture_nx/kernel/event_builder.py; autocapture_nx/kernel/loader.py; plugins/builtin/capture_windows/plugin.py; plugins/builtin/audio_windows/plugin.py; tests/test_event_builder.py
+- SRC-099: implemented; plugins/builtin/journal_basic/plugin.py; autocapture_nx/kernel/event_builder.py; tests/test_journal_run_id.py
+- SRC-100: implemented; autocapture_nx/kernel/event_builder.py; tests/test_event_builder.py
+- SRC-101: implemented; autocapture_nx/capture/pipeline.py; plugins/builtin/audio_windows/plugin.py; plugins/builtin/input_windows/plugin.py
+- SRC-102: implemented; autocapture_nx/capture/pipeline.py
+- SRC-103: implemented; autocapture_nx/capture/pipeline.py
+- SRC-104: implemented; autocapture_nx/kernel/loader.py
+- SRC-105: implemented; autocapture_nx/capture/pipeline.py
+- SRC-106: implemented; autocapture_nx/capture/pipeline.py
+- SRC-107: implemented; plugins/builtin/input_windows/plugin.py; plugins/builtin/journal_basic/plugin.py
+- SRC-108: implemented; plugins/builtin/input_windows/plugin.py
+- SRC-109: implemented; plugins/builtin/audio_windows/plugin.py
+- SRC-110: implemented; plugins/builtin/audio_windows/plugin.py
+- SRC-111: implemented; autocapture_nx/windows/win_window.py; plugins/builtin/window_metadata_windows/plugin.py
+- SRC-112: implemented; autocapture_nx/windows/win_window.py; plugins/builtin/window_metadata_windows/plugin.py
+- SRC-113: implemented; autocapture_nx/windows/win_cursor.py; plugins/builtin/cursor_windows/plugin.py; autocapture_nx/capture/pipeline.py
+- SRC-114: implemented; plugins/builtin/clipboard_windows
+- SRC-115: implemented; plugins/builtin/file_activity_windows
+- SRC-116: implemented; autocapture/runtime/governor.py; autocapture/runtime/scheduler.py; autocapture/runtime/budgets.py; autocapture/runtime/conductor.py; autocapture_nx/processing/idle.py
+- SRC-117: implemented; autocapture/runtime/conductor.py; autocapture_nx/processing/idle.py; autocapture/research/runner.py
+- SRC-118: implemented; autocapture/indexing/manifest.py; autocapture/indexing/lexical.py; autocapture/indexing/vector.py; plugins/builtin/retrieval_basic/plugin.py
+- SRC-119: implemented; plugins/builtin/egress_sanitizer/plugin.py; plugins/builtin/storage_sqlcipher/plugin.py; plugins/builtin/storage_encrypted/plugin.py; plugins/builtin/storage_memory/plugin.py
+- SRC-120: implemented; plugins/builtin/egress_gateway/plugin.py; autocapture_nx/kernel/egress_approvals.py
+- SRC-121: implemented; autocapture_nx/kernel/egress_approvals.py; autocapture/web/routes/egress.py; autocapture/web/ui
+- SRC-122: implemented; autocapture_nx/plugin_system/registry.py; autocapture_nx/kernel/loader.py
+- SRC-123: implemented; autocapture_nx/kernel/loader.py; tests/test_run_state_entries.py
+- SRC-124: implemented; autocapture_nx/kernel/loader.py; tests/test_run_state_entries.py
+- SRC-125: implemented; autocapture_nx/kernel/loader.py; tests/test_run_state_entries.py
+- SRC-126: implemented; autocapture_nx/kernel/hashing.py; tests/test_directory_hashing.py; tests/test_hashing_directory_deterministic.py
+- SRC-127: implemented; autocapture_nx/kernel/loader.py
+- SRC-128: implemented; autocapture/storage/migrate.py; autocapture_nx/cli.py
+- SRC-129: implemented; autocapture/storage/pressure.py; autocapture/storage/forecast.py; autocapture/runtime/conductor.py; autocapture_nx/kernel/loader.py; autocapture_nx/cli.py
+- SRC-130: implemented; autocapture/storage/compaction.py; autocapture_nx/kernel/metadata_store.py; autocapture_nx/cli.py
 
 # 3. Modules
 - MOD-001: Blueprint coverage gate

@@ -9,7 +9,7 @@ from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 from autocapture_nx.processing.sst.compliance import redact_text
 
 from .contracts import validate_query_bundle
-from .policy_gate import StatePolicyDecision
+from .policy_gate import StatePolicyDecision, normalize_state_policy_decision
 
 
 class EvidenceCompiler(PluginBase):
@@ -29,6 +29,12 @@ class EvidenceCompiler(PluginBase):
         policy: StatePolicyDecision,
         metadata: Any,
     ) -> dict[str, Any]:
+        if metadata is None or not hasattr(metadata, "get") or isinstance(metadata, dict):
+            try:
+                metadata = self.context.get_capability("storage.metadata")
+            except Exception:
+                metadata = None
+        policy = normalize_state_policy_decision(policy)
         cfg = self._config.get("evidence", {}) if isinstance(self._config.get("evidence", {}), dict) else {}
         max_hits = int(cfg.get("max_hits", 5) or 5)
         max_evidence = int(cfg.get("max_evidence_per_hit", 3) or 3)

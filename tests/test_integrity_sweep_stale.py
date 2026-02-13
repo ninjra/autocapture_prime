@@ -62,6 +62,7 @@ class IntegritySweepTests(unittest.TestCase):
             metadata = storage.capabilities()["storage.metadata"]
             record_id = "run1/frame/0"
             record = {
+                "schema_version": 1,
                 "record_type": "evidence.capture.frame",
                 "run_id": "run1",
                 "ts_utc": "2024-01-01T00:00:00+00:00",

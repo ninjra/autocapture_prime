@@ -4,8 +4,8 @@ import unittest
 import zipfile
 
 from autocapture.core.hashing import hash_text, normalize_text
+from autocapture_nx.kernel.derived_records import derived_text_record_id
 from autocapture_nx.processing.idle import IdleProcessor
-from autocapture_nx.kernel.ids import encode_record_id_component
 
 
 class _MetadataStore:
@@ -113,11 +113,20 @@ class IdleProcessorTests(unittest.TestCase):
             processor = IdleProcessor(system)
             stats = processor.process()
             self.assertEqual(stats.processed, 2)
-            encoded = encode_record_id_component(record_id)
-            ocr_provider = encode_record_id_component("ocr.engine")
-            vlm_provider = encode_record_id_component("vision.extractor")
-            ocr_id = f"run1/derived.text.ocr/{ocr_provider}/{encoded}"
-            vlm_id = f"run1/derived.text.vlm/{vlm_provider}/{encoded}"
+            ocr_id = derived_text_record_id(
+                kind="ocr",
+                run_id="run1",
+                provider_id="ocr.engine",
+                source_id=record_id,
+                config=config,
+            )
+            vlm_id = derived_text_record_id(
+                kind="vlm",
+                run_id="run1",
+                provider_id="vision.extractor",
+                source_id=record_id,
+                config=config,
+            )
             self.assertIn(ocr_id, metadata.data)
             self.assertIn(vlm_id, metadata.data)
             self.assertEqual(metadata.data[ocr_id]["content_hash"], hash_text(normalize_text("ocr text")))

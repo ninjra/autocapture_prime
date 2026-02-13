@@ -1,0 +1,108 @@
+{
+  "answer": {
+    "claims": [
+      {
+        "citations": [
+          {
+            "anchor_ref": "anchor:test",
+            "derived_hash": null,
+            "derived_id": null,
+            "evidence_hash": "hash_quorum_obs",
+            "evidence_id": "run_test/derived.text.obs/test_provider/quorum",
+            "ledger_head": "ledger:test",
+            "locator": {
+              "kind": "text_offsets",
+              "offset_end": 90,
+              "offset_start": 0,
+              "record_hash": "hash_quorum_obs",
+              "record_id": "run_test/derived.text.obs/test_provider/quorum",
+              "span_sha256": "794d7e9ac36dd1363cabb081a673a8e05c255b79f799dd618b83212f7024003a"
+            },
+            "offset_end": 90,
+            "offset_start": 0,
+            "schema_version": 1,
+            "source": "local",
+            "span_id": "run_test/derived.text.obs/test_provider/quorum",
+            "span_kind": "text",
+            "span_ref": null,
+            "stale": false,
+            "stale_reason": null
+          }
+        ],
+        "text": "Observation: quorum_task_collaborator=Open Invoice. Quorum task collaborator: Open Invoice"
+      }
+    ],
+    "errors": [],
+    "policy": {
+      "require_citations": true
+    },
+    "state": "ok"
+  },
+  "custom_claims": {
+    "count": 0,
+    "debug": {
+      "mode": "persisted_only"
+    },
+    "error": null
+  },
+  "evaluation": {
+    "blocked_extract": true,
+    "blocked_reason": "disabled",
+    "candidate_count": 1,
+    "coverage_ratio": 1.0,
+    "freshness_newest_ts_utc": null,
+    "missing_spans_count": 0,
+    "result_count": 1,
+    "scheduled_extract_job_id": null,
+    "schema_error": "$: Additional properties are not allowed ('scheduled_extract_job_id' was unexpected)",
+    "schema_version": 1
+  },
+  "intent": {
+    "query": "who is working with me on the quorum task",
+    "time_window": null
+  },
+  "processing": {
+    "extraction": {
+      "allowed": false,
+      "blocked": true,
+      "blocked_reason": "disabled",
+      "candidate_count": 1,
+      "extracted_count": 0,
+      "idle_seconds": null,
+      "idle_window_s": null,
+      "ran": false,
+      "require_idle": true,
+      "scheduled_job_id": null
+    },
+    "policy": {
+      "filtered_claim_count": 1,
+      "raw_claim_count": 1,
+      "source_guard_applied": true,
+      "source_rejections": [],
+      "source_rejections_count": 0
+    }
+  },
+  "provenance": {
+    "anchor_ref": "anchor:test",
+    "contracts_lock_sha256": "<hash>",
+    "data_dir": null,
+    "effective_config_sha256": "<hash>",
+    "generated_at_utc": "<ts>",
+    "plugin_locks_sha256": "<hash>",
+    "query_ledger_head": "ledger:test",
+    "run_id": null,
+    "schema_version": 1
+  },
+  "results": [
+    {
+      "derived_id": null,
+      "record_id": "run_test/derived.text.obs/test_provider/quorum"
+    }
+  ],
+  "scheduled_extract_job_id": null,
+  "synth_claims": {
+    "count": 0,
+    "debug": {},
+    "error": null
+  }
+}

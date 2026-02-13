@@ -53,8 +53,9 @@ class _SQLCipherStore:
     def _connect(self):
         import sqlcipher3
 
-        conn = sqlcipher3.connect(str(self._path))
-        conn.execute("PRAGMA key = ?", (self._key.hex(),))
+        conn = sqlcipher3.connect(str(self._path), check_same_thread=False)
+        # sqlcipher3 does not support parameter binding for PRAGMA key.
+        conn.execute(f"PRAGMA key = \"x'{self._key.hex()}'\"")
         _apply_fsync_policy(conn, self._fsync_policy)
         return conn
 

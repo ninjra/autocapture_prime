@@ -47,7 +47,16 @@ def build_state(
     state_conf = _state_confidence(tokens, tables, spreadsheets, code_blocks, charts)
 
     # Update state ids on nested artifacts now that we have a stable state id.
+    source_state_id = str(element_graph.get("state_id") or "")
+    source_backend = str(element_graph.get("source_backend") or "")
+    source_provider_id = str(element_graph.get("source_provider_id") or "")
     element_graph = {**element_graph, "state_id": state_id}
+    if source_state_id:
+        element_graph["source_state_id"] = source_state_id
+    if source_backend:
+        element_graph["source_backend"] = source_backend
+    if source_provider_id:
+        element_graph["source_provider_id"] = source_provider_id
     tables = [_with_state_id(t, state_id) for t in tables]
     spreadsheets = [_with_state_id(t, state_id) for t in spreadsheets]
     code_blocks = [_with_state_id(c, state_id) for c in code_blocks]

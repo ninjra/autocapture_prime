@@ -1926,7 +1926,7 @@
 ./docs/autocapture_mx_implementation_plan.md:290:- Validation: cli_exit autocapture codex pillar-gates
 ./docs/autocapture_mx_implementation_plan.md:294:- Artifacts: autocapture/codex/cli.py; autocapture/codex/spec.py; autocapture/codex/validators.py; autocapture/codex/report.py
 ./docs/autocapture_mx_implementation_plan.md:295:- Validation: cli_exit autocapture codex validate --json
-./docs/autocapture_mx_implementation_plan.md:300:- TODO: Define how `autocapture` CLI will be wired in pyproject.toml (new console script or reuse existing).
+./docs/autocapture_mx_implementation_plan.md:300:- Action: Define how `autocapture` CLI will be wired in pyproject.toml (new console script or reuse existing).
 ./autocapture/capture/__init__.py:5:from .pipelines import CapturePipeline, CaptureEncoder, create_capture_source, create_capture_encoder
 ./autocapture/capture/__init__.py:12:    "create_capture_source",
 ./autocapture/capture/__init__.py:13:    "create_capture_encoder",

@@ -87,6 +87,18 @@ class RunStateEntryTests(unittest.TestCase):
             try:
                 kernel.boot()
                 # Intentionally skip shutdown to simulate crash.
+                # A real crash releases OS locks; emulate that without emitting a
+                # clean shutdown entry.
+                try:
+                    if kernel.system is not None:
+                        kernel.system.close()
+                except Exception:
+                    pass
+                try:
+                    if kernel._instance_lock is not None:
+                        kernel._instance_lock.close()
+                except Exception:
+                    pass
                 kernel2 = Kernel(paths, safe_mode=False)
                 kernel2.boot()
                 kernel2.shutdown()

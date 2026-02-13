@@ -28,6 +28,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.answer.basic",
+  "provides": [
+    "answer.builder"
+  ],
   "required_capabilities": [
     "citation.validator"
   ],

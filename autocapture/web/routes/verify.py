@@ -25,3 +25,8 @@ def verify_anchors(req: VerifyPathRequest, request: Request):
 @router.post("/api/verify/evidence")
 def verify_evidence(request: Request):
     return request.app.state.facade.verify_evidence()
+
+
+@router.post("/api/verify/integrity")
+def integrity_scan(request: Request):
+    return request.app.state.facade.integrity_scan()

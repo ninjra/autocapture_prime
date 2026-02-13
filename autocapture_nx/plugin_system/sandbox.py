@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,12 +63,69 @@ def spawn_plugin_process(
             notes.append("restricted_token_available")
         except Exception:
             notes.append("restricted_token_unavailable")
+
+    # On POSIX (including WSL), ensure subprocesses die with their parent and honor
+    # the existing "job_limits" config via rlimits. This avoids leaking many
+    # host_runner processes when a test shard crashes and prevents runaway RAM.
+    preexec_fn = None
+    start_new_session = False
+    if os.name != "nt":
+        start_new_session = True
+
+        def _posix_preexec() -> None:  # Runs in the child just before exec.
+            # Best-effort: terminate child if parent dies.
+            try:
+                import ctypes
+                import ctypes.util
+
+                libc_path = ctypes.util.find_library("c")
+                if libc_path:
+                    libc = ctypes.CDLL(libc_path, use_errno=True)
+                    PR_SET_PDEATHSIG = 1
+                    libc.prctl(PR_SET_PDEATHSIG, int(signal.SIGTERM))
+            except Exception:
+                pass
+
+            if not limits:
+                return
+            try:
+                import math
+                import resource
+
+                max_memory_mb = int(limits.get("max_memory_mb", 0) or 0)
+                if max_memory_mb > 0 and hasattr(resource, "RLIMIT_AS"):
+                    bytes_limit = int(max_memory_mb) * 1024 * 1024
+                    resource.setrlimit(resource.RLIMIT_AS, (bytes_limit, bytes_limit))
+
+                cpu_time_ms = int(limits.get("cpu_time_ms", 0) or 0)
+                if cpu_time_ms > 0 and hasattr(resource, "RLIMIT_CPU"):
+                    seconds = max(1, int(math.ceil(cpu_time_ms / 1000.0)))
+                    resource.setrlimit(resource.RLIMIT_CPU, (seconds, seconds))
+            except Exception:
+                # Best-effort only; sandbox must not fail open due to platform variance.
+                pass
+
+        preexec_fn = _posix_preexec
+        notes.append("posix_start_new_session")
+        notes.append("posix_pdeathsig_sigterm")
+        if limits:
+            if int(limits.get("max_memory_mb", 0) or 0) > 0:
+                notes.append(f"posix_rlimit_as_mb={int(limits.get('max_memory_mb', 0) or 0)}")
+            if int(limits.get("cpu_time_ms", 0) or 0) > 0:
+                notes.append(f"posix_rlimit_cpu_ms={int(limits.get('cpu_time_ms', 0) or 0)}")
+            if int(limits.get("max_processes", 0) or 0) > 0:
+                # On POSIX, threads count toward RLIMIT_NPROC, and host_runner uses
+                # threads internally. We intentionally do not apply RLIMIT_NPROC here.
+                notes.append(f"posix_max_processes_unenforced={int(limits.get('max_processes', 0) or 0)}")
+
     proc = subprocess.Popen(
         args,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         text=True,
         env=env,
+        start_new_session=start_new_session,
+        preexec_fn=preexec_fn,
     )
     job_object = False
     try:

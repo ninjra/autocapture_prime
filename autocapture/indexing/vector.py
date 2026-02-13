@@ -15,6 +15,7 @@ from typing import Any
 
 from autocapture.indexing.manifest import bump_manifest, update_manifest_digest, manifest_path
 from autocapture.models.bundles import select_bundle, BundleInfo
+from autocapture_nx.storage.migrations import record_baseline
 
 class HashEmbedder:
     def __init__(self, dims: int = 384) -> None:
@@ -70,7 +71,7 @@ class LocalEmbedder:
             try:
                 if candidate.exists():
                     self._bundle = select_bundle("embedder", [candidate])
-            except PermissionError:
+            except Exception:
                 self._bundle = None
             except Exception:
                 self._bundle = None
@@ -164,7 +165,12 @@ class LocalEmbedder:
         if not self._model_name:
             return False
         path = Path(str(self._model_name))
-        if not path.exists() or path.is_dir():
+        try:
+            if not path.exists() or path.is_dir():
+                return False
+        except Exception:
+            # In sandboxed plugin hosts, the configured model path may be outside the
+            # allowed filesystem roots; treat as "not a toy embedder" and fall back.
             return False
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
@@ -228,7 +234,10 @@ class LocalEmbedder:
 
     def _model_digest(self, model_name: str) -> str | None:
         path = Path(str(model_name))
-        if not path.exists():
+        try:
+            if not path.exists():
+                return None
+        except Exception:
             return None
         try:
             from autocapture_nx.kernel.hashing import sha256_directory, sha256_file
@@ -284,25 +293,55 @@ class VectorHit:
 
 
 class VectorIndex:
-    def __init__(self, path: str | Path, embedder: LocalEmbedder) -> None:
+    def __init__(self, path: str | Path, embedder: LocalEmbedder, *, read_only: bool = False) -> None:
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.path)
-        self._conn.execute("CREATE TABLE IF NOT EXISTS vectors (doc_id TEXT PRIMARY KEY, vector TEXT)")
-        self._conn.commit()
+        self._read_only = bool(read_only)
+        if self._read_only:
+            if not self.path.exists():
+                raise FileNotFoundError(str(self.path))
+            self._conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(self.path)
+            self._conn.execute("CREATE TABLE IF NOT EXISTS vectors (doc_id TEXT PRIMARY KEY, vector TEXT)")
+            # PERF-02: track per-doc digests to avoid redundant re-embedding.
+            self._conn.execute("CREATE TABLE IF NOT EXISTS indexed (doc_id TEXT PRIMARY KEY, digest TEXT)")
+            try:
+                record_baseline(self._conn, version=1, name="vector.baseline")
+            except Exception:
+                pass
+            self._conn.commit()
         self._embedder = embedder
         self._identity_cache: dict[str, Any] | None = None
         self._identity_mtime: float | None = None
         self._manifest_mtime: float | None = None
 
     def index(self, doc_id: str, text: str) -> None:
+        if self._read_only:
+            raise PermissionError("VectorIndex is read-only")
         vec = self._embedder.embed(text)
         self._conn.execute("REPLACE INTO vectors (doc_id, vector) VALUES (?, ?)", (doc_id, json.dumps(vec)))
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        self._conn.execute("REPLACE INTO indexed (doc_id, digest) VALUES (?, ?)", (doc_id, digest))
         self._conn.commit()
         try:
             bump_manifest(self.path, "vector")
         except Exception:
             pass
+
+    def index_if_changed(self, doc_id: str, text: str) -> bool:
+        if self._read_only:
+            raise PermissionError("VectorIndex is read-only")
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        try:
+            cur = self._conn.execute("SELECT digest FROM indexed WHERE doc_id = ?", (doc_id,))
+            row = cur.fetchone()
+            if row and str(row[0]) == digest:
+                return False
+        except Exception:
+            pass
+        self.index(doc_id, text)
+        return True
 
     def count(self) -> int:
         cur = self._conn.execute("SELECT COUNT(*) FROM vectors")
@@ -338,6 +377,8 @@ class VectorIndex:
         return payload
 
     def import_json(self, path: str | Path) -> None:
+        if self._read_only:
+            raise PermissionError("VectorIndex is read-only")
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
         scale = float(payload.get("scale", 1.0) or 1.0)
         doc_ids = payload.get("doc_ids", [])

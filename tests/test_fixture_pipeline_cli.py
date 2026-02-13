@@ -36,7 +36,9 @@ class FixturePipelineCliTests(unittest.TestCase):
             frame_dir = tmp_path / "frames"
             frame_dir.mkdir(parents=True, exist_ok=True)
             png_path = frame_dir / "fixture.png"
-            self._write_png(png_path, "FIXTURE123")
+            # Avoid digit/letter OCR confusables (e.g. 1 vs I) to keep the
+            # fixture pipeline deterministic across OCR backends.
+            self._write_png(png_path, "FIXTUREABC")
 
             manifest = {
                 "fixture_id": "test-fixture",
@@ -44,7 +46,7 @@ class FixturePipelineCliTests(unittest.TestCase):
                 "inputs": {"screenshots": [{"id": "s1", "path": str(png_path)}]},
                 "queries": {
                     "mode": "explicit",
-                    "explicit": [{"query": "FIXTURE123"}],
+                    "explicit": [{"query": "FIXTUREABC"}],
                     "require_citations": True,
                     "require_state": "ok",
                 },

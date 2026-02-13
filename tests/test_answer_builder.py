@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from autocapture.core.hashing import hash_text, normalize_text
+from autocapture_nx.kernel.hashing import sha256_text
 from autocapture_nx.plugin_system.api import PluginContext
 from plugins.builtin.anchor_basic.plugin import AnchorWriter
 from plugins.builtin.answer_basic.plugin import AnswerBuilder
@@ -88,6 +89,14 @@ class AnswerBuilderTests(unittest.TestCase):
                     "citations": [
                         {
                             "schema_version": 1,
+                            "locator": {
+                                "kind": "text_offsets",
+                                "record_id": "run1/derived/0",
+                                "record_hash": derived_hash,
+                                "offset_start": 0,
+                                "offset_end": len(derived_text),
+                                "span_sha256": sha256_text(derived_text),
+                            },
                             "span_id": "run1/segment/0",
                             "evidence_id": "run1/segment/0",
                             "evidence_hash": evidence_hash,
@@ -173,6 +182,11 @@ class AnswerBuilderTests(unittest.TestCase):
                     "citations": [
                         {
                             "schema_version": 1,
+                            "locator": {
+                                "kind": "record",
+                                "record_id": "missing",
+                                "record_hash": evidence_hash,
+                            },
                             "span_id": "missing",
                             "evidence_id": "missing",
                             "evidence_hash": evidence_hash,

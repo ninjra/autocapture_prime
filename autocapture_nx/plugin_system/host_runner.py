@@ -10,6 +10,7 @@ import sys
 import threading
 import random
 import traceback
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -32,16 +33,20 @@ def _debug(message: str) -> None:
 
 
 def _host_log_path(config: dict[str, Any], plugin_id: str) -> Path | None:
-    try:
-        storage = config.get("storage", {}) if isinstance(config, dict) else {}
-        data_dir = storage.get("data_dir", "data")
-        runtime = config.get("runtime", {}) if isinstance(config, dict) else {}
-        run_id = runtime.get("run_id", "run")
-        run_dir = Path(str(data_dir)) / "runs" / str(run_id)
-        run_dir.mkdir(parents=True, exist_ok=True)
-        return run_dir / f"plugin_host_{plugin_id}.log"
-    except Exception:
-        return None
+    # Subprocess hosts run under a filesystem guard. Logging must never try to
+    # create or write outside of the plugin's allowed write roots.
+    #
+    # The parent process sets TMPDIR/TMP/TEMP to an allowed per-plugin scratch
+    # directory under the plugin cache. Prefer that directory and avoid mkdirs
+    # here (mkdir can be denied and slow under WSL /mnt/<drive>).
+    for key in ("AUTOCAPTURE_HOST_LOG_DIR", "TMPDIR", "TEMP", "TMP"):
+        raw = os.getenv(key, "").strip()
+        if raw:
+            try:
+                return Path(raw) / f"plugin_host_{plugin_id}.log"
+            except Exception:
+                continue
+    return None
 
 
 def _log_host_error(config: dict[str, Any], plugin_id: str, message: str) -> None:
@@ -72,6 +77,10 @@ def _encode(obj: Any) -> Any:
         import base64
 
         return {"__bytes__": base64.b64encode(obj).decode("ascii")}
+    if obj.__class__.__name__ == "CapabilityProxy":
+        return {"__capability_proxy__": True, "repr": str(obj)}
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return _encode(asdict(obj))
     if isinstance(obj, Path):
         return str(obj)
     if isinstance(obj, tuple):
@@ -264,12 +273,42 @@ def _filesystem_policy(payload: Any) -> FilesystemPolicy | None:
     return FilesystemPolicy.from_paths(read=read if isinstance(read, list) else [], readwrite=readwrite if isinstance(readwrite, list) else [])
 
 
+def _seed_optional_libs(seed: int) -> None:
+    """Seed optional heavy deps without importing them.
+
+    Importing torch in every subprocess host was causing large RSS (hundreds of MB)
+    even for plugins that never touch torch. We only seed if the module is already
+    loaded by the plugin.
+    """
+
+    np = sys.modules.get("numpy")
+    if np is not None:
+        try:
+            getattr(np, "random").seed(seed)
+        except Exception:
+            pass
+    torch = sys.modules.get("torch")
+    if torch is not None:
+        try:
+            getattr(torch, "manual_seed")(seed)
+        except Exception:
+            pass
+
+
 def main() -> None:
     if len(sys.argv) < 5:
-        raise SystemExit("usage: host_runner <plugin_path> <callable> <plugin_id> <network_allowed>")
-    plugin_path, callable_name, plugin_id, network_allowed_text = sys.argv[1:5]
-    network_allowed = network_allowed_text.lower() == "true"
-    set_global_network_deny(not network_allowed)
+        raise SystemExit("usage: host_runner <plugin_path> <callable> <plugin_id> <network_scope>")
+    plugin_path, callable_name, plugin_id, network_scope_text = sys.argv[1:5]
+    scope = str(network_scope_text or "none").strip().lower()
+    if scope in {"true", "1", "yes"}:
+        # Back-compat: old runners passed a boolean.
+        scope = "internet"
+    if scope not in {"none", "localhost", "internet"}:
+        scope = "none"
+    network_allowed = scope != "none"
+    # Even when a plugin can create sockets, keep the global deny enabled unless
+    # the plugin is explicitly granted "internet" scope (egress gateway only).
+    set_global_network_deny(scope != "internet")
 
     init_line = sys.stdin.readline()
     if not init_line:
@@ -291,7 +330,42 @@ def main() -> None:
 
     set_global_filesystem_policy(fs_policy)
     _debug("filesystem policy installed")
-    _log_host_error(config, plugin_id, f"host_runner start: pid={os.getpid()} python={sys.executable}")
+    if os.getenv("AUTOCAPTURE_HOST_DEBUG", "") and fs_policy is not None:
+        try:
+            _debug(
+                "fs_policy roots:"
+                f" read={len(getattr(fs_policy, 'read_roots', ()))},"
+                f" readwrite={len(getattr(fs_policy, 'readwrite_roots', ()))},"
+                f" sample_read={[str(p) for p in list(getattr(fs_policy, 'read_roots', ()))[:5]]}"
+            )
+        except Exception:
+            pass
+    # File-based logging in a guarded subprocess is best-effort only. On WSL
+    # mounts it can be surprisingly slow and has caused host startup timeouts.
+    # Keep it off by default and enable only for local debugging.
+    allow_host_logs = bool(os.getenv("AUTOCAPTURE_HOST_ENABLE_FILE_LOGS", "").strip())
+
+    logger = None
+    if allow_host_logs:
+        _debug("host log begin")
+        _log_host_error(config, plugin_id, f"host_runner start: pid={os.getpid()} python={sys.executable}")
+        _debug("host log done")
+        # OPS-01: structured JSONL logging with correlation IDs (best-effort).
+        try:
+            _debug("jsonl logger begin")
+            from autocapture_nx.kernel.logging import JsonlLogger
+
+            logger = JsonlLogger.from_config(config, name="plugin_host")
+            logger.event(
+                event="plugin.host_runner.start",
+                run_id=str(config.get("runtime", {}).get("run_id") or ""),
+                plugin_id=str(plugin_id),
+                pid=os.getpid(),
+                python=sys.executable,
+            )
+            _debug("jsonl logger done")
+        except Exception:
+            logger = None
 
     rng_enabled = bool(rng_info.get("enabled", False))
     rng_seed_value = rng_info.get("seed")
@@ -307,18 +381,6 @@ def main() -> None:
         install_rng_guard()
         set_thread_seed(rng_seed_int, strict=rng_strict)
         rng_instance = random.Random(rng_seed_int)
-        try:  # optional deps
-            import numpy as np  # type: ignore
-
-            np.random.seed(rng_seed_int)
-        except Exception:
-            pass
-        try:  # optional deps
-            import torch  # type: ignore
-
-            torch.manual_seed(rng_seed_int)
-        except Exception:
-            pass
 
     if not isinstance(host_config, dict):
         host_config = {}
@@ -327,7 +389,9 @@ def main() -> None:
         rpc_timeout_s=float(hosting.get("rpc_timeout_s", 10)),
         rpc_max_message_bytes=int(hosting.get("rpc_max_message_bytes", 2_000_000)),
     )
+    _debug("bridge start begin")
     bridge.start()
+    _debug("bridge start done")
 
     def _get_capability(name: str) -> Any:
         cap = str(name)
@@ -360,6 +424,8 @@ def main() -> None:
                 import faulthandler
 
                 faulthandler.dump_traceback_later(5.0, repeat=False, file=sys.stderr)
+            if rng_enabled and rng_seed_int is not None:
+                _seed_optional_libs(rng_seed_int)
             instance = factory(plugin_id, context)
             if trace_enabled:
                 import faulthandler
@@ -371,6 +437,17 @@ def main() -> None:
     except Exception as exc:
         tb = traceback.format_exc()
         _log_host_error(config, plugin_id, f"plugin init error: {type(exc).__name__}: {exc}\n{tb}")
+        try:
+            if logger is not None:
+                logger.event(
+                    event="plugin.host_runner.init_error",
+                    level="error",
+                    run_id=str(config.get("runtime", {}).get("run_id") or ""),
+                    plugin_id=str(plugin_id),
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+        except Exception:
+            pass
         raise
 
     cap_map = {name: cap for name, cap in caps.items()}
@@ -383,6 +460,7 @@ def main() -> None:
                 break
             req_id = request.get("id")
             method = request.get("method")
+            _debug(f"request: id={req_id} method={method}")
             try:
                 if method == "capabilities":
                     result = {
@@ -390,13 +468,19 @@ def main() -> None:
                         for name, obj in cap_map.items()
                     }
                 elif method == "call":
+                    _debug(
+                        f"call begin: cap={request.get('capability')} fn={request.get('function')} id={req_id}"
+                    )
                     cap = cap_map[request["capability"]]
                     func = getattr(cap, request["function"])
                     args = _decode(request.get("args", []))
                     kwargs = _decode(request.get("kwargs", {}))
                     with network_guard(network_allowed):
+                        if rng_enabled and rng_seed_int is not None:
+                            _seed_optional_libs(rng_seed_int)
                         result = func(*args, **kwargs)
                     result = _encode(result)
+                    _debug(f"call done: id={req_id}")
                 else:
                     raise ValueError("unknown method")
                 response = {"id": req_id, "ok": True, "result": result}
@@ -407,6 +491,7 @@ def main() -> None:
                     "error": f"{type(exc).__name__}: {exc}",
                 }
             bridge.send(response)
+            _debug(f"response sent: id={req_id} ok={bool(response.get('ok'))}")
     finally:
         bridge.close()
 

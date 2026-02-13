@@ -108,7 +108,11 @@ class StateRetrieval(PluginBase):
             def _score(item: dict[str, Any]) -> float:
                 return float(item.get("score") or 0.0)
 
+            raw_hits = list(hits)
             hits = [hit for hit in hits if _score(hit) >= min_score and hit.get("state_id")]
+            if not hits and raw_hits:
+                # Avoid hard empty results when the similarity scale drifts negative.
+                hits = [hit for hit in raw_hits if hit.get("state_id")]
             hits.sort(key=lambda h: (-_score(h), str(h.get("state_id"))))
             hits = hits[: max(1, k)]
 

@@ -91,6 +91,7 @@ class StorageRecoveryScannerTests(unittest.TestCase):
             else:
                 media.put(record_id, payload, ts_utc=ts_utc)
             meta_payload = {
+                "schema_version": 1,
                 "record_type": "evidence.capture.segment",
                 "run_id": "run1",
                 "segment_id": record_id,

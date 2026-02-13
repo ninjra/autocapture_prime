@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -63,7 +64,12 @@ def _write_slow_plugin(root: Path, plugin_id: str) -> None:
 
 class PluginHostTimeoutTests(unittest.TestCase):
     def test_subprocess_host_times_out(self) -> None:
-        with tempfile.TemporaryDirectory(dir=".") as tmp:
+        # MOD-021 low-resource mode forces in-proc hosting for WSL stability; the
+        # subprocess watchdog/timeout boundary is only meaningful when subprocess
+        # hosting is enabled.
+        if os.getenv("AUTOCAPTURE_PLUGINS_HOSTING_MODE", "").strip().lower() == "inproc":
+            self.skipTest("subprocess-only: host timeout enforced across IPC boundary")
+        with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             plugin_id = "test.slow.timeout"
             _write_slow_plugin(root, plugin_id)
@@ -76,6 +82,7 @@ class PluginHostTimeoutTests(unittest.TestCase):
             plugins.setdefault("locks", {})["enforce"] = False
             hosting = plugins.setdefault("hosting", {})
             hosting["mode"] = "subprocess"
+            hosting["wsl_force_inproc"] = False
             hosting["inproc_allowlist"] = []
             hosting["rpc_timeout_s"] = 0.2
             hosting["rpc_max_message_bytes"] = 2000000

@@ -45,7 +45,7 @@ class Wsl2RoutingTests(unittest.TestCase):
                     {"user_active": False, "idle_seconds": 100, "query_intent": False, "run_id": "run"}
                 )
             self.assertEqual(executed, ["gpu_task"])
-            files = list(Path(tmp).glob("*.json"))
+            files = list(queue.requests_dir.glob("*.json"))
             self.assertEqual(len(files), 1)
             payload = json.loads(files[0].read_text(encoding="utf-8"))
             self.assertEqual(payload.get("job_name"), "gpu_task")

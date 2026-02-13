@@ -9,8 +9,9 @@ from typing import Any, Callable
 
 from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.canonical_json import CanonicalJSONError, dumps as canonical_dumps
-from autocapture_nx.kernel.derived_records import extract_text_payload
+from autocapture_nx.kernel.derived_records import extract_text_payload, derived_text_record_id
 from autocapture_nx.kernel.ids import encode_record_id_component
+from autocapture_nx.kernel.providers import capability_providers
 
 from .action import infer_action
 from .compliance import redact_artifacts, redact_text, redact_value
@@ -102,6 +103,7 @@ class SSTPipeline:
         self._ocr = self._cap("ocr.engine")
         self._vlm = self._cap("vision.extractor")
         self._stage_hooks = self._cap("processing.stage.hooks")
+        self._post_index = self._cap("index.postprocess")
         self._events = self._cap("event.builder")
         self._logger = self._cap("observability.logger")
         self._lexical = None
@@ -391,10 +393,12 @@ class SSTPipeline:
             ocr_capability=self._ocr,
             frame_width=frame_width,
             frame_height=frame_height,
+            full_frame_bytes=frame_bytes if isinstance(frame_bytes, (bytes, bytearray)) else None,
             min_conf_bp=int(self._sst_cfg["ocr_min_conf_bp"]),
             nms_iou_bp=int(self._sst_cfg["ocr_nms_iou_bp"]),
             max_tokens=int(self._sst_cfg["ocr_max_tokens"]),
             max_patches=int(self._sst_cfg["ocr_max_patches"]),
+            prefer_full_frame=bool(self._sst_cfg.get("ocr_prefer_full_frame", True)),
             allow_ocr=allow_ocr,
             should_abort=should_abort,
             deadline_ts=deadline_ts,
@@ -450,7 +454,16 @@ class SSTPipeline:
             )
             stage_payload["tokens_raw"] = tokens_raw
         vlm_tokens = _sanitize_tokens(
-            self._vlm_tokens(frame_width, frame_height, frame_bytes, allow_vlm, should_abort, deadline_ts),
+            self._vlm_tokens(
+                frame_width,
+                frame_height,
+                frame_bytes,
+                allow_vlm,
+                should_abort,
+                deadline_ts,
+                run_id=run_id,
+                source_id=record_id,
+            ),
             frame_width=frame_width,
             frame_height=frame_height,
             diagnostics=diagnostics,
@@ -1095,20 +1108,26 @@ class SSTPipeline:
         allow_vlm: bool,
         should_abort: ShouldAbortFn | None,
         deadline_ts: float | None,
+        *,
+        run_id: str | None = None,
+        source_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if not allow_vlm or self._vlm is None:
             return []
-        providers = []
-        target = self._vlm
-        if hasattr(target, "target"):
-            target = getattr(target, "target")
-        if hasattr(target, "items"):
-            try:
-                providers = list(target.items())
-            except Exception:
-                providers = []
-        if not providers:
-            providers = [("vision.extractor", self._vlm)]
+
+        def _provider_priority(provider_id: str) -> int:
+            low = str(provider_id or "").strip().casefold()
+            score = 0
+            if "vllm" in low or "localhost" in low or "openai" in low:
+                score += 60
+            if "transformers" in low or "qwen" in low or "internvl" in low or "mai" in low:
+                score += 20
+            if "stub" in low or "basic" in low or "toy" in low or "heuristic" in low:
+                score -= 40
+            return score
+
+        providers = capability_providers(self._vlm, "vision.extractor")
+        providers.sort(key=lambda pair: (-_provider_priority(pair[0]), str(pair[0])))
 
         tokens: list[dict[str, Any]] = []
         for provider_id, provider in providers:
@@ -1116,10 +1135,17 @@ class SSTPipeline:
                 break
             if deadline_ts is not None and time.time() >= deadline_ts:
                 break
+            text = ""
             try:
                 text = extract_text_payload(provider.extract(frame_bytes))
             except Exception:
-                continue
+                text = ""
+            if not text:
+                text = self._cached_vlm_text(
+                    provider_id=str(provider_id),
+                    run_id=run_id,
+                    source_id=source_id,
+                )
             text = norm_text(text)
             if not text:
                 continue
@@ -1139,6 +1165,29 @@ class SSTPipeline:
             )
         return tokens
 
+    def _cached_vlm_text(self, *, provider_id: str, run_id: str | None, source_id: str | None) -> str:
+        if self._metadata is None:
+            return ""
+        if not run_id or not source_id:
+            return ""
+        try:
+            record_id = derived_text_record_id(
+                kind="vlm",
+                run_id=str(run_id),
+                provider_id=str(provider_id),
+                source_id=str(source_id),
+                config=self._config if isinstance(self._config, dict) else {},
+            )
+            payload = self._metadata.get(record_id)
+            if not isinstance(payload, dict):
+                return ""
+            text = payload.get("text")
+            if not text:
+                text = payload.get("text_normalized")
+            return str(text or "")
+        except Exception:
+            return ""
+
     def _cap(self, name: str) -> Any | None:
         if hasattr(self._system, "has") and self._system.has(name):
             return self._system.get(name)
@@ -1151,10 +1200,12 @@ class SSTPipeline:
             return self._persistence
         self._ensure_indexes()
         index_fn = self._index_text
+        post_fn = self._post_index_text
         self._persistence = SSTPersistence(
             metadata=self._metadata,
             event_builder=self._events,
             index_text=index_fn,
+            post_index=post_fn,
             extractor_id=self._extractor_id,
             extractor_version=self._extractor_version,
             config_hash=self._config_hash,
@@ -1188,6 +1239,23 @@ class SSTPipeline:
                 self._vector.index(doc_id, text)
             except Exception as exc:
                 self._log(f"sst.index_vector_error[{doc_id}]: {exc}")
+
+    def _post_index_text(self, doc_id: str, text: str) -> None:
+        """Optional post-index fanout (late interaction, extra embeddings, etc)."""
+        if not text:
+            return
+        cap = self._post_index
+        if cap is None:
+            return
+        for provider_id, provider in capability_providers(cap, "index.postprocess"):
+            _ = provider_id
+            try:
+                if hasattr(provider, "process_doc"):
+                    provider.process_doc(doc_id, text)
+                elif callable(provider):
+                    provider(doc_id, text)
+            except Exception as exc:
+                self._log(f"sst.post_index_error[{doc_id}]: {exc}")
 
     def _log(self, msg: str) -> None:
         if self._logger is None:
@@ -1692,7 +1760,14 @@ def _merge_payload(
     stage: str,
     diagnostics: list[dict[str, Any]],
 ) -> None:
+    replace_keys_by_stage: dict[str, set[str]] = {
+        "ui.parse": {"element_graph"},
+    }
+    replace_keys = replace_keys_by_stage.get(stage, set())
     for key, value in update.items():
+        if key in replace_keys:
+            base[key] = value
+            continue
         if key not in base:
             base[key] = value
             continue

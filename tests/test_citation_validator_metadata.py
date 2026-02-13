@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from autocapture.core.hashing import hash_text, normalize_text
+from autocapture_nx.kernel.hashing import sha256_text
 from autocapture_nx.plugin_system.api import PluginContext
 from plugins.builtin.anchor_basic.plugin import AnchorWriter
 from plugins.builtin.citation_basic.plugin import CitationValidator
@@ -84,6 +85,14 @@ class CitationValidatorMetadataTests(unittest.TestCase):
                 [
                     {
                         "schema_version": 1,
+                        "locator": {
+                            "kind": "text_offsets",
+                            "record_id": "run1/derived/0",
+                            "record_hash": derived_hash,
+                            "offset_start": 0,
+                            "offset_end": len(derived_text),
+                            "span_sha256": sha256_text(derived_text),
+                        },
                         "span_id": "run1/segment/0",
                         "evidence_id": "run1/segment/0",
                         "evidence_hash": evidence_hash,
@@ -104,6 +113,7 @@ class CitationValidatorMetadataTests(unittest.TestCase):
                     [
                         {
                             "schema_version": 1,
+                            "locator": {"kind": "record", "record_id": "missing", "record_hash": evidence_hash},
                             "span_id": "missing",
                             "evidence_id": "missing",
                             "evidence_hash": evidence_hash,
@@ -121,6 +131,7 @@ class CitationValidatorMetadataTests(unittest.TestCase):
                     [
                         {
                             "schema_version": 1,
+                            "locator": {"kind": "record", "record_id": "run1/derived/0", "record_hash": evidence_hash},
                             "span_id": "run1/derived/0",
                             "evidence_id": "run1/derived/0",
                             "evidence_hash": evidence_hash,
@@ -138,6 +149,7 @@ class CitationValidatorMetadataTests(unittest.TestCase):
                     [
                         {
                             "schema_version": 1,
+                            "locator": {"kind": "record", "record_id": "run1/segment/0", "record_hash": "bad"},
                             "span_id": "run1/segment/0",
                             "evidence_id": "run1/segment/0",
                             "evidence_hash": "bad",

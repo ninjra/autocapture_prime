@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass
+import shutil
+from dataclasses import dataclass, asdict, is_dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
 from autocapture_nx.kernel.hashing import sha256_text
+from autocapture_nx.storage.migrations import record_baseline
 from .contracts import validate_state_edge, validate_state_span
 from .ids import b64decode, b64encode, compute_embedding_hash
 
@@ -61,6 +64,29 @@ class StateTapeCounts:
     evidence_inserted: int = 0
 
 
+def _normalize_json(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, bytes):
+        return {"__bytes_len": len(value), "__bytes_sha256": sha256_text(value.hex())}
+    if isinstance(value, Path):
+        return str(value)
+    if is_dataclass(value) and not isinstance(value, type):
+        return _normalize_json(asdict(value))
+    if isinstance(value, dict):
+        return {str(key): _normalize_json(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_normalize_json(item) for item in value]
+    return str(value)
+
+
+def _json_dumps(value: Any) -> str:
+    try:
+        return json.dumps(value, sort_keys=True)
+    except TypeError:
+        return json.dumps(_normalize_json(value), sort_keys=True)
+
+
 class StateTapeStore:
     def __init__(
         self,
@@ -75,26 +101,78 @@ class StateTapeStore:
         self._conn: sqlite3.Connection | None = None
 
     def _connect(self) -> sqlite3.Connection:
-        if self._key is None:
-            conn = sqlite3.connect(str(self._path))
-        else:
-            import sqlcipher3
+        conn: sqlite3.Connection | None = None
+        try:
+            if self._key is None:
+                conn = sqlite3.connect(str(self._path), check_same_thread=False)
+            else:
+                import sqlcipher3
 
-            conn = sqlcipher3.connect(str(self._path))
-            conn.execute("PRAGMA key = ?", (self._key.hex(),))
-        if self._fsync_policy == "critical":
-            conn.execute("PRAGMA synchronous = FULL")
-        elif self._fsync_policy == "bulk":
-            conn.execute("PRAGMA synchronous = NORMAL")
-        elif self._fsync_policy == "none":
-            conn.execute("PRAGMA synchronous = OFF")
-        return conn
+                conn = sqlcipher3.connect(str(self._path), check_same_thread=False)
+                # sqlcipher3 does not support parameter binding for PRAGMA key.
+                conn.execute(f"PRAGMA key = \"x'{self._key.hex()}'\"")
+            if self._fsync_policy == "critical":
+                conn.execute("PRAGMA synchronous = FULL")
+            elif self._fsync_policy == "bulk":
+                conn.execute("PRAGMA synchronous = NORMAL")
+            elif self._fsync_policy == "none":
+                conn.execute("PRAGMA synchronous = OFF")
+            return conn
+        except sqlite3.DatabaseError as exc:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            if "not a database" not in str(exc).lower():
+                raise
+            self._archive_corrupt_db(str(exc))
+            if self._key is None:
+                conn = sqlite3.connect(str(self._path), check_same_thread=False)
+            else:
+                import sqlcipher3
+
+                conn = sqlcipher3.connect(str(self._path), check_same_thread=False)
+                conn.execute(f"PRAGMA key = \"x'{self._key.hex()}'\"")
+            if self._fsync_policy == "critical":
+                conn.execute("PRAGMA synchronous = FULL")
+            elif self._fsync_policy == "bulk":
+                conn.execute("PRAGMA synchronous = NORMAL")
+            elif self._fsync_policy == "none":
+                conn.execute("PRAGMA synchronous = OFF")
+            return conn
+
+    def _archive_corrupt_db(self, reason: str) -> None:
+        if not self._path.exists():
+            raise sqlite3.DatabaseError(reason)
+        archive_dir = self._path.parent / "corrupt"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        archive_path = archive_dir / f"{self._path.name}.{ts}.corrupt"
+        shutil.move(str(self._path), str(archive_path))
+        marker = {
+            "schema_version": 1,
+            "record_type": "storage.recovery",
+            "ts_utc": datetime.now(timezone.utc).isoformat(),
+            "src_path": str(self._path),
+            "archive_path": str(archive_path),
+            "reason": reason,
+        }
+        (archive_path.with_suffix(archive_path.suffix + ".json")).write_text(
+            json.dumps(marker, sort_keys=True),
+            encoding="utf-8",
+        )
 
     def _ensure(self) -> None:
         if self._conn is None:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = self._connect()
             self._conn.executescript(_SCHEMA)
+            # FND-08: record a deterministic baseline schema version.
+            try:
+                record_baseline(self._conn, version=1, name="state_tape.baseline")
+            except Exception:
+                pass
             self._conn.commit()
 
     def insert_batch(self, spans: list[dict[str, Any]], edges: list[dict[str, Any]]) -> StateTapeCounts:
@@ -112,19 +190,27 @@ class StateTapeStore:
             for span in spans:
                 if not isinstance(span, dict):
                     continue
-                validate_state_span(span)
-                inserted = self._insert_span(conn, span)
+                # Normalize dataclasses/paths/bytes into JSON-safe structures
+                # before schema validation and persistence.
+                span_norm = _normalize_json(span)
+                if not isinstance(span_norm, dict):
+                    continue
+                validate_state_span(span_norm)
+                inserted = self._insert_span(conn, span_norm)
                 if inserted:
                     counts.spans_inserted += 1
-                    counts.evidence_inserted += self._insert_evidence_links(conn, "span", span)
+                    counts.evidence_inserted += self._insert_evidence_links(conn, "span", span_norm)
             for edge in edges:
                 if not isinstance(edge, dict):
                     continue
-                validate_state_edge(edge)
-                inserted = self._insert_edge(conn, edge)
+                edge_norm = _normalize_json(edge)
+                if not isinstance(edge_norm, dict):
+                    continue
+                validate_state_edge(edge_norm)
+                inserted = self._insert_edge(conn, edge_norm)
                 if inserted:
                     counts.edges_inserted += 1
-                    counts.evidence_inserted += self._insert_evidence_links(conn, "edge", edge)
+                    counts.evidence_inserted += self._insert_evidence_links(conn, "edge", edge_norm)
             conn.commit()
         except Exception:
             conn.rollback()
@@ -153,8 +239,8 @@ class StateTapeStore:
             str(emb.get("dtype", "")),
             str(summary.get("app", "")) if summary.get("app") is not None else None,
             str(summary.get("window_title_hash", "")) if summary.get("window_title_hash") is not None else None,
-            json.dumps(top_entities, sort_keys=True),
-            json.dumps(span.get("provenance", {}), sort_keys=True),
+            _json_dumps(top_entities),
+            _json_dumps(span.get("provenance", {})),
         )
         try:
             conn.execute(
@@ -181,7 +267,7 @@ class StateTapeStore:
             int(emb.get("dim", 0) or 0),
             str(emb.get("dtype", "")),
             float(edge.get("pred_error", 0.0)),
-            json.dumps(edge.get("provenance", {}), sort_keys=True),
+            _json_dumps(edge.get("provenance", {})),
         )
         try:
             conn.execute(
@@ -217,7 +303,7 @@ class StateTapeStore:
                         link_id,
                         obj_type,
                         obj.get("state_id") if obj_type == "span" else obj.get("edge_id"),
-                        json.dumps(ref, sort_keys=True),
+                    _json_dumps(ref),
                     ),
                 )
                 inserted += 1

@@ -30,6 +30,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.vlm.deepseek_ocr2",
+  "provides": [
+    "vision.extractor"
+  ],
   "required_capabilities": [],
   "version": "0.1.0"
 }

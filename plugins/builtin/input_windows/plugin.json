@@ -28,6 +28,9 @@
     "raw_input": true
   },
   "plugin_id": "builtin.tracking.input.windows",
+  "provides": [
+    "tracking.input"
+  ],
   "required_capabilities": [
     "event.builder",
     "storage.media",

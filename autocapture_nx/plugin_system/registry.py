@@ -16,7 +16,7 @@ from typing import Any, TYPE_CHECKING, cast
 from autocapture_nx import __version__ as kernel_version
 from autocapture_nx.kernel.config import SchemaLiteValidator
 from autocapture_nx.kernel.audit import PluginAuditLog, hash_payload
-from autocapture_nx.kernel.errors import PermissionError, PluginError
+from autocapture_nx.kernel.errors import PluginError
 from autocapture_nx.kernel.hashing import sha256_directory, sha256_file, clear_directory_hash_cache
 from autocapture_nx.kernel.paths import plugins_dir, resolve_repo_path, load_json
 from autocapture_nx.kernel.schema_registry import SchemaRegistry, derive_schema_from_paths
@@ -24,7 +24,7 @@ from autocapture_nx.kernel.rng import RNGScope, RNGService, install_rng_guard
 
 from .api import PluginContext
 from .contracts import IOContract, load_io_contracts
-from .host import SubprocessPlugin
+from .host import SubprocessPlugin, estimate_rows_read, estimate_rows_written
 from .manifest import PluginManifest
 from .runtime import FilesystemPolicy, filesystem_guard, network_guard
 from .settings import build_plugin_settings
@@ -74,6 +74,17 @@ def _parse_version(version: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
+def _is_wsl() -> bool:
+    # Best-effort detection for WSL2. This is used only for resource safety
+    # defaults and must not affect non-WSL behavior when explicitly configured.
+    if os.getenv("WSL_INTEROP") or os.getenv("WSL_DISTRO_NAME"):
+        return True
+    try:
+        return "microsoft" in Path("/proc/version").read_text(encoding="utf-8", errors="ignore").lower()
+    except Exception:
+        return False
+
+
 def _version_satisfies(current: str, requirement: str) -> bool:
     ops = (">=", "<=", ">", "<", "==")
     op = "=="
@@ -103,7 +114,9 @@ def _capability_guard(capabilities, plugin_id: str, required_capabilities: set[s
 
     def _get_capability(name: str):
         if name not in allowed:
-            raise PermissionError(f"Plugin {plugin_id} not allowed to access capability {name}")
+            # Treat this as a plugin contract violation (not a host OS permission
+            # error) so callers can handle it deterministically.
+            raise PluginError(f"capability_not_allowed:{plugin_id}:{name}")
         return capabilities.get(name)
 
     return _get_capability
@@ -117,6 +130,57 @@ class LoadedPlugin:
     capabilities: dict[str, Any]
     filesystem_policy: FilesystemPolicy | None = None
     manifest_path: Path | None = None
+
+
+_TEMP_ENV_LOCK = None
+
+
+def _temporary_tempdir_env(temp_dir: str | None):
+    """Best-effort temporary TMPDIR/TMP/TEMP override.
+
+    Some OCR backends (notably pytesseract) write temp files and will fail under the
+    filesystem guard unless the temp directory is within the plugin's allowed roots.
+
+    Note: os.environ and tempfile.tempdir are process-global. We serialize to avoid
+    cross-plugin races. This trades concurrency for determinism and WSL stability.
+    """
+
+    import contextlib
+    import tempfile
+    import threading
+    from pathlib import Path
+
+    global _TEMP_ENV_LOCK
+    if _TEMP_ENV_LOCK is None:
+        # Capability calls can nest (capability A calls capability B). Use a
+        # re-entrant lock to avoid deadlocking when nested calls attempt to
+        # apply the same tempdir override.
+        _TEMP_ENV_LOCK = threading.RLock()
+
+    @contextlib.contextmanager
+    def _ctx():
+        td = str(temp_dir or "").strip()
+        if not td:
+            yield
+            return
+        with _TEMP_ENV_LOCK:
+            Path(td).mkdir(parents=True, exist_ok=True)
+            prev = {k: os.environ.get(k) for k in ("TMPDIR", "TMP", "TEMP")}
+            try:
+                os.environ["TMPDIR"] = td
+                os.environ["TMP"] = td
+                os.environ["TEMP"] = td
+                tempfile.tempdir = None
+                yield
+            finally:
+                for k, v in prev.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
+                tempfile.tempdir = None
+
+    return _ctx()
 
 
 class CapabilityProxy:
@@ -134,6 +198,11 @@ class CapabilityProxy:
         rng_enabled: bool = False,
         plugin_id: str | None = None,
         trace_hook: Any | None = None,
+        audit_log: PluginAuditLog | None = None,
+        audit_run_id: str | None = None,
+        audit_code_hash: str | None = None,
+        audit_settings_hash: str | None = None,
+        temp_dir: str | None = None,
     ) -> None:
         self._target = target
         self._network_allowed = network_allowed
@@ -146,6 +215,11 @@ class CapabilityProxy:
         self._rng_enabled = rng_enabled
         self._plugin_id = str(plugin_id or "")
         self._trace_hook = trace_hook
+        self._audit_log = audit_log
+        self._audit_run_id = str(audit_run_id or "").strip()
+        self._audit_code_hash = str(audit_code_hash or "").strip() or None
+        self._audit_settings_hash = str(audit_settings_hash or "").strip() or None
+        self._temp_dir = str(temp_dir or "").strip()
 
     @property
     def network_allowed(self) -> bool:
@@ -191,15 +265,24 @@ class CapabilityProxy:
         start_perf = time.perf_counter()
         ok = True
         error = None
+        audit_error_text: str | None = None
+        audit_result: Any = None
         try:
             with RNGScope(self._rng_seed, strict=self._rng_strict, enabled=self._rng_enabled):
                 with network_guard(self._network_allowed):
+                    # Apply filesystem policy before tempdir override. The override may
+                    # create the temp directory, and that must be evaluated against
+                    # the callee plugin's policy (not the caller's), especially for
+                    # nested capability calls.
                     with filesystem_guard(self._filesystem_policy):
-                        result = func(*args, **kwargs)
+                        with _temporary_tempdir_env(self._temp_dir):
+                            result = func(*args, **kwargs)
             self._validate_output(method, result)
+            audit_result = result
         except Exception as exc:
             ok = False
             error = f"{type(exc).__name__}: {exc}"
+            audit_error_text = error
             raise
         finally:
             end_utc = datetime.now(timezone.utc).isoformat()
@@ -217,6 +300,38 @@ class CapabilityProxy:
                             "ok": bool(ok),
                             "error": error,
                         }
+                    )
+                except Exception:
+                    pass
+            # Always audit in-proc capability execution via the same append-only audit DB.
+            # Subprocess-hosted plugins already record audit rows inside PluginHostSubprocess.
+            if self._audit_log is not None and self._plugin_id and self._capability:
+                try:
+                    run_id = self._audit_run_id or "run"
+                    input_hash, input_bytes = hash_payload({"args": list(args), "kwargs": dict(kwargs)})
+                    output_hash, output_bytes = hash_payload(audit_result) if ok else (None, None)
+                    data_hash, _ = hash_payload({"input": input_hash, "output": output_hash})
+                    rows_written = estimate_rows_written(method, list(args), dict(kwargs))
+                    rows_read = estimate_rows_read(method, audit_result) if ok else None
+                    self._audit_log.record(
+                        run_id=run_id,
+                        plugin_id=self._plugin_id,
+                        capability=str(self._capability),
+                        method=str(method),
+                        ok=bool(ok),
+                        error=audit_error_text,
+                        duration_ms=duration_ms,
+                        rows_read=rows_read,
+                        rows_written=rows_written,
+                        memory_rss_mb=None,
+                        memory_vms_mb=None,
+                        input_hash=input_hash,
+                        output_hash=output_hash,
+                        data_hash=data_hash,
+                        code_hash=self._audit_code_hash,
+                        settings_hash=self._audit_settings_hash,
+                        input_bytes=input_bytes,
+                        output_bytes=output_bytes,
                     )
                 except Exception:
                     pass
@@ -404,6 +519,7 @@ class PluginRegistry:
         self._rng_service = RNGService.from_config(config)
         self._audit_log = PluginAuditLog.from_config(config)
         self._trace = PluginExecutionTrace()
+        self._plugin_tmp_dirs: dict[str, str] = {}
         self._load_reporter = PluginLoadReport(self.load_report)
         self._failure_summary_cache: dict[str, dict[str, Any]] | None = None
         self._load_report: dict[str, Any] = {"loaded": [], "failed": [], "skipped": [], "errors": []}
@@ -490,9 +606,42 @@ class PluginRegistry:
         if not lockfile.exists():
             raise PluginError(f"Missing plugin lockfile: {lockfile}")
         try:
-            return load_json(lockfile)
+            payload = load_json(lockfile)
         except FileNotFoundError:
             raise PluginError(f"Missing plugin lockfile: {lockfile}")
+        # EXT-11: optional lockfile signature verification (enabled via config/env).
+        sig_cfg = locks_cfg.get("signature", {}) if isinstance(locks_cfg, dict) else {}
+        enforce_sig = bool(sig_cfg.get("enforce", False))
+        if os.getenv("AUTOCAPTURE_PLUGINS_LOCKS_REQUIRE_SIGNATURE", "").strip().lower() in {"1", "true", "yes"}:
+            enforce_sig = True
+        if enforce_sig:
+            try:
+                from autocapture_nx.plugin_system.lock_signing import verify_lockfile
+                from autocapture_nx.kernel.keyring import KeyRing
+
+                storage = self.config.get("storage", {}) if isinstance(self.config, dict) else {}
+                crypto = storage.get("crypto", {}) if isinstance(storage, dict) else {}
+                keyring_path = str(crypto.get("keyring_path", "data/vault/keyring.json"))
+                root_key_path = str(crypto.get("root_key_path", "data/vault/root.key"))
+                backend = str(crypto.get("keyring_backend", "auto"))
+                credential_name = str(crypto.get("keyring_credential_name", "autocapture.keyring"))
+                require_protection = bool(storage.get("encryption_required", False) and os.name == "nt")
+                keyring = KeyRing.load(
+                    keyring_path,
+                    legacy_root_path=root_key_path,
+                    require_protection=require_protection,
+                    backend=backend,
+                    credential_name=credential_name,
+                )
+                sig_path = sig_cfg.get("path") or (str(lockfile) + ".sig.json")
+                report = verify_lockfile(lock_path=lockfile, sig_path=resolve_repo_path(sig_path), keyring=keyring)
+                if not report.get("ok", False):
+                    raise PluginError(f"plugin_locks signature invalid: {report.get('error')}")
+            except PluginError:
+                raise
+            except Exception as exc:
+                raise PluginError(f"plugin_locks signature verify failed: {type(exc).__name__}") from exc
+        return payload
 
     def _validate_manifest(self, manifest: dict[str, Any]) -> None:
         schema_path = resolve_repo_path("contracts/plugin_manifest.schema.json")
@@ -523,6 +672,21 @@ class PluginRegistry:
         if plugin_id not in plugin_locks:
             raise PluginError(f"Plugin {plugin_id} missing from lockfile")
         expected = plugin_locks[plugin_id]
+        # EXT-04: compatibility contracts pinned in the lock entry.
+        try:
+            expected_kernel = expected.get("kernel_api_version")
+            if expected_kernel and str(expected_kernel) != str(kernel_version):
+                raise PluginError(f"Plugin {plugin_id} kernel_api_version mismatch")
+            expected_contract = expected.get("contract_lock_hash") or lockfile.get("contract_lock_hash")
+            if expected_contract:
+                lock_path = resolve_repo_path("contracts/lock.json")
+                actual_contract = sha256_file(lock_path) if lock_path.exists() else None
+                if str(expected_contract) != str(actual_contract):
+                    raise PluginError(f"Plugin {plugin_id} contract_lock_hash mismatch")
+        except PluginError:
+            raise
+        except Exception:
+            pass
         manifest_hash = sha256_file(manifest_path)
         artifact_hash = sha256_directory(plugin_root)
         if manifest_hash != expected.get("manifest_sha256"):
@@ -533,11 +697,14 @@ class PluginRegistry:
     def _check_permissions(self, manifest: dict[str, Any]) -> None:
         perms = manifest.get("permissions", {})
         if perms.get("network", False):
-            allowed = set(
-                self.config.get("plugins", {})
-                .get("permissions", {})
-                .get("network_allowed_plugin_ids", [])
+            perms_cfg = (
+                self.config.get("plugins", {}).get("permissions", {})
+                if isinstance(self.config.get("plugins", {}).get("permissions", {}), dict)
+                else {}
             )
+            allowed_internet = set(perms_cfg.get("network_allowed_plugin_ids", []) or [])
+            allowed_localhost = set(perms_cfg.get("localhost_allowed_plugin_ids", []) or [])
+            allowed = allowed_internet | allowed_localhost
             if manifest.get("plugin_id") not in allowed:
                 raise PluginError("Network permission denied by policy")
             hosting = self.config.get("plugins", {}).get("hosting", {})
@@ -545,6 +712,27 @@ class PluginRegistry:
             inproc_allowlist = set(hosting.get("inproc_allowlist", []) or [])
             if hosting_mode != "subprocess" or manifest.get("plugin_id") in inproc_allowlist:
                 raise PluginError("Network-capable plugins must run in subprocess hosting mode")
+
+    def _network_scope_for_plugin(self, plugin_id: str, *, network_requested: bool) -> str:
+        """Return one of: none, localhost, internet.
+
+        - `internet` is reserved for the egress gateway.
+        - `localhost` allows loopback-only sockets (enforced via global network deny).
+        """
+        if not network_requested:
+            return "none"
+        perms_cfg = (
+            self.config.get("plugins", {}).get("permissions", {})
+            if isinstance(self.config.get("plugins", {}).get("permissions", {}), dict)
+            else {}
+        )
+        allowed_internet = set(perms_cfg.get("network_allowed_plugin_ids", []) or [])
+        allowed_localhost = set(perms_cfg.get("localhost_allowed_plugin_ids", []) or [])
+        if plugin_id in allowed_internet:
+            return "internet"
+        if plugin_id in allowed_localhost:
+            return "localhost"
+        return "none"
 
     def _load_inproc_instance(
         self,
@@ -918,7 +1106,10 @@ class PluginRegistry:
         # Expand simple template variables.
         config = self.config if isinstance(self.config, dict) else {}
         data_dir = str(config.get("storage", {}).get("data_dir", "data"))
-        cache_dir = str(config.get("plugins", {}).get("hosting", {}).get("cache_dir", "data/cache/plugins"))
+        plugins_cfg = config.get("plugins", {})
+        hosting_cfg = plugins_cfg.get("hosting", {}) if isinstance(plugins_cfg, dict) else {}
+        raw_cache_dir = hosting_cfg.get("cache_dir") if isinstance(hosting_cfg, dict) else None
+        cache_dir = str(raw_cache_dir) if raw_cache_dir else str(Path(data_dir) / "cache" / "plugins")
         config_dir = str(config.get("paths", {}).get("config_dir", "config"))
         run_id = str(config.get("runtime", {}).get("run_id", "run"))
         run_dir = str(Path(data_dir) / "runs" / run_id)
@@ -935,6 +1126,22 @@ class PluginRegistry:
         vector_db_path = str(config.get("storage", {}).get("vector_path", "data/vector.db"))
         state_tape_db_path = str(config.get("storage", {}).get("state_tape_path", "data/state/state_tape.db"))
         state_vector_db_path = str(config.get("storage", {}).get("state_vector_path", "data/state/state_vector.db"))
+
+        if fs_perm in {"read", "readwrite"}:
+            # Ensure every plugin has a narrow, deterministic scratch tmp dir for tempfiles.
+            # This keeps OCR engines functional under the filesystem guard without granting
+            # broad write access to /tmp.
+            def _sanitize(pid: str) -> str:
+                value = str(pid).strip() or "plugin"
+                value = value.replace("\\", "_").replace("/", "_")
+                return "".join(ch if (ch.isalnum() or ch in "._-") else "_" for ch in value)
+
+            sanitized_id = _sanitize(plugin_id)
+            plugin_cache_root = str(Path(cache_dir) / sanitized_id)
+            plugin_tmp_dir = str(Path(plugin_cache_root) / "tmp")
+            self._plugin_tmp_dirs[plugin_id] = plugin_tmp_dir
+            read_roots.append(plugin_cache_root)
+            write_roots.append(plugin_tmp_dir)
         anchor_path = ""
         anchor_dir = ""
         keyring_path = ""
@@ -947,7 +1154,9 @@ class PluginRegistry:
                 raw_anchor_path = anchor_cfg.get("path")
                 if isinstance(raw_anchor_path, str) and raw_anchor_path.strip():
                     anchor_path = raw_anchor_path
-                    anchor_dir = str(Path(raw_anchor_path).expanduser().resolve().parent)
+                    # Avoid filesystem-touching `resolve()` during boot; the filesystem
+                    # guard performs realpath normalization at access time.
+                    anchor_dir = str(Path(raw_anchor_path).expanduser().absolute().parent)
         except Exception:
             anchor_path = ""
             anchor_dir = ""
@@ -958,14 +1167,14 @@ class PluginRegistry:
                 if isinstance(raw_keyring, str) and raw_keyring.strip():
                     keyring_path = raw_keyring
                     try:
-                        keyring_dir = str(Path(raw_keyring).expanduser().resolve().parent)
+                        keyring_dir = str(Path(raw_keyring).expanduser().absolute().parent)
                     except Exception:
                         keyring_dir = ""
                 raw_root = crypto_cfg.get("root_key_path")
                 if isinstance(raw_root, str) and raw_root.strip():
                     root_key_path = raw_root
                     try:
-                        root_key_dir = str(Path(raw_root).expanduser().resolve().parent)
+                        root_key_dir = str(Path(raw_root).expanduser().absolute().parent)
                     except Exception:
                         root_key_dir = ""
         except Exception:
@@ -1265,6 +1474,7 @@ class PluginRegistry:
 
     def _capabilities_for_plugins(self, plugins: list[LoadedPlugin]) -> CapabilityRegistry:
         providers_by_cap: dict[str, list[tuple[str, CapabilityProxy]]] = {}
+        run_id = str(self.config.get("runtime", {}).get("run_id", "") or "run")
         for plugin in plugins:
             network_allowed = bool(plugin.manifest.get("permissions", {}).get("network", False))
             filesystem_policy = plugin.filesystem_policy
@@ -1273,6 +1483,16 @@ class PluginRegistry:
             rng_seed_info = self._rng_service.seed_for_plugin(plugin.plugin_id) if self._rng_service.enabled else None
             rng_seed = rng_seed_info.plugin_seed if rng_seed_info else None
             for cap_name, impl in plugin.capabilities.items():
+                # In-proc calls must be audited here. Subprocess-hosted plugins record audit rows
+                # inside their subprocess host wrapper; avoid double-auditing RemoteCapability.
+                audit_log = None
+                try:
+                    from .host import RemoteCapability  # local import to avoid cycles
+
+                    if not isinstance(impl, RemoteCapability):
+                        audit_log = self._audit_log
+                except Exception:
+                    audit_log = self._audit_log
                 proxy = CapabilityProxy(
                     impl,
                     network_allowed,
@@ -1285,6 +1505,8 @@ class PluginRegistry:
                     rng_enabled=self._rng_service.enabled,
                     plugin_id=plugin.plugin_id,
                     trace_hook=self._trace.record,
+                    audit_log=audit_log,
+                    audit_run_id=run_id,
                 )
                 providers_by_cap.setdefault(cap_name, []).append((plugin.plugin_id, proxy))
         return self._resolve_capabilities(providers_by_cap)
@@ -1385,6 +1607,7 @@ class PluginRegistry:
 
         if not isinstance(system, SystemType):
             raise PluginError("register_capabilities requires a System instance")
+        run_id = str(self.config.get("runtime", {}).get("run_id", "") or "run")
         for plugin in plugins:
             if isinstance(plugin, LoadedPlugin):
                 plugin_id = plugin.plugin_id
@@ -1406,6 +1629,14 @@ class PluginRegistry:
                 continue
             for cap_name, impl in caps.items():
                 policy = self._capability_policy(cap_name)
+                audit_log = None
+                try:
+                    from .host import RemoteCapability  # local import to avoid cycles
+
+                    if not isinstance(impl, RemoteCapability):
+                        audit_log = self._audit_log
+                except Exception:
+                    audit_log = self._audit_log
                 if system.has(cap_name):
                     if policy.get("mode") != "multi":
                         raise PluginError(f"Duplicate capability for {cap_name}: {plugin_id}")
@@ -1427,6 +1658,8 @@ class PluginRegistry:
                                 rng_enabled=self._rng_service.enabled,
                                 plugin_id=plugin_id,
                                 trace_hook=self._trace.record,
+                                audit_log=audit_log,
+                                audit_run_id=run_id,
                             ),
                         )
                         continue
@@ -1449,6 +1682,8 @@ class PluginRegistry:
                                     rng_enabled=self._rng_service.enabled,
                                     plugin_id=plugin_id,
                                     trace_hook=self._trace.record,
+                                    audit_log=audit_log,
+                                    audit_run_id=run_id,
                                 ),
                             )
                         ],
@@ -1470,6 +1705,8 @@ class PluginRegistry:
                             rng_enabled=self._rng_service.enabled,
                             plugin_id=plugin_id,
                             trace_hook=self._trace.record,
+                            audit_log=audit_log,
+                            audit_run_id=run_id,
                         ),
                         network_allowed=network_allowed,
                         filesystem_policy=filesystem_policy,
@@ -1480,10 +1717,34 @@ class PluginRegistry:
         self._failure_summary_cache = None
         manifests = self.discover_manifest_paths()
         lockfile = self.load_lockfile()
+        plugins_cfg = self.config.get("plugins", {}) if isinstance(self.config, dict) else {}
+        safe_mode_minimal = bool(plugins_cfg.get("safe_mode_minimal", False))
+        if os.getenv("AUTOCAPTURE_SAFE_MODE_MINIMAL", "").lower() in {"1", "true", "yes"}:
+            safe_mode_minimal = True
         hosting_cfg = self.config.get("plugins", {}).get("hosting", {})
         hosting_mode = str(hosting_cfg.get("mode", "subprocess")).lower()
+        # Tests and low-resource environments (WSL) may need to force inproc hosting
+        # to avoid spawning many subprocess plugin hosts and exhausting RAM.
+        hosting_mode_env = os.getenv("AUTOCAPTURE_PLUGINS_HOSTING_MODE", "").strip().lower()
+        if hosting_mode_env:
+            hosting_mode = hosting_mode_env
         if hosting_mode not in {"subprocess", "inproc"}:
             raise PluginError(f"Unsupported plugin hosting mode: {hosting_mode}")
+        # Safe-mode minimal is used by perf/health gates; avoid paying the subprocess startup tax.
+        if self.safe_mode and safe_mode_minimal:
+            hosting_mode = "inproc"
+        # WSL2 is often memory-constrained; subprocess hosting can spawn many heavy
+        # Python processes (one per plugin) and destabilize the VM. Default to
+        # in-proc hosting on WSL unless explicitly overridden by env or by setting
+        # hosting.wsl_force_inproc=false.
+        wsl_force_inproc = bool(hosting_cfg.get("wsl_force_inproc", True))
+        if (
+            hosting_mode_env == ""
+            and hosting_mode == "subprocess"
+            and wsl_force_inproc
+            and _is_wsl()
+        ):
+            hosting_mode = "inproc"
 
         manifests_by_id: dict[str, tuple[Path, dict[str, Any]]] = {}
         for manifest_path in manifests:
@@ -1510,11 +1771,48 @@ class PluginRegistry:
         default_pack = set(self._normalize_ids(self.config.get("plugins", {}).get("default_pack", []), alias_map))
         inproc_allowlist = set(self._normalize_ids(hosting_cfg.get("inproc_allowlist", []), alias_map))
         self._validate_inproc_justifications(inproc_allowlist)
+        quarantine_cfg = plugins_cfg.get("quarantine", {}) if isinstance(plugins_cfg, dict) else {}
+        quarantine_ids: set[str] = set()
+        if isinstance(quarantine_cfg, dict):
+            quarantine_ids = set(self._normalize_ids(list(quarantine_cfg.keys()), alias_map))
+        elif isinstance(quarantine_cfg, list):
+            quarantine_ids = set(self._normalize_ids(quarantine_cfg, alias_map))
+
+        # Never quarantine core storage/ledger/anchor providers; quarantining them
+        # can make the kernel unbootable (missing required capabilities).
+        core_caps = {"storage.metadata", "storage.media", "journal.writer", "ledger.writer", "anchor.writer"}
+
+        def _is_core_plugin(pid: str) -> bool:
+            entry = manifests_by_id.get(pid)
+            if not entry:
+                return False
+            _path, manifest = entry
+            provides = manifest.get("provides", []) if isinstance(manifest, dict) else []
+            if not isinstance(provides, list):
+                return False
+            for cap in provides:
+                if str(cap).strip() in core_caps:
+                    return True
+            return False
+
+        quarantine_ids = {pid for pid in quarantine_ids if not _is_core_plugin(pid)}
+        # EXT-07: inproc must be explicitly allowlisted. On WSL we auto-fill the
+        # allowlist with enabled plugins to avoid subprocess OOM while keeping a
+        # deterministic, inspectable allowlist.
+        effective_inproc_allowlist: set[str] = set(inproc_allowlist)
+        allow_all_inproc = bool(hosting_cfg.get("inproc_allow_all", False))
+        # Safe-mode minimal is used by health/perf gates; it must not fail open
+        # due to missing allowlist plumbing. In safe-mode minimal, we allow
+        # in-proc loading of the minimal pack deterministically.
+        if self.safe_mode and safe_mode_minimal:
+            allow_all_inproc = True
 
         def use_inproc(pid: str) -> bool:
             if hosting_mode == "inproc":
-                return not inproc_allowlist or pid in inproc_allowlist
-            return pid in inproc_allowlist
+                if allow_all_inproc:
+                    return True
+                return pid in effective_inproc_allowlist
+            return pid in effective_inproc_allowlist
 
         loaded: list[LoadedPlugin] = []
         capabilities = CapabilityRegistry()
@@ -1535,11 +1833,92 @@ class PluginRegistry:
             for pid, (_path, manifest) in manifests_by_id.items()
             if pid in allowlist and is_enabled(pid, manifest)
         }
+        if quarantine_ids:
+            enabled_set = {pid for pid in enabled_set if pid not in quarantine_ids}
+        # WSL2 stability: when running in-proc (whether auto-forced or explicitly
+        # requested via env/config), default the effective inproc allowlist to the
+        # enabled set if no allowlist was provided. This preserves EXT-07's
+        # "explicit inproc allowlist" invariant without requiring test harnesses
+        # to plumb per-plugin justifications for ephemeral local plugins.
+        if hosting_mode == "inproc" and _is_wsl() and not effective_inproc_allowlist:
+            # Only auto-fill the in-proc allowlist when WSL in-proc hosting is
+            # being forced/enabled by policy. Tests may explicitly disable
+            # this behavior to validate EXT-07 fail-closed semantics.
+            if wsl_force_inproc:
+                effective_inproc_allowlist.update(sorted(enabled_set))
 
-        plugins_cfg = self.config.get("plugins", {}) if isinstance(self.config, dict) else {}
-        safe_mode_minimal = bool(plugins_cfg.get("safe_mode_minimal", False))
-        if os.getenv("AUTOCAPTURE_SAFE_MODE_MINIMAL", "").lower() in {"1", "true", "yes"}:
-            safe_mode_minimal = True
+        # EXT-08: crash-loop containment (auto-quarantine repeated failures).
+        # Best-effort and deterministic: quarantine only when failures exceed a
+        # fixed threshold within a bounded window.
+        try:
+            health_cfg = plugins_cfg.get("health", {}) if isinstance(plugins_cfg, dict) else {}
+            auto_quarantine = bool(health_cfg.get("auto_quarantine", True))
+            crash_limit = int(health_cfg.get("crash_loop_failures", 3) or 3)
+            crash_window_s = int(health_cfg.get("crash_loop_window_s", 300) or 300)
+        except Exception:
+            auto_quarantine = True
+            crash_limit = 3
+            crash_window_s = 300
+        if auto_quarantine and crash_limit > 0 and crash_window_s > 0 and enabled_set:
+            # Load current user quarantine map so we can persist new quarantines.
+            from autocapture_nx.kernel.atomic_write import atomic_write_json
+            from datetime import datetime, timezone
+
+            config_dir = self.config.get("paths", {}).get("config_dir", "config") if isinstance(self.config, dict) else "config"
+            user_path = Path(str(config_dir)) / "user.json"
+            try:
+                user_cfg = json.loads(user_path.read_text(encoding="utf-8")) if user_path.exists() else {}
+            except Exception:
+                user_cfg = {}
+            user_plugins = user_cfg.setdefault("plugins", {}) if isinstance(user_cfg, dict) else {}
+            user_quarantine = user_plugins.setdefault("quarantine", {}) if isinstance(user_plugins, dict) else {}
+            if not isinstance(user_quarantine, dict):
+                user_quarantine = {}
+                if isinstance(user_plugins, dict):
+                    user_plugins["quarantine"] = user_quarantine
+            new_quarantines: list[str] = []
+            removed_quarantines: list[str] = []
+            for pid in sorted(enabled_set):
+                if _is_core_plugin(pid):
+                    # Ensure stale quarantine entries do not disable core plugins.
+                    try:
+                        if isinstance(user_quarantine, dict) and pid in user_quarantine:
+                            user_quarantine.pop(pid, None)
+                            removed_quarantines.append(pid)
+                    except Exception:
+                        pass
+                    quarantine_ids.discard(pid)
+                    continue
+                if pid in quarantine_ids or pid in user_quarantine:
+                    continue
+                try:
+                    recent = self._audit_log.recent_failures(pid, window_s=crash_window_s)
+                except Exception:
+                    continue
+                if not (isinstance(recent, dict) and recent.get("ok")):
+                    continue
+                try:
+                    failures = int(recent.get("failures") or 0)
+                except Exception:
+                    failures = 0
+                if failures >= crash_limit:
+                    quarantine_ids.add(pid)
+                    new_quarantines.append(pid)
+                    user_quarantine[pid] = {
+                        "reason": "crash_loop",
+                        "failures": failures,
+                        "window_s": int(crash_window_s),
+                        "ts_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    }
+            if new_quarantines or removed_quarantines:
+                # Persist quarantine marks; do not delete old entries.
+                try:
+                    atomic_write_json(user_path, user_cfg, sort_keys=True, indent=2)
+                except Exception:
+                    pass
+            if new_quarantines:
+                enabled_set = {pid for pid in enabled_set if pid not in quarantine_ids}
+
         if (self.safe_mode or plugins_cfg.get("safe_mode", False)) and safe_mode_minimal:
             minimal = self._minimal_safe_mode_set(manifests_by_id, allowlist, alias_map)
             if minimal:
@@ -1639,10 +2018,14 @@ class PluginRegistry:
                     entrypoints=entrypoints,
                     manifest=manifest,
                 )
-                network_allowed = bool(manifest.get("permissions", {}).get("network", False))
+                network_requested = bool(manifest.get("permissions", {}).get("network", False))
+                network_scope = self._network_scope_for_plugin(plugin_id, network_requested=network_requested)
+                network_allowed = network_scope != "none"
                 filesystem_policy = self._filesystem_policy(plugin_id, manifest, manifest_path.parent)
 
                 inproc = use_inproc(plugin_id)
+                if hosting_mode == "inproc" and not allow_all_inproc and not inproc:
+                    raise PluginError(f"inproc_not_allowlisted:{plugin_id}")
                 for entry in entrypoints:
                     module_path = manifest_path.parent / entry["path"]
                     if not module_path.exists():
@@ -1661,16 +2044,21 @@ class PluginRegistry:
                             rng_seed_hex=rng_seed_hex,
                         )
                     else:
+                        provides = manifest.get("provides", [])
+                        if not isinstance(provides, list):
+                            provides = []
                         instance = SubprocessPlugin(
                             module_path,
                             entry["callable"],
                             plugin_id,
-                            network_allowed,
+                            network_scope,
                             self.config,
                             plugin_config=plugin_settings,
                             capabilities=capabilities,
                             allowed_capabilities=required_capabilities,
                             filesystem_policy=filesystem_policy.payload() if filesystem_policy else None,
+                            entrypoint_kind=str(entry.get("kind", "")).strip() or None,
+                            provided_capabilities=[str(item) for item in provides if str(item).strip()],
                             rng_seed=rng_seed,
                             rng_seed_hex=rng_seed_hex,
                             rng_strict=self._rng_service.strict,
@@ -1684,6 +2072,14 @@ class PluginRegistry:
                     except Exception:
                         self._shutdown_instance(instance)
                         raise
+                    # WSL stability: if we had to spin up a subprocess host just to
+                    # enumerate capabilities at boot, close it immediately. The
+                    # SubprocessPlugin will restart lazily on first real use.
+                    try:
+                        if bool(getattr(instance, "_capabilities_probe_only", False)):
+                            instance.close()
+                    except Exception:
+                        pass
                     if isinstance(caps, dict):
                         manifest_provides = manifest.get("provides", [])
                         if isinstance(manifest_provides, list) and caps:
@@ -1692,7 +2088,16 @@ class PluginRegistry:
                                 cap_name = str(cap).strip()
                                 if cap_name and cap_name not in caps:
                                     caps[cap_name] = fallback_impl
+                    audit_run_id = str(self.config.get("runtime", {}).get("run_id", "") or "run")
                     for cap_name, impl in caps.items():
+                        audit_log = None
+                        try:
+                            from .host import RemoteCapability  # local import to avoid cycles
+
+                            if not isinstance(impl, RemoteCapability):
+                                audit_log = self._audit_log
+                        except Exception:
+                            audit_log = self._audit_log
                         proxy = CapabilityProxy(
                             impl,
                             network_allowed,
@@ -1705,6 +2110,11 @@ class PluginRegistry:
                             rng_enabled=self._rng_service.enabled,
                             plugin_id=plugin_id,
                             trace_hook=self._trace.record,
+                            audit_log=audit_log,
+                            audit_run_id=audit_run_id,
+                            audit_code_hash=code_hash,
+                            audit_settings_hash=settings_hash,
+                            temp_dir=self._plugin_tmp_dirs.get(plugin_id),
                         )
                         local_providers.setdefault(cap_name, []).append((plugin_id, proxy))
                     local_loaded.append(LoadedPlugin(plugin_id, manifest, instance, caps, filesystem_policy, manifest_path))

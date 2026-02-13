@@ -30,6 +30,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.vlm.qwen2_vl_7b",
+  "provides": [
+    "vision.extractor"
+  ],
   "required_capabilities": [],
   "version": "0.1.0"
 }

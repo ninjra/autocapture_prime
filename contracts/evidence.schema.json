@@ -1,8 +1,9 @@
 {
   "type": "object",
   "additionalProperties": true,
-  "required": ["record_type", "run_id"],
+  "required": ["schema_version", "record_type", "run_id"],
   "properties": {
+    "schema_version": {"type": "integer"},
     "record_type": {"type": "string"},
     "run_id": {"type": "string"},
     "ts_utc": {"type": "string"},
@@ -42,6 +43,8 @@
     "child_id": {"type": "string"},
     "relation_type": {"type": "string"},
     "artifact_id": {"type": "string"},
+    "artifact_sha256": {"type": "string"},
+    "derived_from": {"type": "object"},
     "kind": {"type": "string"},
     "created_ts_ms": {"type": "integer"},
     "extractor": {"type": "object"},
@@ -86,7 +89,7 @@
     },
     {
       "type": "object",
-      "properties": {"record_type": {"enum": ["derived.text.ocr", "derived.text.vlm"]}},
+      "properties": {"record_type": {"enum": ["derived.text.ocr", "derived.text.vlm", "derived.text.qa"]}},
       "required": [
         "text",
         "source_id",
@@ -120,6 +123,16 @@
     },
     {
       "type": "object",
+      "properties": {"record_type": {"enum": ["derived.job.extract"]}},
+      "required": ["state", "candidate_ids", "allow_ocr", "allow_vlm"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["derived.artifact.manifest"]}},
+      "required": ["artifact_id", "artifact_sha256", "derived_from"]
+    },
+    {
+      "type": "object",
       "properties": {
         "record_type": {
           "enum": [
@@ -133,6 +146,11 @@
         }
       },
       "required": ["artifact_id", "kind", "created_ts_ms", "extractor", "provenance"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["derived.state_tape.checkpoint"]}},
+      "required": ["ts_utc", "last_record_id", "processed_total", "payload_hash"]
     },
     {
       "type": "object",

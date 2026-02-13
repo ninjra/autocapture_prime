@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Retrieval Result Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "record_id": { "type": "string" },
+          "derived_id": { "type": ["string", "null"] },
+          "score": { "type": "number" },
+          "ts_utc": { "type": ["string", "null"] },
+          "record_type": { "type": ["string", "null"] },
+          "snippet": { "type": ["string", "null"] }
+        },
+        "required": ["record_id", "score"]
+      }
+    },
+    "ordering": {
+      "type": "string",
+      "description": "Deterministic ordering. Sort keys: score desc, ts desc (when present), record_type asc, record_id asc, derived_id asc."
+    }
+  },
+  "required": ["results", "ordering"]
+}
+

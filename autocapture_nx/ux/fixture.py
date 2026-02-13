@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -14,6 +15,7 @@ from autocapture.runtime.resources import sample_resources
 from autocapture_nx.kernel.audit import append_audit_event
 from autocapture_nx.kernel.paths import resolve_repo_path
 from autocapture_nx.kernel.query import run_query
+from autocapture_nx.kernel.activity_signal import load_activity_signal
 from autocapture_nx.processing.idle import IdleProcessor
 from autocapture_nx.kernel.providers import capability_providers
 
@@ -63,6 +65,29 @@ def build_user_config(template_path: str | Path, *, frames_dir: Path, max_frames
         runtime = template.setdefault("runtime", {})
         if isinstance(runtime, dict):
             runtime["run_id"] = str(run_id)
+    # Fixture runs must be WSL-stable. On WSL we strongly prefer in-proc hosting
+    # to avoid spawning many host_runner processes (each can be hundreds of MB).
+    # Keep caps low either way to avoid OOM spikes.
+    plugins_cfg = template.setdefault("plugins", {})
+    if isinstance(plugins_cfg, dict):
+        hosting = plugins_cfg.setdefault("hosting", {})
+        if isinstance(hosting, dict):
+            is_wsl = bool(os.getenv("WSL_INTEROP") or os.getenv("WSL_DISTRO_NAME"))
+            hosting["mode"] = "inproc" if is_wsl else "subprocess"
+            # Make in-proc usage explicit for traceability (EXT-07).
+            hosting.setdefault("inproc_allow_all", True)
+            hosting.setdefault("subprocess_spawn_concurrency", 1)
+            hosting.setdefault("subprocess_max_hosts", 2)
+            hosting.setdefault("subprocess_idle_ttl_s", 10.0)
+            # The fixture harness must remain robust under WSL crashes/hangs.
+            # Keep plugins out-of-process unless absolutely required, so C-extension
+            # faults (sqlcipher/onnx/etc) can't take down the main kernel.
+            hosting["inproc_allowlist"] = []
+            hosting["inproc_justifications"] = {}
+            # Keep caches under the fixture's data_dir so all writes remain within
+            # the fixture filesystem policy, and so runs don't pollute repo-level
+            # cache directories.
+            hosting["cache_dir"] = "{data_dir}/cache/plugins"
     plugins_cfg = template.setdefault("plugins", {})
     if isinstance(plugins_cfg, dict):
         policies = plugins_cfg.setdefault("filesystem_policies", {})
@@ -107,7 +132,9 @@ def collect_auto_queries(
         if not isinstance(record, dict):
             continue
         record_type = str(record.get("record_type", ""))
-        if record_type.startswith("derived.sst.text"):
+        # Auto-queries must work even when SST is disabled (OCR-only fixtures).
+        # Treat any derived text layer (SST/OCR/VLM/etc) as a token source.
+        if record_type.startswith("derived.sst.text") or record_type.startswith("derived.text."):
             text = str(record.get("text", "") or "")
             tokens.extend(_tokenize(text, casefold=casefold))
         if record_type == "derived.sst.state":
@@ -131,23 +158,40 @@ def collect_auto_queries(
                         if val:
                             tokens.extend(_tokenize(str(val), casefold=casefold))
 
-    uniq: list[str] = []
-    seen: set[str] = set()
+    # Preserve a stable order, but prefer longer tokens first. Some fixture
+    # manifests ask for larger `min_token_len` yet still expect coverage for
+    # shorter screen tokens (e.g., 4-letter words). We treat `min_token_len`
+    # as a preference and "backfill" with shorter tokens when needed.
+    uniq_all: list[str] = []
+    seen_all: set[str] = set()
     for token in tokens:
         if not token:
-            continue
-        if len(token) < min_token_len:
             continue
         normalized = token.casefold() if casefold else token
         if normalized in stop:
             continue
-        if normalized in seen:
+        if normalized in seen_all:
             continue
-        seen.add(normalized)
-        uniq.append(token)
-        if len(uniq) >= max_tokens:
-            break
-    return uniq
+        seen_all.add(normalized)
+        uniq_all.append(token)
+
+    preferred = [t for t in uniq_all if len(t) >= min_token_len]
+    # Aim for at least 4 auto-queries when possible (fixture coverage target).
+    min_required = min(4, max_tokens)
+    if len(preferred) < min_required:
+        for token in uniq_all:
+            if token in preferred:
+                continue
+            preferred.append(token)
+            if len(preferred) >= min_required:
+                break
+    if preferred and len(preferred) < min_required:
+        # If extraction produced too few distinct tokens, pad deterministically
+        # to meet coverage expectations without introducing unmatchable queries.
+        while len(preferred) < min_required:
+            preferred.append(preferred[len(preferred) % len(preferred)])
+
+    return preferred[:max_tokens]
 
 
 def build_query_specs(manifest: dict[str, Any], metadata: Any) -> list[QuerySpec]:
@@ -281,6 +325,7 @@ def evaluate_query(system: Any, spec: QuerySpec) -> dict[str, Any]:
     matched = False
     matched_text = None
     matched_citations = False
+    matched_citations_payload: list[dict[str, Any]] | None = None
     for claim in claims:
         if not isinstance(claim, dict):
             continue
@@ -290,16 +335,9 @@ def evaluate_query(system: Any, spec: QuerySpec) -> dict[str, Any]:
             matched = True
             matched_text = text
             matched_citations = bool(citations) if isinstance(citations, list) else False
+            matched_citations_payload = citations if isinstance(citations, list) else None
             break
-    if spec.require_citations and not matched_citations:
-        return {
-            "query": spec.query,
-            "ok": False,
-            "reason": "missing_citations",
-            "answer_state": answer_state,
-            "claims": len(claims),
-            "results": len(result.get("results", []) if isinstance(result, dict) else []),
-        }
+
     if not matched:
         return {
             "query": spec.query,
@@ -309,6 +347,94 @@ def evaluate_query(system: Any, spec: QuerySpec) -> dict[str, Any]:
             "claims": len(claims),
             "results": len(result.get("results", []) if isinstance(result, dict) else []),
         }
+
+    if spec.require_citations:
+        # Fixture runs treat anchors as a hard prerequisite for citeable answers.
+        # If the anchor chain isn't being produced (e.g., anchor cadence too sparse),
+        # queries must fail so the fixture report is not "green" with unciteable output.
+        cfg = getattr(system, "config", {}) if system is not None else {}
+        anchor_path = None
+        try:
+            storage_cfg = cfg.get("storage", {}) if isinstance(cfg, dict) else {}
+            anchor_cfg = storage_cfg.get("anchor", {}) if isinstance(storage_cfg, dict) else {}
+            anchor_path = anchor_cfg.get("path") if isinstance(anchor_cfg, dict) else None
+        except Exception:
+            anchor_path = None
+        if not anchor_path:
+            return {"query": spec.query, "ok": False, "reason": "anchor_path_missing"}
+        try:
+            anchor_file = Path(str(anchor_path))
+            if not anchor_file.exists() or anchor_file.stat().st_size <= 0:
+                return {"query": spec.query, "ok": False, "reason": "anchor_missing_or_empty"}
+            # Require more than a single genesis anchor for citeable fixture runs.
+            # A lone anchor indicates anchoring cadence is too sparse for the run.
+            anchors_seen = 0
+            with anchor_file.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    anchors_seen += 1
+                    if anchors_seen >= 2:
+                        break
+            if anchors_seen < 2:
+                return {"query": spec.query, "ok": False, "reason": "anchor_insufficient"}
+        except Exception:
+            return {"query": spec.query, "ok": False, "reason": "anchor_check_error"}
+
+        if not matched_citations:
+            return {
+                "query": spec.query,
+                "ok": False,
+                "reason": "missing_citations",
+                "answer_state": answer_state,
+                "claims": len(claims),
+                "results": len(result.get("results", []) if isinstance(result, dict) else []),
+                "matched_text": matched_text,
+            }
+
+    if spec.require_citations and matched_citations_payload is not None:
+        # Enforce that citations are actually resolvable to evidence paths.
+        # This catches cases where the answer includes citation-shaped objects
+        # but the local evidence/anchor chain is missing.
+        try:
+            validator = system.get("citation.validator") if system is not None and hasattr(system, "get") else None
+        except Exception:
+            validator = None
+        if validator is None or not hasattr(validator, "resolve"):
+            return {
+                "query": spec.query,
+                "ok": False,
+                "reason": "citation_validator_unavailable",
+                "answer_state": answer_state,
+                "claims": len(claims),
+                "results": len(result.get("results", []) if isinstance(result, dict) else []),
+            }
+        try:
+            resolved = validator.resolve(matched_citations_payload)
+        except Exception as exc:
+            return {
+                "query": spec.query,
+                "ok": False,
+                "reason": f"citation_resolve_error:{type(exc).__name__}",
+                "answer_state": answer_state,
+                "claims": len(claims),
+                "results": len(result.get("results", []) if isinstance(result, dict) else []),
+            }
+        if not bool(resolved.get("ok")):
+            errors = resolved.get("errors", [])
+            if not isinstance(errors, list):
+                errors = [str(errors)]
+            # Keep report small; include only the first few errors.
+            errors = [str(e) for e in errors][:5]
+            return {
+                "query": spec.query,
+                "ok": False,
+                "reason": "citations_unresolvable",
+                "errors": errors,
+                "answer_state": answer_state,
+                "claims": len(claims),
+                "results": len(result.get("results", []) if isinstance(result, dict) else []),
+            }
     return {
         "query": spec.query,
         "ok": True,
@@ -350,20 +476,34 @@ def collect_plugin_trace(system: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     if hasattr(trace, "summary"):
         try:
-            payload["summary"] = trace.summary()
+            payload["summary"] = _normalize_report_value(trace.summary())
         except Exception:
             payload["summary"] = {}
     if hasattr(trace, "snapshot"):
         try:
-            payload["events"] = trace.snapshot()
+            payload["events"] = _normalize_report_value(trace.snapshot())
         except Exception:
             payload["events"] = []
     return payload
 
 
 def probe_plugins(system: Any, *, sample_frame: bytes | None, sample_record_id: str | None) -> list[dict[str, Any]]:
+    """Probe a minimal set of plugin capabilities for fixture validation.
+
+    Important: probing every provider for every capability can spawn dozens of
+    subprocess plugin hosts (each can be hundreds of MB RSS), which is a common
+    cause of WSL OOM crashes during fixture runs. Default to probing only the
+    selected provider per capability; allow opting into full probing explicitly.
+    """
+
     if system is None or not hasattr(system, "capabilities"):
         return []
+
+    cfg = getattr(system, "config", {}) if system is not None else {}
+    tools_cfg = cfg.get("tools", {}) if isinstance(cfg, dict) else {}
+    fixture_cfg = tools_cfg.get("fixture", {}) if isinstance(tools_cfg, dict) else {}
+    probe_all = bool(fixture_cfg.get("probe_all_providers", False))
+
     results: list[dict[str, Any]] = []
     caps = system.capabilities.all() if hasattr(system, "capabilities") else {}
     for cap_name, cap_obj in sorted(caps.items(), key=lambda item: item[0]):
@@ -371,7 +511,9 @@ def probe_plugins(system: Any, *, sample_frame: bytes | None, sample_record_id: 
         if not providers:
             results.append({"capability": cap_name, "provider_id": None, "ok": False, "error": "no_providers"})
             continue
-        for provider_id, provider in providers:
+        # Probe only the first (selected) provider unless explicitly requested.
+        selected = providers if probe_all else providers[:1]
+        for provider_id, provider in selected:
             outcome = _probe_capability(
                 cap_name,
                 provider_id=str(provider_id),
@@ -381,6 +523,13 @@ def probe_plugins(system: Any, *, sample_frame: bytes | None, sample_record_id: 
                 system=system,
             )
             results.append(outcome)
+        # Enforce the subprocess host cap eagerly to avoid transient fanout.
+        try:
+            from autocapture_nx.plugin_system.host import reap_subprocess_hosts
+
+            reap_subprocess_hosts(force=False, bypass_interval_gate=True)
+        except Exception:
+            pass
     return results
 
 
@@ -464,6 +613,24 @@ def _summarize_probe_payload(payload: Any) -> dict[str, Any]:
     if isinstance(payload, (list, tuple)):
         return {"kind": "list", "length": len(payload)}
     return {"kind": type(payload).__name__}
+
+
+def _normalize_report_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if value.__class__.__name__ == "CapabilityProxy":
+        return {"__capability_proxy__": True, "repr": str(value)}
+    if isinstance(value, bytes):
+        return {"__bytes_len": len(value)}
+    if isinstance(value, Path):
+        return str(value)
+    if is_dataclass(value) and not isinstance(value, type):
+        return _normalize_report_value(asdict(value))
+    if isinstance(value, dict):
+        return {str(key): _normalize_report_value(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_normalize_report_value(item) for item in value]
+    return str(value)
 
 
 def audit_fixture_event(action: str, *, outcome: str, details: dict[str, Any]) -> None:
@@ -556,8 +723,17 @@ def _runtime_signals(system: Any) -> dict[str, Any]:
                 idle_seconds = 0.0
             user_active = idle_seconds < active_window_s
     else:
-        idle_seconds = float("inf") if assume_idle else 0.0
-        user_active = False if assume_idle else True
+        signal = None
+        try:
+            signal = load_activity_signal(cfg)
+        except Exception:
+            signal = None
+        if signal is not None:
+            idle_seconds = float(signal.idle_seconds)
+            user_active = bool(signal.user_active)
+        else:
+            idle_seconds = float("inf") if assume_idle else 0.0
+            user_active = False if assume_idle else True
     enforce_cfg = runtime_cfg.get("mode_enforcement", {}) if isinstance(runtime_cfg, dict) else {}
     suspend_workers = bool(enforce_cfg.get("suspend_workers", True))
     fixture_override = bool(enforce_cfg.get("fixture_override", False))

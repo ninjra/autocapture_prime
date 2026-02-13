@@ -300,17 +300,30 @@ def normalize_config_paths(
         "vector_path",
         "metadata_path",
         "audit_db_path",
+        # State layer SQLite paths must follow data_dir overrides (e.g. temp dirs in tests).
+        "state_tape_path",
+        "state_vector_path",
     ):
         if key in storage and isinstance(storage[key], str):
             storage[key] = _normalize_storage_value(storage[key])
     anchor = storage.get("anchor", {})
     if isinstance(anchor, dict) and "path" in anchor and isinstance(anchor.get("path"), str):
-        anchor_path = anchor["path"]
+        # Anchor logs must remain run-scoped (follow data_dir overrides) but must
+        # not live *inside* data_dir. Keeping anchors outside data_dir provides a
+        # clearer integrity boundary and is enforced by doctor checks.
+        anchor_path = str(anchor.get("path") or "")
         anchor_path_obj = Path(anchor_path)
         if anchor_path_obj.is_absolute():
             anchor["path"] = str(anchor_path_obj)
         else:
-            anchor["path"] = str((data_dir_abs.parent / anchor_path).resolve())
+            # Resolve relative to the parent of data_dir so each run gets its own
+            # anchor domain even when tests override data_dir to a temp dir.
+            text = anchor_path.replace("\\", "/")
+            for prefix in legacy_prefixes:
+                if text.startswith(f"{prefix}/"):
+                    text = text[len(prefix) + 1 :]
+                    break
+            anchor["path"] = str((data_dir_abs.parent / text).resolve())
     crypto = storage.get("crypto", {})
     if isinstance(crypto, dict):
         for key in ("root_key_path", "keyring_path"):

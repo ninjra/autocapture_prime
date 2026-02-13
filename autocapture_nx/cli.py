@@ -9,6 +9,7 @@ import sys
 from getpass import getpass
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from autocapture_nx.kernel.config import load_config
 from autocapture_nx.kernel.audit import append_audit_event
@@ -17,6 +18,7 @@ from autocapture_nx.kernel.keyring import KeyRing, export_keyring_bundle, import
 from autocapture_nx.kernel.loader import default_config_paths
 from autocapture_nx.ux.facade import create_facade
 
+from autocapture_nx.kernel.backup_bundle import create_backup_bundle, restore_backup_bundle
 
 def _print_json(data: object) -> None:
     print(json.dumps(data, indent=2, sort_keys=True))
@@ -24,7 +26,18 @@ def _print_json(data: object) -> None:
 
 def cmd_doctor(args: argparse.Namespace) -> int:
     facade = create_facade(safe_mode=args.safe_mode)
+    if getattr(args, "self_test", False):
+        result = facade.self_test()
+        _print_json(result)
+        return 0 if bool(result.get("ok")) else 2
     report = facade.doctor_report()
+    if getattr(args, "bundle", False):
+        bundle = facade.diagnostics_bundle_create()
+        if isinstance(bundle, dict):
+            path = str(bundle.get("path") or "")
+            sha = str(bundle.get("sha256") or "")
+            if path:
+                print(f"Diagnostics bundle: {path} sha256={sha}")
     ok = bool(report.get("ok"))
     for check in report.get("checks", []):
         ok_flag = bool(check.get("ok")) if isinstance(check, dict) else False
@@ -62,11 +75,173 @@ def cmd_plugins_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_plugins_load_report(args: argparse.Namespace) -> int:
+    # Debug-only command used by soak scripts when capture+ingest fails to start.
+    # It intentionally attempts a real plugin load to surface missing deps,
+    # lock mismatches, and capability/provider gaps.
+    from autocapture_nx.plugin_system.registry import PluginRegistry
+    from autocapture_nx.kernel.paths import repo_root
+
+    paths = default_config_paths()
+    config = load_config(paths, safe_mode=bool(args.safe_mode))
+    registry = PluginRegistry(config, safe_mode=bool(args.safe_mode))
+    error = None
+    caps = []
+    try:
+        _plugins, capabilities = registry.load_plugins()
+        try:
+            caps = sorted((capabilities.all() or {}).keys())
+        except Exception:
+            caps = []
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        try:
+            caps = []
+        except Exception:
+            caps = []
+    report = {}
+    try:
+        report = registry.load_report()
+    except Exception:
+        report = {}
+    payload = {
+        "ok": error is None,
+        "error": error,
+        "repo_root": str(repo_root()),
+        "config_default": str(paths.default_path),
+        "config_user": str(paths.user_path),
+        "paths": config.get("paths") if isinstance(config, dict) else {},
+        "hosting_mode_env": os.getenv("AUTOCAPTURE_PLUGINS_HOSTING_MODE", ""),
+        "report": report,
+        "capabilities": caps,
+        "capabilities_count": int(len(caps)),
+    }
+    _print_json(payload)
+    return 0 if payload.get("ok") else 2
+
+
 def cmd_plugins_approve(_args: argparse.Namespace) -> int:
     facade = create_facade()
     facade.plugins_approve()
     print("Plugin lockfile updated")
     return 0
+
+
+def cmd_plugins_plan(_args: argparse.Namespace) -> int:
+    facade = create_facade()
+    _print_json(facade.plugins_plan())
+    return 0
+
+
+def cmd_plugins_capabilities(_args: argparse.Namespace) -> int:
+    facade = create_facade()
+    _print_json(facade.plugins_capabilities_matrix())
+    return 0
+
+
+def cmd_plugins_install(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    dry_run = not bool(getattr(args, "apply", False))
+    result = facade.plugins_install_local(args.path, dry_run=dry_run)
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_plugins_lock_snapshot(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.plugins_lock_snapshot(str(args.reason))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_plugins_lock_rollback(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.plugins_lock_rollback(str(args.snapshot_path))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_plugins_lifecycle(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.plugins_lifecycle_state(str(args.plugin_id))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_plugins_permissions(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.plugins_permissions_digest(str(args.plugin_id))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_plugins_permissions_approve(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.plugins_approve_permissions(
+        str(args.plugin_id),
+        str(args.accept_digest),
+        confirm=str(getattr(args, "confirm", "") or ""),
+    )
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_plugins_logs(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.plugins_logs(str(args.plugin_id), limit=int(args.limit))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_plugins_apply(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    enable = list(getattr(args, "enable", []) or [])
+    disable = list(getattr(args, "disable", []) or [])
+    result = facade.plugins_apply(str(args.plan_hash), enable=enable, disable=disable)
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_plugins_lock_diff(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.plugins_lock_diff(str(args.a_path), str(args.b_path))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_plugins_lock_update(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.plugins_update_lock(str(args.plugin_id), reason=str(args.reason))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_operator_reindex(_args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.operator_reindex()
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_operator_vacuum(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.operator_vacuum(include_state=bool(getattr(args, "include_state", True)))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_operator_quarantine(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.operator_quarantine(str(args.plugin_id), reason=str(args.reason))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
+
+
+def cmd_operator_rollback_locks(args: argparse.Namespace) -> int:
+    facade = create_facade()
+    result = facade.operator_rollback_locks(str(args.snapshot_path))
+    _print_json(result)
+    return 0 if bool(result.get("ok")) else 2
 
 
 def cmd_plugins_verify_defaults(_args: argparse.Namespace) -> int:
@@ -140,14 +315,77 @@ def cmd_tray(_args: argparse.Namespace) -> int:
     return tray_main()
 
 
+def cmd_consent_status(args: argparse.Namespace) -> int:
+    config, _paths = _load_config_for_backup(args.data_dir, args.config_dir, safe_mode=args.safe_mode)
+    storage = config.get("storage", {}) if isinstance(config, dict) else {}
+    data_dir = str(storage.get("data_dir", "data"))
+    from autocapture_nx.kernel.consent import load_capture_consent
+
+    consent = load_capture_consent(data_dir=data_dir)
+    _print_json({"ok": True, "data_dir": data_dir, "capture": consent.to_dict()})
+    return 0
+
+
+def cmd_consent_accept(args: argparse.Namespace) -> int:
+    config, _paths = _load_config_for_backup(args.data_dir, args.config_dir, safe_mode=args.safe_mode)
+    storage = config.get("storage", {}) if isinstance(config, dict) else {}
+    data_dir = str(storage.get("data_dir", "data"))
+    from autocapture_nx.kernel.consent import accept_capture_consent
+
+    consent = accept_capture_consent(data_dir=data_dir)
+    append_audit_event(
+        action="consent.capture.accept",
+        actor="cli.consent",
+        outcome="success",
+        details={"data_dir": data_dir, "accepted_ts_utc": consent.accepted_ts_utc},
+    )
+    _print_json({"ok": True, "data_dir": data_dir, "capture": consent.to_dict()})
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     facade = create_facade(persistent=True, safe_mode=args.safe_mode, auto_start_capture=False)
-    facade.run_start()
-    print("Capture running. Press Ctrl+C to stop.")
+    start_result = facade.run_start()
+    if not isinstance(start_result, dict) or not bool(start_result.get("ok", False)):
+        # Preserve structured details to support soak debugging.
+        if isinstance(start_result, dict):
+            payload = dict(start_result)
+            payload.setdefault("ok", False)
+            _print_json(payload)
+        else:
+            _print_json({"ok": False, "error": "run_start_failed"})
+        try:
+            facade.shutdown()
+        except Exception:
+            pass
+        return 2
+    duration_s = int(getattr(args, "duration_s", 0) or 0)
+    status_interval_s = int(getattr(args, "status_interval_s", 0) or 0)
+    if duration_s > 0:
+        print(f"Capture running for up to {duration_s}s. Press Ctrl+C to stop early.")
+    else:
+        print("Capture running. Press Ctrl+C to stop.")
     try:
         import time
+        started_mono = time.monotonic()
+        last_status = started_mono
         while True:
             time.sleep(1)
+            now = time.monotonic()
+            if duration_s > 0 and (now - started_mono) >= duration_s:
+                break
+            if status_interval_s > 0 and (now - last_status) >= status_interval_s:
+                last_status = now
+                try:
+                    result = facade.doctor_report()
+                except Exception:
+                    result = None
+                if isinstance(result, dict):
+                    summary_raw = result.get("summary")
+                    summary: dict[str, Any] = summary_raw if isinstance(summary_raw, dict) else {}
+                    code = str(summary.get("code") or "")
+                    msg = str(summary.get("message") or "")
+                    print(f"[status] code={code} message={msg[:120]}")
     except KeyboardInterrupt:
         pass
     finally:
@@ -175,6 +413,14 @@ def cmd_query(args: argparse.Namespace) -> int:
     result = facade.query(args.text)
     _print_json(result)
     return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    facade = create_facade(safe_mode=args.safe_mode)
+    payload = facade.status()
+    _print_json(payload)
+    # Non-zero exit helps scripts/soak harnesses detect degraded mode.
+    return 3 if bool(payload.get("safe_mode")) else 0
 
 
 def cmd_state_jepa_approve(args: argparse.Namespace) -> int:
@@ -245,6 +491,17 @@ def cmd_enrich(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_batch_run(args: argparse.Namespace) -> int:
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.batch_run(
+        max_loops=int(args.max_loops),
+        sleep_ms=int(args.sleep_ms),
+        require_idle=bool(args.require_idle),
+    )
+    _print_json(result)
+    return 0
+
+
 def cmd_keys_rotate(args: argparse.Namespace) -> int:
     facade = create_facade(safe_mode=args.safe_mode)
     result = facade.keys_rotate()
@@ -277,7 +534,7 @@ def _prompt_passphrase(value: str) -> str:
 
 
 def cmd_keys_export(args: argparse.Namespace) -> int:
-    details = {"bundle_path": str(args.out)}
+    details: dict[str, Any] = {"bundle_path": str(args.out)}
     try:
         crypto = _load_crypto_config(args.data_dir, args.config_dir, safe_mode=args.safe_mode)
         require_protection = bool(crypto["encryption_required"] and os.name == "nt")
@@ -318,7 +575,7 @@ def cmd_keys_export(args: argparse.Namespace) -> int:
 
 
 def cmd_keys_import(args: argparse.Namespace) -> int:
-    details = {"bundle_path": str(args.bundle)}
+    details: dict[str, Any] = {"bundle_path": str(args.bundle)}
     try:
         crypto = _load_crypto_config(args.data_dir, args.config_dir, safe_mode=args.safe_mode)
         require_protection = bool(crypto["encryption_required"] and os.name == "nt")
@@ -354,6 +611,91 @@ def cmd_keys_import(args: argparse.Namespace) -> int:
             outcome="error",
             details=details,
         )
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+
+def _load_config_for_backup(data_dir: str, config_dir: str, *, safe_mode: bool) -> tuple[dict, Any]:
+    if data_dir:
+        os.environ["AUTOCAPTURE_DATA_DIR"] = data_dir
+    if config_dir:
+        os.environ["AUTOCAPTURE_CONFIG_DIR"] = config_dir
+    paths = default_config_paths()
+    config = load_config(paths, safe_mode=safe_mode)
+    return config, paths
+
+
+def cmd_backup_create(args: argparse.Namespace) -> int:
+    details: dict[str, Any] = {"bundle_path": str(args.out), "include_data": bool(args.include_data)}
+    try:
+        config, paths = _load_config_for_backup(args.data_dir, args.config_dir, safe_mode=args.safe_mode)
+        storage = config.get("storage", {}) if isinstance(config, dict) else {}
+        crypto = storage.get("crypto", {}) if isinstance(storage, dict) else {}
+        data_dir = str(storage.get("data_dir", "data"))
+        cfg_dir = str(Path(paths.user_path).resolve().parent)
+        encryption_required = bool(storage.get("encryption_required", False))
+
+        include_keys = args.keys
+        if include_keys is None:
+            include_keys = bool(encryption_required)
+        include_keys = bool(include_keys)
+
+        passphrase = ""
+        if include_keys:
+            passphrase = _prompt_passphrase(args.passphrase)
+
+        report = create_backup_bundle(
+            output_path=args.out,
+            config_dir=cfg_dir,
+            data_dir=data_dir,
+            include_data=bool(args.include_data),
+            include_keyring_bundle=include_keys,
+            keyring_bundle_passphrase=passphrase if include_keys else None,
+            keyring_backend=str(crypto.get("keyring_backend", "auto") or "auto"),
+            keyring_credential_name=str(crypto.get("keyring_credential_name", "autocapture.keyring") or "autocapture.keyring"),
+            require_key_protection=bool(encryption_required and os.name == "nt"),
+            keyring_path=str(crypto.get("keyring_path", Path(data_dir) / "vault" / "keyring.json")),
+            legacy_root_key_path=str(crypto.get("root_key_path", Path(data_dir) / "vault" / "root.key")),
+            overwrite=bool(args.overwrite),
+        )
+        details.update({"ok": bool(report.get("ok")), "entries": int(report.get("entries", 0) or 0)})
+        append_audit_event(action="backup.create", actor="cli.backup", outcome="success" if report.get("ok") else "error", details=details)
+        _print_json(report)
+        return 0 if report.get("ok") else 2
+    except Exception as exc:
+        details["error"] = str(exc)
+        append_audit_event(action="backup.create", actor="cli.backup", outcome="error", details=details)
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+
+def cmd_backup_restore(args: argparse.Namespace) -> int:
+    details: dict[str, Any] = {"bundle_path": str(args.bundle)}
+    try:
+        config, paths = _load_config_for_backup(args.data_dir, args.config_dir, safe_mode=args.safe_mode)
+        storage = config.get("storage", {}) if isinstance(config, dict) else {}
+        data_dir = str(storage.get("data_dir", "data"))
+        cfg_dir = str(Path(paths.user_path).resolve().parent)
+
+        passphrase = args.passphrase or ""
+        if args.restore_keys:
+            passphrase = _prompt_passphrase(passphrase)
+
+        report = restore_backup_bundle(
+            bundle_path=args.bundle,
+            config_dir=cfg_dir,
+            data_dir=data_dir,
+            keyring_bundle_passphrase=passphrase if args.restore_keys else None,
+            restore_keyring_bundle=bool(args.restore_keys),
+            overwrite=bool(args.overwrite),
+        )
+        details.update({"ok": bool(report.get("ok")), "extracted": int(report.get("extracted", 0) or 0)})
+        append_audit_event(action="backup.restore", actor="cli.backup", outcome="success" if report.get("ok") else "error", details=details)
+        _print_json(report)
+        return 0 if report.get("ok") else 2
+    except Exception as exc:
+        details["error"] = str(exc)
+        append_audit_event(action="backup.restore", actor="cli.backup", outcome="error", details=details)
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
@@ -402,6 +744,13 @@ def cmd_verify_evidence(args: argparse.Namespace) -> int:
         return 0
     _print_json(result)
     return 2
+
+
+def cmd_integrity_scan(args: argparse.Namespace) -> int:
+    facade = create_facade(safe_mode=args.safe_mode)
+    result = facade.integrity_scan()
+    _print_json(result)
+    return 0 if result.get("ok") else 2
 
 
 def cmd_verify_archive(args: argparse.Namespace) -> int:
@@ -597,6 +946,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     doctor = sub.add_parser("doctor")
+    doctor.add_argument("--bundle", action="store_true", help="Create a diagnostics bundle zip")
+    doctor.add_argument("--self-test", action="store_true", help="Run a lightweight offline self-test")
     doctor.set_defaults(func=cmd_doctor)
 
     cfg = sub.add_parser("config")
@@ -613,16 +964,102 @@ def build_parser() -> argparse.ArgumentParser:
     plugins_list = plugins_sub.add_parser("list")
     plugins_list.add_argument("--json", action="store_true", default=False)
     plugins_list.set_defaults(func=cmd_plugins_list)
+    plugins_load_report = plugins_sub.add_parser("load-report")
+    plugins_load_report.set_defaults(func=cmd_plugins_load_report)
     plugins_approve = plugins_sub.add_parser("approve")
     plugins_approve.set_defaults(func=cmd_plugins_approve)
+    plugins_plan = plugins_sub.add_parser("plan")
+    plugins_plan.set_defaults(func=cmd_plugins_plan)
+    plugins_caps = plugins_sub.add_parser("capabilities")
+    plugins_caps.set_defaults(func=cmd_plugins_capabilities)
+    plugins_install = plugins_sub.add_parser("install")
+    plugins_install.add_argument("path")
+    plugins_install.add_argument("--apply", action="store_true", default=False, help="Apply install (default is dry-run)")
+    plugins_install.set_defaults(func=cmd_plugins_install)
+    plugins_lock = plugins_sub.add_parser("lock")
+    plugins_lock_sub = plugins_lock.add_subparsers(dest="lock_cmd", required=True)
+    plugins_lock_snapshot = plugins_lock_sub.add_parser("snapshot")
+    plugins_lock_snapshot.add_argument("--reason", default="snapshot")
+    plugins_lock_snapshot.set_defaults(func=cmd_plugins_lock_snapshot)
+    plugins_lock_rollback = plugins_lock_sub.add_parser("rollback")
+    plugins_lock_rollback.add_argument("snapshot_path")
+    plugins_lock_rollback.set_defaults(func=cmd_plugins_lock_rollback)
+    plugins_lock_diff = plugins_lock_sub.add_parser("diff")
+    plugins_lock_diff.add_argument("a_path")
+    plugins_lock_diff.add_argument("b_path")
+    plugins_lock_diff.set_defaults(func=cmd_plugins_lock_diff)
+    plugins_lock_update = plugins_lock_sub.add_parser("update")
+    plugins_lock_update.add_argument("plugin_id")
+    plugins_lock_update.add_argument("--reason", default="update")
+    plugins_lock_update.set_defaults(func=cmd_plugins_lock_update)
+    plugins_lifecycle = plugins_sub.add_parser("lifecycle")
+    plugins_lifecycle.add_argument("plugin_id")
+    plugins_lifecycle.set_defaults(func=cmd_plugins_lifecycle)
+    plugins_permissions = plugins_sub.add_parser("permissions")
+    plugins_permissions.add_argument("plugin_id")
+    plugins_permissions.set_defaults(func=cmd_plugins_permissions)
+    plugins_permissions_approve = plugins_sub.add_parser("approve-permissions")
+    plugins_permissions_approve.add_argument("plugin_id")
+    plugins_permissions_approve.add_argument("--accept-digest", required=True)
+    plugins_permissions_approve.add_argument(
+        "--confirm",
+        default="",
+        help="If required, pass the exact confirmation string returned in the approval error (e.g. APPROVE:<plugin_id>).",
+    )
+    plugins_permissions_approve.set_defaults(func=cmd_plugins_permissions_approve)
+    plugins_apply = plugins_sub.add_parser("apply")
+    plugins_apply.add_argument("--plan-hash", required=True)
+    plugins_apply.add_argument("--enable", action="append", default=[], help="Plugin id to enable (repeatable).")
+    plugins_apply.add_argument("--disable", action="append", default=[], help="Plugin id to disable (repeatable).")
+    plugins_apply.set_defaults(func=cmd_plugins_apply)
+    plugins_logs = plugins_sub.add_parser("logs")
+    plugins_logs.add_argument("plugin_id")
+    plugins_logs.add_argument("--limit", type=int, default=80)
+    plugins_logs.set_defaults(func=cmd_plugins_logs)
     plugins_verify = plugins_sub.add_parser("verify-defaults")
     plugins_verify.set_defaults(func=cmd_plugins_verify_defaults)
+
+    operator = sub.add_parser("operator")
+    operator_sub = operator.add_subparsers(dest="operator_cmd", required=True)
+    op_reindex = operator_sub.add_parser("reindex")
+    op_reindex.set_defaults(func=cmd_operator_reindex)
+    op_vacuum = operator_sub.add_parser("vacuum")
+    op_vacuum.add_argument("--include-state", action=argparse.BooleanOptionalAction, default=True)
+    op_vacuum.set_defaults(func=cmd_operator_vacuum)
+    op_quarantine = operator_sub.add_parser("quarantine")
+    op_quarantine.add_argument("plugin_id")
+    op_quarantine.add_argument("--reason", default="operator_quarantine")
+    op_quarantine.set_defaults(func=cmd_operator_quarantine)
+    op_rollback = operator_sub.add_parser("rollback-locks")
+    op_rollback.add_argument("snapshot_path")
+    op_rollback.set_defaults(func=cmd_operator_rollback_locks)
+
+    consent = sub.add_parser("consent")
+    consent_sub = consent.add_subparsers(dest="consent_cmd", required=True)
+    consent_status = consent_sub.add_parser("status")
+    consent_status.add_argument("--data-dir", default="", help="Override AUTOCAPTURE_DATA_DIR")
+    consent_status.add_argument("--config-dir", default="", help="Override AUTOCAPTURE_CONFIG_DIR")
+    consent_status.set_defaults(func=cmd_consent_status)
+    consent_accept = consent_sub.add_parser("accept")
+    consent_accept.add_argument("--data-dir", default="", help="Override AUTOCAPTURE_DATA_DIR")
+    consent_accept.add_argument("--config-dir", default="", help="Override AUTOCAPTURE_CONFIG_DIR")
+    consent_accept.set_defaults(func=cmd_consent_accept)
 
     tray = sub.add_parser("tray")
     tray.set_defaults(func=cmd_tray)
 
     run_cmd = sub.add_parser("run")
+    run_cmd.add_argument("--duration-s", type=int, default=0, help="Stop after N seconds (0=run until Ctrl+C)")
+    run_cmd.add_argument(
+        "--status-interval-s",
+        type=int,
+        default=0,
+        help="Print doctor status every N seconds (0=disabled)",
+    )
     run_cmd.set_defaults(func=cmd_run)
+
+    status_cmd = sub.add_parser("status")
+    status_cmd.set_defaults(func=cmd_status)
 
     query_cmd = sub.add_parser("query")
     query_cmd.add_argument("text")
@@ -658,6 +1095,14 @@ def build_parser() -> argparse.ArgumentParser:
     enrich_cmd = sub.add_parser("enrich")
     enrich_cmd.set_defaults(func=cmd_enrich)
 
+    batch_cmd = sub.add_parser("batch")
+    batch_sub = batch_cmd.add_subparsers(dest="batch_cmd", required=True)
+    batch_run = batch_sub.add_parser("run")
+    batch_run.add_argument("--max-loops", type=int, default=500)
+    batch_run.add_argument("--sleep-ms", type=int, default=200)
+    batch_run.add_argument("--require-idle", action=argparse.BooleanOptionalAction, default=True)
+    batch_run.set_defaults(func=cmd_batch_run)
+
     devtools = sub.add_parser("devtools")
     devtools_sub = devtools.add_subparsers(dest="devtools_cmd", required=True)
     diffusion = devtools_sub.add_parser("diffusion")
@@ -685,6 +1130,26 @@ def build_parser() -> argparse.ArgumentParser:
     keys_import.add_argument("--data-dir", default="", help="Override AUTOCAPTURE_DATA_DIR")
     keys_import.add_argument("--config-dir", default="", help="Override AUTOCAPTURE_CONFIG_DIR")
     keys_import.set_defaults(func=cmd_keys_import)
+
+    backup = sub.add_parser("backup")
+    backup_sub = backup.add_subparsers(dest="backup_cmd", required=True)
+    backup_create = backup_sub.add_parser("create")
+    backup_create.add_argument("--out", required=True, help="Output bundle path (zip)")
+    backup_create.add_argument("--include-data", action=argparse.BooleanOptionalAction, default=False)
+    backup_create.add_argument("--keys", action=argparse.BooleanOptionalAction, default=None, help="Include portable keyring bundle")
+    backup_create.add_argument("--passphrase", default="", help="Keyring bundle passphrase (prompted if empty)")
+    backup_create.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=False)
+    backup_create.add_argument("--data-dir", default="", help="Override AUTOCAPTURE_DATA_DIR")
+    backup_create.add_argument("--config-dir", default="", help="Override AUTOCAPTURE_CONFIG_DIR")
+    backup_create.set_defaults(func=cmd_backup_create)
+    backup_restore = backup_sub.add_parser("restore")
+    backup_restore.add_argument("--bundle", required=True, help="Input bundle path (zip)")
+    backup_restore.add_argument("--restore-keys", action=argparse.BooleanOptionalAction, default=True)
+    backup_restore.add_argument("--passphrase", default="", help="Keyring bundle passphrase (prompted if empty)")
+    backup_restore.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=False)
+    backup_restore.add_argument("--data-dir", default="", help="Override AUTOCAPTURE_DATA_DIR")
+    backup_restore.add_argument("--config-dir", default="", help="Override AUTOCAPTURE_CONFIG_DIR")
+    backup_restore.set_defaults(func=cmd_backup_restore)
 
     provenance = sub.add_parser("provenance")
     provenance_sub = provenance.add_subparsers(dest="provenance_cmd", required=True)
@@ -716,6 +1181,11 @@ def build_parser() -> argparse.ArgumentParser:
     verify_archive = verify_sub.add_parser("archive")
     verify_archive.add_argument("--path", required=True)
     verify_archive.set_defaults(func=cmd_verify_archive)
+
+    integrity = sub.add_parser("integrity")
+    integrity_sub = integrity.add_subparsers(dest="integrity_cmd", required=True)
+    integrity_scan = integrity_sub.add_parser("scan")
+    integrity_scan.set_defaults(func=cmd_integrity_scan)
 
     research = sub.add_parser("research")
     research_sub = research.add_subparsers(dest="research_cmd", required=True)

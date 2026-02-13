@@ -27,6 +27,9 @@ def _schema() -> dict[str, Any]:
 def validate_evidence_record(record: dict[str, Any], record_id: str | None = None) -> None:
     if not is_evidence_like(record):
         return
+    if "schema_version" not in record:
+        suffix = f" {record_id}" if record_id else ""
+        raise ValueError(f"Evidence record{suffix} missing schema_version")
     try:
         _validator.validate(_schema(), record)
     except Exception as exc:  # pragma: no cover - error handling exercised in tests

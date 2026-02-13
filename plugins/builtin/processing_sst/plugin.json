@@ -26,6 +26,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.processing.sst.pipeline",
+  "provides": [
+    "processing.pipeline"
+  ],
   "required_capabilities": [
     "event.builder",
     "observability.logger",

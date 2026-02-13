@@ -1,5 +1,7 @@
 # User Surface (Pinned Contract)
 
+**Core runtime**: `autocapture_nx` (the `autocapture` CLI is the pinned user-facing entrypoint that bootstraps NX).
+
 ## CLI
 The baseline user-visible interface is the `autocapture` CLI.
 
@@ -19,7 +21,12 @@ Commands:
 - `autocapture tray`
   - Starts the native Windows tray host and local settings/plugin manager UI.
 - `autocapture run`
-  - Starts capture, audio, input, and window metadata pipelines.
+  - Deprecated in this repo: live capture is expected to run in a Windows sidecar repo.
+  - When enabled explicitly, starts capture/audio/input/window pipelines (Windows-only).
+- `autocapture backup create --out <path> [--include-data] [--keys]`
+  - Creates a portable backup bundle zip for sidecar -> processor handoff.
+- `autocapture backup restore --bundle <path> [--restore-keys]`
+  - Restores a backup bundle zip (archives conflicts; no deletion).
 - `autocapture query "<text>"`
   - Runs deterministic time parsing, retrieval, optional on-demand extraction, and claim-level citations.
 - `autocapture devtools diffusion --axis <name> [-k N] [--dry-run]`

@@ -17,6 +17,11 @@
       "path": "plugin.py"
     }
   ],
+  "filesystem_policy": {
+    "read": [
+      "{repo_root}/contracts"
+    ]
+  },
   "hash_lock": {
     "artifact_sha256": "",
     "manifest_sha256": ""
@@ -28,6 +33,9 @@
     "raw_input": false
   },
   "plugin_id": "builtin.egress.gateway",
+  "provides": [
+    "egress.gateway"
+  ],
   "required_capabilities": [
     "privacy.egress_sanitizer",
     "event.builder",
@@ -40,10 +48,5 @@
     "privacy",
     "storage"
   ],
-  "version": "0.1.0",
-  "filesystem_policy": {
-    "read": [
-      "{repo_root}/contracts"
-    ]
-  }
+  "version": "0.1.0"
 }

@@ -13,6 +13,7 @@ from autocapture_nx.kernel.canonical_json import dumps
 from autocapture_nx.kernel.hashing import sha256_text
 from autocapture_nx.plugin_system.api import PluginContext
 from plugins.builtin.citation_basic.plugin import CitationValidator
+from autocapture_nx.kernel.proof_bundle import verify_proof_bundle
 
 
 @dataclass(frozen=True)
@@ -25,7 +26,7 @@ class ReplayReport:
     index_errors: list[str]
 
 
-def replay_bundle(path: str | Path) -> ReplayReport:
+def replay_bundle(path: str | Path, *, keyring: Any | None = None) -> ReplayReport:
     path = Path(path)
     errors: list[str] = []
     warnings: list[str] = []
@@ -43,6 +44,15 @@ def replay_bundle(path: str | Path) -> ReplayReport:
         )
     with zipfile.ZipFile(path, "r") as zf:
         _read_json(zf, "manifest.json")
+        sig_result = verify_proof_bundle(path, keyring=keyring)
+        if not sig_result.get("ok"):
+            # If no keyring is available, we cannot verify signatures; treat as a warning
+            # for local/dev replay while still surfacing the condition.
+            msg = f"bundle_signature_invalid:{sig_result.get('error')}"
+            if keyring is None:
+                warnings.append(msg)
+            else:
+                errors.append(msg)
         metadata_lines = _read_text(zf, "metadata.jsonl").splitlines()
         ledger_text = _read_text(zf, "ledger.ndjson")
         anchor_text = _read_text(zf, "anchors.ndjson")

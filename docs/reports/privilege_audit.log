@@ -1,0 +1,1 @@
+2026-02-05T02:45:00Z Added {repo_root} to plugin filesystem_defaults read roots and set PYTHONPATH for plugin host to repo root for module imports.

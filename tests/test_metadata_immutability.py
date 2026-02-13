@@ -9,6 +9,7 @@ class MetadataImmutabilityTests(unittest.TestCase):
         store = InMemoryStore()
         meta = ImmutableMetadataStore(store)
         evidence = {
+            "schema_version": 1,
             "record_type": "evidence.capture.segment",
             "run_id": "run1",
             "segment_id": "seg0",
@@ -33,6 +34,7 @@ class MetadataImmutabilityTests(unittest.TestCase):
         store = InMemoryStore()
         meta = ImmutableMetadataStore(store)
         evidence = {
+            "schema_version": 1,
             "record_type": "evidence.capture.segment",
             "run_id": "run1",
             "segment_id": "seg0",
@@ -50,6 +52,7 @@ class MetadataImmutabilityTests(unittest.TestCase):
         meta.put_new(
             "run1/derived.text.ocr/abc",
             {
+                "schema_version": 1,
                 "record_type": "derived.text.ocr",
                 "run_id": "run1",
                 "text": "hello",

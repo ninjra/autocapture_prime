@@ -23,6 +23,10 @@ from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.kernel.loader import Kernel, default_config_paths
 from autocapture_nx.kernel.query import run_query
 from autocapture_nx.kernel.telemetry import telemetry_snapshot, percentile
+from autocapture_nx.kernel.atomic_write import atomic_write_json
+from autocapture_nx.kernel.doctor import build_health_report
+from autocapture_nx.kernel.activity_signal import load_activity_signal
+from autocapture_nx.kernel.logging import JsonlLogger
 from autocapture_nx.plugin_system.manager import PluginManager
 from autocapture_nx.processing.idle import _extract_frame, _get_media_blob
 
@@ -204,7 +208,8 @@ class KernelManager:
     def session(self) -> Iterator[Any]:
         if not self._persistent:
             kernel = Kernel(self._paths, safe_mode=self._safe_mode)
-            system = kernel.boot(start_conductor=self._start_conductor)
+            # One-shot sessions should be lightweight and avoid heavy boot-time fanout.
+            system = kernel.boot(start_conductor=self._start_conductor, fast_boot=True)
             try:
                 yield system
             finally:
@@ -229,6 +234,11 @@ class KernelManager:
 
     def kernel(self) -> Kernel | None:
         return self._kernel
+
+    def system(self) -> Any | None:
+        # Return the already-booted system without forcing a boot.
+        with self._lock:
+            return self._system
 
     def last_error(self) -> str | None:
         return self._last_error
@@ -294,19 +304,129 @@ class UXFacade:
         return dict(self._config)
 
     def doctor_report(self) -> dict[str, Any]:
+        logger = None
+        try:
+            logger = JsonlLogger.from_config(self._config, name="core")
+        except Exception:
+            logger = None
+        # OPS-06: always include DB schema/version snapshot without requiring heavy work.
+        try:
+            from autocapture_nx.kernel.db_status import db_status_snapshot
+
+            db_status = db_status_snapshot(self._config)
+        except Exception:
+            db_status = None
         kernel = self._kernel_mgr.kernel()
         if kernel is None:
             kernel = Kernel(self._paths, safe_mode=self._safe_mode)
             kernel.boot(start_conductor=False)
             checks = kernel.doctor()
+            try:
+                system = kernel.system
+                report = build_health_report(system=system, checks=checks) if system is not None else None
+            except Exception:
+                report = None
             kernel.shutdown()
         else:
             checks = kernel.doctor()
-        ok = all(check.ok for check in checks)
+            try:
+                system = kernel.system
+                report = build_health_report(system=system, checks=checks) if system is not None else None
+            except Exception:
+                report = None
+        if not isinstance(report, dict):
+            ok = all(check.ok for check in checks)
+            failed = [str(getattr(c, "name", "")) for c in (checks or []) if getattr(c, "ok", True) is False]
+            report = {
+                "ok": ok,
+                "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+                "summary": {
+                    "ok": bool(ok),
+                    "code": "ok" if ok else "degraded",
+                    "message": "ok" if ok else f"failed_checks={failed[:5]}",
+                    "checks_total": int(len(checks or [])),
+                    "checks_failed": int(len(failed)),
+                },
+                "checks": [check.__dict__ for check in checks],
+            }
+        if logger is not None:
+            try:
+                report.setdefault("logs", {})["core_jsonl"] = logger.path
+            except Exception:
+                pass
+        if db_status is not None:
+            report["db_status"] = db_status
+        return report
+
+    def diagnostics_bundle_create(self) -> dict[str, Any]:
+        from autocapture_nx.kernel.diagnostics_bundle import create_diagnostics_bundle
+
+        # Avoid heavy work: reuse doctor_report and export with redaction.
+        report = self.doctor_report()
+        result = create_diagnostics_bundle(config=self._config, doctor_report=report)
+        return {"ok": True, "path": result.path, "sha256": result.bundle_sha256, "manifest": result.manifest}
+
+    def self_test(self) -> dict[str, Any]:
+        """OPS-07: low-friction, offline self-test (boot + ledger write + verify)."""
+        import time
+
+        started = time.perf_counter()
+        boot_ok = False
+        plugin_count = 0
+        ledger_head = None
+        error: str | None = None
+        boot_ms = None
+        ledger_ms = None
+        verify_ms = None
+        try:
+            boot_start = time.perf_counter()
+            with self._kernel_mgr.session() as system:
+                boot_ok = system is not None
+                boot_ms = int(round((time.perf_counter() - boot_start) * 1000.0))
+                try:
+                    plugin_count = int(len(getattr(system, "plugins", []) or []))
+                except Exception:
+                    plugin_count = 0
+                # Append a deterministic ledger entry (best-effort; do not fail open).
+                ledger_start = time.perf_counter()
+                try:
+                    builder = system.get("event.builder") if system and hasattr(system, "get") else None
+                    if builder is not None and hasattr(builder, "ledger_entry"):
+                        builder.ledger_entry(
+                            "operator.self_test",
+                            inputs=[],
+                            outputs=[],
+                            payload={"event": "self_test"},
+                        )
+                        try:
+                            ledger_head = builder.ledger_head()
+                        except Exception:
+                            ledger_head = None
+                finally:
+                    ledger_ms = int(round((time.perf_counter() - ledger_start) * 1000.0))
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+
+        verify_start = time.perf_counter()
+        ledger_report = self.verify_ledger()
+        anchors_report = self.verify_anchors()
+        verify_ms = int(round((time.perf_counter() - verify_start) * 1000.0))
+
+        ok = bool(boot_ok) and bool(ledger_report.get("ok")) and bool(anchors_report.get("ok"))
         return {
             "ok": ok,
-            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-            "checks": [check.__dict__ for check in checks],
+            "boot_ok": bool(boot_ok),
+            "plugin_count": int(plugin_count),
+            "ledger_head": ledger_head,
+            "ledger": ledger_report,
+            "anchors": anchors_report,
+            "timings_ms": {
+                "boot_ms": boot_ms,
+                "ledger_write_ms": ledger_ms,
+                "verify_ms": verify_ms,
+                "total_ms": int(round((time.perf_counter() - started) * 1000.0)),
+            },
+            "error": error,
         }
 
     def resolve_citations(self, citations: list[dict[str, Any]]) -> dict[str, Any]:
@@ -320,6 +440,50 @@ class UXFacade:
 
     def config_get(self) -> dict[str, Any]:
         return dict(self._config)
+
+    def config_diff(self) -> dict[str, Any]:
+        """UX-09: deterministic diff viewer (default vs user overrides vs effective)."""
+
+        def _load(path: Path) -> dict[str, Any]:
+            if not path.exists():
+                return {}
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                return {}
+
+        default_cfg = _load(self._paths.default_path)
+        user_cfg = _load(self._paths.user_path)
+        effective = dict(self._config)
+
+        def _walk(prefix: str, a: Any, b: Any, out: list[dict[str, Any]]) -> None:
+            if isinstance(a, dict) and isinstance(b, dict):
+                keys = sorted({*a.keys(), *b.keys()}, key=lambda k: str(k))
+                for k in keys:
+                    kp = f"{prefix}.{k}" if prefix else str(k)
+                    _walk(kp, a.get(k, _MISSING), b.get(k, _MISSING), out)
+                return
+            if a is _MISSING and b is _MISSING:
+                return
+            if a == b:
+                return
+            out.append({"path": prefix, "from": a if a is not _MISSING else None, "to": b if b is not _MISSING else None})
+
+        diff_default_to_effective: list[dict[str, Any]] = []
+        _walk("", default_cfg, effective, diff_default_to_effective)
+        diff_default_to_effective.sort(key=lambda r: str(r.get("path") or ""))
+
+        diff_user_to_effective: list[dict[str, Any]] = []
+        _walk("", user_cfg, effective, diff_user_to_effective)
+        diff_user_to_effective.sort(key=lambda r: str(r.get("path") or ""))
+
+        return {
+            "ok": True,
+            "default_path": str(self._paths.default_path),
+            "user_path": str(self._paths.user_path),
+            "diff_default_to_effective": diff_default_to_effective,
+            "diff_user_to_effective": diff_user_to_effective,
+        }
 
     def _now_utc(self) -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -381,12 +545,11 @@ class UXFacade:
             user_cfg = json.loads(self._paths.user_path.read_text(encoding="utf-8"))
         prior_text = json.dumps(user_cfg, indent=2, sort_keys=True)
         _apply_revert_patch(user_cfg, previous)
-        self._paths.user_path.parent.mkdir(parents=True, exist_ok=True)
-        self._paths.user_path.write_text(json.dumps(user_cfg, indent=2, sort_keys=True), encoding="utf-8")
+        atomic_write_json(self._paths.user_path, user_cfg, sort_keys=True, indent=2)
         try:
             self.reload_config()
         except Exception as exc:
-            self._paths.user_path.write_text(prior_text, encoding="utf-8")
+            atomic_write_json(self._paths.user_path, json.loads(prior_text), sort_keys=True, indent=2)
             self.reload_config()
             raise exc
         revert_entry = {
@@ -409,17 +572,38 @@ class UXFacade:
             self._pause_timer = None
         self._paused_until_utc = None
 
-    def config_set(self, patch: dict[str, Any]) -> dict[str, Any]:
+    def config_set(self, patch: dict[str, Any], *, confirm: str = "") -> dict[str, Any]:
         if not isinstance(patch, dict):
             raise ValueError("config_patch_invalid")
+        # Misclick-resistant dangerous toggles: require typed confirmation when enabling.
+        def _walk(obj: Any, prefix: tuple[str, ...] = ()) -> list[tuple[tuple[str, ...], Any]]:
+            if not isinstance(obj, dict):
+                return [(prefix, obj)]
+            out: list[tuple[tuple[str, ...], Any]] = []
+            for k, v in obj.items():
+                out.extend(_walk(v, prefix + (str(k),)))
+            return out
+
+        dangerous_enable_paths = {
+            ("privacy", "egress", "allow_raw_egress"),
+            ("privacy", "cloud", "enabled"),
+            ("privacy", "cloud", "allow_images"),
+        }
+        enabling = []
+        for path, value in _walk(patch):
+            if path in dangerous_enable_paths and bool(value) is True:
+                enabling.append(".".join(path))
+        if enabling:
+            if str(confirm).strip() != "I UNDERSTAND":
+                return {"ok": False, "error": "confirmation_required", "required": "I UNDERSTAND", "paths": enabling}
+
         previous = _snapshot_patch_values(self._config, patch)
         user_cfg = {}
         if self._paths.user_path.exists():
             user_cfg = json.loads(self._paths.user_path.read_text(encoding="utf-8"))
         merged = _deep_merge(user_cfg, patch)
         validate_config(self._paths.schema_path, _deep_merge(self._config, patch))
-        self._paths.user_path.parent.mkdir(parents=True, exist_ok=True)
-        self._paths.user_path.write_text(json.dumps(merged, indent=2, sort_keys=True), encoding="utf-8")
+        atomic_write_json(self._paths.user_path, merged, sort_keys=True, indent=2)
         updated = self.reload_config()
         entry = {
             "id": f"cfg_{uuid.uuid4().hex}",
@@ -450,6 +634,61 @@ class UXFacade:
         return {
             "plugins": [asdict(p) for p in manager.list_plugins()],
         }
+
+    def plugins_timing(self) -> dict[str, Any]:
+        def _percentile(values: list[int], pct: float) -> int | None:
+            if not values:
+                return None
+            values = sorted(values)
+            if len(values) == 1:
+                return int(values[0])
+            pct = max(0.0, min(100.0, float(pct)))
+            rank = (pct / 100.0) * (len(values) - 1)
+            low = int(rank)
+            high = min(low + 1, len(values) - 1)
+            frac = rank - low
+            return int(round(values[low] + (values[high] - values[low]) * frac))
+
+        with self._kernel_mgr.session() as system:
+            trace = system.get("observability.plugin_trace") if system and hasattr(system, "get") else None
+            if trace is None or not hasattr(trace, "snapshot"):
+                return {"ok": True, "rows": [], "events": 0}
+            events = trace.snapshot()
+        by_key: dict[tuple[str, str, str], list[int]] = {}
+        err_by_key: dict[tuple[str, str, str], int] = {}
+        for ev in events if isinstance(events, list) else []:
+            if not isinstance(ev, dict):
+                continue
+            pid = str(ev.get("plugin_id") or "")
+            cap = str(ev.get("capability") or "")
+            method = str(ev.get("method") or "")
+            if not pid or not cap or not method:
+                continue
+            try:
+                dur = int(ev.get("duration_ms") or 0)
+            except Exception:
+                dur = 0
+            key = (pid, cap, method)
+            by_key.setdefault(key, []).append(max(0, dur))
+            if not bool(ev.get("ok", True)):
+                err_by_key[key] = int(err_by_key.get(key, 0) or 0) + 1
+        rows: list[dict[str, Any]] = []
+        for (pid, cap, method), durs in sorted(by_key.items()):
+            durs_sorted = sorted(durs)
+            rows.append(
+                {
+                    "plugin_id": pid,
+                    "capability": cap,
+                    "method": method,
+                    "calls": len(durs_sorted),
+                    "errors": int(err_by_key.get((pid, cap, method), 0) or 0),
+                    "total_ms": int(sum(durs_sorted)),
+                    "p50_ms": _percentile(durs_sorted, 50.0),
+                    "p95_ms": _percentile(durs_sorted, 95.0),
+                    "max_ms": int(durs_sorted[-1]) if durs_sorted else None,
+                }
+            )
+        return {"ok": True, "rows": rows, "events": int(len(events) if isinstance(events, list) else 0)}
 
     def plugins_settings_get(self, plugin_id: str) -> dict[str, Any]:
         manager = PluginManager(self._config, safe_mode=self._safe_mode)
@@ -519,15 +758,163 @@ class UXFacade:
         manager = PluginManager(self._config, safe_mode=self._safe_mode)
         return manager.approve_hashes()
 
+    def plugins_plan(self) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        return manager.plugins_plan()
+
+    def plugins_apply(self, plan_hash: str, *, enable: list[str] | None = None, disable: list[str] | None = None) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        result = manager.plugins_apply(plan_hash=str(plan_hash), enable=enable, disable=disable)
+        if bool(result.get("ok")):
+            self.reload_config()
+        return result
+
+    def plugins_install_local(self, path: str, *, dry_run: bool = True) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        result = manager.install_local(path, dry_run=dry_run)
+        # Installing updates config + lockfile; reload effective config.
+        if bool(result.get("ok")) and not dry_run:
+            self.reload_config()
+        return result
+
+    def plugins_lock_snapshot(self, reason: str) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        return manager.lockfile_snapshot(reason=str(reason))
+
+    def plugins_lock_rollback(self, snapshot_path: str) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        result = manager.lockfile_rollback(snapshot_path)
+        if bool(result.get("ok")):
+            self.reload_config()
+        return result
+
+    def plugins_lifecycle_state(self, plugin_id: str) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        return manager.lifecycle_state(plugin_id)
+
+    def plugins_permissions_digest(self, plugin_id: str) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        return manager.permissions_digest(plugin_id)
+
+    def plugins_approve_permissions(self, plugin_id: str, accept_digest: str, *, confirm: str = "") -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        result = manager.approve_permissions_confirm(plugin_id, accept_digest=str(accept_digest), confirm=str(confirm))
+        if bool(result.get("ok")):
+            self.reload_config()
+        return result
+
+    def plugins_lock_diff(self, a_path: str, b_path: str) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        return manager.lockfile_diff(str(a_path), str(b_path))
+
+    def plugins_update_lock(self, plugin_id: str, *, reason: str = "update") -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        result = manager.update_lock_entry(plugin_id, reason=str(reason))
+        if bool(result.get("ok")):
+            self.reload_config()
+        return result
+
+    def plugins_quarantine(self, plugin_id: str, reason: str) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        result = manager.quarantine(plugin_id, reason=str(reason))
+        if bool(result.get("ok")):
+            self.reload_config()
+        return result
+
+    def plugins_unquarantine(self, plugin_id: str) -> dict[str, Any]:
+        manager = PluginManager(self._config, safe_mode=self._safe_mode)
+        result = manager.unquarantine(plugin_id)
+        if bool(result.get("ok")):
+            self.reload_config()
+        return result
+
+    def plugins_logs(self, plugin_id: str, *, limit: int = 80) -> dict[str, Any]:
+        # EXT-09: return per-plugin host_runner logs (best-effort, sanitized).
+        limit = max(1, min(400, int(limit or 80)))
+        data_dir = str(self._config.get("storage", {}).get("data_dir", "data"))
+        run_id = str(self._config.get("runtime", {}).get("run_id") or "")
+        if not run_id:
+            run_id = str(self.status().get("run_id") or "run")
+        path = Path(data_dir) / "runs" / run_id / f"plugin_host_{plugin_id}.log"
+        if not path.exists():
+            return {"ok": True, "plugin_id": plugin_id, "path": str(path), "lines": [], "missing": True}
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        tail = lines[-limit:]
+        redacted: list[str] = []
+        for line in tail:
+            text = str(line)
+            if "OPENAI_API_KEY" in text or "Authorization:" in text:
+                continue
+            redacted.append(text[:2000])
+        return {"ok": True, "plugin_id": plugin_id, "path": str(path), "lines": redacted, "missing": False}
+
+    def plugins_capabilities_matrix(self) -> dict[str, Any]:
+        # EXT-12: stable capabilities matrix derived from manifests.
+        plan = self.plugins_plan()
+        return {"ok": True, "capabilities": plan.get("capabilities", {}), "conflicts": plan.get("conflicts", {})}
+
     def plugins_reload(self, plugin_ids: list[str] | None = None) -> dict[str, Any]:
         kernel = self._kernel_mgr.kernel()
         if kernel is None:
             raise RuntimeError("kernel_not_running")
         return kernel.reload_plugins(plugin_ids=plugin_ids)
 
-    def query(self, text: str) -> dict[str, Any]:
+    def operator_reindex(self) -> dict[str, Any]:
+        from autocapture_nx.kernel.operator_ledger import record_operator_action
+
+        return record_operator_action(config=self._config, action="reindex", payload={"scheduled": True})
+
+    def operator_vacuum(self, *, include_state: bool = True) -> dict[str, Any]:
+        import sqlite3
+
+        from autocapture_nx.kernel.operator_ledger import record_operator_action
+
+        storage = self._config.get("storage", {}) if isinstance(self._config, dict) else {}
+        paths = [
+            ("metadata", storage.get("metadata_path", "data/metadata.db")),
+            ("lexical", storage.get("lexical_path", "data/lexical.db")),
+            ("vector", storage.get("vector_path", "data/vector.db")),
+        ]
+        if include_state:
+            paths.extend(
+                [
+                    ("state_tape", storage.get("state_tape_path", "data/state/state_tape.db")),
+                    ("state_vector", storage.get("state_vector_path", "data/state/state_vector.db")),
+                ]
+            )
+        vacuumed: list[str] = []
+        for _name, raw in paths:
+            if not raw:
+                continue
+            try:
+                con = sqlite3.connect(str(raw))
+                try:
+                    con.execute("VACUUM")
+                    con.commit()
+                finally:
+                    con.close()
+                vacuumed.append(str(raw))
+            except Exception:
+                continue
+        return record_operator_action(config=self._config, action="vacuum", payload={"vacuumed": vacuumed})
+
+    def operator_quarantine(self, plugin_id: str, *, reason: str) -> dict[str, Any]:
+        from autocapture_nx.kernel.operator_ledger import record_operator_action
+
+        result = self.plugins_quarantine(plugin_id, reason)
+        record_operator_action(config=self._config, action="quarantine", payload={"plugin_id": plugin_id, "reason": reason})
+        return result
+
+    def operator_rollback_locks(self, snapshot_path: str) -> dict[str, Any]:
+        from autocapture_nx.kernel.operator_ledger import record_operator_action
+
+        result = self.plugins_lock_rollback(snapshot_path)
+        record_operator_action(config=self._config, action="rollback-locks", payload={"snapshot_path": snapshot_path})
+        return result
+
+    def query(self, text: str, *, schedule_extract: bool = False) -> dict[str, Any]:
         with self._kernel_mgr.session() as system:
-            return run_query(system, text)
+            return run_query(system, text, schedule_extract=bool(schedule_extract))
 
     def state_query(self, text: str) -> dict[str, Any]:
         from autocapture_nx.kernel.query import run_state_query
@@ -606,6 +993,23 @@ class UXFacade:
             conductor = create_conductor(system)
             return conductor.run_once(force=force)
 
+    def batch_run(
+        self,
+        *,
+        max_loops: int = 500,
+        sleep_ms: int = 200,
+        require_idle: bool = True,
+    ) -> dict[str, Any]:
+        from autocapture_nx.runtime.batch import run_processing_batch
+
+        with self._kernel_mgr.session() as system:
+            return run_processing_batch(
+                system,
+                max_loops=int(max_loops),
+                sleep_ms=int(sleep_ms),
+                require_idle=bool(require_idle),
+            )
+
     def keys_rotate(self) -> dict[str, Any]:
         from autocapture_nx.kernel.key_rotation import rotate_keys
 
@@ -613,41 +1017,111 @@ class UXFacade:
             return rotate_keys(system)
 
     def status(self) -> dict[str, Any]:
-        with self._kernel_mgr.session() as system:
-            kernel_error = self._kernel_mgr.last_error()
-            kernel = self._kernel_mgr.kernel()
-            safe_mode = bool(getattr(kernel, "safe_mode", self._safe_mode)) if kernel is not None else bool(self._safe_mode)
-            safe_mode_reason = getattr(kernel, "safe_mode_reason", None) if kernel is not None else None
-            crash_loop = None
-            if kernel is not None and hasattr(kernel, "crash_loop_status"):
-                try:
-                    crash_loop = kernel.crash_loop_status()
-                except Exception:
-                    crash_loop = None
-            builder = system.get("event.builder") if system and hasattr(system, "get") else None
-            run_id = builder.run_id if builder is not None else ""
-            ledger_head = builder.ledger_head() if builder is not None else None
-            capture_status = self._capture_status_payload()
-            processing_state = self._processing_state_payload(system)
-            telemetry = telemetry_snapshot()
-            slo = compute_slo_summary(self._config, telemetry, capture_status, processing_state)
-            return {
-                "run_id": run_id,
-                "ledger_head": ledger_head,
-                "plugins_loaded": len(getattr(system, "plugins", []) or []),
-                "safe_mode": safe_mode,
-                "safe_mode_reason": safe_mode_reason,
-                "crash_loop": crash_loop,
-                "capture_active": bool(self._run_active),
-                "paused_until_utc": self._paused_until_utc,
-                "paused": bool(self._paused_until_utc),
-                "capture_controls_enabled": self._capture_controls_enabled(),
-                "capture_status": capture_status,
-                "processing_state": processing_state,
-                "slo": slo,
-                "kernel_ready": system is not None,
-                "kernel_error": kernel_error,
+        # Status must be lightweight: do not force a kernel boot just to answer.
+        system = self._kernel_mgr.system()
+        kernel_error = self._kernel_mgr.last_error()
+        kernel = self._kernel_mgr.kernel()
+        safe_mode = bool(getattr(kernel, "safe_mode", self._safe_mode)) if kernel is not None else bool(self._safe_mode)
+        safe_mode_reason = getattr(kernel, "safe_mode_reason", None) if kernel is not None else None
+        crash_loop = None
+        if kernel is not None and hasattr(kernel, "crash_loop_status"):
+            try:
+                crash_loop = kernel.crash_loop_status()
+            except Exception:
+                crash_loop = None
+        builder = system.get("event.builder") if system and hasattr(system, "get") else None
+        run_id = builder.run_id if builder is not None else ""
+        ledger_head = builder.ledger_head() if builder is not None else None
+        capture_status = self._capture_status_payload()
+        processing_state = self._processing_state_payload(system)
+        telemetry = telemetry_snapshot()
+        slo = compute_slo_summary(self._config, telemetry, capture_status, processing_state)
+        # PERF-08: resource snapshot + governor state (best-effort; do not boot kernel).
+        resources = None
+        governor = None
+        try:
+            from autocapture.runtime.resources import sample_resources
+
+            snap = sample_resources()
+            resources = {
+                "cpu_utilization": snap.cpu_utilization,
+                "ram_utilization": snap.ram_utilization,
             }
+        except Exception:
+            resources = None
+        if system is not None and hasattr(system, "has") and system.has("runtime.governor"):
+            try:
+                gov = system.get("runtime.governor")
+            except Exception:
+                gov = None
+            if gov is not None:
+                try:
+                    # Avoid expensive signal collection: expose budget snapshot and preempt state only.
+                    bs = gov.budget_snapshot() if hasattr(gov, "budget_snapshot") else None
+                    governor = {
+                        "idle_window_s": getattr(gov, "idle_window_s", None),
+                        "suspend_workers": getattr(gov, "suspend_workers", None),
+                        "budget": asdict(bs) if bs is not None else None,
+                        "should_preempt": bool(gov.should_preempt()) if hasattr(gov, "should_preempt") else None,
+                    }
+                except Exception:
+                    governor = None
+        return {
+            "run_id": run_id,
+            "ledger_head": ledger_head,
+            "plugins_loaded": len(getattr(system, "plugins", []) or []),
+            "safe_mode": safe_mode,
+            "safe_mode_reason": safe_mode_reason,
+            "crash_loop": crash_loop,
+            "capture_active": bool(self._run_active),
+            "paused_until_utc": self._paused_until_utc,
+            "paused": bool(self._paused_until_utc),
+            "capture_controls_enabled": self._capture_controls_enabled(),
+            "capture_status": capture_status,
+            "processing_state": processing_state,
+            "slo": slo,
+            "resources": resources,
+            "governor": governor,
+            "kernel_ready": system is not None,
+            "kernel_error": kernel_error,
+        }
+
+    def run_detail(self) -> dict[str, Any]:
+        """UX-03: run/job detail payload with provenance anchors."""
+        system = self._kernel_mgr.system()
+        builder = system.get("event.builder") if system and hasattr(system, "get") else None
+        run_id = ""
+        ledger_head = None
+        last_anchor = None
+        try:
+            run_id = builder.run_id if builder is not None else ""
+        except Exception:
+            run_id = ""
+        try:
+            ledger_head = builder.ledger_head() if builder is not None else None
+        except Exception:
+            ledger_head = None
+        try:
+            last_anchor = builder.last_anchor() if builder is not None and hasattr(builder, "last_anchor") else None
+        except Exception:
+            last_anchor = None
+        lockfile = None
+        try:
+            manager = PluginManager(self._config, safe_mode=self._safe_mode)
+            lock_path = manager._lockfile_path()  # noqa: SLF001
+            from autocapture_nx.kernel.hashing import sha256_file
+
+            lockfile = {"path": str(lock_path), "sha256": sha256_file(lock_path) if lock_path.exists() else None}
+        except Exception:
+            lockfile = None
+        return {
+            "ok": True,
+            "run_id": run_id,
+            "data_dir": str(self._config.get("storage", {}).get("data_dir", "data")),
+            "ledger_head": ledger_head,
+            "last_anchor": last_anchor,
+            "lockfile": lockfile,
+        }
 
     def _capture_status_payload(self) -> dict[str, Any]:
         from autocapture.storage.pressure import sample_disk_pressure
@@ -722,6 +1196,12 @@ class UXFacade:
                     watchdog = conductor.watchdog_state()
                 except Exception:
                     watchdog = None
+        if system is None:
+            # Lightweight path: do not force a kernel boot for status UI/API.
+            telemetry = telemetry_snapshot()
+            latest = telemetry.get("latest", {}) if isinstance(telemetry, dict) else {}
+            watchdog = latest.get("processing.watchdog") if isinstance(latest, dict) else None
+            return {"mode": None, "paused": None, "reason": None, "watchdog": watchdog}
         if stats is None:
             stats = self.scheduler_status().get("stats")
         if stats is not None and hasattr(stats, "__dataclass_fields__"):
@@ -742,52 +1222,185 @@ class UXFacade:
         controls_cfg = runtime_cfg.get("capture_controls", {}) if isinstance(runtime_cfg, dict) else {}
         return bool(controls_cfg.get("enabled", False))
 
-    def _start_components(self) -> None:
-        started = False
+    def _start_components(self) -> dict[str, Any]:
+        """Start capture-related components.
+
+        Fail closed for soak/ops: if required components can't start or the kernel
+        can't boot, bubble up a structured error so scripts don't "fake run".
+        """
+
+        errors: list[dict[str, Any]] = []
+        started_names: list[str] = []
+        kernel_error = None
+        # Ensure these are always defined, even if the session block errors early.
+        # This prevents ambiguous soak output like present={} wanted={} which hides
+        # whether capture was configured and which capabilities were missing.
+        present: dict[str, Any] = {
+            "capture.source": False,
+            "capture.screenshot": False,
+            "capture.audio": False,
+            "tracking.input": False,
+            "window.metadata": False,
+            "tracking.cursor": False,
+            "tracking.clipboard": False,
+            "tracking.file_activity": False,
+        }
+        wanted: dict[str, Any] = {}
+        # Compute "wanted" from config outside the kernel session so it is always
+        # populated even when boot fails.
+        capture_cfg = self._config.get("capture") if isinstance(self._config.get("capture"), dict) else {}
+        want_screenshot = bool((capture_cfg.get("screenshot") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        want_audio = bool((capture_cfg.get("audio") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        want_source = bool((capture_cfg.get("video") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        # Trackers are started only if enabled in config to reduce overhead during soak.
+        input_cfg = capture_cfg.get("input_tracking", {}) if isinstance(capture_cfg, dict) else {}
+        input_mode = str(input_cfg.get("mode") or "").strip().lower()
+        want_input = bool(input_mode and input_mode not in {"off", "disabled", "none"})
+        want_window_meta = bool((capture_cfg.get("window_metadata") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        want_cursor = bool((capture_cfg.get("cursor") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        want_clipboard = bool((capture_cfg.get("clipboard") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        want_file_activity = bool((capture_cfg.get("file_activity") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+        wanted = {
+            "capture.source": want_source,
+            "capture.screenshot": want_screenshot,
+            "capture.audio": want_audio,
+            "tracking.input": want_input,
+            "window.metadata": want_window_meta,
+            "tracking.cursor": want_cursor,
+            "tracking.clipboard": want_clipboard,
+            "tracking.file_activity": want_file_activity,
+        }
+
+        def _providers(obj: Any) -> list[str] | None:
+            # Best-effort introspection for capability proxies (helps diagnose
+            # "no providers" cases where hasattr/getattr can raise).
+            if obj is None:
+                return None
+            if hasattr(obj, "provider_ids") and callable(getattr(obj, "provider_ids", None)):
+                try:
+                    ids = obj.provider_ids()
+                    if isinstance(ids, list):
+                        return [str(x) for x in ids]
+                except Exception:
+                    return None
+            if hasattr(obj, "plugin_id"):
+                try:
+                    pid = getattr(obj, "plugin_id")
+                    if isinstance(pid, str) and pid:
+                        return [pid]
+                except Exception:
+                    return None
+            return None
+
+        def _startable(obj: Any) -> tuple[bool, str | None]:
+            if obj is None:
+                return (False, "missing")
+            try:
+                attr = getattr(obj, "start", None)
+            except Exception as exc:
+                return (False, f"start_attr_error:{type(exc).__name__}:{exc}")
+            if not callable(attr):
+                return (False, "no_start_method")
+            return (True, None)
+
         with self._kernel_mgr.session() as system:
-            capture = system.get("capture.source") if system and hasattr(system, "get") else None
-            screenshot = (
-                system.get("capture.screenshot")
-                if system and hasattr(system, "has") and system.has("capture.screenshot")
-                else None
-            )
-            audio = system.get("capture.audio") if system and hasattr(system, "get") else None
-            input_tracker = system.get("tracking.input") if system and hasattr(system, "get") else None
-            window_meta = system.get("window.metadata") if system and hasattr(system, "get") else None
-            cursor_tracker = (
-                system.get("tracking.cursor")
-                if system and hasattr(system, "has") and system.has("tracking.cursor")
-                else None
-            )
-            clipboard = (
-                system.get("tracking.clipboard")
-                if system and hasattr(system, "has") and system.has("tracking.clipboard")
-                else None
-            )
-            file_activity = (
-                system.get("tracking.file_activity")
-                if system and hasattr(system, "has") and system.has("tracking.file_activity")
-                else None
-            )
-            for component in (
-                capture,
-                screenshot,
-                audio,
-                input_tracker,
-                window_meta,
-                cursor_tracker,
-                clipboard,
-                file_activity,
-            ):
+            if system is None:
+                kernel_error = self._kernel_mgr.last_error()
+                return {
+                    "ok": False,
+                    "error": "kernel_boot_failed",
+                    "kernel_error": kernel_error,
+                    "started": [],
+                    "errors": [],
+                    "present": present,
+                    "wanted": wanted,
+                }
+
+            # Pull capabilities with "has" checks where possible to avoid raising when a
+            # capability is not registered.
+            capture = system.get("capture.source") if hasattr(system, "has") and system.has("capture.source") else None
+            screenshot = system.get("capture.screenshot") if hasattr(system, "has") and system.has("capture.screenshot") else None
+            audio = system.get("capture.audio") if hasattr(system, "has") and system.has("capture.audio") else None
+            input_tracker = system.get("tracking.input") if hasattr(system, "has") and system.has("tracking.input") else None
+            window_meta = system.get("window.metadata") if hasattr(system, "has") and system.has("window.metadata") else None
+            cursor_tracker = system.get("tracking.cursor") if hasattr(system, "has") and system.has("tracking.cursor") else None
+            clipboard = system.get("tracking.clipboard") if hasattr(system, "has") and system.has("tracking.clipboard") else None
+            file_activity = system.get("tracking.file_activity") if hasattr(system, "has") and system.has("tracking.file_activity") else None
+
+            present = {
+                "capture.source": {"present": capture is not None, "providers": _providers(capture), "startable": _startable(capture)[0]},
+                "capture.screenshot": {"present": screenshot is not None, "providers": _providers(screenshot), "startable": _startable(screenshot)[0]},
+                "capture.audio": {"present": audio is not None, "providers": _providers(audio), "startable": _startable(audio)[0]},
+                "tracking.input": {"present": input_tracker is not None, "providers": _providers(input_tracker), "startable": _startable(input_tracker)[0]},
+                "window.metadata": {"present": window_meta is not None, "providers": _providers(window_meta), "startable": _startable(window_meta)[0]},
+                "tracking.cursor": {"present": cursor_tracker is not None, "providers": _providers(cursor_tracker), "startable": _startable(cursor_tracker)[0]},
+                "tracking.clipboard": {"present": clipboard is not None, "providers": _providers(clipboard), "startable": _startable(clipboard)[0]},
+                "tracking.file_activity": {"present": file_activity is not None, "providers": _providers(file_activity), "startable": _startable(file_activity)[0]},
+            }
+
+            # (name, component, should_start, required)
+            #
+            # Trackers are optional for capture+ingest: capture must never be blocked due
+            # to missing peripheral metadata providers. However, they still must respect
+            # config "wanted" flags (do not start when disabled).
+            components: list[tuple[str, Any, bool, bool]] = [
+                ("capture.source", capture, want_source, want_source),
+                ("capture.screenshot", screenshot, want_screenshot, want_screenshot),
+                ("capture.audio", audio, want_audio, want_audio),
+                ("tracking.input", input_tracker, want_input, False),
+                ("window.metadata", window_meta, want_window_meta, False),
+                ("tracking.cursor", cursor_tracker, want_cursor, False),
+                ("tracking.clipboard", clipboard, want_clipboard, False),
+                ("tracking.file_activity", file_activity, want_file_activity, False),
+            ]
+
+            for name, component, should_start, required in components:
                 if component is None:
+                    if required:
+                        errors.append({"component": name, "error": "missing"})
                     continue
-                if hasattr(component, "start"):
-                    try:
-                        component.start()
-                        started = True
-                    except Exception:
-                        continue
+                if not should_start:
+                    continue
+                ok_start, start_issue = _startable(component)
+                if not ok_start:
+                    if required:
+                        errors.append({"component": name, "error": start_issue or "not_startable"})
+                    continue
+                try:
+                    start_fn = getattr(component, "start")
+                except Exception as exc:
+                    if required:
+                        errors.append({"component": name, "error": f"start_attr_error:{type(exc).__name__}:{exc}"})
+                    continue
+                try:
+                    start_fn()
+                    started_names.append(name)
+                except Exception as exc:
+                    if required:
+                        errors.append({"component": name, "error": f"{type(exc).__name__}: {exc}"})
+                    continue
+
+        started = bool(started_names)
         self._run_active = started
+        if errors:
+            return {
+                "ok": False,
+                "error": "component_start_failed",
+                "started": started_names,
+                "errors": errors,
+                "present": present,
+                "wanted": wanted,
+            }
+        if not started:
+            return {
+                "ok": False,
+                "error": "no_components_started",
+                "started": [],
+                "errors": [],
+                "present": present,
+                "wanted": wanted,
+            }
+        return {"ok": True, "started": started_names, "errors": [], "present": present, "wanted": wanted}
 
     def _stop_components(self) -> None:
         with self._kernel_mgr.session() as system:
@@ -825,8 +1438,63 @@ class UXFacade:
     def run_start(self) -> dict[str, Any]:
         with self._pause_lock:
             self._clear_pause_locked()
-        self._start_components()
-        return {"ok": True, "running": True}
+        # If capture is not configured, fail fast with a clear message. This repo
+        # treats capture+ingest as an external (Windows sidecar) responsibility by
+        # default.
+        try:
+            capture_cfg = self._config.get("capture") if isinstance(self._config.get("capture"), dict) else {}
+            want_screenshot = bool((capture_cfg.get("screenshot") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_audio = bool((capture_cfg.get("audio") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_source = bool((capture_cfg.get("video") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            input_cfg = capture_cfg.get("input_tracking", {}) if isinstance(capture_cfg, dict) else {}
+            input_mode = str(input_cfg.get("mode") or "").strip().lower()
+            want_input = bool(input_mode and input_mode not in {"off", "disabled", "none"})
+            want_window_meta = bool((capture_cfg.get("window_metadata") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_cursor = bool((capture_cfg.get("cursor") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_clipboard = bool((capture_cfg.get("clipboard") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            want_file_activity = bool((capture_cfg.get("file_activity") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
+            if not any((want_source, want_screenshot, want_audio, want_input, want_window_meta, want_cursor, want_clipboard, want_file_activity)):
+                return {
+                    "ok": False,
+                    "error": "capture_disabled",
+                    "running": False,
+                    "hint": "use_windows_sidecar_contract",
+                }
+        except Exception:
+            # If config is malformed, fall through to existing error handling.
+            pass
+        # Fail closed: require explicit capture consent if configured.
+        try:
+            privacy_cfg = self._config.get("privacy", {}) if isinstance(self._config, dict) else {}
+            capture_cfg = privacy_cfg.get("capture", {}) if isinstance(privacy_cfg, dict) else {}
+            require_consent = bool(capture_cfg.get("require_consent", True))
+            if require_consent:
+                from autocapture_nx.kernel.consent import load_capture_consent
+
+                data_dir = str(self._config.get("storage", {}).get("data_dir", "data"))
+                consent = load_capture_consent(data_dir=data_dir)
+                if not consent.accepted:
+                    return {"ok": False, "error": "consent_required", "running": False}
+        except Exception:
+            return {"ok": False, "error": "consent_check_failed", "running": False}
+
+        start_result = self._start_components()
+        if not bool(start_result.get("ok", False)):
+            return {"ok": False, "error": str(start_result.get("error") or "capture_start_failed"), "details": start_result, "running": False}
+        # Ledger an operator capture start event (append-only).
+        with self._kernel_mgr.session() as system:
+            builder = system.get("event.builder") if system and hasattr(system, "get") else None
+            if builder is not None and hasattr(builder, "ledger_entry"):
+                try:
+                    builder.ledger_entry(
+                        "operator.capture.start",
+                        inputs=[],
+                        outputs=[],
+                        payload={"event": "capture.start"},
+                    )
+                except Exception:
+                    pass
+        return {"ok": True, "running": True, "started": start_result.get("started")}
 
     def run_stop(self, *, preserve_pause: bool = False) -> dict[str, Any]:
         if not self._capture_controls_enabled():
@@ -835,6 +1503,18 @@ class UXFacade:
             with self._pause_lock:
                 self._clear_pause_locked()
         self._stop_components()
+        with self._kernel_mgr.session() as system:
+            builder = system.get("event.builder") if system and hasattr(system, "get") else None
+            if builder is not None and hasattr(builder, "ledger_entry"):
+                try:
+                    builder.ledger_entry(
+                        "operator.capture.stop",
+                        inputs=[],
+                        outputs=[],
+                        payload={"event": "capture.stop"},
+                    )
+                except Exception:
+                    pass
         return {"ok": True, "running": False}
 
     def run_pause(self, minutes: float) -> dict[str, Any]:
@@ -860,6 +1540,31 @@ class UXFacade:
                 self._pause_timer = timer
                 timer.start()
         return {"ok": True, "paused_until_utc": self._paused_until_utc}
+
+    def run_resume(self) -> dict[str, Any]:
+        """UX-02: idempotent resume (do not duplicate capture.start ledger entries)."""
+        if not self._capture_controls_enabled():
+            return {"ok": False, "error": "capture_controls_disabled"}
+        with self._pause_lock:
+            self._clear_pause_locked()
+        if self._run_active:
+            return {"ok": True, "running": True, "resumed": False}
+        start_result = self._start_components()
+        if not bool(start_result.get("ok", False)):
+            return {"ok": False, "error": str(start_result.get("error") or "capture_start_failed"), "details": start_result, "running": False}
+        with self._kernel_mgr.session() as system:
+            builder = system.get("event.builder") if system and hasattr(system, "get") else None
+            if builder is not None and hasattr(builder, "ledger_entry"):
+                try:
+                    builder.ledger_entry(
+                        "operator.capture.resume",
+                        inputs=[],
+                        outputs=[],
+                        payload={"event": "capture.resume"},
+                    )
+                except Exception:
+                    pass
+        return {"ok": True, "running": True, "resumed": True}
 
     def scheduler_status(self) -> dict[str, Any]:
         with self._kernel_mgr.session() as system:
@@ -901,7 +1606,7 @@ class UXFacade:
         with self._kernel_mgr.session() as system:
             config = system.config if hasattr(system, "config") else {}
             anchor_cfg = config.get("storage", {}).get("anchor", {})
-            anchor_path = Path(path) if path else Path(anchor_cfg.get("path", "data_anchor/anchors.ndjson"))
+            anchor_path = Path(path) if path else Path(anchor_cfg.get("path", "anchor/anchors.ndjson"))
             keyring = system.get("storage.keyring") if system and hasattr(system, "has") and system.has("storage.keyring") else None
             ok, errors = verify_anchors(anchor_path, keyring)
             return {"ok": ok, "errors": errors, "path": str(anchor_path)}
@@ -914,6 +1619,24 @@ class UXFacade:
             media = system.get("storage.media") if system is not None else None
             ok, errors = verify_evidence(metadata, media)
             return {"ok": ok, "errors": errors}
+
+    def integrity_scan(self) -> dict[str, Any]:
+        from autocapture.pillars.citable import integrity_scan
+
+        with self._kernel_mgr.session() as system:
+            config = system.config if hasattr(system, "config") else {}
+            storage_cfg = config.get("storage", {}) if isinstance(config, dict) else {}
+            data_dir = Path(storage_cfg.get("data_dir", "data"))
+            ledger_path = data_dir / "ledger.ndjson"
+            anchor_path = Path(storage_cfg.get("anchor", {}).get("path", "anchor/anchors.ndjson"))
+            keyring = system.get("storage.keyring") if system is not None and hasattr(system, "has") and system.has("storage.keyring") else None
+            return integrity_scan(
+                ledger_path=ledger_path,
+                anchor_path=anchor_path,
+                metadata=system.get("storage.metadata") if system is not None else None,
+                media=system.get("storage.media") if system is not None else None,
+                keyring=keyring,
+            )
 
     def citations_resolve(self, citations: list[dict[str, Any]]) -> dict[str, Any]:
         with self._kernel_mgr.session() as system:
@@ -938,7 +1661,7 @@ class UXFacade:
             storage_cfg = config.get("storage", {}) if isinstance(config, dict) else {}
             data_dir = storage_cfg.get("data_dir", "data")
             ledger_path = Path(data_dir) / "ledger.ndjson"
-            anchor_path = Path(storage_cfg.get("anchor", {}).get("path", "data_anchor/anchors.ndjson"))
+            anchor_path = Path(storage_cfg.get("anchor", {}).get("path", "anchor/anchors.ndjson"))
             report = export_proof_bundle(
                 metadata=system.get("storage.metadata"),
                 media=system.get("storage.media"),
@@ -954,7 +1677,9 @@ class UXFacade:
     def replay_proof_bundle(self, bundle_path: str) -> dict[str, Any]:
         from autocapture_nx.kernel.replay import replay_bundle
 
-        return asdict(replay_bundle(bundle_path))
+        with self._kernel_mgr.session() as system:
+            keyring = system.get("storage.keyring") if system.has("storage.keyring") else None
+            return asdict(replay_bundle(bundle_path, keyring=keyring))
 
     def storage_compact(self, *, dry_run: bool = False) -> dict[str, Any]:
         from autocapture.storage.compaction import compact_derived
@@ -1418,8 +2143,17 @@ class UXFacade:
                         idle_seconds = 0.0
                     can_run = idle_seconds >= idle_window
                 else:
-                    assume_idle = bool(system.config.get("runtime", {}).get("activity", {}).get("assume_idle_when_missing", False))
-                    can_run = assume_idle
+                    signal = None
+                    try:
+                        signal = load_activity_signal(system.config)
+                    except Exception:
+                        signal = None
+                    if signal is not None:
+                        idle_seconds = float(signal.idle_seconds)
+                        can_run = idle_seconds >= idle_window
+                    else:
+                        assume_idle = bool(system.config.get("runtime", {}).get("activity", {}).get("assume_idle_when_missing", False))
+                        can_run = assume_idle
             if not can_run:
                 return {
                     "ok": False,

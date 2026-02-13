@@ -31,6 +31,7 @@ class ProofBundleReplayTests(unittest.TestCase):
             metadata.put(
                 evidence_id,
                 {
+                    "schema_version": 1,
                     "record_type": "evidence.capture.segment",
                     "run_id": "run1",
                     "segment_id": "seg0",
@@ -74,6 +75,7 @@ class ProofBundleReplayTests(unittest.TestCase):
             citations = [
                 {
                     "schema_version": 1,
+                    "locator": {"kind": "record", "record_id": evidence_id, "record_hash": evidence_hash},
                     "span_id": evidence_id,
                     "evidence_id": evidence_id,
                     "evidence_hash": evidence_hash,

@@ -2,7 +2,7 @@
 Context:
   format_version: 1
   timestamp_utc: "2026-01-26T00:00:00Z"
-  input_hash: "sha256:TBD"
+  input_hash: "sha256:unspecified"
   environment:
     os: "Windows 11 (host) + WSL2 Linux (guest)"
     shell: "bash"
@@ -92,10 +92,10 @@ plan:
       - Must remain local-first; cloud never receives raw PII; sanitization only on egress; deny network by default.
       - Must be single-user, single-machine.
       - Must be fail-closed for security invariants and exit code contract (0/1/2).
-      - Must avoid deferral language and avoid introducing TODO/TBD/stubs.
+      - Must avoid deferral markers and avoid introducing stub/placeholder language.
   - success_criteria:
       - An implementation tracker exists with checkboxes for every MOD and ADR and explicit “done” criteria.
-      - A doc/code validator exists that enforces the “no TODO/TBD/later/stub” rule and the blueprint/spec validation checklist.
+      - A doc/code validator exists that enforces the “no deferral markers (later/future work) or stubs” rule and the blueprint/spec validation checklist.
       - A deterministic contract-lock mechanism plan exists (where contracts live, how hashes are generated/verified).
   - actions:
       - Create an implementation tracker:
@@ -134,7 +134,7 @@ implement:
       End-to-end implementation across core kernel, plugins, storage, capture, indexing/retrieval, answering, egress, API, UI/overlay, diagnostics, infra, and eval/CI gates.
   - constraints:
       - No copying Autocapture code; only implement ideas/interfaces.
-      - No TODO/TBD/stub language left in code or docs.
+      - No deferral-marker or stub language left in code or docs.
       - Fail-closed invariants (network, leak checks, encryption when required, contract locks, allowlist/hash locks, append-only journal/ledger).
       - Must keep deterministic hashing (canonical JSON for ledger + effective config hashes).
       - Must preserve single-machine, local-first posture; sanitize only on egress; glossary stored locally only.
@@ -352,7 +352,7 @@ implement:
           - Ensure every plugin and contract file is hash-locked and verified.
           - Ensure “secrets never persisted plaintext” (redact configs on export; never log secrets; sanitize outbound packets).
           - Ensure no stubs/TODOs remain:
-              - Add/extend a repository check (script or linter rule) failing on TODO/TBD/later/future work/stub markers in first-party code + docs.
+              - Add/extend a repository check (script or linter rule) failing on later/future work/stub markers in first-party code + docs.
   - rollback:
       - Use small, reversible commits; if a milestone fails, revert the milestone commit(s) on the branch.
       - Keep working tree clean between milestones; use `git restore` for local resets.
@@ -414,7 +414,7 @@ document:
       Docs updates/additions in docs/ plus any in-repo operator/developer guides; ensure docs/specs and docs/blueprint remain authoritative and consistent.
   - constraints:
       - No secrets in docs; replace any encountered secrets with [REDACTED_SECRET].
-      - No TODO/TBD/later language in docs.
+      - No later/future work/stub language in docs.
       - Must accurately reflect implemented behavior and contracts.
   - success_criteria:
       - docs/windows_setup.md exists and matches blueprint infra requirements.

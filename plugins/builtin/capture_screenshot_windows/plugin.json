@@ -30,6 +30,9 @@
     "raw_input": true
   },
   "plugin_id": "builtin.capture.screenshot.windows",
+  "provides": [
+    "capture.screenshot"
+  ],
   "required_capabilities": [
     "event.builder",
     "observability.logger",

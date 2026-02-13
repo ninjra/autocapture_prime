@@ -15,6 +15,11 @@
       "path": "plugin.py"
     }
   ],
+  "filesystem_policy": {
+    "readwrite": [
+      "{data_dir}"
+    ]
+  },
   "hash_lock": {
     "artifact_sha256": "",
     "manifest_sha256": ""
@@ -26,15 +31,13 @@
     "raw_input": false
   },
   "plugin_id": "builtin.observability.basic",
+  "provides": [
+    "observability.logger"
+  ],
   "required_capabilities": [],
   "settings_paths": [
     "observability",
     "storage"
   ],
-  "version": "0.1.0",
-  "filesystem_policy": {
-    "readwrite": [
-      "{data_dir}"
-    ]
-  }
+  "version": "0.1.0"
 }

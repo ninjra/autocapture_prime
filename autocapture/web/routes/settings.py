@@ -10,6 +10,7 @@ router = APIRouter()
 
 class ConfigPatch(BaseModel):
     patch: dict
+    confirm: str = ""
 
 
 class ConfigRevert(BaseModel):
@@ -23,7 +24,7 @@ def config_get(request: Request):
 
 @router.post("/api/config")
 def config_set(req: ConfigPatch, request: Request):
-    return request.app.state.facade.config_set(req.patch)
+    return request.app.state.facade.config_set(req.patch, confirm=req.confirm)
 
 
 @router.get("/api/settings/schema")
@@ -34,6 +35,11 @@ def settings_schema(request: Request):
 @router.get("/api/config/history")
 def config_history(request: Request, limit: int = 20):
     return request.app.state.facade.config_history(limit=limit)
+
+
+@router.get("/api/config/diff")
+def config_diff(request: Request):
+    return request.app.state.facade.config_diff()
 
 
 @router.post("/api/config/revert")

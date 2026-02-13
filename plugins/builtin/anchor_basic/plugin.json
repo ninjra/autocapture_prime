@@ -17,6 +17,11 @@
       "path": "plugin.py"
     }
   ],
+  "filesystem_policy": {
+    "readwrite": [
+      "{anchor_dir}"
+    ]
+  },
   "hash_lock": {
     "artifact_sha256": "",
     "manifest_sha256": ""
@@ -28,16 +33,14 @@
     "raw_input": false
   },
   "plugin_id": "builtin.anchor.basic",
+  "provides": [
+    "anchor.writer"
+  ],
   "required_capabilities": [
     "storage.keyring"
   ],
   "settings_paths": [
     "storage"
   ],
-  "version": "0.1.0",
-  "filesystem_policy": {
-    "readwrite": [
-      "{anchor_dir}"
-    ]
-  }
+  "version": "0.1.0"
 }

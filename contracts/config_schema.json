@@ -356,6 +356,9 @@
                 "assume_idle_when_missing": {
                   "type": "boolean"
                 },
+                "capture_when_idle": {
+                  "type": "boolean"
+                },
                 "check_interval_s": {
                   "type": "number"
                 },
@@ -472,6 +475,27 @@
         "screenshot": {
           "additionalProperties": false,
           "properties": {
+            "activity": {
+              "additionalProperties": false,
+              "properties": {
+                "active_interval_s": {
+                  "type": "number"
+                },
+                "active_window_s": {
+                  "type": "number"
+                },
+                "assume_active_when_missing": {
+                  "type": "boolean"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "idle_interval_s": {
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            },
             "backend": {
               "type": "string"
             },
@@ -508,9 +532,20 @@
             "include_cursor": {
               "type": "boolean"
             },
-            "include_cursor_shape": {
-              "type": "boolean"
-            },
+	            "include_cursor_shape": {
+	              "type": "boolean"
+	            },
+	            "media_fsync_policy": {
+	              "enum": [
+	                "none",
+	                "bulk",
+	                "critical"
+	              ],
+	              "type": "string"
+	            },
+	            "render_cursor": {
+	              "type": "boolean"
+	            },
             "monitor_index": {
               "type": "integer"
             },
@@ -766,6 +801,22 @@
           "additionalProperties": true,
           "type": "object"
         },
+        "rapidocr": {
+          "additionalProperties": false,
+          "properties": {
+            "det_model_path": {"type": ["string", "null"]},
+            "rec_model_path": {"type": ["string", "null"]},
+            "cls_model_path": {"type": ["string", "null"]},
+            "rec_keys_path": {"type": ["string", "null"]},
+            "use_cuda": {"type": ["boolean", "null"]},
+            "det_use_cuda": {"type": ["boolean", "null"]},
+            "rec_use_cuda": {"type": ["boolean", "null"]},
+            "cls_use_cuda": {"type": ["boolean", "null"]},
+            "max_image_side": {"type": ["integer", "null"]},
+            "max_threads": {"type": ["integer", "null"]}
+          },
+          "type": "object"
+        },
         "ocr_lang": {
           "type": [
             "string",
@@ -773,6 +824,12 @@
           ]
         },
         "ocr_oem": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ocr_max_image_side": {
           "type": [
             "integer",
             "null"
@@ -1099,6 +1156,9 @@
               },
               "type": "array"
             },
+            "inproc_allow_all": {
+              "type": "boolean"
+            },
             "inproc_justifications": {
               "additionalProperties": {
                 "type": "string"
@@ -1122,6 +1182,18 @@
             },
             "mode": {
               "type": "string"
+            },
+            "wsl_force_lazy_start": {
+              "type": "boolean"
+            },
+            "subprocess_spawn_concurrency": {
+              "type": "integer"
+            },
+            "subprocess_max_hosts": {
+              "type": "integer"
+            },
+            "subprocess_idle_ttl_s": {
+              "type": "number"
             },
             "offline_env": {
               "type": "boolean"
@@ -1242,12 +1314,32 @@
                 "type": "string"
               },
               "type": "array"
+            },
+            "localhost_allowed_plugin_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             }
           },
           "required": [
             "network_allowed_plugin_ids"
           ],
           "type": "object"
+        },
+        "quarantine": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": true
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
         },
         "safe_mode": {
           "type": "boolean"
@@ -1283,6 +1375,18 @@
     "privacy": {
       "additionalProperties": false,
       "properties": {
+        "capture": {
+          "additionalProperties": false,
+          "properties": {
+            "require_consent": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "require_consent"
+          ],
+          "type": "object"
+        },
         "cloud": {
           "additionalProperties": false,
           "properties": {
@@ -1313,6 +1417,12 @@
             },
             "approval_ttl_s": {
               "type": "number"
+            },
+            "destination_allowlist": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             },
             "default_sanitize": {
               "type": "boolean"
@@ -1397,7 +1507,8 @@
       },
       "required": [
         "egress",
-        "cloud"
+        "cloud",
+        "capture"
       ],
       "type": "object"
     },
@@ -1442,6 +1553,9 @@
               "type": "integer"
             },
             "max_concurrency_gpu": {
+              "type": "integer"
+            },
+            "batch_size": {
               "type": "integer"
             },
             "max_items_per_run": {
@@ -1807,6 +1921,12 @@
             "enabled": {
               "type": "boolean"
             },
+            "allow_ocr": {
+              "type": "boolean"
+            },
+            "allow_vlm": {
+              "type": "boolean"
+            },
             "heavy_always": {
               "type": "boolean"
             },
@@ -1827,6 +1947,9 @@
             },
             "ocr_max_tokens": {
               "type": "integer"
+            },
+            "ocr_prefer_full_frame": {
+              "type": "boolean"
             },
             "ocr_min_conf_bp": {
               "type": "integer"
@@ -2321,6 +2444,12 @@
         "activity": {
           "additionalProperties": false,
           "properties": {
+            "signal_path": {
+              "type": "string"
+            },
+            "sidecar_signal_path": {
+              "type": "string"
+            },
             "assume_idle_when_missing": {
               "type": "boolean"
             },
@@ -2340,6 +2469,12 @@
               "type": "number"
             },
             "screensaver_idle_seconds": {
+              "type": "integer"
+            },
+            "screensaver_trigger_enabled": {
+              "type": "boolean"
+            },
+            "screensaver_trigger_idle_seconds": {
               "type": "integer"
             }
           },
@@ -2754,6 +2889,18 @@
         "encryption_enabled": {
           "type": "boolean"
         },
+        "sqlcipher": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled"
+          ],
+          "type": "object"
+        },
         "entity_map": {
           "additionalProperties": false,
           "properties": {
@@ -2835,6 +2982,47 @@
         "spool_dir": {
           "type": "string"
         },
+        "spool_overflow": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "dir": {
+              "type": "string"
+            },
+            "drain_interval_s": {
+              "type": "number"
+            },
+            "max_drain_per_tick": {
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "spillover": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "media_dirs": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "on_level": {
+              "enum": [
+                "warn",
+                "soft",
+                "critical"
+              ],
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
         "vector_path": {
           "type": "string"
         }
@@ -2903,6 +3091,21 @@
         "bind_port",
         "telemetry_interval_s"
       ],
+      "type": "object"
+    },
+    "tools": {
+      "additionalProperties": false,
+      "properties": {
+        "fixture": {
+          "additionalProperties": false,
+          "properties": {
+            "probe_all_providers": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        }
+      },
       "type": "object"
     }
   },

@@ -62,6 +62,9 @@ class RuntimeConductorTests(unittest.TestCase):
                     "preempt_grace_ms": 0,
                     "min_idle_seconds": 10,
                     "allow_heavy_during_active": False,
+                    # Keep this unit test focused on idle gating, not host resource noise.
+                    "cpu_max_utilization": 1.0,
+                    "ram_max_utilization": 1.0,
                 },
                 "telemetry": {"enabled": False, "emit_interval_s": 5},
             },
@@ -97,6 +100,9 @@ class RuntimeConductorTests(unittest.TestCase):
                     "preempt_grace_ms": 0,
                     "min_idle_seconds": 5,
                     "allow_heavy_during_active": False,
+                    # Keep this unit test focused on job-window limits, not host resource noise.
+                    "cpu_max_utilization": 1.0,
+                    "ram_max_utilization": 1.0,
                 },
                 "telemetry": {"enabled": False, "emit_interval_s": 5},
             },

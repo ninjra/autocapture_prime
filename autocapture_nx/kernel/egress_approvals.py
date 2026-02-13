@@ -57,7 +57,8 @@ class EgressApprovalStore:
         if not self._path or not os.path.exists(self._path):
             return
         try:
-            payload = json.loads(open(self._path, "r", encoding="utf-8").read())
+            with open(self._path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
         except Exception:
             return
         pending = payload.get("pending", []) if isinstance(payload, dict) else []

@@ -13,6 +13,15 @@ def _default_config() -> dict:
 def _write_provider(root: Path, plugin_id: str, kind: str, provides: list[str] | None = None) -> None:
     plugin_dir = root / plugin_id.replace(".", "_")
     plugin_dir.mkdir(parents=True, exist_ok=True)
+    provides = provides or []
+    provide_lines = ""
+    for cap in provides:
+        cap_s = str(cap).strip()
+        if not cap_s:
+            continue
+        # Keep indentation consistent with the method body (8 spaces). Extra indent
+        # triggers a syntax error in the generated plugin.
+        provide_lines += f"        caps[\"{cap_s}\"] = self\n"
     (plugin_dir / "plugin.py").write_text(
         "class Provider:\n"
         "    def ping(self):\n"
@@ -22,7 +31,9 @@ def _write_provider(root: Path, plugin_id: str, kind: str, provides: list[str] |
         "        return {\"remaining_ms\": 0}\n"
         "\n"
         "    def capabilities(self):\n"
-        f"        return {{\"{kind}\": self}}\n"
+        f"        caps = {{\"{kind}\": self}}\n"
+        f"{provide_lines}"
+        "        return caps\n"
         "\n"
         "def create_plugin(plugin_id, context):\n"
         "    return Provider()\n",
@@ -35,7 +46,7 @@ def _write_provider(root: Path, plugin_id: str, kind: str, provides: list[str] |
         "entrypoints": [{"kind": kind, "id": "default", "path": "plugin.py", "callable": "create_plugin"}],
         "permissions": {"filesystem": "read", "gpu": False, "raw_input": False, "network": False},
         "required_capabilities": [],
-        "provides": provides or [],
+        "provides": provides,
         "compat": {"requires_kernel": ">=0.0.0", "requires_schema_versions": [1]},
         "depends_on": [],
         "hash_lock": {"manifest_sha256": "", "artifact_sha256": ""},
@@ -73,7 +84,7 @@ def _write_dependent(root: Path, plugin_id: str, kind: str, required: str) -> No
 
 class PluginDependencyOrderTests(unittest.TestCase):
     def test_required_capability_loads_provider_first(self) -> None:
-        with tempfile.TemporaryDirectory(dir=".") as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             provider_id = "test.runtime.governor"
             dependent_id = "test.runtime.scheduler"
@@ -97,7 +108,7 @@ class PluginDependencyOrderTests(unittest.TestCase):
             self.assertEqual([plugin.plugin_id for plugin in loaded], [provider_id, dependent_id])
 
     def test_required_capability_uses_provides_hint(self) -> None:
-        with tempfile.TemporaryDirectory(dir=".") as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             provider_id = "test.storage.provider"
             dependent_id = "test.anchor.consumer"
@@ -105,7 +116,11 @@ class PluginDependencyOrderTests(unittest.TestCase):
                 root,
                 provider_id,
                 "storage.metadata_store",
-                provides=["storage.keyring"],
+                # On WSL, subprocess hosting defaults to lazy-start, so the registry relies on
+                # manifest `provides` to seed capability keys without spawning the host.
+                # Include the entrypoint kind itself (denylisted from implicit seeding) plus
+                # the additional capability needed by the dependent.
+                provides=["storage.metadata_store", "storage.keyring"],
             )
             _write_dependent(root, dependent_id, "anchor.writer", "storage.keyring")
 

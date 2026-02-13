@@ -562,31 +562,61 @@ class EncryptedBlobStore:
                 except OSError:
                     pass
 
-    def put(self, record_id: str, data: bytes, *, ts_utc: str | None = None) -> None:
-        self.put_replace(record_id, data, ts_utc=ts_utc)
+    def put(
+        self,
+        record_id: str,
+        data: bytes,
+        *,
+        ts_utc: str | None = None,
+        fsync_policy: str | None = None,
+    ) -> None:
+        self.put_replace(record_id, data, ts_utc=ts_utc, fsync_policy=fsync_policy)
 
-    def put_replace(self, record_id: str, data: bytes, *, ts_utc: str | None = None) -> None:
+    def put_replace(
+        self,
+        record_id: str,
+        data: bytes,
+        *,
+        ts_utc: str | None = None,
+        fsync_policy: str | None = None,
+    ) -> None:
         key_id, key = self._key_provider.active()
         blob = encrypt_bytes_raw(key, data, key_id=key_id)
         path = self._path_for_write(record_id, ts_utc, stream=False)
         existed = any(os.path.exists(path) for path in self._path_candidates(record_id))
         self._remove_existing(record_id)
-        _atomic_write_bytes(path, _pack_blob(blob), fsync_policy=self._fsync_policy)
+        policy = _FsyncPolicy.normalize(fsync_policy) if fsync_policy else self._fsync_policy
+        _atomic_write_bytes(path, _pack_blob(blob), fsync_policy=policy)
         self._index[record_id] = path
         if self._count_cache is not None and not existed:
             self._count_cache += 1
 
-    def put_new(self, record_id: str, data: bytes, *, ts_utc: str | None = None) -> None:
+    def put_new(
+        self,
+        record_id: str,
+        data: bytes,
+        *,
+        ts_utc: str | None = None,
+        fsync_policy: str | None = None,
+    ) -> None:
         for path in self._path_candidates(record_id):
             if os.path.exists(path):
                 raise FileExistsError(f"Blob record already exists: {record_id}")
-        self.put_replace(record_id, data, ts_utc=ts_utc)
+        self.put_replace(record_id, data, ts_utc=ts_utc, fsync_policy=fsync_policy)
 
-    def put_stream(self, record_id: str, stream, chunk_size: int = 1024 * 1024, *, ts_utc: str | None = None) -> None:
+    def put_stream(
+        self,
+        record_id: str,
+        stream,
+        chunk_size: int = 1024 * 1024,
+        *,
+        ts_utc: str | None = None,
+        fsync_policy: str | None = None,
+    ) -> None:
         for path in self._path_candidates(record_id):
             if os.path.exists(path):
                 raise FileExistsError(f"Blob record already exists: {record_id}")
-        self.put_stream_replace(record_id, stream, chunk_size=chunk_size, ts_utc=ts_utc)
+        self.put_stream_replace(record_id, stream, chunk_size=chunk_size, ts_utc=ts_utc, fsync_policy=fsync_policy)
 
     def put_stream_replace(
         self,
@@ -595,11 +625,13 @@ class EncryptedBlobStore:
         chunk_size: int = 1024 * 1024,
         *,
         ts_utc: str | None = None,
+        fsync_policy: str | None = None,
     ) -> None:
         key_id, key = self._key_provider.active()
         path = self._path_for_write(record_id, ts_utc, stream=True)
         existed = any(os.path.exists(path) for path in self._path_candidates(record_id))
         self._remove_existing(record_id)
+        policy = _FsyncPolicy.normalize(fsync_policy) if fsync_policy else self._fsync_policy
         tmp_path = f"{path}.tmp"
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(tmp_path, "wb") as handle:
@@ -617,16 +649,23 @@ class EncryptedBlobStore:
                 handle.write(blob.nonce)
                 handle.write(struct.pack(">I", len(blob.ciphertext)))
                 handle.write(blob.ciphertext)
-            _fsync_file(handle, self._fsync_policy)
+            _fsync_file(handle, policy)
         os.replace(tmp_path, path)
-        _fsync_dir(path, self._fsync_policy)
+        _fsync_dir(path, policy)
         self._index[record_id] = path
         if self._count_cache is not None and not existed:
             self._count_cache += 1
 
-    def put_path(self, record_id: str, path: str, *, ts_utc: str | None = None) -> None:
+    def put_path(
+        self,
+        record_id: str,
+        path: str,
+        *,
+        ts_utc: str | None = None,
+        fsync_policy: str | None = None,
+    ) -> None:
         with open(path, "rb") as handle:
-            self.put_stream_replace(record_id, handle, ts_utc=ts_utc)
+            self.put_stream_replace(record_id, handle, ts_utc=ts_utc, fsync_policy=fsync_policy)
 
     def get(self, record_id: str, default: bytes | None = None) -> bytes | None:
         for path in self._path_candidates(record_id):

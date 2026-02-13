@@ -17,6 +17,7 @@ from autocapture.runtime.gpu import release_vram
 from autocapture.runtime.gpu_guard import evaluate_gpu_lag_guard
 from autocapture.runtime.gpu_monitor import sample_gpu
 from autocapture.runtime.scheduler import Job, JobStepResult, Scheduler
+from autocapture_nx.kernel.activity_signal import load_activity_signal
 from autocapture_nx.kernel.audit import append_audit_event
 from autocapture_nx.kernel.telemetry import record_telemetry
 from autocapture_nx.windows.fullscreen import fullscreen_snapshot
@@ -173,6 +174,17 @@ class RuntimeConductor:
                 user_active = bool(signal.get("user_active", user_active))
                 activity_score = float(signal.get("activity_score", 0.0) or 0.0)
                 activity_recent = bool(signal.get("recent_activity", False))
+        elif self._input_tracker is None:
+            # Sidecar capture/input means we must rely on an external activity
+            # signal file for foreground gating (fail closed by default).
+            signal = None
+            try:
+                signal = load_activity_signal(self._config)
+            except Exception:
+                signal = None
+            if signal is not None:
+                idle_seconds = float(signal.idle_seconds)
+                user_active = bool(signal.user_active)
         if fixture_override:
             idle_seconds = float("inf")
             user_active = False

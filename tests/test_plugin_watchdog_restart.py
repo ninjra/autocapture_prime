@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -50,7 +51,11 @@ def _write_slow_plugin(root: Path, plugin_id: str) -> None:
 
 class PluginWatchdogTests(unittest.TestCase):
     def test_watchdog_restarts_on_timeout(self) -> None:
-        with tempfile.TemporaryDirectory(dir=".") as tmp:
+        # MOD-021 low-resource mode forces in-proc hosting for WSL stability; the
+        # subprocess watchdog is only meaningful when subprocess hosting is enabled.
+        if os.getenv("AUTOCAPTURE_PLUGINS_HOSTING_MODE", "").strip().lower() == "inproc":
+            self.skipTest("subprocess hosting disabled in this environment")
+        with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             plugin_id = "test.slow.watchdog"
             _write_slow_plugin(root, plugin_id)
@@ -75,12 +80,20 @@ class PluginWatchdogTests(unittest.TestCase):
             hosting["sanitize_env"] = True
             hosting["cache_dir"] = str(root / "cache")
 
-            registry = PluginRegistry(config, safe_mode=False)
-            _loaded, caps = registry.load_plugins()
-            slow = caps.get("slow.cap")
-            with self.assertRaises(PluginError):
-                slow.sleep(1.0)
-            self.assertEqual(slow.ping(), {"ok": True})
+            original_hosting_mode = os.environ.get("AUTOCAPTURE_PLUGINS_HOSTING_MODE")
+            os.environ["AUTOCAPTURE_PLUGINS_HOSTING_MODE"] = "subprocess"
+            try:
+                registry = PluginRegistry(config, safe_mode=False)
+                _loaded, caps = registry.load_plugins()
+                slow = caps.get("slow.cap")
+                with self.assertRaises(PluginError):
+                    slow.sleep(1.0)
+                self.assertEqual(slow.ping(), {"ok": True})
+            finally:
+                if original_hosting_mode is None:
+                    os.environ.pop("AUTOCAPTURE_PLUGINS_HOSTING_MODE", None)
+                else:
+                    os.environ["AUTOCAPTURE_PLUGINS_HOSTING_MODE"] = original_hosting_mode
 
 
 if __name__ == "__main__":

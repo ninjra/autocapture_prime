@@ -29,4 +29,9 @@ def run_pause(req: PauseRequest, request: Request):
 
 @router.post("/api/run/resume")
 def run_resume(request: Request):
-    return request.app.state.facade.run_start()
+    return request.app.state.facade.run_resume()
+
+
+@router.get("/api/run/detail")
+def run_detail(request: Request):
+    return request.app.state.facade.run_detail()

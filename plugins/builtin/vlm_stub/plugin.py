@@ -70,6 +70,10 @@ class VLMStub(PluginBase):
         layout = _heuristic_layout(image_bytes, image)
         payload: dict[str, Any] = {"text": json.dumps(layout), "layout": layout, "backend": self._backend}
         caption = self._caption_from_model(image)
+        # `_caption_from_model()` may load a bundle-backed toy model or a local
+        # transformers pipeline, which mutates `self._backend`. Ensure the
+        # emitted payload reflects the backend that actually produced captioning.
+        payload["backend"] = self._backend
         if caption:
             payload["caption"] = caption
             payload["text_plain"] = caption

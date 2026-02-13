@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -44,9 +45,58 @@ def _resolve_path(path: str | Path) -> Path:
 
 
 def _collect_evidence(metadata) -> list[str]:
-    ids = []
-    for key in getattr(metadata, "keys", lambda: [])():
-        record = metadata.get(key, {})
+    def _safe_attr(name: str):
+        try:
+            return getattr(metadata, name)
+        except Exception:
+            return None
+
+    def _safe_call(name: str, *args, **kwargs):
+        fn = _safe_attr(name)
+        if fn is None or not callable(fn):
+            return None
+        try:
+            return fn(*args, **kwargs)
+        except Exception:
+            return None
+
+    # Some capability providers may wrap the underlying store (fanout/fallback).
+    # Prefer a single primary provider if exposed (keeps downstream logic simple).
+    primary = _safe_call("primary")
+    if isinstance(primary, tuple) and len(primary) == 2:
+        _pid, provider = primary
+        if provider is not None:
+            metadata = provider
+
+    raw_ids = _safe_call("keys")
+    # If the provider is a fanout proxy, `keys()` can return per-provider results.
+    if isinstance(raw_ids, list) and raw_ids and all(isinstance(x, dict) for x in raw_ids):
+        flattened: list[str] = []
+        for item in raw_ids:
+            if not isinstance(item, dict):
+                continue
+            result = item.get("result")
+            if isinstance(result, list):
+                flattened.extend(str(v) for v in result)
+        raw_ids = flattened
+
+    # Fall back to a bounded time-window scan when `.keys()` is unavailable due to
+    # subprocess method allowlists / capability wrappers.
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raw_ids = _safe_call("query_time_window", None, None, 5000)
+
+    ids: list[str] = []
+    if not isinstance(raw_ids, list):
+        return ids
+
+    get_fn = _safe_attr("get")
+    if get_fn is None or not callable(get_fn):
+        return ids
+    for key in raw_ids:
+        try:
+            record = get_fn(key, {})
+        except Exception:
+            continue
         if not isinstance(record, dict):
             continue
         record_type = str(record.get("record_type", ""))
@@ -63,6 +113,28 @@ def _wait_for_evidence(metadata, *, timeout_s: float = 10.0) -> list[str]:
             return ids
         time.sleep(0.1)
     return []
+
+
+def _debug_storage_metadata(metadata) -> dict[str, Any]:
+    payload: dict[str, Any] = {"type": type(metadata).__name__}
+    for name in ("keys", "get", "query_time_window", "primary"):
+        try:
+            attr = getattr(metadata, name)
+            payload[f"has_{name}"] = True
+            payload[f"{name}_callable"] = bool(callable(attr))
+        except Exception as exc:
+            payload[f"has_{name}"] = False
+            payload[f"{name}_error"] = f"{type(exc).__name__}: {exc}"
+    try:
+        if callable(getattr(metadata, "keys", None)):
+            keys = metadata.keys()
+            payload["keys_type"] = type(keys).__name__
+            payload["keys_len"] = len(keys) if hasattr(keys, "__len__") else None
+            if isinstance(keys, list):
+                payload["keys_sample"] = [str(x) for x in keys[:3]]
+    except Exception as exc:
+        payload["keys_call_error"] = f"{type(exc).__name__}: {exc}"
+    return payload
 
 
 def _sha256_text(text: str) -> str:
@@ -171,6 +243,7 @@ def _build_plugin_status(
     load_report: dict[str, Any],
     probe_results: list[dict[str, Any]],
     trace: dict[str, Any],
+    expected_plugin_ids: set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     loaded = set(load_report.get("loaded", []) if isinstance(load_report, dict) else [])
     failed = set(load_report.get("failed", []) if isinstance(load_report, dict) else [])
@@ -198,8 +271,11 @@ def _build_plugin_status(
 
     statuses: list[dict[str, Any]] = []
     skipped_without_reason: list[str] = []
+    expected = set(expected_plugin_ids or [])
     for item in manifests:
         pid = item["plugin_id"]
+        if expected and pid not in expected:
+            continue
         status = "unknown"
         if pid in loaded:
             status = "loaded"
@@ -226,18 +302,143 @@ def _build_plugin_status(
     return statuses, skipped_without_reason
 
 
+def _expected_plugin_ids(user_config: dict[str, Any]) -> set[str]:
+    plugins_cfg = user_config.get("plugins", {}) if isinstance(user_config, dict) else {}
+    if not isinstance(plugins_cfg, dict):
+        return set()
+    if bool(plugins_cfg.get("safe_mode", False)):
+        raw = plugins_cfg.get("default_pack", [])
+        if isinstance(raw, list):
+            return {str(pid).strip() for pid in raw if str(pid).strip()}
+        return set()
+    enabled = plugins_cfg.get("enabled", {})
+    if not isinstance(enabled, dict):
+        return set()
+    return {str(pid).strip() for pid, on in enabled.items() if bool(on) and str(pid).strip()}
+
+
+def _percentile(values: list[int], pct: float) -> int | None:
+    if not values:
+        return None
+    values = sorted(values)
+    if len(values) == 1:
+        return int(values[0])
+    pct = max(0.0, min(100.0, float(pct)))
+    rank = (pct / 100.0) * (len(values) - 1)
+    low = int(rank)
+    high = min(low + 1, len(values) - 1)
+    frac = rank - low
+    return int(round(values[low] + (values[high] - values[low]) * frac))
+
+
+def _plugin_timing_summary(trace: dict[str, Any]) -> dict[str, Any]:
+    events = trace.get("events", []) if isinstance(trace.get("events", []), list) else []
+    by_key: dict[tuple[str, str, str], list[int]] = {}
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        pid = str(ev.get("plugin_id") or "")
+        cap = str(ev.get("capability") or "")
+        method = str(ev.get("method") or "")
+        if not pid or not cap or not method:
+            continue
+        try:
+            dur = int(ev.get("duration_ms") or 0)
+        except Exception:
+            dur = 0
+        by_key.setdefault((pid, cap, method), []).append(max(0, dur))
+    rows: list[dict[str, Any]] = []
+    for (pid, cap, method), durs in sorted(by_key.items()):
+        durs_sorted = sorted(durs)
+        rows.append(
+            {
+                "plugin_id": pid,
+                "capability": cap,
+                "method": method,
+                "calls": len(durs_sorted),
+                "total_ms": int(sum(durs_sorted)),
+                "p50_ms": _percentile(durs_sorted, 50.0),
+                "p95_ms": _percentile(durs_sorted, 95.0),
+                "max_ms": int(durs_sorted[-1]) if durs_sorted else None,
+            }
+        )
+    return {"rows": rows, "unique_keys": len(rows), "events": len(events)}
+
+
+def _env_bool(name: str, *, default: bool = False) -> bool:
+    raw = str(os.environ.get(name, "") or "").strip().casefold()
+    if not raw:
+        return bool(default)
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _safe_component(value: str) -> str:
+    text = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip())
+    text = text.strip("._-")
+    return text[:96] if text else ""
+
+
+def _emit_log(log_json: bool, event: str, **fields: Any) -> None:
+    if bool(log_json):
+        payload: dict[str, Any] = {
+            "ts_utc": datetime.now(timezone.utc).isoformat(),
+            "event": str(event),
+        }
+        for key, value in fields.items():
+            payload[str(key)] = value
+        print(json.dumps(payload, sort_keys=True), flush=True)
+        return
+    if fields:
+        extras = " ".join(f"{k}={v}" for k, v in fields.items())
+        print(f"[fixture] {event} {extras}".rstrip())
+    else:
+        print(f"[fixture] {event}")
+    sys.stdout.flush()
+
+
+def _write_ready_file(path: str, payload: dict[str, Any]) -> None:
+    if not path:
+        return
+    ready_path = _resolve_path(path)
+    ready_path.parent.mkdir(parents=True, exist_ok=True)
+    ready_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     if not os.environ.get("AUTOCAPTURE_PYTHON_EXE"):
         os.environ["AUTOCAPTURE_PYTHON_EXE"] = sys.executable
+    # Fixture runs must stay WSL-stable: force in-process plugin hosting to avoid
+    # spawning many subprocess plugin hosts (each with a large RSS).
+    os.environ.setdefault("AUTOCAPTURE_PLUGINS_HOSTING_MODE", "inproc")
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", default="docs/test sample/fixture_manifest.json")
-    parser.add_argument("--output-dir", default="artifacts/fixture_runs")
+    parser.add_argument("--output-dir", "--out", dest="output_dir", default=os.environ.get("AP_OUT_DIR", "artifacts/fixture_runs"))
+    parser.add_argument("--run-id", default=os.environ.get("AP_RUN_ID", ""))
+    parser.add_argument("--data-root", default=os.environ.get("AP_DATA_ROOT", ""))
+    parser.add_argument("--no-network", action="store_true", default=_env_bool("AP_NO_NETWORK", default=False))
+    parser.add_argument("--ready-file", default=os.environ.get("AP_READY_FILE", ""))
+    parser.add_argument("--log-json", action="store_true", default=_env_bool("AP_LOG_JSON", default=False))
     parser.add_argument("--config-template", default="tools/fixture_config_template.json")
     parser.add_argument("--capture-timeout-s", type=float, default=10.0)
     parser.add_argument("--idle-timeout-s", type=float, default=60.0)
     parser.add_argument("--idle-max-steps", type=int, default=20)
     parser.add_argument("--input-dir", default="")
     parser.add_argument("--force-idle", action="store_true")
+    parser.add_argument(
+        "--capture-container",
+        default="",
+        help="Override capture.video.container (e.g. zip, avi_mjpeg, ffmpeg_mp4)",
+    )
+    parser.add_argument(
+        "--stub-frame-format",
+        default="",
+        help="Override capture.stub.frame_format (e.g. png, jpeg)",
+    )
+    parser.add_argument(
+        "--video-frame-format",
+        default="",
+        help="Override capture.video.frame_format (e.g. png, jpeg, rgb)",
+    )
     args = parser.parse_args(argv)
 
     manifest_path = _resolve_path(args.manifest)
@@ -258,10 +459,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: no frames found in {frames_dir}")
         return 2
 
-    run_dir = _resolve_path(args.output_dir) / _utc_stamp()
+    run_id_override = str(args.run_id or "").strip()
+    run_token = _safe_component(run_id_override) if run_id_override else _utc_stamp()
+    run_dir = _resolve_path(args.output_dir) / run_token
     config_dir = run_dir / "config"
-    data_dir = run_dir / "data"
-    run_id = f"fixture_{run_dir.name}"
+    if str(args.data_root or "").strip():
+        data_dir = _resolve_path(str(args.data_root).strip()) / run_token
+    else:
+        data_dir = run_dir / "data"
+    run_id = run_id_override if run_id_override else f"fixture_{run_dir.name}"
 
     user_config = build_user_config(
         args.config_template,
@@ -270,11 +476,31 @@ def main(argv: list[str] | None = None) -> int:
         run_id=run_id,
     )
     if isinstance(user_config, dict):
+        capture_cfg = user_config.setdefault("capture", {})
+        if isinstance(capture_cfg, dict):
+            if args.stub_frame_format:
+                stub_cfg = capture_cfg.setdefault("stub", {})
+                if isinstance(stub_cfg, dict):
+                    stub_cfg["frame_format"] = str(args.stub_frame_format).strip()
+            video_cfg = capture_cfg.setdefault("video", {})
+            if isinstance(video_cfg, dict):
+                if args.capture_container:
+                    video_cfg["container"] = str(args.capture_container).strip()
+                if args.video_frame_format:
+                    video_cfg["frame_format"] = str(args.video_frame_format).strip()
+    if isinstance(user_config, dict):
         storage_cfg = user_config.setdefault("storage", {})
         if isinstance(storage_cfg, dict):
             storage_cfg["data_dir"] = str(data_dir)
+            if bool(args.no_network):
+                storage_cfg["network_disabled"] = True
         plugins_cfg = user_config.setdefault("plugins", {})
         if isinstance(plugins_cfg, dict):
+            if bool(args.no_network):
+                enabled_cfg = plugins_cfg.setdefault("enabled", {})
+                if isinstance(enabled_cfg, dict):
+                    enabled_cfg["builtin.egress.gateway"] = False
+                    enabled_cfg["builtin.privacy.egress_sanitizer"] = False
             settings_cfg = plugins_cfg.setdefault("settings", {})
             if isinstance(settings_cfg, dict):
                 jepa_cfg = settings_cfg.setdefault("builtin.state.jepa.training", {})
@@ -282,6 +508,15 @@ def main(argv: list[str] | None = None) -> int:
                     storage_cfg = jepa_cfg.setdefault("storage", {})
                     if isinstance(storage_cfg, dict):
                         storage_cfg["data_dir"] = str(data_dir)
+        if bool(args.no_network):
+            privacy_cfg = user_config.setdefault("privacy", {})
+            if isinstance(privacy_cfg, dict):
+                egress_cfg = privacy_cfg.setdefault("egress", {})
+                if isinstance(egress_cfg, dict):
+                    egress_cfg["enabled"] = False
+                cloud_cfg = privacy_cfg.setdefault("cloud", {})
+                if isinstance(cloud_cfg, dict):
+                    cloud_cfg["enabled"] = False
         user_config = _replace_placeholder(user_config, "{data_dir}", str(data_dir))
     if args.force_idle and isinstance(user_config, dict):
         runtime_cfg = user_config.setdefault("runtime", {})
@@ -305,7 +540,11 @@ def main(argv: list[str] | None = None) -> int:
     plugins_cfg = user_config.setdefault("plugins", {})
     if isinstance(plugins_cfg, dict):
         plugins_cfg["allowlist"] = list(plugin_ids)
-        plugins_cfg["enabled"] = {pid: True for pid in plugin_ids}
+        # Keep the fixture template's explicit enable/disable set to avoid loading
+        # every plugin in the repo (WSL RAM blowups + noisy failures).
+        enabled_cfg = plugins_cfg.get("enabled")
+        if not isinstance(enabled_cfg, dict):
+            plugins_cfg["enabled"] = {}
     config_dir.mkdir(parents=True, exist_ok=True)
     user_path = (config_dir / "user.json")
     user_path.write_text(json.dumps(user_config, indent=2, sort_keys=True), encoding="utf-8")
@@ -346,12 +585,19 @@ def main(argv: list[str] | None = None) -> int:
         "frame_count": len(frame_files),
         "run_id": run_id,
         "config_hash": config_hash,
+        "no_network": bool(args.no_network),
+        "log_json": bool(args.log_json),
+        "ready_file": str(args.ready_file or ""),
         "started_utc": datetime.now(timezone.utc).isoformat(),
     }
 
     exit_code = 0
     kernel = None
     try:
+        if bool(args.no_network):
+            os.environ["AUTO_CAPTURE_ALLOW_NETWORK"] = "0"
+            os.environ["AUTOCAPTURE_NO_NETWORK"] = "1"
+        _emit_log(bool(args.log_json), "run.start", run_dir=str(run_dir), run_id=run_id)
         audit_fixture_event(
             "fixture.run.start",
             outcome="ok",
@@ -362,15 +608,41 @@ def main(argv: list[str] | None = None) -> int:
                 "config_hash": config_hash,
             },
         )
+        t0 = time.monotonic()
+        import faulthandler
+
+        # If boot stalls (e.g., lock hashing or plugin init), emit a traceback for
+        # stepwise debugging without attaching a debugger.
+        faulthandler.dump_traceback_later(30.0, repeat=False, file=sys.stderr)
         kernel = Kernel(default_config_paths(), safe_mode=False)
-        system = kernel.boot(start_conductor=False)
+        # Fixture validation is a one-shot CLI workflow. Avoid heavy boot steps
+        # (recovery/integrity sweeps, conductor wiring) to keep WSL stable and
+        # reduce wall-clock time.
+        system = kernel.boot(start_conductor=False, fast_boot=True)
+        faulthandler.cancel_dump_traceback_later()
+        report["boot_elapsed_s"] = round(time.monotonic() - t0, 3)
+        _emit_log(bool(args.log_json), "boot.done", boot_elapsed_s=report["boot_elapsed_s"])
         report["ocr"] = _ocr_report(system)
         report["plugins"] = {"load_report": collect_plugin_load_report(system)}
+        if str(args.ready_file or "").strip():
+            _write_ready_file(
+                str(args.ready_file),
+                {
+                    "schema_version": 1,
+                    "status": "ready",
+                    "run_id": run_id,
+                    "run_dir": str(run_dir),
+                    "config_dir": str(config_dir),
+                    "data_dir": str(data_dir),
+                    "ts_utc": datetime.now(timezone.utc).isoformat(),
+                },
+            )
 
         capture = system.get("capture.source") if system and hasattr(system, "get") else None
         if capture is None or not hasattr(capture, "start"):
             print("ERROR: capture.source unavailable")
             return 2
+        t_cap = time.monotonic()
         capture.start()
         metadata = system.get("storage.metadata")
         if metadata is None:
@@ -379,27 +651,71 @@ def main(argv: list[str] | None = None) -> int:
         evidence_ids = _wait_for_evidence(metadata, timeout_s=float(args.capture_timeout_s))
         if not evidence_ids:
             print("ERROR: no evidence captured")
+            try:
+                report["debug"] = dict(report.get("debug", {}) if isinstance(report.get("debug", {}), dict) else {})
+                report["debug"]["storage_metadata"] = _debug_storage_metadata(metadata)
+                # Cross-check filesystem state (metadata is raw-first on disk).
+                try:
+                    meta_root = Path(str(data_dir)) / "metadata"
+                    report["debug"]["metadata_file_count"] = (
+                        len(list(meta_root.rglob("*.json"))) if meta_root.exists() else 0
+                    )
+                except Exception:
+                    pass
+            except Exception:
+                pass
             exit_code = 3
         capture.stop()
-        report["evidence"] = {"count": len(evidence_ids), "record_ids": evidence_ids[:20]}
-        sample_frame = None
-        try:
-            if frame_files:
-                sample_frame = frame_files[0].read_bytes()
-        except Exception:
-            sample_frame = None
+        report["capture_elapsed_s"] = round(time.monotonic() - t_cap, 3)
+        _emit_log(
+            bool(args.log_json),
+            "capture.done",
+            capture_elapsed_s=report["capture_elapsed_s"],
+            evidence_count=len(evidence_ids),
+        )
+        evidence_sample = None
+        if evidence_ids and hasattr(metadata, "get"):
+            try:
+                rec = metadata.get(evidence_ids[0], {})
+                if isinstance(rec, dict):
+                    container = rec.get("container", {}) if isinstance(rec.get("container", {}), dict) else {}
+                    evidence_sample = {
+                        "record_id": evidence_ids[0],
+                        "record_type": rec.get("record_type"),
+                        "container_type": container.get("type"),
+                    }
+            except Exception:
+                evidence_sample = None
+        report["evidence"] = {"count": len(evidence_ids), "record_ids": evidence_ids[:20], "sample": evidence_sample}
+        # Avoid re-running heavy OCR/VLM work just for "probe_plugins" bookkeeping.
+        # Probes should validate wiring and sandboxing, not burn cycles on real media.
+        sample_frame: bytes | None = b""
 
         if exit_code == 0:
+            t_idle = time.monotonic()
+            import faulthandler
+            # If idle processing stalls (OCR/model hangs), emit a traceback for debugging.
+            faulthandler.dump_traceback_later(max(10.0, float(args.idle_timeout_s) + 5.0), repeat=False, file=sys.stderr)
             idle_result = run_idle_processing(
                 system,
                 max_steps=int(args.idle_max_steps),
                 timeout_s=float(args.idle_timeout_s),
             )
+            faulthandler.cancel_dump_traceback_later()
+            report["idle_elapsed_s"] = round(time.monotonic() - t_idle, 3)
             report["idle"] = idle_result
+            _emit_log(
+                bool(args.log_json),
+                "idle.done",
+                idle_elapsed_s=report["idle_elapsed_s"],
+                done=bool(idle_result.get("done")),
+                blocked=bool(idle_result.get("blocked")),
+            )
             if not idle_result.get("done") and idle_result.get("blocked"):
                 exit_code = 4
 
         if exit_code == 0:
+            t_queries = time.monotonic()
             specs = build_query_specs(manifest, metadata)
             query_results = []
             failures = 0
@@ -415,17 +731,33 @@ def main(argv: list[str] | None = None) -> int:
                 report["queries"] = {"count": len(specs), "failures": failures, "results": query_results}
                 if failures:
                     exit_code = 5
+            report["queries_elapsed_s"] = round(time.monotonic() - t_queries, 3)
+            _emit_log(
+                bool(args.log_json),
+                "queries.done",
+                queries_elapsed_s=report["queries_elapsed_s"],
+                count=report["queries"]["count"],
+                failures=report["queries"]["failures"],
+            )
+        t_probe = time.monotonic()
         report["plugin_probe"] = probe_plugins(
             system,
             sample_frame=sample_frame,
             sample_record_id=(evidence_ids[0] if evidence_ids else None),
         )
+        report["probe_elapsed_s"] = round(time.monotonic() - t_probe, 3)
+        _emit_log(bool(args.log_json), "probe.done", probe_elapsed_s=report["probe_elapsed_s"])
+        t_trace = time.monotonic()
         report["plugin_trace"] = collect_plugin_trace(system)
+        report["trace_elapsed_s"] = round(time.monotonic() - t_trace, 3)
+        report["plugin_timing"] = _plugin_timing_summary(report["plugin_trace"] if isinstance(report.get("plugin_trace"), dict) else {})
+        _emit_log(bool(args.log_json), "trace.done", trace_elapsed_s=report["trace_elapsed_s"])
         plugin_status, skipped_without_reason = _build_plugin_status(
             manifests=manifests,
             load_report=report["plugins"]["load_report"],
             probe_results=report["plugin_probe"],
             trace=report["plugin_trace"],
+            expected_plugin_ids=_expected_plugin_ids(user_config) if isinstance(user_config, dict) else None,
         )
         report["plugin_status"] = plugin_status
         report["skipped_without_reason"] = skipped_without_reason
@@ -442,6 +774,7 @@ def main(argv: list[str] | None = None) -> int:
             output_path = run_dir / "fixture_report.json"
             output_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
             report["report_path"] = str(output_path)
+            _emit_log(bool(args.log_json), "report.written", report_path=str(output_path))
         except Exception:
             pass
         if kernel is not None:
@@ -468,6 +801,19 @@ def main(argv: list[str] | None = None) -> int:
             "run_dir": str(run_dir),
         },
     )
+    if str(args.ready_file or "").strip():
+        _write_ready_file(
+            str(args.ready_file),
+            {
+                "schema_version": 1,
+                "status": "ok" if exit_code == 0 else "error",
+                "run_id": run_id,
+                "run_dir": str(run_dir),
+                "exit_code": int(exit_code),
+                "report_path": str(report.get("report_path") or ""),
+                "ts_utc": datetime.now(timezone.utc).isoformat(),
+            },
+        )
 
     if report.get("plugin_status"):
         print("PLUGIN STATUS:")
@@ -483,8 +829,10 @@ def main(argv: list[str] | None = None) -> int:
             print(msg)
 
     if exit_code == 0:
+        _emit_log(bool(args.log_json), "run.finish", outcome="ok", exit_code=0)
         print("OK: fixture pipeline")
     else:
+        _emit_log(bool(args.log_json), "run.finish", outcome="error", exit_code=int(exit_code))
         print(f"FAIL: fixture pipeline (code {exit_code})")
     return exit_code
 

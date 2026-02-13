@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
 
 from autocapture_nx.plugin_system.api import PluginContext
@@ -78,6 +79,29 @@ class StateTapeStoreTests(unittest.TestCase):
             fetched = store.get_spans()
             self.assertTrue(fetched)
             self.assertTrue(fetched[0].get("evidence"))
+
+    def test_state_tape_accepts_dataclass_provenance(self):
+        @dataclass
+        class DummyPolicy:
+            can_export_text: bool
+
+        builder = self._builder()
+        states = [_state_record(1000, "frame1"), _state_record(2000, "frame2")]
+        batch = {"session_id": "run", "states": states}
+        out = builder.process(batch)
+        spans = out["spans"]
+        edges = out["edges"]
+        self.assertTrue(spans)
+        spans[0].setdefault("provenance", {})["policy"] = DummyPolicy(True)
+        if spans[0].get("evidence"):
+            spans[0]["evidence"][0]["policy"] = DummyPolicy(False)
+        if edges:
+            edges[0].setdefault("provenance", {})["policy"] = DummyPolicy(False)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "state_tape.db"
+            store = StateTapeStore(path)
+            counts = store.insert_batch(spans, edges)
+            self.assertGreaterEqual(counts.spans_inserted, 1)
 
 
 if __name__ == "__main__":

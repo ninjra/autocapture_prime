@@ -70,7 +70,7 @@ class PluginConflictTests(unittest.TestCase):
         return config
 
     def test_conflict_blocks_load(self) -> None:
-        with tempfile.TemporaryDirectory(dir=".") as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write_plugin(root, "test.conflict.a", conflicts_with=["test.conflict.b"])
             _write_plugin(root, "test.conflict.b")
@@ -80,7 +80,7 @@ class PluginConflictTests(unittest.TestCase):
                 registry.load_plugins()
 
     def test_conflict_allow_pair_permits_load(self) -> None:
-        with tempfile.TemporaryDirectory(dir=".") as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write_plugin(root, "test.conflict.a", conflicts_with=["test.conflict.b"])
             _write_plugin(root, "test.conflict.b")

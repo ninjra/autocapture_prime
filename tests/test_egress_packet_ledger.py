@@ -32,6 +32,9 @@ class EgressLedgerTests(unittest.TestCase):
                 "cloud": {"enabled": True, "allow_images": True},
                 "egress": {
                     "enabled": True,
+                    # Default policy is fail-closed with approval_required=true.
+                    # This unit test verifies ledger emission, not approvals flow.
+                    "approval_required": False,
                     "default_sanitize": True,
                     "allow_raw_egress": False,
                     "reasoning_packet_only": False,

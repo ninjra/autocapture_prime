@@ -27,6 +27,7 @@ from autocapture_nx.windows.win_capture import Frame, iter_screenshots, list_mon
 from autocapture_nx.windows.fullscreen import fullscreen_snapshot
 
 STOP_SENTINEL = object()
+FLUSH_SENTINEL = object()
 _FFMPEG_ENCODER_CACHE: dict[str, set[str]] = {}
 _FFMPEG_ENCODER_LOCK = threading.Lock()
 
@@ -164,6 +165,9 @@ class FfmpegWriter:
         codec = "h264_nvenc" if encoder == "nvenc" else "libx264"
         cmd = [
             ffmpeg_path,
+            "-hide_banner",
+            "-loglevel",
+            "error",
             "-y",
             "-f",
             "mjpeg",
@@ -179,6 +183,7 @@ class FfmpegWriter:
             f"{max(1, int(bitrate_kbps))}k",
             path,
         ]
+        self._cmd = list(cmd)
         self._proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
@@ -219,7 +224,9 @@ class FfmpegWriter:
             stderr = b""
             if self._proc.stderr:
                 stderr = self._proc.stderr.read() or b""
-            raise RuntimeError(f"ffmpeg failed: {stderr[:200].decode(errors='ignore')}")
+            tail = stderr[-2000:].decode(errors="ignore")
+            cmd = " ".join(self._cmd)
+            raise RuntimeError(f"ffmpeg failed rc={self._proc.returncode}: {tail} (cmd={cmd})")
 
 
 class FfmpegRawWriter:
@@ -236,6 +243,9 @@ class FfmpegRawWriter:
         self._path = path
         cmd = [
             ffmpeg_path,
+            "-hide_banner",
+            "-loglevel",
+            "error",
             "-y",
             "-f",
             "rawvideo",
@@ -255,6 +265,7 @@ class FfmpegRawWriter:
             "1",
             path,
         ]
+        self._cmd = list(cmd)
         self._proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
@@ -295,7 +306,9 @@ class FfmpegRawWriter:
             stderr = b""
             if self._proc.stderr:
                 stderr = self._proc.stderr.read() or b""
-            raise RuntimeError(f"ffmpeg failed: {stderr[:200].decode(errors='ignore')}")
+            tail = stderr[-2000:].decode(errors="ignore")
+            cmd = " ".join(self._cmd)
+            raise RuntimeError(f"ffmpeg failed rc={self._proc.returncode}: {tail} (cmd={cmd})")
 
 
 class SegmentWriter:
@@ -349,10 +362,13 @@ class SegmentWriter:
     def _segment_path(self, *, final: bool) -> str:
         safe = encode_record_id_component(self.segment_id)
         ext = self.container_ext()
-        suffix = f".{ext}"
-        if not final:
-            suffix += ".tmp"
-        return os.path.join(self._spool_dir, f"{safe}{suffix}")
+        if final:
+            name = f"{safe}.{ext}"
+        else:
+            # Keep the real container extension at the end so external tools
+            # (ffmpeg) infer the muxer correctly.
+            name = f"{safe}.tmp.{ext}"
+        return os.path.join(self._spool_dir, name)
 
     def container_ext(self) -> str:
         if self._container_type == "avi_mjpeg":
@@ -503,6 +519,7 @@ class CapturePipeline:
         self._drops_lock = threading.Lock()
         self._segment_seq = 0
         self._start_mono = time.monotonic()
+        self._ttfr_recorded = False
         self._last_output_mono: float | None = None
         self._last_output_lock = threading.Lock()
         self._last_segment_id: str | None = None
@@ -563,6 +580,11 @@ class CapturePipeline:
                 encoder_reason = "ffmpeg_missing"
             else:
                 prefers_gpu = self._encoder_auto or encoder_request in {"nvenc", "h264_nvenc"}
+                # In WSL/Linux environments, ffmpeg may advertise nvenc support even when CUDA/NVENC
+                # isn't actually usable. Default "auto" to CPU unless explicitly requested.
+                if prefers_gpu and self._encoder_auto and os.name != "nt":
+                    prefers_gpu = False
+                    encoder_reason = encoder_reason or "gpu_auto_disabled_non_windows"
                 if prefers_gpu:
                     if _ffmpeg_supports_encoder(ffmpeg_path, "h264_nvenc"):
                         self._encoder_preferred = "nvenc"
@@ -650,6 +672,9 @@ class CapturePipeline:
         jpeg_quality = int(capture_cfg.get("jpeg_quality", mss_cfg.get("quality", self._jpeg_quality)))
         activity_cfg = capture_cfg.get("activity", {})
         activity_enabled = bool(activity_cfg.get("enabled", False))
+        # Ultralight mode: optionally disable *video* frame capture entirely while idle.
+        # Screenshots remain a separate capture stream and should remain enabled.
+        capture_when_idle = bool(activity_cfg.get("capture_when_idle", True))
         activity_window_s = float(activity_cfg.get("active_window_s", 3))
         activity_check_s = float(activity_cfg.get("check_interval_s", 1))
         assume_idle = bool(activity_cfg.get("assume_idle_when_missing", False))
@@ -686,6 +711,7 @@ class CapturePipeline:
             active_quality = int(base_quality)
             idle_quality = int(base_quality)
         activity_mode: str | None = None
+        last_activity_mode: str | None = None
         last_activity_check = 0.0
         last_idle_seconds = 0.0
         last_activity_score = 0.0
@@ -892,6 +918,27 @@ class CapturePipeline:
             if fullscreen_enabled and fullscreen_active:
                 time.sleep(fullscreen_poll_s)
                 continue
+            # If we're configured to capture only when active, check activity state
+            # before grabbing a frame so we avoid paying the capture+encode cost while idle.
+            if activity_enabled and capture_when_idle is False and (now - last_activity_check) >= max(0.2, activity_check_s):
+                mode, idle_seconds, activity_score, activity_reason = _activity_snapshot()
+                last_idle_seconds = float(idle_seconds)
+                last_activity_score = float(activity_score)
+                last_activity_reason = str(activity_reason) if activity_reason else None
+                last_activity_check = now
+                last_activity_mode = activity_mode
+                activity_mode = mode
+                if mode == "idle":
+                    # Flush any in-flight segment so we don't leave a partial segment
+                    # hanging when we stop capturing while idle.
+                    if last_activity_mode == "active" and frame_queue is not None:
+                        try:
+                            frame_queue.put(FLUSH_SENTINEL)
+                        except Exception:
+                            pass
+                    # Sleep a bit and re-check; this loop must remain responsive to stop().
+                    time.sleep(min(0.25, max(0.05, float(activity_check_s))))
+                    continue
             try:
                 frame = next(frame_iter)
             except StopIteration:
@@ -946,6 +993,7 @@ class CapturePipeline:
                             except Exception:
                                 pass
                 if mode != activity_mode:
+                    last_activity_mode = activity_mode
                     activity_mode = mode
                     if mode == "active":
                         base_fps = int(active_fps)
@@ -955,6 +1003,12 @@ class CapturePipeline:
                         base_fps = int(idle_fps)
                         base_bitrate = int(idle_bitrate)
                         base_quality = int(idle_quality)
+                    if mode == "idle" and capture_when_idle is False and last_activity_mode == "active":
+                        # Flush any in-flight segment; grab loop will stop capturing after this frame.
+                        try:
+                            frame_queue.put(FLUSH_SENTINEL)
+                        except Exception:
+                            pass
                     if degraded:
                         fps_target, bitrate_kbps, quality = _apply_disk_degrade(base_fps, base_bitrate, base_quality)
                     else:
@@ -1260,6 +1314,21 @@ class CapturePipeline:
                 if self._stop.is_set():
                     continue
                 continue
+            if frame is FLUSH_SENTINEL:
+                if segment is not None:
+                    artifact = segment.finalize()
+                    if artifact:
+                        dropped_frames, depth_max = self._pop_drop_stats()
+                        artifact.dropped_frames = dropped_frames
+                        artifact.queue_depth_max = depth_max
+                        artifact.duplicate_frames = int(segment_dup_frames)
+                        artifact.duplicate_dropped = int(segment_dup_dropped)
+                        segment_queue.put((artifact, backend))
+                    segment = None
+                    segment_start_mono = None
+                    segment_dup_frames = 0
+                    segment_dup_dropped = 0
+                continue
             if frame is STOP_SENTINEL:
                 if segment is not None:
                     artifact = segment.finalize()
@@ -1370,6 +1439,7 @@ class CapturePipeline:
         fps_effective = _safe_div(artifact.frame_count * 1000, artifact.duration_ms or 1)
         run_id = str(self._config.get("runtime", {}).get("run_id", ""))
         metadata = {
+            "schema_version": 1,
             "record_type": "evidence.capture.segment",
             "run_id": run_id,
             "segment_id": artifact.segment_id,
@@ -1574,6 +1644,16 @@ class CapturePipeline:
             record_telemetry("capture.output", telemetry_payload)
             if self._plugin_id:
                 record_telemetry(f"plugin.{self._plugin_id}", telemetry_payload)
+            if not self._ttfr_recorded:
+                self._ttfr_recorded = True
+                record_telemetry(
+                    "ttfr",
+                    {
+                        "ts_utc": artifact.ts_end_utc or artifact.ts_start_utc,
+                        "seconds": float(round(max(0.0, time.monotonic() - self._start_mono), 3)),
+                        "record_id": artifact.segment_id,
+                    },
+                )
         except Exception as exc:
             failure_payload = {
                 "segment_id": artifact.segment_id,
