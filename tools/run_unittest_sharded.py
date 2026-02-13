@@ -25,6 +25,16 @@ def _iter_test_files(repo_root: Path) -> list[Path]:
     return files
 
 
+def _resolve_test_python(repo_root: Path) -> str:
+    override = os.environ.get("AUTO_CAPTURE_TEST_PYTHON", "").strip()
+    if override:
+        return override
+    venv_py = repo_root / ".venv" / "bin" / "python"
+    if venv_py.exists() and os.access(venv_py, os.X_OK):
+        return str(venv_py)
+    return sys.executable
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -62,7 +72,8 @@ def main() -> int:
             return 2
         test_files = test_files[start_idx:]
 
-    py = sys.executable
+    py = _resolve_test_python(repo_root)
+    print(f"[shard-python] {py}")
     timeout_s = args.timeout_s
 
     for path in test_files:

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import numpy as np
+from numpy.typing import NDArray
 
 from autocapture_nx.kernel.hashing import sha256_text
 
@@ -73,7 +74,7 @@ class HashTokenEmbedder:
         if not toks:
             return TokenEmbeddings(tokens=[], vectors_f16=b"", dim=self.dim)
         # Build deterministic unit vectors for each token (approx).
-        mat = np.zeros((len(toks), self.dim), dtype=np.float32)
+        mat: NDArray[np.float32] = np.zeros((len(toks), self.dim), dtype=np.float32)
         for i, tok in enumerate(toks):
             h = hashlib.sha256((self._seed + "\n" + tok).encode("utf-8")).digest()
             # Fill floats by mapping bytes -> [-1, 1]

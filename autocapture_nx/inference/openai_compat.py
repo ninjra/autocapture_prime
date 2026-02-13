@@ -34,16 +34,18 @@ def _is_loopback_host(host: str) -> bool:
             addr = info[4][0]
         except Exception:
             continue
+        if not isinstance(addr, str):
+            continue
         try:
-            if socket.inet_pton(socket.AF_INET, addr):
-                if addr.startswith("127."):
-                    return True
+            socket.inet_pton(socket.AF_INET, addr)
+            if addr.startswith("127."):
+                return True
         except Exception:
             pass
         try:
-            if socket.inet_pton(socket.AF_INET6, addr):
-                if addr == "::1":
-                    return True
+            socket.inet_pton(socket.AF_INET6, addr)
+            if addr == "::1":
+                return True
         except Exception:
             pass
     return False
@@ -159,4 +161,3 @@ def image_bytes_to_data_url(image_bytes: bytes, *, content_type: str = "image/pn
     blob = bytes(image_bytes or b"")
     b64 = base64.b64encode(blob).decode("ascii")
     return f"data:{content_type};base64,{b64}"
-

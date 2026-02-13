@@ -44,19 +44,35 @@ class QueryArbitrationTests(unittest.TestCase):
 
     def test_run_query_prefers_state_when_state_scores_higher(self) -> None:
         system = _System()
-        state_result = _result("VDI time: 11:35 AM", coverage=1.0)
+        state_result = _result("State layer summary: coding session in progress.", coverage=1.0)
         classic_result = _result("", state="no_evidence", coverage=0.0)
         with (
             mock.patch.object(query_mod, "run_state_query", return_value=state_result),
             mock.patch.object(query_mod, "run_query_without_state", return_value=classic_result),
             mock.patch.object(query_mod, "_append_query_metric") as append_metric,
         ):
-            out = query_mod.run_query(system, "what time is it on the vdi")
+            out = query_mod.run_query(system, "summarize what i am working on")
         self.assertEqual(out.get("answer", {}).get("claims", [])[0].get("text"), state_result["answer"]["claims"][0]["text"])
         arb = out.get("processing", {}).get("arbitration", {})
         self.assertEqual(arb.get("winner"), "state")
         append_metric.assert_called()
         self.assertEqual(append_metric.call_args.kwargs.get("method"), "state_arbitrated")
+
+    def test_run_query_prefers_classic_for_background_color_signal(self) -> None:
+        system = _System()
+        state_result = _result("@@@ noisy background text with no color value", coverage=0.0)
+        classic_result = _result("Observation: background_color=black; ui.background.primary_color=black.", coverage=1.0)
+        with (
+            mock.patch.object(query_mod, "run_state_query", return_value=state_result),
+            mock.patch.object(query_mod, "run_query_without_state", return_value=classic_result),
+            mock.patch.object(query_mod, "_append_query_metric") as append_metric,
+        ):
+            out = query_mod.run_query(system, "what color is the background")
+        self.assertEqual(out.get("answer", {}).get("claims", [])[0].get("text"), classic_result["answer"]["claims"][0]["text"])
+        arb = out.get("processing", {}).get("arbitration", {})
+        self.assertEqual(arb.get("winner"), "classic")
+        append_metric.assert_called()
+        self.assertEqual(append_metric.call_args.kwargs.get("method"), "classic_arbitrated")
 
 
 if __name__ == "__main__":

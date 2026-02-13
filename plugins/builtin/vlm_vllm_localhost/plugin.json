@@ -39,7 +39,15 @@
     "model": "",
     "timeout_s": 30.0,
     "prompt": "",
-    "max_tokens": 256
+    "max_tokens": 256,
+    "two_pass_enabled": true,
+    "thumb_prompt": "",
+    "roi_prompt": "",
+    "thumb_max_px": 960,
+    "max_rois": 4,
+    "roi_max_side": 896,
+    "thumb_max_tokens": 320,
+    "roi_max_tokens": 384
   },
   "settings_schema": {
     "type": "object",
@@ -62,9 +70,32 @@
       },
       "max_tokens": {
         "type": "integer"
+      },
+      "two_pass_enabled": {
+        "type": "boolean"
+      },
+      "thumb_prompt": {
+        "type": "string"
+      },
+      "roi_prompt": {
+        "type": "string"
+      },
+      "thumb_max_px": {
+        "type": "integer"
+      },
+      "max_rois": {
+        "type": "integer"
+      },
+      "roi_max_side": {
+        "type": "integer"
+      },
+      "thumb_max_tokens": {
+        "type": "integer"
+      },
+      "roi_max_tokens": {
+        "type": "integer"
       }
     }
   },
   "version": "0.1.0"
 }
-

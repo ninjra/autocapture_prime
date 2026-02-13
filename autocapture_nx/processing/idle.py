@@ -841,6 +841,19 @@ class IdleProcessor:
                         continue
                     texts = _response_texts(response)
                     if not texts:
+                        if kind == "vlm" and self._logger is not None and isinstance(response, dict):
+                            try:
+                                self._logger.log(
+                                    "idle.vlm_empty_response",
+                                    {
+                                        "provider_id": str(provider_id),
+                                        "source_id": item.record_id,
+                                        "backend": str(response.get("backend") or ""),
+                                        "model_error": str(response.get("model_error") or ""),
+                                    },
+                                )
+                            except Exception:
+                                pass
                         continue
                     text = "\n\n".join(texts)
                     payload = build_text_record(

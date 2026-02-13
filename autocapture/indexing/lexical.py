@@ -53,16 +53,14 @@ _STOPWORDS = {
 }
 
 
-def _fts_expr(query: str) -> str:
-    """Convert arbitrary user text into a safe, FTS5-compatible MATCH expression."""
-
+def _query_terms(query: str) -> list[str]:
     raw = str(query or "").strip().lower()
     if not raw:
-        return ""
+        return []
 
     tokens = [t for t in re.findall(r"[a-z0-9]+", raw) if t]
     if not tokens:
-        return ""
+        return []
 
     filtered: list[str] = [t for t in tokens if t not in _STOPWORDS and len(t) > 1]
     if not filtered:
@@ -75,13 +73,18 @@ def _fts_expr(query: str) -> str:
             continue
         seen.add(tok)
         uniq.append(tok)
+    return uniq[:12]
 
-    if not uniq:
+
+def _fts_expr(terms: list[str], *, mode: str) -> str:
+    """Build an FTS5 MATCH expression in deterministic OR/AND mode."""
+
+    if not terms:
         return ""
-    if len(uniq) == 1:
-        return f"\"{uniq[0]}\""
-    # Use OR for recall; rank by bm25 and then deterministic tie-breakers upstream.
-    return " OR ".join(f"\"{tok}\"" for tok in uniq[:12])
+    if len(terms) == 1:
+        return f"\"{terms[0]}\""
+    joiner = " AND " if mode == "and" else " OR "
+    return joiner.join(f"\"{tok}\"" for tok in terms)
 
 
 class LexicalIndex:
@@ -143,34 +146,46 @@ class LexicalIndex:
         return int(row[0]) if row else 0
 
     def query(self, text: str, limit: int = 10) -> list[dict[str, Any]]:
-        expr = _fts_expr(text)
-        if not expr:
+        terms = _query_terms(text)
+        if not terms:
             return []
-        cur = self._conn.execute(
-            "SELECT doc_id, snippet(fts, 1, '[', ']', '...', 10), bm25(fts) "
-            "FROM fts WHERE fts MATCH ? ORDER BY bm25(fts), doc_id LIMIT ?",
-            (expr, limit),
-        )
-        hits = []
-        for doc_id, snippet, bm25_score in cur.fetchall():
-            if isinstance(doc_id, (bytes, bytearray)):
-                try:
-                    doc_id = doc_id.decode("utf-8", errors="replace")
-                except Exception:
+
+        def _run(expr: str) -> list[dict[str, Any]]:
+            if not expr:
+                return []
+            cur = self._conn.execute(
+                "SELECT doc_id, snippet(fts, 1, '[', ']', '...', 10), bm25(fts) "
+                "FROM fts WHERE fts MATCH ? ORDER BY bm25(fts), doc_id LIMIT ?",
+                (expr, limit),
+            )
+            hits: list[dict[str, Any]] = []
+            for doc_id, snippet, bm25_score in cur.fetchall():
+                if isinstance(doc_id, (bytes, bytearray)):
+                    try:
+                        doc_id = doc_id.decode("utf-8", errors="replace")
+                    except Exception:
+                        doc_id = str(doc_id)
+                else:
                     doc_id = str(doc_id)
-            else:
-                doc_id = str(doc_id)
-            if isinstance(snippet, (bytes, bytearray)):
-                try:
-                    snippet = snippet.decode("utf-8", errors="replace")
-                except Exception:
-                    snippet = str(snippet)
-            else:
-                snippet = str(snippet) if snippet is not None else ""
-            raw_score = float(bm25_score) if bm25_score is not None else 0.0
-            score = 1.0 / (1.0 + max(raw_score, 0.0))
-            hits.append({"doc_id": doc_id, "snippet": snippet, "score": score})
-        return hits
+                if isinstance(snippet, (bytes, bytearray)):
+                    try:
+                        snippet = snippet.decode("utf-8", errors="replace")
+                    except Exception:
+                        snippet = str(snippet)
+                else:
+                    snippet = str(snippet) if snippet is not None else ""
+                raw_score = float(bm25_score) if bm25_score is not None else 0.0
+                score = 1.0 / (1.0 + max(raw_score, 0.0))
+                hits.append({"doc_id": doc_id, "snippet": snippet, "score": score})
+            return hits
+
+        # Precision-first on multi-term queries: if strict conjunction yields hits,
+        # prefer that set; otherwise fall back to OR recall.
+        if len(terms) > 1:
+            strict_hits = _run(_fts_expr(terms, mode="and"))
+            if strict_hits:
+                return strict_hits
+        return _run(_fts_expr(terms, mode="or"))
 
     def identity(self) -> dict[str, Any]:
         try:

@@ -73,6 +73,13 @@
       "ran": false,
       "require_idle": true,
       "scheduled_job_id": null
+    },
+    "policy": {
+      "filtered_claim_count": 1,
+      "raw_claim_count": 1,
+      "source_guard_applied": true,
+      "source_rejections": [],
+      "source_rejections_count": 0
     }
   },
   "provenance": {

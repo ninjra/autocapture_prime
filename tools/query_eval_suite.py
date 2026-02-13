@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -60,8 +59,11 @@ def _answer_text(result: dict[str, Any]) -> str:
         if isinstance(claim, dict):
             txt = str(claim.get("text") or "").strip()
             if txt:
-                texts.append(txt)
-    return "\n".join(texts)
+                compact = " ".join(txt.split())
+                if len(compact) > 220:
+                    compact = compact[:219].rstrip() + "…"
+                texts.append(compact)
+    return "\n".join(texts[:3])
 
 
 def _claim_texts(result: dict[str, Any]) -> list[str]:
@@ -96,6 +98,32 @@ def _has_citations(result: dict[str, Any]) -> bool:
         if isinstance(cites, list) and cites:
             return True
     return False
+
+
+def _attribution_summary(result: dict[str, Any]) -> tuple[str, list[str], str]:
+    processing = result.get("processing", {}) if isinstance(result.get("processing", {}), dict) else {}
+    attribution = processing.get("attribution", {}) if isinstance(processing.get("attribution", {}), dict) else {}
+    providers = attribution.get("providers", []) if isinstance(attribution.get("providers", []), list) else []
+    provider_ids: list[str] = []
+    for item in providers:
+        if not isinstance(item, dict):
+            continue
+        pid = str(item.get("provider_id") or "").strip()
+        if pid:
+            provider_ids.append(pid)
+    provider_ids = sorted(set(provider_ids))
+    primary = provider_ids[0] if provider_ids else ""
+    workflow = attribution.get("workflow_tree", {}) if isinstance(attribution.get("workflow_tree", {}), dict) else {}
+    edges = workflow.get("edges", []) if isinstance(workflow.get("edges", []), list) else []
+    paths: list[str] = []
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        src = str(edge.get("from") or "").strip()
+        dst = str(edge.get("to") or "").strip()
+        if src and dst:
+            paths.append(f"{src}>{dst}")
+    return primary, provider_ids, paths[0] if paths else ""
 
 
 @dataclass(frozen=True)
@@ -197,6 +225,11 @@ def main(argv: list[str] | None = None) -> int:
                 "synth_model": str((((result.get("synth_claims", {}) or {}).get("debug", {}) or {}).get("model") or "")),
                 "answer_text": out.answer_text,
             }
+            primary_provider, provider_ids, workflow_edge = _attribution_summary(result)
+            row["attribution_primary_provider"] = primary_provider
+            row["attribution_providers"] = provider_ids
+            row["attribution_provider_count"] = int(len(provider_ids))
+            row["attribution_workflow_edge"] = workflow_edge
             rows.append(row)
             try:
                 _ = append_fact_line(config, rel_path="query_eval_suite.ndjson", payload=row)

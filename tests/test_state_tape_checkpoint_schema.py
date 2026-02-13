@@ -9,6 +9,7 @@ from autocapture_nx.state_layer.processor import _normalize_counts
 class StateTapeCheckpointSchemaTests(unittest.TestCase):
     def _checkpoint_payload(self) -> dict:
         payload = {
+            "schema_version": 1,
             "record_type": "derived.state_tape.checkpoint",
             "run_id": "run",
             "ts_utc": datetime.now(timezone.utc).isoformat(),

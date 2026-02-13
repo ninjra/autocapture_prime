@@ -376,10 +376,9 @@ function Ensure-Vllm {
         $serverOk = $false
     }
     if (-not $serverOk) {
-        Write-Status "WARN" "vLLM server not responding on $baseUrl (will verify local model paths only)"
+        Write-Status "ERROR" "External vLLM server not responding on $baseUrl"
         Write-PrepLog -Path $prepLog -Event "vllm.server_unavailable" -Data @{ base_url = $baseUrl }
         $results = @()
-        $missingRequired = $false
         foreach ($model in $Models) {
             $mid = [string](Get-ManifestValue -Manifest $model -Key "id")
             if (-not $mid) { continue }
@@ -390,35 +389,20 @@ function Ensure-Vllm {
             if ($servedNameCandidate) { $servedId = $servedNameCandidate }
             if (-not $servedId) { $servedId = $mid }
             $required = [bool](Get-ManifestValue -Manifest $model -Key "required")
-            $subdir = [string](Get-ManifestValue -Manifest $model -Key "subdir")
-            if (-not $subdir) { $subdir = ($mid -replace "[^A-Za-z0-9._-]", "_") }
-            $localPath = ""
-            $exists = $false
-            if ($RootDir) {
-                $localPath = Join-Path $RootDir $subdir
-                if ((Get-ChildItem -Path $localPath -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1)) {
-                    $exists = $true
-                }
-            }
-            $status = if ($exists) { "local_only" } else { "missing" }
-            $ok = $exists
-            $error = if ($exists) { "server_unavailable" } else { "missing" }
-            if ($required -and -not $ok) { $missingRequired = $true }
             $results += [pscustomobject]@{
                 id = $mid
                 served_id = $servedId
-                ok = $ok
-                status = $status
+                ok = $false
+                status = "missing"
                 required = $required
-                error = $error
-                local_path = $localPath
+                error = "vllm_server_unavailable"
             }
         }
         return @{
-            ok = (-not $missingRequired)
+            ok = $false
             error = "vllm_server_unavailable"
             base_url = $baseUrl
-            local_only = $true
+            local_only = $false
             results = $results
         }
     }

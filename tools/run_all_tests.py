@@ -41,6 +41,7 @@ def _commands(py: str) -> Iterable[list[str]]:
         [py, "tools/gate_static.py"],
         [py, "tools/gate_vuln.py"],
         [py, "tools/gate_doctor.py"],
+        [py, "tools/gate_full_repo_miss_matrix.py"],
         [py, "-m", "autocapture_nx", "doctor"],
         [py, "-m", "autocapture_nx", "--safe-mode", "doctor"],
         [py, "-m", "unittest", "tests/test_blueprint_spec_validation.py", "-q"],

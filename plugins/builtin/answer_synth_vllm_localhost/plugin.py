@@ -10,6 +10,7 @@ import json
 from typing import Any
 
 from autocapture_nx.inference.openai_compat import OpenAICompatClient
+from autocapture_nx.inference.vllm_endpoint import EXTERNAL_VLLM_BASE_URL, enforce_external_vllm_base_url
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 
 
@@ -32,7 +33,12 @@ class VllmAnswerSynthesizer(PluginBase):
     def __init__(self, plugin_id: str, context: PluginContext) -> None:
         super().__init__(plugin_id, context)
         cfg = context.config if isinstance(context.config, dict) else {}
-        self._base_url = str(cfg.get("base_url") or "http://127.0.0.1:8000").strip()
+        self._base_url_policy_error = ""
+        try:
+            self._base_url = enforce_external_vllm_base_url(cfg.get("base_url"))
+        except Exception as exc:
+            self._base_url = EXTERNAL_VLLM_BASE_URL
+            self._base_url_policy_error = f"invalid_vllm_base_url:{type(exc).__name__}:{exc}"
         self._api_key = str(cfg.get("api_key") or "").strip() or None
         self._model = str(cfg.get("model") or "").strip() or None
         self._timeout_s = float(cfg.get("timeout_s") or 30.0)
@@ -62,6 +68,8 @@ class VllmAnswerSynthesizer(PluginBase):
             return {"claims": [], "error": "empty_query"}
         if self._model is None:
             return {"claims": [], "error": "model_missing"}
+        if self._base_url_policy_error:
+            return {"claims": [], "error": self._base_url_policy_error}
         if self._client is None:
             try:
                 self._client = OpenAICompatClient(
@@ -157,4 +165,3 @@ class VllmAnswerSynthesizer(PluginBase):
 
 def create_plugin(plugin_id: str, context: PluginContext) -> VllmAnswerSynthesizer:
     return VllmAnswerSynthesizer(plugin_id, context)
-

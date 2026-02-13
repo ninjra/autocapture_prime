@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from autocapture.indexing.factory import build_indexes
 from autocapture_nx.kernel.canonical_json import CanonicalJSONError, dumps as canonical_dumps
-from autocapture_nx.kernel.derived_records import extract_text_payload
+from autocapture_nx.kernel.derived_records import extract_text_payload, derived_text_record_id
 from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.kernel.providers import capability_providers
 
@@ -454,7 +454,16 @@ class SSTPipeline:
             )
             stage_payload["tokens_raw"] = tokens_raw
         vlm_tokens = _sanitize_tokens(
-            self._vlm_tokens(frame_width, frame_height, frame_bytes, allow_vlm, should_abort, deadline_ts),
+            self._vlm_tokens(
+                frame_width,
+                frame_height,
+                frame_bytes,
+                allow_vlm,
+                should_abort,
+                deadline_ts,
+                run_id=run_id,
+                source_id=record_id,
+            ),
             frame_width=frame_width,
             frame_height=frame_height,
             diagnostics=diagnostics,
@@ -1099,20 +1108,26 @@ class SSTPipeline:
         allow_vlm: bool,
         should_abort: ShouldAbortFn | None,
         deadline_ts: float | None,
+        *,
+        run_id: str | None = None,
+        source_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if not allow_vlm or self._vlm is None:
             return []
-        providers = []
-        target = self._vlm
-        if hasattr(target, "target"):
-            target = getattr(target, "target")
-        if hasattr(target, "items"):
-            try:
-                providers = list(target.items())
-            except Exception:
-                providers = []
-        if not providers:
-            providers = [("vision.extractor", self._vlm)]
+
+        def _provider_priority(provider_id: str) -> int:
+            low = str(provider_id or "").strip().casefold()
+            score = 0
+            if "vllm" in low or "localhost" in low or "openai" in low:
+                score += 60
+            if "transformers" in low or "qwen" in low or "internvl" in low or "mai" in low:
+                score += 20
+            if "stub" in low or "basic" in low or "toy" in low or "heuristic" in low:
+                score -= 40
+            return score
+
+        providers = capability_providers(self._vlm, "vision.extractor")
+        providers.sort(key=lambda pair: (-_provider_priority(pair[0]), str(pair[0])))
 
         tokens: list[dict[str, Any]] = []
         for provider_id, provider in providers:
@@ -1120,10 +1135,17 @@ class SSTPipeline:
                 break
             if deadline_ts is not None and time.time() >= deadline_ts:
                 break
+            text = ""
             try:
                 text = extract_text_payload(provider.extract(frame_bytes))
             except Exception:
-                continue
+                text = ""
+            if not text:
+                text = self._cached_vlm_text(
+                    provider_id=str(provider_id),
+                    run_id=run_id,
+                    source_id=source_id,
+                )
             text = norm_text(text)
             if not text:
                 continue
@@ -1142,6 +1164,29 @@ class SSTPipeline:
                 }
             )
         return tokens
+
+    def _cached_vlm_text(self, *, provider_id: str, run_id: str | None, source_id: str | None) -> str:
+        if self._metadata is None:
+            return ""
+        if not run_id or not source_id:
+            return ""
+        try:
+            record_id = derived_text_record_id(
+                kind="vlm",
+                run_id=str(run_id),
+                provider_id=str(provider_id),
+                source_id=str(source_id),
+                config=self._config if isinstance(self._config, dict) else {},
+            )
+            payload = self._metadata.get(record_id)
+            if not isinstance(payload, dict):
+                return ""
+            text = payload.get("text")
+            if not text:
+                text = payload.get("text_normalized")
+            return str(text or "")
+        except Exception:
+            return ""
 
     def _cap(self, name: str) -> Any | None:
         if hasattr(self._system, "has") and self._system.has(name):
@@ -1715,7 +1760,14 @@ def _merge_payload(
     stage: str,
     diagnostics: list[dict[str, Any]],
 ) -> None:
+    replace_keys_by_stage: dict[str, set[str]] = {
+        "ui.parse": {"element_graph"},
+    }
+    replace_keys = replace_keys_by_stage.get(stage, set())
     for key, value in update.items():
+        if key in replace_keys:
+            base[key] = value
+            continue
         if key not in base:
             base[key] = value
             continue

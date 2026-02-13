@@ -175,84 +175,12 @@ if ((Invoke-Logged -Label "model_prep" -Exe "powershell.exe" -Arguments $prepArg
     Fail "model_prep failed"
 }
 
-# Install vLLM in WSL
-Log "Installing vLLM in WSL..."
-$installArgs = @("-NoProfile","-ExecutionPolicy","Bypass","-File","$RepoRoot\\tools\\install_vllm.ps1")
-if ((Invoke-Logged -Label "install_vllm" -Exe "powershell.exe" -Arguments $installArgs) -ne 0) {
-    Fail "install_vllm failed"
-}
-
-# Ensure WSL can bind sockets before starting vLLM
-Log "Checking WSL socket permissions..."
-if ((Test-WslSocket -Port 0) -ne 0) {
-    Fail "WSL cannot open sockets (PermissionError). vLLM cannot start. Fix WSL networking permissions and retry."
-}
-
-# Start vLLM
-Log "Starting vLLM..."
-$vllmUp = $false
-try {
-    Invoke-RestMethod "http://127.0.0.1:$VllmPort/v1/models" -TimeoutSec 2 | Out-Null
-    $vllmUp = $true
-    Log "vLLM already running on 127.0.0.1:$VllmPort; skipping start."
-} catch {
-    $vllmUp = $false
-}
-$startCode = 0
-if (-not $vllmUp) {
-    $startArgs = @("-NoProfile","-ExecutionPolicy","Bypass","-File","$RepoRoot\\tools\\start_vllm.ps1",
-        "-Manifest",$ModelManifest,
-        "-RootDir",$ModelRoot,
-        "-ModelId",$VllmModelId,
-        "-Port",$VllmPort,
-        "-WaitSeconds","45")
-    $startCode = Invoke-Logged -Label "start_vllm" -Exe "powershell.exe" -Arguments $startArgs
-}
-if ($startCode -ne 0) {
-    Log "vLLM start failed; gathering diagnostics..."
-    try {
-        $owner = Get-NetTCPConnection -LocalPort $VllmPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($owner) {
-            Log "Port $VllmPort already in use by PID $($owner.OwningProcess)"
-        } else {
-            Log "Port $VllmPort appears free on Windows host."
-        }
-    } catch {
-        Log "WARN: Unable to query port $VllmPort ownership: $($_.Exception.Message)"
-    }
-    try {
-        Invoke-Logged -Label "vllm log tail" -Exe "wsl.exe" -Arguments @("-e","bash","-lc","ls -l /tmp/vllm_autocapture.log; tail -n 200 /tmp/vllm_autocapture.log")
-    } catch {
-        Log "WARN: Unable to read /tmp/vllm_autocapture.log"
-    }
-    try {
-        $socketScript = Join-Path $RepoRoot "tools\\wsl_socket_check.ps1"
-        Invoke-Logged -Label "wsl socket test" -Exe "powershell.exe" -Arguments @("-NoProfile","-ExecutionPolicy","Bypass","-File",$socketScript)
-    } catch {
-        Log "WARN: Unable to run WSL socket test"
-    }
-    try {
-        $probeScript = Join-Path $RepoRoot "tools\\vllm_foreground_probe.ps1"
-        $modelPath = "D:\\autocapture\\models\\tinyllama-1.1b-chat-v1.0"
-        Invoke-Logged -Label "vllm foreground probe" -Exe "powershell.exe" -Arguments @(
-            "-NoProfile","-ExecutionPolicy","Bypass","-File",$probeScript,
-            "-RepoRoot",$RepoRoot,
-            "-ModelPath",$modelPath,
-            "-Port",$VllmPort,
-            "-TimeoutSec","20"
-        )
-    } catch {
-        Log "WARN: Unable to run vLLM foreground probe"
-    }
-    Fail "start_vllm failed"
-}
-
-# Verify vLLM is responding
-Log "Checking vLLM at http://127.0.0.1:$VllmPort/v1/models"
+# Verify external vLLM is responding (owned by sidecar repo)
+Log "Checking external vLLM at http://127.0.0.1:$VllmPort/v1/models"
 try {
     Invoke-RestMethod "http://127.0.0.1:$VllmPort/v1/models" -TimeoutSec 5 | Out-Null
 } catch {
-    Fail "vLLM did not respond on 127.0.0.1:$VllmPort"
+    Fail "External vLLM unavailable on 127.0.0.1:$VllmPort. This repo no longer starts vLLM; start it from the sidecar/hypervisor repo."
 }
 
 # Run fixture pipeline with full processing

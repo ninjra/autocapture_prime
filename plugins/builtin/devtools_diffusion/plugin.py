@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from typing import Any
 
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
@@ -17,6 +18,8 @@ def _load_run_diffusion():
     if spec is None or spec.loader is None:
         raise RuntimeError("hypervisor_loader_unavailable")
     module = importlib.util.module_from_spec(spec)
+    # dataclass/type resolution expects the module to be registered.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     fn = getattr(module, "run_diffusion", None)
     if not callable(fn):

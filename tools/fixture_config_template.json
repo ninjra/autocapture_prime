@@ -137,6 +137,9 @@
       "builtin.ledger.basic",
       "builtin.observability.basic",
       "builtin.ocr.basic",
+      "builtin.screen.parse.v1",
+      "builtin.screen.index.v1",
+      "builtin.screen.answer.v1",
       "builtin.processing.sst.pipeline",
       "builtin.retrieval.basic",
       "builtin.sst.index",
@@ -145,7 +148,6 @@
       "builtin.sst.persist",
       "builtin.sst.preprocess.normalize",
       "builtin.sst.preprocess.tile",
-      "builtin.sst.qa.answers",
       "builtin.sst.temporal.segment",
       "builtin.time.basic",
       "builtin.storage.encrypted"
@@ -174,13 +176,16 @@
       "builtin.sst.ocr.onnx": true,
       "builtin.ocr.rapid": false,
       "builtin.ocr.basic": true,
+      "builtin.screen.parse.v1": true,
+      "builtin.screen.index.v1": true,
+      "builtin.screen.answer.v1": true,
       "builtin.sst.persist": true,
       "builtin.sst.preprocess.normalize": true,
       "builtin.sst.preprocess.tile": true,
       "builtin.sst.temporal.segment": true,
       "builtin.sst.track.cursor": false,
       "builtin.sst.ui.parse": false,
-      "builtin.sst.qa.answers": true,
+      "builtin.sst.qa.answers": false,
       "builtin.state.anomaly": false,
       "builtin.state.policy": false,
       "builtin.state.evidence.compiler": false,
@@ -233,6 +238,9 @@
         "builtin.state.jepa_like",
         "builtin.state.retrieval",
         "builtin.state.vector.sqlite_ts",
+        "builtin.screen.parse.v1",
+        "builtin.screen.index.v1",
+        "builtin.screen.answer.v1",
         "builtin.storage.sqlcipher"
       ],
       "inproc_justifications": {
@@ -265,6 +273,9 @@
         "builtin.state.jepa_like": "Fixture run keeps JEPA-like state builder in-process for deterministic span building.",
         "builtin.state.retrieval": "Fixture run keeps state retrieval local for deterministic vector access.",
         "builtin.state.vector.sqlite_ts": "Fixture run keeps vector index local for deterministic SQLite access.",
+        "builtin.screen.parse.v1": "Fixture run keeps screen parse in-process for deterministic UI-graph extraction.",
+        "builtin.screen.index.v1": "Fixture run keeps screen index in-process for deterministic chunk/evidence build.",
+        "builtin.screen.answer.v1": "Fixture run keeps screen answer in-process for deterministic cited claims.",
         "builtin.storage.sqlcipher": "Fixture run keeps metadata storage local for deterministic SQLite writes."
       }
     },
@@ -299,6 +310,39 @@
         ],
         "provider_ids": [
           "builtin.vlm.qwen2_vl_2b"
+        ]
+      },
+      "screen.parse.v1": {
+        "mode": "single",
+        "fanout": false,
+        "max_providers": 1,
+        "preferred": [
+          "builtin.screen.parse.v1"
+        ],
+        "provider_ids": [
+          "builtin.screen.parse.v1"
+        ]
+      },
+      "screen.index.v1": {
+        "mode": "single",
+        "fanout": false,
+        "max_providers": 1,
+        "preferred": [
+          "builtin.screen.index.v1"
+        ],
+        "provider_ids": [
+          "builtin.screen.index.v1"
+        ]
+      },
+      "screen.answer.v1": {
+        "mode": "single",
+        "fanout": false,
+        "max_providers": 1,
+        "preferred": [
+          "builtin.screen.answer.v1"
+        ],
+        "provider_ids": [
+          "builtin.screen.answer.v1"
         ]
       },
       "storage.metadata": {

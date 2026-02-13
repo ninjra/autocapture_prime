@@ -17,6 +17,7 @@ from autocapture.runtime.gpu import release_vram
 from autocapture.runtime.gpu_guard import evaluate_gpu_lag_guard
 from autocapture.runtime.gpu_monitor import sample_gpu
 from autocapture.runtime.scheduler import Job, JobStepResult, Scheduler
+from autocapture_nx.kernel.activity_signal import load_activity_signal
 from autocapture_nx.kernel.audit import append_audit_event
 from autocapture_nx.kernel.telemetry import record_telemetry
 from autocapture_nx.windows.fullscreen import fullscreen_snapshot
