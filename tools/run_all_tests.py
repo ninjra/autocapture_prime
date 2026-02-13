@@ -41,7 +41,7 @@ def _commands(py: str) -> Iterable[list[str]]:
         [py, "tools/gate_static.py"],
         [py, "tools/gate_vuln.py"],
         [py, "tools/gate_doctor.py"],
-        [py, "tools/gate_full_repo_miss_matrix.py"],
+        [py, "tools/gate_full_repo_miss_matrix.py", "--refresh"],
         [py, "-m", "autocapture_nx", "doctor"],
         [py, "-m", "autocapture_nx", "--safe-mode", "doctor"],
         [py, "-m", "unittest", "tests/test_blueprint_spec_validation.py", "-q"],
@@ -167,6 +167,8 @@ def main() -> int:
     log_path.write_text("", encoding="utf-8")
     print(f"Logging to: {log_path}")
     print(f"Report to: {report_path}")
+    # Clear stale failure state so gate_full_repo_miss_matrix evaluates the current run.
+    _write_report(report_path, log_path, "ok", "bootstrap", 0, project_python)
 
     try:
         tool_python = _ensure_tooling(root, log_path)

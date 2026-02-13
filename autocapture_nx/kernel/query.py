@@ -2586,7 +2586,7 @@ def _encode_topic_vlm_candidates(image_bytes: bytes, *, topic: str, elements: li
                 for roi_box in roi_boxes:
                     x1, y1, x2, y2 = roi_box
                     crop = rgb.crop((x1, y1, x2, y2))
-                    crop_max_sides = (1280, 1024)
+                    crop_max_sides: tuple[int, ...] = (1280, 1024)
                     if topic in {"hard_time_to_assignment", "hard_cell_phone_normalization", "hard_unread_today", "hard_action_grounding"}:
                         crop_max_sides = (2048, 1600, 1280)
                     for max_side in crop_max_sides:
@@ -2867,11 +2867,11 @@ def _hard_vlm_score(topic: str, payload: dict[str, Any]) -> int:
         return score
     if topic == "hard_k_presets":
         raw = payload.get("k_presets")
-        presets = [_intish(x) for x in raw] if isinstance(raw, list) else []
-        presets = [int(x) for x in presets if x is not None]
+        preset_candidates = [_intish(x) for x in raw] if isinstance(raw, list) else []
+        presets = [int(x) for x in preset_candidates if x is not None]
         if presets:
             score += min(6, len(presets) * 2)
-            if any(x >= 10 for x in presets):
+            if any(val >= 10 for val in presets):
                 score += 2
         clamp = payload.get("clamp_range_inclusive")
         if isinstance(clamp, list) and len(clamp) == 2:
@@ -2992,16 +2992,21 @@ def _hard_vlm_score(topic: str, payload: dict[str, Any]) -> int:
                 score -= 2
         return score
     if topic == "hard_action_grounding":
+        def _num(value: Any) -> float | None:
+            try:
+                return float(value)
+            except Exception:
+                return None
+
         boxes: dict[str, tuple[float, float, float, float]] = {}
         for key in ("COMPLETE", "VIEW_DETAILS"):
             box = payload.get(key)
             if isinstance(box, dict) and {"x1", "y1", "x2", "y2"} <= set(box.keys()):
-                try:
-                    x1 = float(box.get("x1"))
-                    y1 = float(box.get("y1"))
-                    x2 = float(box.get("x2"))
-                    y2 = float(box.get("y2"))
-                except Exception:
+                x1 = _num(box.get("x1"))
+                y1 = _num(box.get("y1"))
+                x2 = _num(box.get("x2"))
+                y2 = _num(box.get("y2"))
+                if x1 is None or y1 is None or x2 is None or y2 is None:
                     continue
                 if 0.0 <= x1 <= 1.0 and 0.0 <= y1 <= 1.0 and 0.0 <= x2 <= 1.0 and 0.0 <= y2 <= 1.0:
                     boxes[key] = (x1, y1, x2, y2)
@@ -3897,8 +3902,10 @@ def _build_answer_display(
             "topic": query_topic,
         }
     if query_topic == "hard_cell_phone_normalization":
-        schema = hard_vlm_map.get("normalized_schema") if isinstance(hard_vlm_map.get("normalized_schema"), dict) else {}
-        transformed = hard_vlm_map.get("transformed_record_values") if isinstance(hard_vlm_map.get("transformed_record_values"), dict) else {}
+        schema_raw = hard_vlm_map.get("normalized_schema")
+        transformed_raw = hard_vlm_map.get("transformed_record_values")
+        schema: dict[str, Any] = schema_raw if isinstance(schema_raw, dict) else {}
+        transformed: dict[str, Any] = transformed_raw if isinstance(transformed_raw, dict) else {}
         note = str(hard_vlm_map.get("note") or "").strip()
         has_type = str(schema.get("has_cell_phone_number") or "").strip()
         value_type = str(schema.get("cell_phone_number") or "").strip()
@@ -3952,7 +3959,7 @@ def _build_answer_display(
                 "fields": {"slack_numbers": str(sizes)},
                 "topic": query_topic,
             }
-        bullets = [
+        hard_bullets = [
             f"slack_numbers: {sizes}",
             "inferred_parameter: dimension",
             f"example_queries: ?k=64&dimension={sizes[0]} ; ?k=64&dimension={sizes[1]}",
@@ -3961,7 +3968,7 @@ def _build_answer_display(
         return {
             "schema_version": 1,
             "summary": "Cross-window inference: Slack size numbers map to dimension parameter.",
-            "bullets": bullets,
+            "bullets": hard_bullets,
             "fields": {
                 "slack_numbers": str(sizes),
                 "inferred_parameter": "dimension",
@@ -4010,8 +4017,10 @@ def _build_answer_display(
             "topic": query_topic,
         }
     if query_topic == "hard_sirius_classification":
-        counts = hard_vlm_map.get("counts") if isinstance(hard_vlm_map.get("counts"), dict) else {}
-        tiles_raw = hard_vlm_map.get("classified_tiles") if isinstance(hard_vlm_map.get("classified_tiles"), list) else []
+        counts_raw = hard_vlm_map.get("counts")
+        tiles_raw_any = hard_vlm_map.get("classified_tiles")
+        counts: dict[str, Any] = counts_raw if isinstance(counts_raw, dict) else {}
+        tiles_raw: list[Any] = tiles_raw_any if isinstance(tiles_raw_any, list) else []
         tiles: list[dict[str, str]] = []
         for item in tiles_raw:
             if not isinstance(item, dict):
@@ -4034,16 +4043,16 @@ def _build_answer_display(
                 tp = sum(1 for it in tiles if it.get("class") == "talk_podcast") or tp
                 ncaa = sum(1 for it in tiles if it.get("class") == "ncaa_team") or ncaa
                 nfl = sum(1 for it in tiles if it.get("class") == "nfl_event") or nfl
-            bullets = [f"counts: talk_podcast={tp}, ncaa_team={ncaa}, nfl_event={nfl}"]
+            sirius_bullets = [f"counts: talk_podcast={tp}, ncaa_team={ncaa}, nfl_event={nfl}"]
             for item in tiles[:8]:
                 entity = str(item.get("entity") or "").strip()
                 klass = str(item.get("class") or "").strip()
                 if entity or klass:
-                    bullets.append(f"tile: {entity} [{klass}]")
+                    sirius_bullets.append(f"tile: {entity} [{klass}]")
             return {
                 "schema_version": 1,
                 "summary": f"SiriusXM classes: talk_podcast={tp}, ncaa_team={ncaa}, nfl_event={nfl}",
-                "bullets": bullets,
+                "bullets": sirius_bullets,
                 "fields": {
                     "talk_podcast": str(tp),
                     "ncaa_team": str(ncaa),

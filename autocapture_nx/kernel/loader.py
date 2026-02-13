@@ -37,7 +37,7 @@ from autocapture_nx.kernel.policy_snapshot import persist_policy_snapshot
 from autocapture_nx.kernel.run_manifest import determinism_inputs
 from autocapture_nx.kernel.schema_registry import SchemaRegistry
 from autocapture_nx.plugin_system.registry import PluginRegistry
-from autocapture_nx.plugin_system.runtime import global_network_deny, set_global_network_deny
+from autocapture_nx.plugin_system.runtime import FilesystemPolicy, global_network_deny, set_global_network_deny
 from autocapture_nx.plugin_system.host import close_all_subprocess_hosts
 
 from .system import System
@@ -223,6 +223,22 @@ class Kernel:
             "path": result.path,
         }
 
+    def _egress_approval_store_path(self) -> Path:
+        storage_cfg = self.config.get("storage", {}) if isinstance(self.config, dict) else {}
+        data_dir = str(storage_cfg.get("data_dir", "data"))
+        privacy_cfg = self.config.get("privacy", {}) if isinstance(self.config, dict) else {}
+        egress_cfg = privacy_cfg.get("egress", {}) if isinstance(privacy_cfg, dict) else {}
+        explicit = str(egress_cfg.get("approval_store_path") or "").strip()
+        if explicit:
+            return Path(explicit)
+        return Path(data_dir) / "egress" / "approvals.json"
+
+    def _egress_approval_store_policy(self) -> FilesystemPolicy:
+        approval_dir = self._egress_approval_store_path().parent
+        if str(approval_dir).strip() == "":
+            approval_dir = Path(".")
+        return FilesystemPolicy.from_paths(read=[approval_dir], readwrite=[approval_dir])
+
     def _atexit_shutdown(self) -> None:
         # Best-effort cleanup for callers that forget to call Kernel.shutdown().
         # Avoid leaving run_state=running (which triggers crash-loop safe mode).
@@ -359,7 +375,12 @@ class Kernel:
             from autocapture_nx.kernel.egress_approvals import EgressApprovalStore
 
             approval_store = EgressApprovalStore(self.config, builder)
-            capabilities.register("egress.approval_store", approval_store, network_allowed=False)
+            capabilities.register(
+                "egress.approval_store",
+                approval_store,
+                network_allowed=False,
+                filesystem_policy=self._egress_approval_store_policy(),
+            )
         except Exception:
             pass
         profiler.mark("egress_store")
@@ -410,7 +431,12 @@ class Kernel:
             capabilities.register("event.builder", builder, network_allowed=False)
         if self.system.has("egress.approval_store"):
             store = self.system.get("egress.approval_store")
-            capabilities.register("egress.approval_store", store, network_allowed=False)
+            capabilities.register(
+                "egress.approval_store",
+                store,
+                network_allowed=False,
+                filesystem_policy=self._egress_approval_store_policy(),
+            )
         if self.system.has("runtime.conductor"):
             conductor = self.system.get("runtime.conductor")
             capabilities.register("runtime.conductor", conductor, network_allowed=False)

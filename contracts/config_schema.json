@@ -1186,6 +1186,9 @@
             "wsl_force_lazy_start": {
               "type": "boolean"
             },
+            "wsl_force_inproc": {
+              "type": "boolean"
+            },
             "subprocess_spawn_concurrency": {
               "type": "integer"
             },
@@ -1325,6 +1328,18 @@
           "required": [
             "network_allowed_plugin_ids"
           ],
+          "type": "object"
+        },
+        "approvals": {
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "properties": {
+            "required": {
+              "type": "boolean"
+            }
+          },
           "type": "object"
         },
         "quarantine": {

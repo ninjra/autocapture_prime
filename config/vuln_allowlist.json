@@ -1,0 +1,10 @@
+{
+  "ignored_ids": [
+    {
+      "id": "CVE-2025-69872",
+      "package": "diskcache",
+      "reason": "No upstream fix version published yet; local-dev transitive package.",
+      "expires_utc": "2026-03-31T00:00:00Z"
+    }
+  ]
+}
