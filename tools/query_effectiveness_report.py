@@ -139,6 +139,14 @@ def _provider_stats(
     latency_threshold_ms: float,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     agg: dict[str, dict[str, Any]] = {}
+    quality_samples: list[float] = []
+    for row in rows:
+        if row.user_score_bp is not None:
+            quality_samples.append(float(row.user_score_bp))
+        else:
+            quality_samples.append(float(row.coverage_bp))
+    baseline_quality = _safe_div(sum(quality_samples), float(len(quality_samples))) if quality_samples else 0.0
+
     for row in rows:
         trace = traces_by_id.get(row.query_run_id, {})
         providers = trace.get("providers", []) if isinstance(trace.get("providers", []), list) else []
@@ -155,9 +163,14 @@ def _provider_stats(
                     "runs_total": 0,
                     "feedback_total": 0,
                     "correct_total": 0,
+                    "helped_total": 0,
+                    "hurt_total": 0,
+                    "neutral_total": 0,
                     "latency_sum_ms": 0.0,
                     "provider_latency_sum_ms": 0.0,
                     "contribution_sum_bp": 0.0,
+                    "quality_sum_bp": 0.0,
+                    "quality_samples": 0,
                 },
             )
             entry["runs_total"] += 1
@@ -168,6 +181,15 @@ def _provider_stats(
                 entry["feedback_total"] += 1
                 if int(row.user_score_bp) >= 5000:
                     entry["correct_total"] += 1
+                    entry["helped_total"] += 1
+                else:
+                    entry["hurt_total"] += 1
+                entry["quality_sum_bp"] += float(row.user_score_bp)
+                entry["quality_samples"] += 1
+            else:
+                entry["neutral_total"] += 1
+                entry["quality_sum_bp"] += float(row.coverage_bp)
+                entry["quality_samples"] += 1
 
     provider_rows: list[dict[str, Any]] = []
     recs: list[dict[str, Any]] = []
@@ -179,15 +201,22 @@ def _provider_stats(
         mean_latency = _safe_div(float(item["latency_sum_ms"]), float(runs_total))
         mean_provider_latency = _safe_div(float(item["provider_latency_sum_ms"]), float(runs_total))
         mean_contribution_bp = int(round(_safe_div(float(item["contribution_sum_bp"]), float(runs_total))))
+        quality_mean_bp = _safe_div(float(item["quality_sum_bp"]), float(item["quality_samples"]))
+        confidence_delta_bp = float(round(quality_mean_bp - baseline_quality, 3))
         row = {
             "provider_id": provider_id,
             "runs_total": runs_total,
             "feedback_total": feedback_total,
             "correct_total": correct_total,
+            "helped_total": int(item["helped_total"]),
+            "hurt_total": int(item["hurt_total"]),
+            "neutral_total": int(item["neutral_total"]),
             "accuracy": round(accuracy, 4),
             "mean_run_latency_ms": round(mean_latency, 3),
             "mean_provider_latency_ms": round(mean_provider_latency, 3),
             "mean_contribution_bp": mean_contribution_bp,
+            "quality_mean_bp": round(quality_mean_bp, 3),
+            "confidence_delta_bp": confidence_delta_bp,
         }
         provider_rows.append(row)
 
@@ -208,6 +237,14 @@ def _provider_stats(
                         "reason": f"accuracy={accuracy:.3f} over {feedback_total} feedback runs",
                     }
                 )
+        if runs_total >= int(min_samples) and confidence_delta_bp < -500.0:
+            recs.append(
+                {
+                    "kind": "provider_negative_confidence_delta",
+                    "provider_id": provider_id,
+                    "reason": f"confidence_delta_bp={confidence_delta_bp:.1f}, quality_mean_bp={quality_mean_bp:.1f}, baseline_bp={baseline_quality:.1f}",
+                }
+            )
     return provider_rows, recs
 
 
@@ -347,10 +384,15 @@ def main(argv: list[str] | None = None) -> int:
             "runs_total",
             "feedback_total",
             "correct_total",
+            "helped_total",
+            "hurt_total",
+            "neutral_total",
             "accuracy",
             "mean_run_latency_ms",
             "mean_provider_latency_ms",
             "mean_contribution_bp",
+            "quality_mean_bp",
+            "confidence_delta_bp",
         ],
     )
     _write_csv(

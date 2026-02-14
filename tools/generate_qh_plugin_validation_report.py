@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import glob
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +15,28 @@ ADV_DIR = ROOT / "artifacts" / "advanced10"
 
 
 def _latest_advanced20() -> Path:
+    candidates = sorted(ADV_DIR.glob("advanced*.json"))
+    best: Path | None = None
+    best_mtime = -1.0
+    for path in candidates:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        rows = payload.get("rows", []) if isinstance(payload, dict) else []
+        if not isinstance(rows, list):
+            continue
+        if len(rows) < 20:
+            continue
+        try:
+            mt = path.stat().st_mtime
+        except Exception:
+            mt = 0.0
+        if mt > best_mtime:
+            best = path
+            best_mtime = mt
+    if best is not None:
+        return best
     for pattern in ("advanced20_*_rerun1.json", "advanced20_*.json"):
         matches = sorted(ADV_DIR.glob(pattern))
         if matches:
@@ -24,7 +45,6 @@ def _latest_advanced20() -> Path:
 
 
 def _confidence_score(row: dict[str, Any]) -> float:
-    """Deterministic confidence heuristic for validation reporting."""
     ev = row.get("expected_eval") if isinstance(row.get("expected_eval"), dict) else {}
     evaluated = bool(ev.get("evaluated", False))
     passed = ev.get("passed")
@@ -45,7 +65,7 @@ def _confidence_score(row: dict[str, Any]) -> float:
                 score += 0.10
             if provider_count >= 2:
                 score += 0.05
-            if "Indeterminate:" in summary:
+            if "indeterminate:" in summary.casefold():
                 score -= 0.18
         elif answer_state == "no_evidence":
             score = 0.18
@@ -60,6 +80,44 @@ def _confidence_label(score: float) -> str:
     if score >= 0.50:
         return "medium"
     return "low"
+
+
+def _plugin_status_map(run_report: dict[str, Any]) -> tuple[list[str], dict[str, str]]:
+    plugins = run_report.get("plugins", {}) if isinstance(run_report.get("plugins"), dict) else {}
+    load_report = plugins.get("load_report", {}) if isinstance(plugins.get("load_report"), dict) else {}
+    loaded = [str(x).strip() for x in (load_report.get("loaded") or []) if str(x).strip()]
+    failed = [str(x).strip() for x in (load_report.get("failed") or []) if str(x).strip()]
+    skipped = [str(x).strip() for x in (load_report.get("skipped") or []) if str(x).strip()]
+    all_plugins: list[str] = []
+    seen: set[str] = set()
+    for plugin_id in loaded + failed + skipped:
+        if plugin_id in seen:
+            continue
+        seen.add(plugin_id)
+        all_plugins.append(plugin_id)
+    status: dict[str, str] = {}
+    for plugin_id in all_plugins:
+        if plugin_id in loaded:
+            status[plugin_id] = "loaded"
+        elif plugin_id in failed:
+            status[plugin_id] = "failed"
+        elif plugin_id in skipped:
+            status[plugin_id] = "skipped"
+        else:
+            status[plugin_id] = "unknown"
+    return all_plugins, status
+
+
+def _plugin_decision(*, status: str, in_path: int, strict_pass: int, strict_fail: int, conf_delta: float) -> str:
+    if status == "failed":
+        return "fix_required"
+    if in_path <= 0 and status == "loaded":
+        return "remove_or_rewire"
+    if strict_fail > strict_pass:
+        return "tune"
+    if strict_pass > 0 and conf_delta > 0.02:
+        return "keep"
+    return "neutral"
 
 
 def main() -> int:
@@ -77,28 +135,17 @@ def main() -> int:
         score = _confidence_score(row)
         row["_confidence"] = score
         row["_confidence_label"] = _confidence_label(score)
+    overall_conf = mean(float(row.get("_confidence") or 0.0) for row in rows) if rows else 0.0
 
-    load_report = (
-        ((run_report.get("plugins") or {}).get("load_report") or {})
-        if isinstance(run_report.get("plugins"), dict)
-        else {}
-    )
-    loaded = list(load_report.get("loaded") or [])
-    failed = list(load_report.get("failed") or [])
-    skipped = list(load_report.get("skipped") or [])
-
-    all_plugins: list[str] = []
-    seen: set[str] = set()
-    for plugin_id in loaded + failed + skipped:
-        if plugin_id in seen:
-            continue
-        seen.add(plugin_id)
-        all_plugins.append(plugin_id)
-
+    all_plugins, status_map = _plugin_status_map(run_report)
     usage: dict[str, list[dict[str, Any]]] = {plugin_id: [] for plugin_id in all_plugins}
+
     for row in rows:
         qid = str(row.get("id") or "?")
         conf = float(row.get("_confidence") or 0.0)
+        ev = row.get("expected_eval") if isinstance(row.get("expected_eval"), dict) else {}
+        stage_ms = row.get("stage_ms") if isinstance(row.get("stage_ms"), dict) else {}
+        total_ms = float(stage_ms.get("total", 0.0) or 0.0)
         providers = row.get("providers") if isinstance(row.get("providers"), list) else []
         for provider in providers:
             if not isinstance(provider, dict):
@@ -109,18 +156,62 @@ def main() -> int:
             if plugin_id not in usage:
                 usage[plugin_id] = []
                 all_plugins.append(plugin_id)
+                status_map.setdefault(plugin_id, "seen_in_path_only")
             usage[plugin_id].append(
                 {
                     "id": qid,
                     "confidence": conf,
-                    "contribution_bp": provider.get("contribution_bp"),
-                    "claim_count": provider.get("claim_count"),
-                    "citation_count": provider.get("citation_count"),
+                    "contribution_bp": int(provider.get("contribution_bp", 0) or 0),
+                    "claim_count": int(provider.get("claim_count", 0) or 0),
+                    "citation_count": int(provider.get("citation_count", 0) or 0),
+                    "evaluated": bool(ev.get("evaluated", False)),
+                    "passed": bool(ev.get("passed", False)),
+                    "stage_total_ms": total_ms,
+                    "est_latency_ms": float(provider.get("estimated_latency_ms", 0.0) or 0.0),
                 }
             )
 
+    plugin_rows: list[dict[str, Any]] = []
+    total_questions = int(len(rows))
+    for plugin_id in all_plugins:
+        entries = usage.get(plugin_id, [])
+        in_path = int(len(entries))
+        out_of_path = max(0, total_questions - in_path)
+        strict_entries = [item for item in entries if bool(item.get("evaluated", False))]
+        strict_pass = int(sum(1 for item in strict_entries if bool(item.get("passed", False))))
+        strict_fail = int(sum(1 for item in strict_entries if not bool(item.get("passed", False))))
+        strict_neutral = int(max(0, len(entries) - len(strict_entries)))
+        avg_conf = float(mean(float(item["confidence"]) for item in entries)) if entries else 0.0
+        conf_delta = float(round(avg_conf - overall_conf, 4))
+        mean_latency = float(mean(float(item.get("est_latency_ms", 0.0)) for item in entries)) if entries else 0.0
+        decision = _plugin_decision(
+            status=status_map.get(plugin_id, "unknown"),
+            in_path=in_path,
+            strict_pass=strict_pass,
+            strict_fail=strict_fail,
+            conf_delta=conf_delta,
+        )
+        plugin_rows.append(
+            {
+                "plugin_id": plugin_id,
+                "status": status_map.get(plugin_id, "unknown"),
+                "in_path_count": in_path,
+                "out_of_path_count": out_of_path,
+                "strict_pass_count": strict_pass,
+                "strict_fail_count": strict_fail,
+                "strict_neutral_count": strict_neutral,
+                "avg_confidence": round(avg_conf, 4),
+                "confidence_delta": conf_delta,
+                "mean_est_latency_ms": round(mean_latency, 3),
+                "decision": decision,
+                "answer_ids": ", ".join(item.get("id", "?") for item in entries) if entries else "-",
+            }
+        )
+    plugin_rows.sort(key=lambda item: (str(item["status"]), -int(item["in_path_count"]), str(item["plugin_id"])))
+
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     output_path = ROOT / "docs" / "reports" / "question-validation-plugin-trace-2026-02-13.md"
+    json_output = ROOT / "artifacts" / "advanced10" / "question_validation_plugin_trace_latest.json"
 
     lines: list[str] = []
     lines.append("# Question Validation + Plugin Path Trace (Q/H)")
@@ -131,12 +222,7 @@ def main() -> int:
     lines.append(
         f"- Evaluated summary: total={artifact.get('evaluated_total')} passed={artifact.get('evaluated_passed')} failed={artifact.get('evaluated_failed')}"
     )
-    lines.append("")
-    lines.append("## Confidence Rubric")
-    lines.append("- `high` (>=0.80): strict-evaluated pass or strongly supported non-strict answer with multiple providers")
-    lines.append("- `medium` (0.50-0.79): non-strict `ok` answer with some provider support")
-    lines.append("- `low` (<0.50): strict-evaluated fail or `no_evidence` / indeterminate outputs")
-    lines.append("- Note: `Q1..Q10` are non-strict in this artifact (`expected_eval.evaluated=false`), so confidence there is heuristic.")
+    lines.append(f"- Overall confidence mean: `{overall_conf:.4f}`")
     lines.append("")
     lines.append("## Question Results (All Q and H)")
     lines.append("| ID | Strict Evaluated | Strict Passed | Answer State | Confidence | Label | Winner | Providers In Path |")
@@ -146,23 +232,16 @@ def main() -> int:
         lines.append(
             f"| {row.get('id')} | {ev.get('evaluated')} | {ev.get('passed')} | {row.get('answer_state')} | {float(row.get('_confidence')):.2f} | {row.get('_confidence_label')} | {row.get('winner')} | {len(row.get('providers') or [])} |"
         )
+
     lines.append("")
-    lines.append("## Plugin Execution + Answer Path")
-    lines.append("| Plugin ID | Load Status | In Any Answer Path | Answer Count | Answer IDs | Avg Confidence |")
-    lines.append("| --- | --- | --- | ---: | --- | ---: |")
-    for plugin_id in all_plugins:
-        if plugin_id in loaded:
-            status = "loaded"
-        elif plugin_id in failed:
-            status = "failed"
-        elif plugin_id in skipped:
-            status = "skipped"
-        else:
-            status = "seen_in_path_only"
-        entries = usage.get(plugin_id, [])
-        ids = ", ".join(item["id"] for item in entries) if entries else "-"
-        avg_conf = f"{mean(item['confidence'] for item in entries):.2f}" if entries else "-"
-        lines.append(f"| {plugin_id} | {status} | {bool(entries)} | {len(entries)} | {ids} | {avg_conf} |")
+    lines.append("## Plugin Inventory + Effectiveness")
+    lines.append("| Plugin ID | Status | In Path | Out Path | Strict Pass | Strict Fail | Neutral | Avg Conf | Conf Δ | Mean Est Latency ms | Decision |")
+    lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |")
+    for item in plugin_rows:
+        lines.append(
+            f"| {item['plugin_id']} | {item['status']} | {item['in_path_count']} | {item['out_of_path_count']} | {item['strict_pass_count']} | {item['strict_fail_count']} | {item['strict_neutral_count']} | {item['avg_confidence']:.4f} | {item['confidence_delta']:+.4f} | {item['mean_est_latency_ms']:.3f} | {item['decision']} |"
+        )
+
     lines.append("")
     lines.append("## Per-Question Plugin Path + Confidence")
     for row in rows:
@@ -183,12 +262,30 @@ def main() -> int:
                 if not isinstance(provider, dict):
                     continue
                 lines.append(
-                    f"  - `{provider.get('provider_id')}` | contribution_bp={provider.get('contribution_bp')} | claim_count={provider.get('claim_count')} | citation_count={provider.get('citation_count')}"
+                    f"  - `{provider.get('provider_id')}` | contribution_bp={provider.get('contribution_bp')} | claim_count={provider.get('claim_count')} | citation_count={provider.get('citation_count')} | est_latency_ms={provider.get('estimated_latency_ms', 0)}"
                 )
         lines.append("")
 
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines), encoding="utf-8")
-    print(json.dumps({"ok": True, "output": str(output_path), "artifact": str(artifact_path)}))
+    json_output.parent.mkdir(parents=True, exist_ok=True)
+    json_output.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "generated_utc": now,
+                "artifact": str(artifact_path),
+                "run_report": str(run_report_path),
+                "overall_confidence": round(overall_conf, 6),
+                "rows": rows,
+                "plugin_rows": plugin_rows,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    print(json.dumps({"ok": True, "output": str(output_path), "json": str(json_output), "artifact": str(artifact_path)}))
     return 0
 
 

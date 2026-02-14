@@ -91,6 +91,7 @@ class VllmVLM(PluginBase):
         self._roi_max_tokens = max(128, int(cfg.get("roi_max_tokens") or 384))
         self._client: OpenAICompatClient | None = None
         self._last_chat_error = ""
+        self._model_validated = False
 
     def capabilities(self) -> dict[str, Any]:
         return {"vision.extractor": self}
@@ -102,8 +103,7 @@ class VllmVLM(PluginBase):
         client = self._ensure_client(payload)
         if client is None:
             return payload
-        if self._model is None:
-            self._model = self._discover_model(client)
+        self._resolve_model(client)
         if not self._model:
             payload["model_error"] = "vlm_model_missing"
             return payload
@@ -272,6 +272,13 @@ class VllmVLM(PluginBase):
                 resp = client.chat_completions(req)
             except Exception as exc:
                 msg = str(exc or "").casefold()
+                if _is_model_not_found_error(msg):
+                    previous = str(self._model or "").strip()
+                    self._model_validated = False
+                    self._resolve_model(client)
+                    if self._model and str(self._model).strip() and str(self._model).strip() != previous:
+                        self._last_chat_error = f"model_fallback:{previous}->{self._model}"
+                        continue
                 if _is_context_limit_error(msg):
                     downsized = _downscale_png_bytes(current)
                     if downsized and len(downsized) < len(current):
@@ -301,20 +308,39 @@ class VllmVLM(PluginBase):
 
     @staticmethod
     def _discover_model(client: OpenAICompatClient) -> str | None:
+        ids = VllmVLM._discover_model_ids(client)
+        return ids[0] if ids else None
+
+    @staticmethod
+    def _discover_model_ids(client: OpenAICompatClient) -> list[str]:
         try:
             models = client.list_models()
         except Exception:
-            return None
+            return []
         data = models.get("data", []) if isinstance(models, dict) else []
         if not isinstance(data, list):
-            return None
+            return []
+        out: list[str] = []
         for item in data:
             if not isinstance(item, dict):
                 continue
             model_id = str(item.get("id") or "").strip()
             if model_id:
-                return model_id
-        return None
+                out.append(model_id)
+        return out
+
+    def _resolve_model(self, client: OpenAICompatClient) -> str | None:
+        if self._model and self._model_validated:
+            return self._model
+        model_ids = self._discover_model_ids(client)
+        if not model_ids:
+            return self._model
+        if self._model and self._model in model_ids:
+            self._model_validated = True
+            return self._model
+        self._model = model_ids[0]
+        self._model_validated = True
+        return self._model
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> VllmVLM:
@@ -433,6 +459,11 @@ def _is_context_limit_error(message: str) -> bool:
         or "context length" in text
         or "too many tokens" in text
     )
+
+
+def _is_model_not_found_error(message: str) -> bool:
+    text = str(message or "").casefold()
+    return ("model" in text and "not found" in text) or ("model" in text and "does not exist" in text)
 
 
 def _downscale_png_bytes(image_bytes: bytes) -> bytes | None:

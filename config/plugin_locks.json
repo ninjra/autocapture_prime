@@ -1,6 +1,6 @@
 {
   "contract_lock_hash": "d73d3a0de7f110815a4cba7cff3908eccc7faf94bad6045bf82bd44da2ee2522",
-  "generated_at": "2026-02-13T19:12:24.116123+00:00",
+  "generated_at": "2026-02-14T00:00:18.337680+00:00",
   "kernel_api_version": "0.1.0",
   "plugins": {
     "builtin.anchor.basic": {
@@ -235,7 +235,13 @@
     },
     "builtin.observation.graph": {
       "artifact_sha256": "7a77653223a51064e7812ed395cbfff073d4f0822281b03494512796056a1a8e",
-      "manifest_sha256": "bd4615a28782fcffe1054173e698c08af71718f1f307c689291751bd386f9482"
+      "contract_lock_hash": "d73d3a0de7f110815a4cba7cff3908eccc7faf94bad6045bf82bd44da2ee2522",
+      "kernel_api_version": "0.1.0",
+      "manifest_sha256": "bd4615a28782fcffe1054173e698c08af71718f1f307c689291751bd386f9482",
+      "sbom": {
+        "requirements": [],
+        "requirements_sha256": null
+      }
     },
     "builtin.ocr.basic": {
       "artifact_sha256": "dc9146a8766a690641ff60b8b92586f1ef9b7791ddc2b76f0ebb1f091c51ea78",
@@ -878,7 +884,7 @@
       }
     },
     "builtin.vlm.vllm_localhost": {
-      "artifact_sha256": "42f16db74f4c9edca02b5bdfbc7722e44e5fb0e315eed03a79b41c179dd47177",
+      "artifact_sha256": "36880d2ef2f47e8637e796d8bace40e685c995beebd855cdc71cf02748cb1cb9",
       "contract_lock_hash": "d73d3a0de7f110815a4cba7cff3908eccc7faf94bad6045bf82bd44da2ee2522",
       "kernel_api_version": "0.1.0",
       "manifest_sha256": "8a0a91bfb5e5e8f7edbee40ddd3ed8dfb9f324145b196a499871eac49ed49cc9",

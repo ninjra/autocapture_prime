@@ -1,14 +1,29 @@
 import unittest
 
 from plugins.builtin.vlm_vllm_localhost.plugin import (
+    VllmVLM,
     _collect_rois,
     _extract_layout_from_text,
+    _is_model_not_found_error,
     _parse_elements,
     _valid_layout,
 )
 
 
 class VllmLocalhostPluginTests(unittest.TestCase):
+    def test_discover_model_ids_returns_ordered_ids(self) -> None:
+        class _FakeClient:
+            def list_models(self):
+                return {"data": [{"id": "m1"}, {"id": "m2"}, {"id": ""}, {"name": "x"}]}
+
+        ids = VllmVLM._discover_model_ids(_FakeClient())  # type: ignore[arg-type]
+        self.assertEqual(ids, ["m1", "m2"])
+
+    def test_model_not_found_error_detection(self) -> None:
+        self.assertTrue(_is_model_not_found_error("HTTP 404 model does not exist"))
+        self.assertTrue(_is_model_not_found_error("model not found"))
+        self.assertFalse(_is_model_not_found_error("timeout exceeded"))
+
     def test_extract_layout_from_fenced_json(self) -> None:
         text = """```json
 {"elements":[{"type":"button","bbox":[0,0,10,10],"text":"OK"}]}

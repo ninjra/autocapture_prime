@@ -62,6 +62,52 @@ class ExportRunWorkflowTreeTests(unittest.TestCase):
             self.assertIn("builtin.observation.graph", text)
             self.assertIn("graph TD", text)
 
+    def test_exports_per_row_bundle_from_advanced_artifact(self) -> None:
+        payload = {
+            "rows": [
+                {
+                    "id": "Q1",
+                    "question": "Enumerate windows",
+                    "answer_state": "ok",
+                    "winner": "classic",
+                    "summary": "windows extracted",
+                    "stage_ms": {"total": 123.4},
+                    "providers": [
+                        {
+                            "provider_id": "builtin.observation.graph",
+                            "claim_count": 3,
+                            "citation_count": 3,
+                            "contribution_bp": 10000,
+                            "estimated_latency_ms": 45.0,
+                        }
+                    ],
+                },
+                {
+                    "id": "Q2",
+                    "question": "Which window is focused",
+                    "answer_state": "ok",
+                    "winner": "classic",
+                    "summary": "focused window extracted",
+                    "stage_ms": {"total": 98.2},
+                    "providers": [],
+                },
+            ]
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifact = root / "advanced.json"
+            out_dir = root / "trees"
+            artifact.write_text(json.dumps(payload), encoding="utf-8")
+            export_main = _load_main()
+            rc = export_main(["--input", str(artifact), "--out", str(out_dir)])
+            self.assertEqual(rc, 0)
+            index = (out_dir / "index.md").read_text(encoding="utf-8")
+            q1 = (out_dir / "workflow_tree_Q1.md").read_text(encoding="utf-8")
+            q2 = (out_dir / "workflow_tree_Q2.md").read_text(encoding="utf-8")
+            self.assertIn("[Q1](workflow_tree_Q1.md)", index)
+            self.assertIn("builtin.observation.graph", q1)
+            self.assertIn("display.formatter", q2)
+
 
 if __name__ == "__main__":
     unittest.main()

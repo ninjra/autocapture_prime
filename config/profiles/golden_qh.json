@@ -1,0 +1,25 @@
+{
+  "runtime": {
+    "golden_qh": {
+      "enabled": true,
+      "profile_id": "golden_qh_v1",
+      "required_plugins": [
+        "builtin.storage.sqlcipher",
+        "builtin.ocr.basic",
+        "builtin.processing.sst.pipeline",
+        "builtin.processing.sst.ui_vlm",
+        "builtin.vlm.vllm_localhost",
+        "builtin.observation.graph"
+      ]
+    }
+  },
+  "plugins": {
+    "enabled": {
+      "builtin.sst.qa.answers": false,
+      "builtin.processing.sst.pipeline": true,
+      "builtin.processing.sst.ui_vlm": true,
+      "builtin.vlm.vllm_localhost": true,
+      "builtin.observation.graph": true
+    }
+  }
+}

@@ -1257,6 +1257,18 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
     synth_error: str | None = None
     query_cfg = system.config.get("query", {}) if hasattr(system, "config") else {}
     synth_enabled = bool(query_cfg.get("enable_synthesizer", False)) if isinstance(query_cfg, dict) else False
+    if not synth_enabled:
+        plugins_cfg = system.config.get("plugins", {}) if hasattr(system, "config") else {}
+        plugin_settings = plugins_cfg.get("settings", {}) if isinstance(plugins_cfg, dict) else {}
+        golden_profile = plugin_settings.get("__golden_profile", {}) if isinstance(plugin_settings, dict) else {}
+        if isinstance(golden_profile, dict):
+            synth_enabled = bool(golden_profile.get("enable_synthesizer", False))
+    if not synth_enabled:
+        synth_enabled = str(os.environ.get("AUTOCAPTURE_ENABLE_SYNTHESIZER") or "").strip().casefold() in {
+            "1",
+            "true",
+            "yes",
+        }
     try:
         synthesizer = None
         if hasattr(system, "get"):
@@ -1696,6 +1708,7 @@ def _attach_query_trace(
     winner: str,
     stage_ms: dict[str, Any],
     handoffs: list[dict[str, Any]],
+    query_intent: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(result, dict):
         return result
@@ -1733,6 +1746,14 @@ def _attach_query_trace(
         "provider_count": int(len(provider_rows)),
         "providers": provider_rows[:48],
     }
+    if isinstance(query_intent, dict) and query_intent:
+        trace["intent"] = {
+            "topic": str(query_intent.get("topic") or "generic"),
+            "family": str(query_intent.get("family") or "generic"),
+            "score": float(query_intent.get("score") or 0.0),
+            "matched_markers": [str(x) for x in (query_intent.get("matched_markers") or []) if str(x)][:12],
+            "matched_tokens": [str(x) for x in (query_intent.get("matched_tokens") or []) if str(x)][:20],
+        }
     processing["query_trace"] = trace
     out = dict(result)
     out["processing"] = processing
@@ -1756,6 +1777,7 @@ def _append_query_metric(system, *, query: str, method: str, result: dict[str, A
     query_trace = processing.get("query_trace", {}) if isinstance(processing.get("query_trace", {}), dict) else {}
     synth_debug = synth_claims.get("debug", {}) if isinstance(synth_claims.get("debug", {}), dict) else {}
     provider_rows = attribution.get("providers", []) if isinstance(attribution.get("providers", []), list) else []
+    query_intent = query_trace.get("intent", {}) if isinstance(query_trace.get("intent", {}), dict) else {}
     provider_ids = sorted(
         {
             str(item.get("provider_id") or "").strip()
@@ -1780,6 +1802,9 @@ def _append_query_metric(system, *, query: str, method: str, result: dict[str, A
         "claim_count": int(len(answer.get("claims", []))) if isinstance(answer.get("claims", []), list) else 0,
         "result_count": int(len(result.get("results", []))) if isinstance(result.get("results", []), list) else 0,
         "coverage_bp": int(round(float(evaluation.get("coverage_ratio", 0.0) or 0.0) * 10000.0)),
+        "query_intent_topic": str(query_intent.get("topic") or ""),
+        "query_intent_family": str(query_intent.get("family") or ""),
+        "query_intent_score_bp": int(round(float(query_intent.get("score") or 0.0) * 10000.0)),
         "missing_spans_count": int(evaluation.get("missing_spans_count", 0) or 0),
         "blocked_extract": bool(evaluation.get("blocked_extract", False)),
         "blocked_reason": str(evaluation.get("blocked_reason") or ""),
@@ -1822,6 +1847,7 @@ def _append_query_metric(system, *, query: str, method: str, result: dict[str, A
         "citation_count": int(_citation_count(result)),
         "provider_count": int(len(provider_rows)),
         "providers": provider_rows[:48],
+        "intent": query_intent,
         "workflow_tree": attribution.get("workflow_tree", {}) if isinstance(attribution.get("workflow_tree", {}), dict) else {},
         "stage_ms": {str(k): _ms(v) for k, v in stage_ms.items()},
         "handoffs": [item for item in handoffs if isinstance(item, dict)][:96],
@@ -1976,6 +2002,15 @@ def _infer_provider_id(record: dict[str, Any]) -> str:
     provider_id = str(record.get("provider_id") or "").strip()
     if provider_id:
         return provider_id
+    for key in ("producer_plugin_id", "source_provider_id", "parse_provider_id", "index_provider_id", "answer_provider_id"):
+        candidate = str(record.get(key) or "").strip()
+        if candidate:
+            return candidate
+    provenance = record.get("provenance", {}) if isinstance(record.get("provenance", {}), dict) else {}
+    for key in ("plugin_id", "producer_plugin_id", "source_provider_id"):
+        candidate = str(provenance.get(key) or "").strip()
+        if candidate:
+            return candidate
     record_type = str(record.get("record_type") or "")
     if record_type.startswith("derived.text.ocr"):
         return "ocr.engine"
@@ -1988,6 +2023,36 @@ def _infer_provider_id(record: dict[str, Any]) -> str:
     if record_type.startswith("evidence.capture."):
         return "capture.evidence"
     return "unknown"
+
+
+def _record_provider_ids(record: dict[str, Any], fallback_provider_id: str) -> list[str]:
+    out: list[str] = []
+    for key in ("provider_id", "producer_plugin_id", "source_provider_id", "parse_provider_id", "index_provider_id", "answer_provider_id"):
+        value = str(record.get(key) or "").strip()
+        if value:
+            out.append(value)
+    provenance = record.get("provenance", {}) if isinstance(record.get("provenance", {}), dict) else {}
+    if isinstance(provenance, dict):
+        for key in ("plugin_id", "producer_plugin_id", "source_provider_id"):
+            value = str(provenance.get(key) or "").strip()
+            if value:
+                out.append(value)
+        chain = provenance.get("plugin_chain", [])
+        if isinstance(chain, list):
+            for value in chain:
+                text = str(value or "").strip()
+                if text:
+                    out.append(text)
+    if fallback_provider_id:
+        out.append(str(fallback_provider_id))
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in out:
+        if item in seen:
+            continue
+        seen.add(item)
+        deduped.append(item)
+    return deduped
 
 
 def _parse_observation_pairs(text: str) -> dict[str, str]:
@@ -2032,6 +2097,7 @@ def _claim_sources(result: dict[str, Any], metadata: Any | None) -> list[dict[st
                 record = _safe_metadata_get(metadata, evidence_id)
             record_type = str(record.get("record_type") or "")
             provider_id = _infer_provider_id(record)
+            provider_ids = _record_provider_ids(record, provider_id)
             doc_kind = str(record.get("doc_kind") or "").strip()
             record_text = str(record.get("text") or "").strip()
             signal_pairs = _parse_observation_pairs(record_text or claim_text)
@@ -2046,6 +2112,7 @@ def _claim_sources(result: dict[str, Any], metadata: Any | None) -> list[dict[st
                     "evidence_id": str(citation.get("evidence_id") or ""),
                     "text_preview": _compact_line(record_text or claim_text, limit=180),
                     "signal_pairs": signal_pairs,
+                    "provider_ids": provider_ids,
                     "meta": record if isinstance(record, dict) else {},
                 }
             )
@@ -2055,28 +2122,34 @@ def _claim_sources(result: dict[str, Any], metadata: Any | None) -> list[dict[st
 def _provider_contributions(claim_sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: dict[str, dict[str, Any]] = {}
     for src in claim_sources:
-        provider_id = str(src.get("provider_id") or "unknown")
-        row = rows.setdefault(
-            provider_id,
-            {
-                "provider_id": provider_id,
-                "claim_refs": set(),
-                "citation_count": 0,
-                "doc_kinds": set(),
-                "record_types": set(),
-                "signal_keys": set(),
-            },
-        )
-        row["claim_refs"].add(int(src.get("claim_index", -1)))
-        row["citation_count"] = int(row.get("citation_count", 0)) + 1
-        doc_kind = str(src.get("doc_kind") or "").strip()
-        if doc_kind:
-            row["doc_kinds"].add(doc_kind)
-        record_type = str(src.get("record_type") or "").strip()
-        if record_type:
-            row["record_types"].add(record_type)
-        for key in (src.get("signal_pairs") or {}).keys():
-            row["signal_keys"].add(str(key))
+        provider_ids = src.get("provider_ids", [])
+        if not isinstance(provider_ids, list):
+            provider_ids = []
+        provider_ids = [str(x).strip() for x in provider_ids if str(x).strip()]
+        if not provider_ids:
+            provider_ids = [str(src.get("provider_id") or "unknown")]
+        for provider_id in provider_ids:
+            row = rows.setdefault(
+                provider_id,
+                {
+                    "provider_id": provider_id,
+                    "claim_refs": set(),
+                    "citation_count": 0,
+                    "doc_kinds": set(),
+                    "record_types": set(),
+                    "signal_keys": set(),
+                },
+            )
+            row["claim_refs"].add(int(src.get("claim_index", -1)))
+            row["citation_count"] = int(row.get("citation_count", 0)) + 1
+            doc_kind = str(src.get("doc_kind") or "").strip()
+            if doc_kind:
+                row["doc_kinds"].add(doc_kind)
+            record_type = str(src.get("record_type") or "").strip()
+            if record_type:
+                row["record_types"].add(record_type)
+            for key in (src.get("signal_pairs") or {}).keys():
+                row["signal_keys"].add(str(key))
 
     out: list[dict[str, Any]] = []
     total_citations = 0
@@ -3289,61 +3362,220 @@ def _normalize_cst_timestamp(text: str) -> str:
     return f"{month} {day:02d}, {year} - {hhmm}{ampm} CST"
 
 
-def _query_topic(query: str) -> str:
+_QUERY_INTENT_RULES: list[dict[str, Any]] = [
+    {
+        "topic": "hard_time_to_assignment",
+        "family": "hard",
+        "markers": ["time-to-assignment", "opened at", "state changed", "record activity", "elapsed minutes"],
+        "token_cues": ["opened", "state", "changed", "record", "activity", "elapsed", "minutes", "assignment"],
+        "min_marker_hits": 2,
+    },
+    {
+        "topic": "hard_k_presets",
+        "family": "hard",
+        "markers": ["k preset", "clamp", "validity", "sum"],
+        "token_cues": ["preset", "clamp", "sum", "validity", "range", "k"],
+        "min_marker_hits": 2,
+    },
+    {
+        "topic": "hard_cross_window_sizes",
+        "family": "hard",
+        "markers": ["new converter", "k=64", "dimension", "cross-window reasoning", "k vs"],
+        "token_cues": ["converter", "dimension", "query", "slack", "sizes", "64"],
+        "min_marker_hits": 2,
+    },
+    {
+        "topic": "hard_endpoint_pseudocode",
+        "family": "hard",
+        "markers": ["endpoint-selection", "pseudocode", "saltendpoint", "retry"],
+        "token_cues": ["endpoint", "retry", "pseudocode", "invoke-expression"],
+        "min_marker_hits": 2,
+    },
+    {
+        "topic": "hard_success_log_bug",
+        "family": "hard",
+        "markers": ["success log line", "corrected line", "inconsistency"],
+        "token_cues": ["success", "corrected", "line", "endpoint", "bug"],
+        "min_marker_hits": 1,
+    },
+    {
+        "topic": "hard_cell_phone_normalization",
+        "family": "hard",
+        "markers": ["cell phone number", "normalized schema", "deterministic transform"],
+        "token_cues": ["cell", "phone", "normalized", "schema", "transform"],
+        "min_marker_hits": 1,
+    },
+    {
+        "topic": "hard_worklog_checkboxes",
+        "family": "hard",
+        "markers": ["completed checkboxes", "currently running action", "worklog"],
+        "token_cues": ["checkboxes", "running", "action", "worklog", "count"],
+        "min_marker_hits": 1,
+    },
+    {
+        "topic": "hard_unread_today",
+        "family": "hard",
+        "markers": ["unread indicator bar", "today section"],
+        "token_cues": ["unread", "today", "indicator", "rows", "outlook"],
+        "min_marker_hits": 1,
+    },
+    {
+        "topic": "hard_sirius_classification",
+        "family": "hard",
+        "markers": ["carousel row", "talk/podcast", "ncaa", "nfl event"],
+        "token_cues": ["carousel", "talk", "podcast", "ncaa", "nfl", "classify"],
+        "min_marker_hits": 2,
+    },
+    {
+        "topic": "hard_action_grounding",
+        "family": "hard",
+        "markers": ["action grounding", "bounding boxes", "view details", "complete"],
+        "token_cues": ["bounding", "boxes", "normalized", "complete", "view", "details"],
+        "min_marker_hits": 2,
+    },
+    {
+        "topic": "adv_window_inventory",
+        "family": "advanced",
+        "markers": ["top-level window", "z-order", "occluded", "front-to-back"],
+        "token_cues": ["window", "z-order", "occluded", "visible"],
+        "min_marker_hits": 1,
+    },
+    {
+        "topic": "adv_focus",
+        "family": "advanced",
+        "markers": ["keyboard/input focus", "focused window", "highlighted text", "evidence item"],
+        "token_cues": ["focus", "window", "highlighted", "evidence"],
+        "min_marker_hits": 1,
+    },
+    {
+        "topic": "adv_incident",
+        "family": "advanced",
+        "markers": ["task/incident", "sender display name", "email subject", "action buttons"],
+        "token_cues": ["incident", "sender", "subject", "buttons", "domain"],
+        "min_marker_hits": 1,
+    },
+    {
+        "topic": "adv_activity",
+        "family": "advanced",
+        "markers": ["record activity", "timeline", "top-to-bottom order"],
+        "token_cues": ["record", "activity", "timeline", "timestamp"],
+        "min_marker_hits": 1,
+    },
+    {
+        "topic": "adv_details",
+        "family": "advanced",
+        "markers": ["details section", "key-value pairs", "field labels", "on-screen ordering"],
+        "token_cues": ["details", "fields", "label", "value", "ordering"],
+        "min_marker_hits": 1,
+    },
+    {
+        "topic": "adv_calendar",
+        "family": "advanced",
+        "markers": ["calendar", "schedule pane", "selected date", "first 5 visible"],
+        "token_cues": ["calendar", "schedule", "date", "visible", "items"],
+        "min_marker_hits": 1,
+    },
+    {
+        "topic": "adv_slack",
+        "family": "advanced",
+        "markers": ["slack dm", "last two visible messages", "embedded image thumbnail"],
+        "token_cues": ["slack", "messages", "timestamp", "thumbnail"],
+        "min_marker_hits": 1,
+    },
+    {
+        "topic": "adv_dev",
+        "family": "advanced",
+        "markers": ["what changed", "files:", "tests:", "terminal-summary"],
+        "token_cues": ["changed", "files", "tests", "command", "terminal"],
+        "min_marker_hits": 1,
+    },
+    {
+        "topic": "adv_console",
+        "family": "advanced",
+        "markers": ["red and green text", "classify each line by color", "console/log window"],
+        "token_cues": ["console", "log", "red", "green", "line", "count"],
+        "min_marker_hits": 1,
+    },
+    {
+        "topic": "adv_browser",
+        "family": "advanced",
+        "markers": ["browser window", "active tab title", "address-bar hostname", "visible tabs"],
+        "token_cues": ["browser", "tab", "hostname", "address", "window"],
+        "min_marker_hits": 1,
+    },
+    {
+        "topic": "inbox",
+        "family": "signal",
+        "markers": ["inboxes", "inbox"],
+        "token_cues": ["inbox", "mail", "outlook", "gmail"],
+        "min_marker_hits": 1,
+    },
+    {
+        "topic": "song",
+        "family": "signal",
+        "markers": ["song", "playing", "now playing"],
+        "token_cues": ["song", "playing", "music", "track"],
+        "min_marker_hits": 1,
+    },
+    {
+        "topic": "quorum",
+        "family": "signal",
+        "markers": ["quorum", "flagged quorum", "working with me"],
+        "token_cues": ["quorum", "collaborator", "working", "message"],
+        "min_marker_hits": 1,
+    },
+    {
+        "topic": "vdi_time",
+        "family": "signal",
+        "markers": ["vdi", "what time", "time is it"],
+        "token_cues": ["vdi", "time", "clock"],
+        "min_marker_hits": 1,
+    },
+    {
+        "topic": "background_color",
+        "family": "signal",
+        "markers": ["background color", "theme color"],
+        "token_cues": ["background", "color", "theme"],
+        "min_marker_hits": 1,
+    },
+]
+
+
+def _query_intent(query: str) -> dict[str, Any]:
     low = str(query or "").casefold()
-    if "time-to-assignment" in low or ("opened at" in low and "state changed" in low and "record activity" in low):
-        return "hard_time_to_assignment"
-    if "k preset" in low and "clamp" in low and ("sum" in low or "validity" in low):
-        return "hard_k_presets"
-    if "new converter" in low and (("dimension" in low and "k=64" in low) or ("cross-window reasoning" in low) or ("k vs" in low and "dimension" in low)):
-        return "hard_cross_window_sizes"
-    if "endpoint-selection" in low and "pseudocode" in low and "saltendpoint" in low:
-        return "hard_endpoint_pseudocode"
-    if ("success log line" in low or "final success log line" in low) and "corrected line" in low:
-        return "hard_success_log_bug"
-    if "cell phone number" in low and "normalized schema" in low:
-        return "hard_cell_phone_normalization"
-    if "completed checkboxes" in low and "currently running action" in low:
-        return "hard_worklog_checkboxes"
-    if "unread indicator bar" in low and "today section" in low:
-        return "hard_unread_today"
-    if "carousel row" in low and "talk/podcast" in low and "ncaa" in low and "nfl" in low:
-        return "hard_sirius_classification"
-    if "action grounding" in low and "bounding boxes" in low and "view details" in low:
-        return "hard_action_grounding"
-    if ("top-level window" in low or "z-order" in low or "occluded" in low) and "window" in low:
-        return "adv_window_inventory"
-    if "keyboard/input focus" in low or ("focus" in low and "window" in low):
-        return "adv_focus"
-    if (("task/incident" in low) or ("task" in low and "incident" in low)) and (
-        "subject" in low or "sender" in low or "button" in low or "domain" in low
-    ):
-        return "adv_incident"
-    if "record activity" in low and "timeline" in low:
-        return "adv_activity"
-    if "details section" in low or "key-value" in low or "field labels" in low:
-        return "adv_details"
-    if "calendar" in low and ("schedule" in low or "pane" in low):
-        return "adv_calendar"
-    if "slack" in low and ("last two" in low or "dm" in low):
-        return "adv_slack"
-    if "what changed" in low or ("files:" in low and "tests:" in low):
-        return "adv_dev"
-    if ("red" in low and "green" in low and "line" in low) or "console/log window" in low:
-        return "adv_console"
-    if "browser window" in low and ("active tab" in low or "hostname" in low):
-        return "adv_browser"
-    if "inbox" in low:
-        return "inbox"
-    if "song" in low or "playing" in low:
-        return "song"
-    if "quorum" in low or "working with me" in low:
-        return "quorum"
-    if "vdi" in low and "time" in low:
-        return "vdi_time"
-    if "background" in low and "color" in low:
-        return "background_color"
-    return "generic"
+    tokens = _query_tokens(low)
+    best: dict[str, Any] = {
+        "topic": "generic",
+        "family": "generic",
+        "score": 0.0,
+        "matched_markers": [],
+        "matched_tokens": [],
+    }
+    for rule in _QUERY_INTENT_RULES:
+        markers = [str(x).casefold().strip() for x in (rule.get("markers") or []) if str(x).strip()]
+        token_cues = [str(x).casefold().strip() for x in (rule.get("token_cues") or []) if str(x).strip()]
+        min_marker_hits = max(1, int(rule.get("min_marker_hits", 1) or 1))
+        matched_markers = [marker for marker in markers if marker and marker in low]
+        if len(matched_markers) < min_marker_hits:
+            continue
+        matched_tokens = [token for token in token_cues if token and token in tokens]
+        marker_ratio = float(len(matched_markers)) / float(max(1, len(markers)))
+        cue_ratio = float(len(matched_tokens)) / float(max(1, len(token_cues)))
+        score = float(round((marker_ratio * 0.75) + (cue_ratio * 0.25), 6))
+        if score <= float(best.get("score", 0.0)):
+            continue
+        best = {
+            "topic": str(rule.get("topic") or "generic"),
+            "family": str(rule.get("family") or "generic"),
+            "score": score,
+            "matched_markers": matched_markers[:8],
+            "matched_tokens": matched_tokens[:16],
+        }
+    return best
+
+
+def _query_topic(query: str) -> str:
+    return str(_query_intent(query).get("topic") or "generic")
 
 
 def _claim_doc_meta(src: dict[str, Any]) -> dict[str, Any]:
@@ -3702,9 +3934,10 @@ def _build_answer_display(
     claim_sources: list[dict[str, Any]],
     metadata: Any | None = None,
     hard_vlm: dict[str, Any] | None = None,
+    query_intent: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    low_query = str(query or "").casefold()
-    query_topic = _query_topic(query)
+    intent_obj = query_intent if isinstance(query_intent, dict) else _query_intent(query)
+    query_topic = str(intent_obj.get("topic") or _query_topic(query))
     display_sources = _augment_claim_sources_for_display(query_topic, claim_sources, metadata)
     signal_map = _signal_candidates(display_sources)
 
@@ -4151,50 +4384,52 @@ def _build_answer_display(
     summary = ""
     bullets: list[str] = []
     topic = "generic"
-    if "inbox" in low_query and fields.get("open_inboxes"):
-        topic = "inbox"
-        summary = f"Open inboxes: {fields['open_inboxes']}"
-        bullets.extend(_extract_inbox_trace_bullets(display_sources, signal_map))
-    elif ("song" in low_query or "playing" in low_query) and fields.get("song"):
-        topic = "song"
-        summary = f"Song: {fields['song']}"
-        bullets.append(f"source: {_signal_source_text(best_song)}")
-    elif ("quorum" in low_query or "working with me" in low_query) and fields.get("quorum_collaborator"):
-        topic = "quorum"
-        summary = f"Quorum task collaborator: {fields['quorum_collaborator']}"
-        bullets.append(f"source: {_signal_source_text(best_collab)}")
-        if fields.get("quorum_collaborator_alt") and fields["quorum_collaborator_alt"] != fields["quorum_collaborator"]:
-            bullets.append(f"alternative_contractor: {fields['quorum_collaborator_alt']}")
-    elif ("vdi" in low_query or "time" in low_query) and fields.get("vdi_time"):
-        topic = "vdi_time"
-        summary = f"VDI time: {fields['vdi_time']}"
-        bullets.append(f"source: {_signal_source_text(best_time)}")
-    elif "color" in low_query and ("background" in low_query or "theme" in low_query) and fields.get("background_color"):
-        topic = "background_color"
-        summary = f"Background color: {fields['background_color']}"
-        bullets.append(f"source: {_signal_source_text(best_background)}")
-
-    if not summary:
-        if fields.get("open_inboxes"):
+    def _set_signal_topic(candidate: str) -> bool:
+        nonlocal topic, summary, bullets
+        if candidate == "inbox" and fields.get("open_inboxes"):
             topic = "inbox"
             summary = f"Open inboxes: {fields['open_inboxes']}"
             bullets.extend(_extract_inbox_trace_bullets(display_sources, signal_map))
-        elif fields.get("quorum_collaborator"):
-            topic = "quorum"
-            summary = f"Quorum task collaborator: {fields['quorum_collaborator']}"
-            bullets.append(f"source: {_signal_source_text(best_collab)}")
-        elif fields.get("song"):
+            return True
+        if candidate == "song" and fields.get("song"):
             topic = "song"
             summary = f"Song: {fields['song']}"
             bullets.append(f"source: {_signal_source_text(best_song)}")
-        elif fields.get("vdi_time"):
+            return True
+        if candidate == "quorum" and fields.get("quorum_collaborator"):
+            topic = "quorum"
+            summary = f"Quorum task collaborator: {fields['quorum_collaborator']}"
+            bullets.append(f"source: {_signal_source_text(best_collab)}")
+            if fields.get("quorum_collaborator_alt") and fields["quorum_collaborator_alt"] != fields["quorum_collaborator"]:
+                bullets.append(f"alternative_contractor: {fields['quorum_collaborator_alt']}")
+            return True
+        if candidate == "vdi_time" and fields.get("vdi_time"):
             topic = "vdi_time"
             summary = f"VDI time: {fields['vdi_time']}"
             bullets.append(f"source: {_signal_source_text(best_time)}")
-        elif fields.get("background_color"):
+            return True
+        if candidate == "background_color" and fields.get("background_color"):
             topic = "background_color"
             summary = f"Background color: {fields['background_color']}"
             bullets.append(f"source: {_signal_source_text(best_background)}")
+            return True
+        return False
+
+    signal_priority = [
+        str(query_topic),
+        "inbox",
+        "quorum",
+        "song",
+        "vdi_time",
+        "background_color",
+    ]
+    seen_signal_topics: set[str] = set()
+    for candidate in signal_priority:
+        if candidate in seen_signal_topics:
+            continue
+        seen_signal_topics.add(candidate)
+        if _set_signal_topic(candidate):
+            break
 
     if not summary:
         if query_topic in {"inbox", "song", "quorum", "vdi_time"}:
@@ -4208,7 +4443,7 @@ def _build_answer_display(
                 "fields": {"required_modality": "vlm", "required_state_id": "vlm"},
                 "topic": str(query_topic),
             }
-        if "color" in low_query and ("background" in low_query or "theme" in low_query):
+        if query_topic == "background_color":
             summary = "Indeterminate: background color signal is unavailable in extracted metadata."
             topic = "background_color"
         if not summary:
@@ -4232,7 +4467,13 @@ def _build_answer_display(
     }
 
 
-def _apply_answer_display(system: Any, query: str, result: dict[str, Any]) -> dict[str, Any]:
+def _apply_answer_display(
+    system: Any,
+    query: str,
+    result: dict[str, Any],
+    *,
+    query_intent: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if not isinstance(result, dict):
         return result
     answer = result.get("answer", {})
@@ -4246,10 +4487,18 @@ def _apply_answer_display(system: Any, query: str, result: dict[str, Any]) -> di
             metadata = None
     claim_texts = _claim_texts(result)
     claim_sources = _claim_sources(result, metadata)
-    query_topic = _query_topic(query)
+    intent_obj = query_intent if isinstance(query_intent, dict) else _query_intent(query)
+    query_topic = str(intent_obj.get("topic") or _query_topic(query))
     hard_vlm = _hard_vlm_extract(system, result, query_topic)
     display_sources = _augment_claim_sources_for_display(query_topic, claim_sources, metadata)
-    display = _build_answer_display(query, claim_texts, display_sources, metadata, hard_vlm=hard_vlm)
+    display = _build_answer_display(
+        query,
+        claim_texts,
+        display_sources,
+        metadata,
+        hard_vlm=hard_vlm,
+        query_intent=intent_obj,
+    )
     providers = _provider_contributions(display_sources)
     tree = _workflow_tree(providers)
 
@@ -4280,6 +4529,7 @@ def _apply_answer_display(system: Any, query: str, result: dict[str, Any]) -> di
     }
     if hard_vlm:
         processing["hard_vlm"] = {"topic": query_topic, "fields": hard_vlm}
+    processing["query_intent"] = intent_obj
 
     result_obj = dict(result)
     result_obj["answer"] = answer_obj
@@ -4375,6 +4625,9 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
     config = getattr(system, "config", {})
     if not isinstance(config, dict):
         config = {}
+    query_intent = _query_intent(query)
+    query_topic = str(query_intent.get("topic") or "generic")
+    query_family = str(query_intent.get("family") or "generic")
     query_start = time.perf_counter()
     state_cfg = config.get("processing", {}).get("state_layer", {}) if isinstance(config.get("processing", {}), dict) else {}
     if isinstance(state_cfg, dict) and bool(state_cfg.get("query_enabled", False)):
@@ -4393,20 +4646,10 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
         classic_score = _score_query_result(query, classic_result)
         stage_ms["arbitration"] = (time.perf_counter() - arbitration_start) * 1000.0
 
-        query_topic = _query_topic(query)
         prefer_classic = bool(classic_score.get("total", 0.0) >= state_score.get("total", 0.0))
-        if str(query_topic).startswith("adv_"):
-            # Advanced extraction questions require structured, citation-grounded
-            # metadata records (adv.*) that the state-layer-only answer path does
-            # not currently provide.
-            prefer_classic = True
-        if str(query_topic).startswith("hard_"):
-            # Hard eval questions rely on hard_vlm + structured display logic in
-            # the classic retrieval path; state-only snippets are insufficient.
-            prefer_classic = True
-        if query_topic in {"inbox", "song", "quorum", "vdi_time", "background_color"}:
-            # Signal-oriented questions need citation-backed claim sources from
-            # the retrieval path so modality policies can be enforced.
+        if query_family in {"advanced", "hard", "signal"}:
+            # Advanced/hard/signal question families require citation-grounded
+            # retrieval sources and display attribution from the classic path.
             prefer_classic = True
         if prefer_classic:
             merged = _merge_state_fallback(state_result, classic_result)
@@ -4416,10 +4659,11 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
                 "state_score": state_score,
                 "classic_score": classic_score,
                 "query_topic": query_topic,
+                "query_intent": query_intent,
             }
             merged["processing"] = processing
             display_start = time.perf_counter()
-            merged = _apply_answer_display(system, query, merged)
+            merged = _apply_answer_display(system, query, merged, query_intent=query_intent)
             stage_ms["display"] = (time.perf_counter() - display_start) * 1000.0
             handoffs.append({"from": "classic.query", "to": "display.formatter", "latency_ms": _ms(stage_ms["display"])})
             stage_ms["total"] = (time.perf_counter() - query_start) * 1000.0
@@ -4430,6 +4674,7 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
                 winner="classic",
                 stage_ms=stage_ms,
                 handoffs=handoffs,
+                query_intent=query_intent,
             )
             _append_query_metric(system, query=query, method="classic_arbitrated", result=merged)
             return merged
@@ -4441,10 +4686,11 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
             "state_score": state_score,
             "classic_score": classic_score,
             "query_topic": query_topic,
+            "query_intent": query_intent,
         }
         result["processing"] = processing
         display_start = time.perf_counter()
-        result = _apply_answer_display(system, query, result)
+        result = _apply_answer_display(system, query, result, query_intent=query_intent)
         stage_ms["display"] = (time.perf_counter() - display_start) * 1000.0
         handoffs.append({"from": "state.query", "to": "display.formatter", "latency_ms": _ms(stage_ms["display"])})
         stage_ms["total"] = (time.perf_counter() - query_start) * 1000.0
@@ -4455,6 +4701,7 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
             winner="state",
             stage_ms=stage_ms,
             handoffs=handoffs,
+            query_intent=query_intent,
         )
         _append_query_metric(system, query=query, method="state_arbitrated", result=result)
         return result
@@ -4465,7 +4712,7 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
     stage_ms["classic_query"] = (time.perf_counter() - classic_start) * 1000.0
     handoffs.append({"from": "query", "to": "classic.query", "latency_ms": _ms(stage_ms["classic_query"])})
     display_start = time.perf_counter()
-    result = _apply_answer_display(system, query, result)
+    result = _apply_answer_display(system, query, result, query_intent=query_intent)
     stage_ms["display"] = (time.perf_counter() - display_start) * 1000.0
     handoffs.append({"from": "classic.query", "to": "display.formatter", "latency_ms": _ms(stage_ms["display"])})
     stage_ms["total"] = (time.perf_counter() - query_start) * 1000.0
@@ -4476,6 +4723,7 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
         winner="classic",
         stage_ms=stage_ms,
         handoffs=handoffs,
+        query_intent=query_intent,
     )
     _append_query_metric(system, query=query, method="classic", result=result)
     return result

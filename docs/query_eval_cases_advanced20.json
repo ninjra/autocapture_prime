@@ -5,7 +5,25 @@
     "improved": "Window detection; host/VDI attribution; occlusion + z-order reasoning",
     "risked": "Merging overlapping windows; misclassifying VDI-contained UI as host; wrong z-order",
     "enforcement_location": "Capture pipeline -> window segmentation + compositor/z-order logic",
-    "regression_detection": "Golden JSON: stable window count + ordered list; diff on name/context/order/occluded"
+    "regression_detection": "Golden JSON: stable window count + ordered list; diff on name/context/order/occluded",
+    "expected_contains_all": [
+      "Slack",
+      "ChatGPT",
+      "SiriusXM",
+      "Remote Desktop Web Client",
+      "host",
+      "VDI"
+    ],
+    "expected_paths": [
+      {
+        "path": "answer.display.topic",
+        "equals": "adv_window_inventory"
+      },
+      {
+        "path": "answer.state",
+        "equals": "ok"
+      }
+    ]
   },
   {
     "id": "Q2",
@@ -13,7 +31,22 @@
     "improved": "Focus/active-window detection; evidence grounding",
     "risked": "Incorrect focus under dark themes; false positives from hover/selection states",
     "enforcement_location": "UI-state inference layer (focus heuristics + highlight detection)",
-    "regression_detection": "Assert (focused_window_id, evidence_text[]) matches baseline; require 2 evidence items"
+    "regression_detection": "Assert (focused_window_id, evidence_text[]) matches baseline; require 2 evidence items",
+    "expected_contains_all": [
+      "Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476",
+      "focused",
+      "evidence"
+    ],
+    "expected_paths": [
+      {
+        "path": "answer.display.topic",
+        "equals": "adv_focus"
+      },
+      {
+        "path": "answer.state",
+        "equals": "ok"
+      }
+    ]
   },
   {
     "id": "Q3",
@@ -21,15 +54,47 @@
     "improved": "Small-font OCR; email header parsing; secure redaction behavior",
     "risked": "OCR dropouts on dense UI; leaking full email address; missing embedded-card buttons",
     "enforcement_location": "OCR + layout parser; PII redaction/sanitization stage",
-    "regression_detection": "Exact-string checks for subject/button labels; domain-only validation (reject '@' local-part leakage)"
+    "regression_detection": "Exact-string checks for subject/button labels; domain-only validation (reject '@' local-part leakage)",
+    "expected_contains_all": [
+      "Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476",
+      "Permian Resources Service Desk",
+      "permian.xyz.com",
+      "COMPLETE",
+      "VIEW DETAILS"
+    ],
+    "expected_paths": [
+      {
+        "path": "answer.display.topic",
+        "equals": "adv_incident"
+      },
+      {
+        "path": "answer.state",
+        "equals": "ok"
+      }
+    ]
   },
   {
     "id": "Q4",
-    "question": "From that same task/incident view, extract the complete 'Record Activity' timeline: each entry\u2019s timestamp (including timezone if shown) and its associated text, in the same top-to-bottom order displayed.",
+    "question": "From that same task/incident view, extract the complete 'Record Activity' timeline: each entry’s timestamp (including timezone if shown) and its associated text, in the same top-to-bottom order displayed.",
     "improved": "Timeline extraction; timestamp parsing; multi-line association",
     "risked": "Dropping one of the timeline rows; mixing timestamp with wrong activity text",
     "enforcement_location": "Structured extraction -> timeline parser (row grouping + ordering)",
-    "regression_detection": "Golden list length + exact text per row; stable ordering; fail if any row missing"
+    "regression_detection": "Golden list length + exact text per row; stable ordering; fail if any row missing",
+    "expected_contains_all": [
+      "Your record was updated on Feb 02, 2026 - 12:08pm CST",
+      "Mary Mata created the incident on Feb 02, 2026 - 12:08pm CST",
+      "State changed from New to Assigned"
+    ],
+    "expected_paths": [
+      {
+        "path": "answer.display.topic",
+        "equals": "adv_activity"
+      },
+      {
+        "path": "answer.state",
+        "equals": "ok"
+      }
+    ]
   },
   {
     "id": "Q5",
@@ -37,7 +102,25 @@
     "improved": "Form/table key-value extraction; label/value association",
     "risked": "Mis-pairing labels to wrong values; skipping empty fields; unstable ordering",
     "enforcement_location": "Layout-aware KV extractor (two-column form parsing)",
-    "regression_detection": "Schema check + ordered-keys snapshot test; verify empty fields retained"
+    "regression_detection": "Schema check + ordered-keys snapshot test; verify empty fields retained",
+    "expected_contains_all": [
+      "Service requestor",
+      "Norry Mata",
+      "Assigned to",
+      "MAC-TIME-ST88",
+      "Laptop Needed?",
+      "Yes"
+    ],
+    "expected_paths": [
+      {
+        "path": "answer.display.topic",
+        "equals": "adv_details"
+      },
+      {
+        "path": "answer.state",
+        "equals": "ok"
+      }
+    ]
   },
   {
     "id": "Q6",
@@ -45,7 +128,23 @@
     "improved": "Calendar widget parsing; dense list OCR; selection-state recognition",
     "risked": "Wrong selected day; time/title misalignment; skipping items due to low contrast",
     "enforcement_location": "Calendar/schedule parser (selection + list-row extraction)",
-    "regression_detection": "Golden month/year + selected-date + first-5 (time,title) tuples; strict row count"
+    "regression_detection": "Golden month/year + selected-date + first-5 (time,title) tuples; strict row count",
+    "expected_contains_all": [
+      "January 2026",
+      "selected date",
+      "3:00 PM",
+      "CC Daily Standup"
+    ],
+    "expected_paths": [
+      {
+        "path": "answer.display.topic",
+        "equals": "adv_calendar"
+      },
+      {
+        "path": "answer.state",
+        "equals": "ok"
+      }
+    ]
   },
   {
     "id": "Q7",
@@ -53,7 +152,23 @@
     "improved": "Chat transcript extraction; timestamp association; image-thumbnail description",
     "risked": "Timestamp/sender mismatch; partial message transcription; hallucinated thumbnail details",
     "enforcement_location": "Chat UI parser + captioning module with 'visible-only' constraint",
-    "regression_detection": "Exact text match for the 2 messages; thumbnail description must reference visible UI elements only"
+    "regression_detection": "Exact text match for the 2 messages; thumbnail description must reference visible UI elements only",
+    "expected_contains_all": [
+      "For videos, ping you in 5 - 10 mins?",
+      "gwatt",
+      "white dialog/window",
+      "blue background"
+    ],
+    "expected_paths": [
+      {
+        "path": "answer.display.topic",
+        "equals": "adv_slack"
+      },
+      {
+        "path": "answer.state",
+        "equals": "ok"
+      }
+    ]
   },
   {
     "id": "Q8",
@@ -61,7 +176,23 @@
     "improved": "Code-oriented OCR; section boundary detection; path/command extraction",
     "risked": "Missing section headers; dropping file paths; truncating command-line text",
     "enforcement_location": "Document-structure parser (header -> section -> list extraction)",
-    "regression_detection": "Golden sections: exact header+lines; exact file-path list; exact test command string"
+    "regression_detection": "Golden sections: exact header+lines; exact file-path list; exact test command string",
+    "expected_contains_all": [
+      "Summary column derived from payload fields",
+      "src/statistic_harness/v4/templates/vectors.html",
+      "src/statistic_harness/v4/server.py",
+      "PYTHONPATH=src /tmp/stat_harness_venv/bin/python -m pytest -q"
+    ],
+    "expected_paths": [
+      {
+        "path": "answer.display.topic",
+        "equals": "adv_dev"
+      },
+      {
+        "path": "answer.state",
+        "equals": "ok"
+      }
+    ]
   },
   {
     "id": "Q9",
@@ -69,19 +200,53 @@
     "improved": "Color-aware text extraction; error-line isolation; count accuracy",
     "risked": "Losing color classification; merging wrapped lines incorrectly; miscounting",
     "enforcement_location": "Renderer-aware OCR (color sampling per line) + line-wrapping logic",
-    "regression_detection": "Assert (count_red,count_green,count_other) + exact list of red-line strings matches baseline"
+    "regression_detection": "Assert (count_red,count_green,count_other) + exact list of red-line strings matches baseline",
+    "expected_contains_all": [
+      "count_red",
+      "8",
+      "count_green",
+      "16",
+      "Write-Host \"Using WSL IP endpoint $saltEndpoint for $projectId\" -ForegroundColor Yellow"
+    ],
+    "expected_paths": [
+      {
+        "path": "answer.display.topic",
+        "equals": "adv_console"
+      },
+      {
+        "path": "answer.state",
+        "equals": "ok"
+      }
+    ]
   },
   {
     "id": "Q10",
-    "question": "For each visible browser window in the screenshot: extract the active tab title, the address-bar hostname (hostname only), and the count of visible tabs in that window\u2019s tab strip.",
+    "question": "For each visible browser window in the screenshot: extract the active tab title, the address-bar hostname (hostname only), and the count of visible tabs in that window’s tab strip.",
     "improved": "Browser chrome parsing; tab-title OCR; hostname normalization; multi-window disambiguation",
     "risked": "Mixing tab strips between windows; wrong active tab; capturing full URL instead of hostname",
     "enforcement_location": "Browser-UI parser (tab strip + address bar) + URL normalizer",
-    "regression_detection": "Golden per-window tuple: (active_title, hostname, visible_tab_count); validate hostname format (no path/query)"
+    "regression_detection": "Golden per-window tuple: (active_title, hostname, visible_tab_count); validate hostname format (no path/query)",
+    "expected_contains_all": [
+      "statistic_harness",
+      "chatgpt.com",
+      "listen.siriusxm.com",
+      "Remote Desktop Web Client",
+      "hostname"
+    ],
+    "expected_paths": [
+      {
+        "path": "answer.display.topic",
+        "equals": "adv_browser"
+      },
+      {
+        "path": "answer.state",
+        "equals": "ok"
+      }
+    ]
   },
   {
     "id": "H1",
-    "question": "Compute the incident\u2019s time-to-assignment in minutes by using (a) the \"Opened at\" timestamp in Details and (b) the \"State changed\" update timestamp in Record Activity. Return both timestamps and the elapsed minutes.",
+    "question": "Compute the incident’s time-to-assignment in minutes by using (a) the \"Opened at\" timestamp in Details and (b) the \"State changed\" update timestamp in Record Activity. Return both timestamps and the elapsed minutes.",
     "expected_answer": {
       "opened_at": "Feb 02, 2026 - 12:06pm CST",
       "state_changed_at": "Feb 02, 2026 - 12:08pm CST",
@@ -176,7 +341,7 @@
   },
   {
     "id": "H5",
-    "question": "Find one correctness bug/inconsistency in the script\u2019s final success log line and provide the exact corrected line. (Hint: which variable is referenced in the message vs which endpoint may actually have succeeded?)",
+    "question": "Find one correctness bug/inconsistency in the script’s final success log line and provide the exact corrected line. (Hint: which variable is referenced in the message vs which endpoint may actually have succeeded?)",
     "expected_answer": {
       "bug": "Success message hardcodes $saltEndpoint even if validation succeeded against $endpoint (or if $saltEndpoint is empty).",
       "corrected_line": "Write-Host \"Validation succeeded against $endpoint for $projectId\" -ForegroundColor Green"

@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -40,7 +41,15 @@ def _latest_report(root: Path) -> Path:
     return latest
 
 
-def _run_query(root: Path, *, cfg: str, data: str, query: str, image_path: str = "") -> dict[str, Any]:
+def _run_query_once(
+    root: Path,
+    *,
+    cfg: str,
+    data: str,
+    query: str,
+    image_path: str = "",
+    timeout_s: float = 90.0,
+) -> dict[str, Any]:
     py = root / ".venv" / "bin" / "python"
     env = dict(os.environ)
     env["AUTOCAPTURE_CONFIG_DIR"] = str(cfg)
@@ -55,16 +64,34 @@ def _run_query(root: Path, *, cfg: str, data: str, query: str, image_path: str =
             env["AUTOCAPTURE_VLM_MODEL"] = model
     existing = str(env.get("PYTHONPATH") or "").strip()
     env["PYTHONPATH"] = f"{root}{os.pathsep}{existing}" if existing else str(root)
-    proc = subprocess.run(
-        [str(py), "-m", "autocapture_nx", "query", str(query)],
-        cwd=str(root),
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            [str(py), "-m", "autocapture_nx", "query", str(query)],
+            cwd=str(root),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=max(1.0, float(timeout_s)),
+        )
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "ok": False,
+            "error": f"query_timeout:{timeout_s}s",
+            "answer": {},
+            "processing": {},
+            "stderr": str(getattr(exc, "stderr", "") or "").strip(),
+            "stdout": str(getattr(exc, "stdout", "") or "").strip(),
+        }
     if proc.returncode != 0:
-        return {"ok": False, "error": proc.stderr.strip() or proc.stdout.strip(), "answer": {}, "processing": {}}
+        return {
+            "ok": False,
+            "error": proc.stderr.strip() or proc.stdout.strip(),
+            "answer": {},
+            "processing": {},
+            "stderr": proc.stderr.strip(),
+            "stdout": proc.stdout.strip(),
+        }
     try:
         out = json.loads(proc.stdout or "{}")
     except Exception as exc:
@@ -73,6 +100,50 @@ def _run_query(root: Path, *, cfg: str, data: str, query: str, image_path: str =
         return {"ok": False, "error": "query_output_invalid", "answer": {}, "processing": {}}
     out["ok"] = True
     return out
+
+
+def _is_instance_lock_error(result: dict[str, Any]) -> bool:
+    text = str(result.get("error") or "").casefold()
+    if "instance_lock_held" in text:
+        return True
+    text = f"{text}\n{str(result.get('stderr') or '').casefold()}\n{str(result.get('stdout') or '').casefold()}"
+    return "instance_lock_held" in text
+
+
+def _run_query(
+    root: Path,
+    *,
+    cfg: str,
+    data: str,
+    query: str,
+    image_path: str = "",
+    timeout_s: float = 90.0,
+    lock_retries: int = 4,
+    lock_retry_wait_s: float = 0.25,
+) -> dict[str, Any]:
+    retries = max(0, int(lock_retries))
+    wait_s = max(0.0, float(lock_retry_wait_s))
+    attempts = retries + 1
+    last: dict[str, Any] = {}
+    for attempt in range(1, attempts + 1):
+        result = _run_query_once(
+            root,
+            cfg=cfg,
+            data=data,
+            query=query,
+            image_path=image_path,
+            timeout_s=timeout_s,
+        )
+        result["attempt"] = attempt
+        result["attempts"] = attempts
+        if bool(result.get("ok", False)):
+            return result
+        if not _is_instance_lock_error(result):
+            return result
+        last = result
+        if attempt < attempts and wait_s > 0.0:
+            time.sleep(wait_s * attempt)
+    return last or {"ok": False, "error": "query_failed", "answer": {}, "processing": {}, "attempts": attempts}
 
 
 def _configured_vlm_model(config_dir: Path) -> str:
@@ -114,26 +185,148 @@ def _flatten_expected(prefix: str, value: Any, out: list[tuple[str, str]]) -> No
         out.append((key, text))
 
 
-def _evaluate_expected(item: dict[str, Any], result: dict[str, Any], summary: str, bullets: list[str]) -> dict[str, Any]:
-    expected = item.get("expected_answer")
-    if not isinstance(expected, dict):
-        return {"evaluated": False, "passed": None, "checks": []}
-    checks: list[dict[str, Any]] = []
-    flat: list[tuple[str, str]] = []
-    _flatten_expected("", expected, flat)
-    haystack = "\n".join(
+def _path_tokens(path: str) -> list[str]:
+    tokens: list[str] = []
+    buf = ""
+    i = 0
+    while i < len(path):
+        ch = path[i]
+        if ch == ".":
+            if buf:
+                tokens.append(buf)
+                buf = ""
+            i += 1
+            continue
+        if ch == "[":
+            if buf:
+                tokens.append(buf)
+                buf = ""
+            j = path.find("]", i + 1)
+            if j <= i:
+                tokens.append(path[i + 1 :].strip())
+                break
+            tokens.append(path[i + 1 : j].strip())
+            i = j + 1
+            continue
+        buf += ch
+        i += 1
+    if buf:
+        tokens.append(buf)
+    return [tok for tok in tokens if tok]
+
+
+def _resolve_path(payload: Any, path: str) -> tuple[bool, Any]:
+    cur = payload
+    for raw in _path_tokens(path):
+        if isinstance(cur, list):
+            try:
+                idx = int(raw)
+            except Exception:
+                return False, None
+            if idx < 0 or idx >= len(cur):
+                return False, None
+            cur = cur[idx]
+            continue
+        if isinstance(cur, dict):
+            if raw not in cur:
+                return False, None
+            cur = cur.get(raw)
+            continue
+        return False, None
+    return True, cur
+
+
+def _to_haystack(result: dict[str, Any], summary: str, bullets: list[str]) -> str:
+    return "\n".join(
         [
             str(summary or ""),
             "\n".join(str(x or "") for x in bullets),
             json.dumps(result, sort_keys=True),
         ]
     ).casefold()
+
+
+def _evaluate_expected(item: dict[str, Any], result: dict[str, Any], summary: str, bullets: list[str]) -> dict[str, Any]:
+    expected = item.get("expected_answer")
+    checks: list[dict[str, Any]] = []
+    haystack = _to_haystack(result, summary, bullets)
     passed = True
-    for key, token in flat:
-        ok = str(token or "").casefold() in haystack
-        checks.append({"key": key, "expected": token, "present": bool(ok)})
-        if not ok:
+
+    contains_all = item.get("expected_contains_all", [])
+    if isinstance(contains_all, list):
+        for idx, token in enumerate(contains_all):
+            text = str(token).strip()
+            if not text:
+                continue
+            ok = text.casefold() in haystack
+            checks.append({"type": "contains_all", "key": f"contains_all[{idx}]", "expected": text, "present": bool(ok)})
+            if not ok:
+                passed = False
+
+    contains_any = item.get("expected_contains_any", [])
+    if isinstance(contains_any, list) and contains_any:
+        any_ok = False
+        for token in contains_any:
+            text = str(token).strip()
+            if text and text.casefold() in haystack:
+                any_ok = True
+                break
+        checks.append(
+            {
+                "type": "contains_any",
+                "key": "contains_any",
+                "expected": [str(x).strip() for x in contains_any if str(x).strip()],
+                "present": bool(any_ok),
+            }
+        )
+        if not any_ok:
             passed = False
+
+    path_checks = item.get("expected_paths", [])
+    if isinstance(path_checks, list):
+        for idx, spec in enumerate(path_checks):
+            if not isinstance(spec, dict):
+                continue
+            path = str(spec.get("path") or "").strip()
+            if not path:
+                continue
+            exists, value = _resolve_path(result, path)
+            check_row: dict[str, Any] = {"type": "path", "key": f"expected_paths[{idx}]", "path": path, "present": bool(exists)}
+            if not exists:
+                checks.append(check_row)
+                passed = False
+                continue
+            if "equals" in spec:
+                expected_value = spec.get("equals")
+                ok = value == expected_value
+                check_row["equals"] = expected_value
+                check_row["actual"] = value
+                check_row["match"] = bool(ok)
+                if not ok:
+                    passed = False
+            if "contains" in spec:
+                expected_text = str(spec.get("contains") or "").strip()
+                actual_text = str(value or "")
+                ok = bool(expected_text) and expected_text.casefold() in actual_text.casefold()
+                check_row["contains"] = expected_text
+                check_row["actual"] = actual_text
+                check_row["match"] = bool(ok)
+                if not ok:
+                    passed = False
+            checks.append(check_row)
+
+    if isinstance(expected, dict):
+        flat: list[tuple[str, str]] = []
+        _flatten_expected("", expected, flat)
+        for key, token in flat:
+            ok = str(token or "").casefold() in haystack
+            checks.append({"type": "expected_answer", "key": key, "expected": token, "present": bool(ok)})
+            if not ok:
+                passed = False
+
+    if not checks:
+        return {"evaluated": False, "passed": None, "checks": []}
+
     return {"evaluated": True, "passed": bool(passed), "checks": checks}
 
 
@@ -143,6 +336,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report", default="", help="Path to report.json (defaults to latest single-image report).")
     parser.add_argument("--cases", default="docs/query_eval_cases_advanced20.json", help="Path to advanced case list.")
     parser.add_argument("--output", default="", help="Optional output file path.")
+    parser.add_argument("--strict-all", action="store_true", help="Exit non-zero unless all rows are strictly evaluated and pass.")
+    parser.add_argument(
+        "--allow-vllm-unavailable",
+        action="store_true",
+        help="Continue execution even when external vLLM health check fails.",
+    )
+    parser.add_argument("--query-timeout-s", type=float, default=90.0, help="Per-query timeout in seconds.")
+    parser.add_argument("--lock-retries", type=int, default=4, help="Retries for transient instance_lock_held errors.")
+    parser.add_argument("--lock-retry-wait-ms", type=float, default=250.0, help="Base wait between lock retries in ms.")
     args = parser.parse_args(argv)
 
     report_path = Path(str(args.report or "").strip()) if str(args.report or "").strip() else _latest_report(root)
@@ -155,20 +357,38 @@ def main(argv: list[str] | None = None) -> int:
     if not cfg or not data:
         print(json.dumps({"ok": False, "error": "report_missing_config_or_data", "report": str(report_path)}))
         return 2
-
-    vllm_status = check_external_vllm_ready()
-    if not bool(vllm_status.get("ok", False)):
+    plugins = report.get("plugins", {}) if isinstance(report.get("plugins", {}), dict) else {}
+    load_report = plugins.get("load_report", {}) if isinstance(plugins.get("load_report", {}), dict) else {}
+    required_gate = plugins.get("required_gate", {}) if isinstance(plugins.get("required_gate", {}), dict) else {}
+    if load_report and required_gate and not bool(required_gate.get("ok", False)):
         print(
             json.dumps(
                 {
                     "ok": False,
-                    "error": "external_vllm_unavailable",
-                    "message": "This repo no longer launches vLLM. Start vLLM from sidecar repo on 127.0.0.1:8000.",
-                    "vllm_status": vllm_status,
+                    "error": "required_plugin_gate_failed",
+                    "report": str(report_path),
+                    "required_gate": required_gate,
                 }
             )
         )
         return 2
+
+    vllm_status = check_external_vllm_ready()
+    if not bool(vllm_status.get("ok", False)):
+        if args.allow_vllm_unavailable:
+            vllm_status["degraded_mode"] = True
+        else:
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": "external_vllm_unavailable",
+                        "message": "This repo no longer launches vLLM. Start vLLM from sidecar repo on 127.0.0.1:8000.",
+                        "vllm_status": vllm_status,
+                    }
+                )
+            )
+            return 2
 
     cases_path = (root / str(args.cases)).resolve() if not Path(str(args.cases)).is_absolute() else Path(str(args.cases))
     cases = json.loads(cases_path.read_text(encoding="utf-8"))
@@ -188,6 +408,9 @@ def main(argv: list[str] | None = None) -> int:
             data=data,
             query=question,
             image_path=str(report.get("image_path") or "").strip(),
+            timeout_s=float(args.query_timeout_s),
+            lock_retries=int(args.lock_retries),
+            lock_retry_wait_s=float(args.lock_retry_wait_ms) / 1000.0,
         )
         summary, bullets = _display(result)
         eval_result = _evaluate_expected(item, result, summary, bullets)
@@ -230,10 +453,18 @@ def main(argv: list[str] | None = None) -> int:
         "evaluated_failed": int(max(0, evaluated_total - passed_total)),
         "rows": rows,
     }
-    output_path = Path(str(args.output or "").strip()) if str(args.output or "").strip() else root / "artifacts" / "advanced10" / f"advanced10_{_utc_stamp()}.json"
+    case_prefix = f"advanced{len(rows)}"
+    output_path = (
+        Path(str(args.output or "").strip())
+        if str(args.output or "").strip()
+        else root / "artifacts" / "advanced10" / f"{case_prefix}_{_utc_stamp()}.json"
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(out, indent=2, sort_keys=True), encoding="utf-8")
     print(json.dumps({"ok": True, "output": str(output_path), "rows": len(rows)}))
+    if bool(args.strict_all):
+        if int(evaluated_total) != int(len(rows)) or int(passed_total) != int(len(rows)):
+            return 1
     return 0
 
 

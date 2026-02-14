@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import sys
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -30,7 +31,7 @@ from autocapture_nx.kernel.loader import Kernel, default_config_paths
 from autocapture_nx.kernel.paths import resolve_repo_path
 from dataclasses import asdict
 
-from autocapture_nx.inference.vllm_endpoint import EXTERNAL_VLLM_BASE_URL
+from autocapture_nx.inference.vllm_endpoint import EXTERNAL_VLLM_BASE_URL, check_external_vllm_ready
 from autocapture_nx.kernel.providers import capability_providers
 from autocapture_nx.kernel.query import run_query, run_query_without_state, run_state_query
 from autocapture_nx.processing.idle import IdleProcessor
@@ -101,12 +102,71 @@ def _safe_call(obj: Any, name: str, *args, **kwargs) -> Any:
     return fn(*args, **kwargs)
 
 
+_LIST_UNION_PATHS: tuple[str, ...] = (
+    "plugins.allowlist",
+    "plugins.permissions.localhost_allowed_plugin_ids",
+    "plugins.hosting.inproc_allowlist",
+)
+
+
+def _deep_merge_dict(base: dict[str, Any], overlay: dict[str, Any], *, _path: str = "") -> dict[str, Any]:
+    merged = deepcopy(base)
+    for key, value in overlay.items():
+        next_path = f"{_path}.{key}" if _path else str(key)
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dict(merged[key], value, _path=next_path)
+            continue
+        if isinstance(value, list) and isinstance(merged.get(key), list) and next_path in _LIST_UNION_PATHS:
+            merged_list = [str(item) for item in merged.get(key, [])]
+            for item in value:
+                text = str(item)
+                if text not in merged_list:
+                    merged_list.append(text)
+            merged[key] = merged_list
+            continue
+        merged[key] = deepcopy(value)
+    return merged
+
+
+def _plugin_gate_status(load_report: dict[str, Any], required_plugins: list[str]) -> dict[str, Any]:
+    loaded = {str(x).strip() for x in (load_report.get("loaded") or []) if str(x).strip()}
+    failed = {str(x).strip() for x in (load_report.get("failed") or []) if str(x).strip()}
+    required = [str(x).strip() for x in required_plugins if str(x).strip()]
+    missing = sorted([plugin_id for plugin_id in required if plugin_id not in loaded and plugin_id not in failed])
+    failed_required = sorted([plugin_id for plugin_id in required if plugin_id in failed])
+    return {
+        "required_plugins": required,
+        "missing_required": missing,
+        "failed_required": failed_required,
+        "ok": not missing and not failed_required,
+    }
+
+
+def _should_stop_idle_loop(*, done: bool, stats: dict[str, Any]) -> bool:
+    if bool(done):
+        return True
+    return int(stats.get("state_runs", 0) or 0) > 0
+
+
+def _should_require_vlm(required_plugins: list[str]) -> bool:
+    required = {str(x).strip() for x in (required_plugins or []) if str(x).strip()}
+    if "builtin.vlm.vllm_localhost" in required:
+        return True
+    forced = str(os.environ.get("AUTOCAPTURE_REQUIRE_VLM") or "").strip().casefold()
+    return forced in {"1", "true", "yes"}
+
+
 def main(argv: list[str] | None = None) -> int:
     args = argv or sys.argv[1:]
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", required=True, help="Path to a PNG/JPG screenshot on disk.")
     parser.add_argument("--output-dir", default="artifacts/single_image_runs", help="Directory to write run artifacts.")
     parser.add_argument("--config-base", default="config/default.json", help="Base config JSON to load.")
+    parser.add_argument(
+        "--profile",
+        default="config/profiles/golden_full.json",
+        help="Optional config profile JSON overlay (golden pipeline defaults).",
+    )
     parser.add_argument("--query", default="", help="Optional query to run after processing.")
     parser.add_argument("--budget-ms", type=int, default=20000, help="Processing budget for the one-shot idle step.")
     parser.add_argument("--force-idle", action="store_true", help="Force idle processing regardless of activity signal.")
@@ -133,6 +193,13 @@ def main(argv: list[str] | None = None) -> int:
     report_path = run_dir / "report.json"
 
     base_cfg = _load_json(resolve_repo_path(parsed.config_base))
+    profile_path = resolve_repo_path(parsed.profile)
+    profile_cfg: dict[str, Any] = {}
+    if profile_path.exists():
+        loaded_profile = _load_json(profile_path)
+        if isinstance(loaded_profile, dict):
+            profile_cfg = loaded_profile
+            base_cfg = _deep_merge_dict(base_cfg, profile_cfg)
     remote_vlm_base_url = EXTERNAL_VLLM_BASE_URL
     remote_vlm_only = True
     # Hard policy invariants for safety.
@@ -350,7 +417,12 @@ def main(argv: list[str] | None = None) -> int:
         "image_path": str(image_path),
         "started_utc": ts_utc,
         "force_idle": bool(parsed.force_idle),
+        "profile_path": str(profile_path),
     }
+    if profile_cfg:
+        report["profile_sha256"] = hashlib.sha256(
+            json.dumps(profile_cfg, sort_keys=True).encode("utf-8")
+        ).hexdigest()
 
     kernel = None
     try:
@@ -369,9 +441,51 @@ def main(argv: list[str] | None = None) -> int:
             "storage.media": bool(getattr(system, "has", lambda _n: False)("storage.media")),
         }
         try:
-            report["plugins"] = {"load_report": collect_plugin_load_report(system)}
+            load_report = collect_plugin_load_report(system)
+            report["plugins"] = {"load_report": load_report}
         except Exception:
-            report["plugins"] = {"load_report": []}
+            load_report = {}
+            report["plugins"] = {"load_report": {}}
+        golden_cfg = {}
+        if isinstance(base_cfg, dict) and isinstance(base_cfg.get("plugins"), dict):
+            plugin_settings = (base_cfg.get("plugins") or {}).get("settings", {})
+            if isinstance(plugin_settings, dict):
+                explicit = plugin_settings.get("__golden_profile", {})
+                if isinstance(explicit, dict):
+                    golden_cfg = explicit
+        if not golden_cfg and isinstance(base_cfg, dict) and isinstance(base_cfg.get("runtime"), dict):
+            # Back-compat fallback for older profile overlays.
+            runtime_cfg = base_cfg.get("runtime") or {}
+            if isinstance(runtime_cfg, dict):
+                legacy = runtime_cfg.get("golden_qh")
+                if isinstance(legacy, dict):
+                    golden_cfg = legacy
+        required_plugins = []
+        if isinstance(golden_cfg, dict):
+            raw_required = golden_cfg.get("required_plugins", [])
+            if isinstance(raw_required, list):
+                required_plugins = [str(x).strip() for x in raw_required if str(x).strip()]
+            profile_id = str(golden_cfg.get("profile_id") or "").strip()
+            if profile_id:
+                report["profile_id"] = profile_id
+        gate_status = _plugin_gate_status(load_report if isinstance(load_report, dict) else {}, required_plugins)
+        report["plugins"]["required_gate"] = gate_status
+        gate_disabled = str(os.environ.get("AUTOCAPTURE_DISABLE_REQUIRED_PLUGIN_GATE") or "").strip().casefold() in {
+            "1",
+            "true",
+            "yes",
+        }
+        if required_plugins and not gate_status.get("ok", False) and not gate_disabled:
+            missing = ", ".join(gate_status.get("missing_required", []))
+            failed = ", ".join(gate_status.get("failed_required", []))
+            raise RuntimeError(
+                f"required_plugin_gate_failed: missing=[{missing}] failed=[{failed}]"
+            )
+        if _should_require_vlm(required_plugins):
+            vllm_status = check_external_vllm_ready()
+            report["vllm_status"] = vllm_status
+            if not bool(vllm_status.get("ok", False)):
+                raise RuntimeError(f"external_vllm_unavailable:{vllm_status}")
         try:
             ocr_cap = system.get("ocr.engine") if getattr(system, "has", lambda _n: False)("ocr.engine") else None
             vlm_cap = system.get("vision.extractor") if getattr(system, "has", lambda _n: False)("vision.extractor") else None
@@ -416,8 +530,9 @@ def main(argv: list[str] | None = None) -> int:
             steps_taken = step_idx + 1
             last_stats = asdict(stats) if hasattr(stats, "__dataclass_fields__") else dict(stats)
             done = bool(step_done)
-            # Treat a completed SST/state pass as terminal for this fixture run.
-            if done or int(last_stats.get("sst_runs", 0) or 0) > 0 or int(last_stats.get("state_runs", 0) or 0) > 0:
+            # Stop once the processor declares done, or when state-layer has run.
+            # Do not exit solely on sst_runs>0; that can leave state spans unbuilt.
+            if _should_stop_idle_loop(done=done, stats=last_stats):
                 break
         report["idle"] = {
             "done": bool(done),
@@ -439,6 +554,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         report["error"] = f"{type(exc).__name__}: {exc}"
         _write_json(report_path, report)
+        print(json.dumps({"ok": False, "error": report["error"], "report": str(report_path)}, sort_keys=True))
         return 1
     finally:
         if kernel is not None:
