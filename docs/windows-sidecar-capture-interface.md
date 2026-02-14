@@ -20,6 +20,10 @@ This document defines the exact interface another repository (the "Windows sidec
 
 The sidecar must provide captured frames plus Windows-side context (window metadata + input summaries) in the same on-disk contract the processor already understands.
 
+Chronicle spool mode is also supported and versioned at:
+- `contracts/chronicle/v0/chronicle.proto`
+- `contracts/chronicle/v0/spool_format.md`
+
 There are two supported interchange modes:
 
 1. **Mode A (Recommended): Backup Bundle Handoff**

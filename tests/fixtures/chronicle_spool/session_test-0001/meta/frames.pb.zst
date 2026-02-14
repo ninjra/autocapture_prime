@@ -1,0 +1,1 @@
+{"items": [{"session_id": "test-0001", "frame_index": 0, "qpc_ticks": 1000, "width": 640, "height": 360, "artifact_path": "frames/frame_000000.png"}, {"session_id": "test-0001", "frame_index": 1, "qpc_ticks": 2000, "width": 640, "height": 360, "artifact_path": "frames/frame_000001.png"}]}

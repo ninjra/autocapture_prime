@@ -1,0 +1,14 @@
+{
+  "schema_version": "chronicle/v0",
+  "session_id": "test-0001",
+  "host_id": "hosthash",
+  "qpc_frequency_hz": 10000000,
+  "start_qpc_ticks": 1000,
+  "end_qpc_ticks": 3000,
+  "start_unix_ns": 1739000000000000000,
+  "end_unix_ns": 1739000001000000000,
+  "desktop_width": 1280,
+  "desktop_height": 720,
+  "capture_backend": "sidecar",
+  "config_json": "{}"
+}

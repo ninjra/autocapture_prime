@@ -17,11 +17,25 @@
 - Validate:
   - `.venv/bin/python tools/sidecar_contract_validate.py --dataroot /mnt/d/autocapture --max-journal-lines 2000`
 
+## Chronicle Spool Ingestion Mode
+- Additional supported input mode for sidecar handoff:
+  - `contracts/chronicle/v0/chronicle.proto`
+  - `contracts/chronicle/v0/spool_format.md`
+- Processing entrypoint:
+  - `autocapture-prime ingest --once --config config/autocapture_prime.yaml`
+- Chronicle API entrypoint:
+  - `autocapture-prime serve --config config/autocapture_prime.yaml`
+- Contract drift gate:
+  - `.venv/bin/python tools/gate_chronicle_contract_drift.py`
+
 ## New Plugins
 - Localhost vLLM/OpenAI-compatible:
   - `builtin.vlm.vllm_localhost` (`vision.extractor`)
   - `builtin.embedder.vllm_localhost` (`embedder.text`)
   - `builtin.answer.synth_vllm_localhost` (`answer.synthesizer`)
+  - Recommended endpoint split:
+    - VLM + answer synth: `http://127.0.0.1:8000`
+    - Embedder: `http://127.0.0.1:8001`
 - Late interaction (ColBERT path):
   - `builtin.index.colbert_hash` (`index.postprocess`)
   - `builtin.reranker.colbert_hash` (`retrieval.reranker`)
@@ -58,4 +72,3 @@
 
 ## Recommended WSL Pipeline Command
 - `bash tools/run_png_full_processing.sh "docs/test sample/Screenshot 2026-02-02 113519.png"`
-

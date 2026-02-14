@@ -24,7 +24,7 @@ def main() -> int:
         if rel == "contracts/lock.json":
             continue
         # Only hash contract artifacts (schemas + docs), not helper Python.
-        if path.suffix.lower() not in {".json", ".md"}:
+        if path.suffix.lower() not in {".json", ".md", ".proto"}:
             continue
         files[rel] = sha256_file(root / rel)
 

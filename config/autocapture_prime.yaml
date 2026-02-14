@@ -1,0 +1,39 @@
+spool:
+  root_dir_linux: /mnt/d/autocapture
+
+ingest:
+  poll_interval_ms: 1500
+  max_parallel_sessions: 2
+
+ocr:
+  engine: paddleocr
+  full_frame_scale: 0.5
+  roi_strategy: click_anchored
+  cache_dir: /mnt/d/projects/autocapture_prime/artifacts/ocr_cache
+
+layout:
+  engine: uied
+  allow_agpl: true
+
+storage:
+  root_dir: /mnt/d/projects/autocapture_prime/artifacts/chronicle
+  parquet_compression: zstd
+
+index:
+  enable_duckdb: true
+  enable_faiss: false
+
+vllm:
+  base_url: http://127.0.0.1:8000
+  model: OpenGVLab/InternVL3_5-8B
+  trust_remote_code: true
+
+chronicle_api:
+  host: 127.0.0.1
+  port: 7020
+
+qa:
+  top_k_frames: 4
+
+privacy:
+  allow_mm_embeds: true

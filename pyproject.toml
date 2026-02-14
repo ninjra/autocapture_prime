@@ -25,12 +25,15 @@ dependencies = [
   "sounddevice>=0.4.6",
   "PyYAML>=6.0.1",
   "PyPDF2>=3.0.0",
+  "protobuf>=4.25.0",
+  "zstandard>=0.22.0",
   "ruff>=0.6.0",
   "mypy>=1.8.0"
 ]
 
 [project.scripts]
 autocapture = "autocapture_nx.cli:main"
+autocapture-prime = "autocapture_prime.cli:main"
 
 [project.optional-dependencies]
 sqlcipher = ["pysqlcipher3-binary>=1.0.4"]
@@ -42,6 +45,11 @@ embeddings = [
 vision = [
   "transformers>=4.38.0",
   "torch>=2.1.0"
+]
+chronicle = [
+  "duckdb>=1.1.0",
+  "pyarrow>=18.0.0",
+  "faiss-cpu>=1.8.0"
 ]
 dev = [
   "ruff>=0.6.0",
@@ -82,13 +90,24 @@ packages = [
   "autocapture_nx.processing",
   "autocapture_nx.processing.sst",
   "autocapture_nx.windows",
+  "autocapture_prime",
+  "autocapture_prime.ingest",
+  "autocapture_prime.ocr",
+  "autocapture_prime.layout",
+  "autocapture_prime.link",
+  "autocapture_prime.store",
+  "autocapture_prime.eval",
+  "autocapture_prime.chronicle",
+  "autocapture_prime.chronicle.v0",
+  "services",
+  "services.chronicle_api",
   "plugins",
   "plugins.builtin",
 ]
 
 [tool.setuptools.package-data]
 config = ["*.json"]
-contracts = ["*.json", "*.md"]
+contracts = ["*.json", "*.md", "**/*.proto", "**/*.md", "**/*.json"]
 plugins = ["builtin/**"]
 
 [tool.autocapture]

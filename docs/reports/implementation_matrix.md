@@ -2,6 +2,9 @@
 
 Source: `docs/blueprints/autocapture_nx_blueprint.md`
 
+Additional codex implementation matrix:
+- `docs/reports/autocapture_prime_codex_implementation_matrix.md`
+
 | ItemID | Phase | Title | Status | Evidence | Planned change summary | Test / gate |
 | --- | --- | --- | --- | --- | --- | --- |
 | FX001 | Phase 0: Fixture validation | CLI fixture pipeline for screenshot processing + query validation | complete | tools/run_fixture_pipeline.py; autocapture_nx/ux/fixture.py; tools/fixture_config_template.json; tests/test_fixture_pipeline_cli.py; tests/test_fixture_query_coverage.py | CLI harness ingests fixture screenshots via stub capture, runs idle processing, and validates query accuracy with citations plus plugin status reporting. | tests/test_fixture_pipeline_cli.py; tests/test_fixture_query_coverage.py |
