@@ -54,6 +54,8 @@ GENERATED_REPORT_PREFIXES = (
 # stale "partial/missing" text from dominating current closure status.
 ARCHIVAL_REPORT_PREFIXES = (
     "docs/reports/adversarial-redesign-gap-",
+    "docs/deprecated/",
+    "docs/implemented-ignore/",
 )
 ARCHIVAL_REPORT_EXACT = {
     "docs/reports/risk_register.md",
