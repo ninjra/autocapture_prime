@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -66,8 +67,15 @@ class ChronicleApiChatTests(unittest.TestCase):
             payload = resp.json()
             self.assertIn("usage", payload)
             self.assertIn("chronicle_retrieval_hits", payload["usage"])
+            self.assertIn("chronicle_retrieval", payload["usage"])
+            self.assertIsInstance(payload["usage"]["chronicle_retrieval"], list)
             qa_metrics = Path(td) / "out" / "metrics" / "qa_metrics.ndjson"
             self.assertTrue(qa_metrics.exists())
+            line = qa_metrics.read_text(encoding="utf-8").strip().splitlines()[-1]
+            row = json.loads(line)
+            self.assertIn("query_sha256", row)
+            self.assertIn("plugin_path", row)
+            self.assertIn("evidence_order_hash", row)
 
 
 if __name__ == "__main__":

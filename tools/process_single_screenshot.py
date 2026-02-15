@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import sys
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -30,11 +31,28 @@ from autocapture_nx.kernel.loader import Kernel, default_config_paths
 from autocapture_nx.kernel.paths import resolve_repo_path
 from dataclasses import asdict
 
-from autocapture_nx.inference.vllm_endpoint import EXTERNAL_VLLM_BASE_URL
+from autocapture_nx.inference.vllm_endpoint import EXTERNAL_VLLM_BASE_URL, check_external_vllm_ready
 from autocapture_nx.kernel.providers import capability_providers
 from autocapture_nx.kernel.query import run_query, run_query_without_state, run_state_query
 from autocapture_nx.processing.idle import IdleProcessor
 from autocapture_nx.ux.fixture import collect_plugin_load_report
+
+STRICT_GOLDEN_ENV_BLOCKLIST: tuple[str, ...] = (
+    "AUTOCAPTURE_DISABLE_REQUIRED_PLUGIN_GATE",
+    "AUTOCAPTURE_IDLE_VLM_EXTRACT",
+    "AUTOCAPTURE_QWEN_MAX_ROIS",
+    "AUTOCAPTURE_QWEN_MODEL",
+    "AUTOCAPTURE_QWEN_ROI_MAX_NEW_TOKENS",
+    "AUTOCAPTURE_QWEN_ROI_MAX_SIDE",
+    "AUTOCAPTURE_QWEN_THUMB_MAX_NEW_TOKENS",
+    "AUTOCAPTURE_VLM_MAX_ROIS",
+    "AUTOCAPTURE_VLM_MAX_TOKENS",
+    "AUTOCAPTURE_VLM_ROI_MAX_SIDE",
+    "AUTOCAPTURE_VLM_ROI_MAX_TOKENS",
+    "AUTOCAPTURE_VLM_THUMB_MAX_PX",
+    "AUTOCAPTURE_VLM_THUMB_MAX_TOKENS",
+    "AUTOCAPTURE_VLM_TIMEOUT_S",
+)
 
 
 def _utc_stamp() -> str:
@@ -101,12 +119,113 @@ def _safe_call(obj: Any, name: str, *args, **kwargs) -> Any:
     return fn(*args, **kwargs)
 
 
+_LIST_UNION_PATHS: tuple[str, ...] = (
+    "plugins.allowlist",
+    "plugins.permissions.localhost_allowed_plugin_ids",
+    "plugins.hosting.inproc_allowlist",
+)
+
+
+def _deep_merge_dict(base: dict[str, Any], overlay: dict[str, Any], *, _path: str = "") -> dict[str, Any]:
+    merged = deepcopy(base)
+    for key, value in overlay.items():
+        next_path = f"{_path}.{key}" if _path else str(key)
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dict(merged[key], value, _path=next_path)
+            continue
+        if isinstance(value, list) and isinstance(merged.get(key), list) and next_path in _LIST_UNION_PATHS:
+            merged_list = [str(item) for item in merged.get(key, [])]
+            for item in value:
+                text = str(item)
+                if text not in merged_list:
+                    merged_list.append(text)
+            merged[key] = merged_list
+            continue
+        merged[key] = deepcopy(value)
+    return merged
+
+
+def _plugin_gate_status(load_report: dict[str, Any], required_plugins: list[str]) -> dict[str, Any]:
+    loaded = {str(x).strip() for x in (load_report.get("loaded") or []) if str(x).strip()}
+    failed = {str(x).strip() for x in (load_report.get("failed") or []) if str(x).strip()}
+    required = [str(x).strip() for x in required_plugins if str(x).strip()]
+    missing = sorted([plugin_id for plugin_id in required if plugin_id not in loaded and plugin_id not in failed])
+    failed_required = sorted([plugin_id for plugin_id in required if plugin_id in failed])
+    return {
+        "required_plugins": required,
+        "missing_required": missing,
+        "failed_required": failed_required,
+        "ok": not missing and not failed_required,
+    }
+
+
+def _should_stop_idle_loop(*, done: bool, stats: dict[str, Any]) -> bool:
+    if bool(done):
+        return True
+    return int(stats.get("state_runs", 0) or 0) > 0
+
+
+def _should_require_vlm(required_plugins: list[str]) -> bool:
+    required = {str(x).strip() for x in (required_plugins or []) if str(x).strip()}
+    if "builtin.vlm.vllm_localhost" in required:
+        return True
+    forced = str(os.environ.get("AUTOCAPTURE_REQUIRE_VLM") or "").strip().casefold()
+    return forced in {"1", "true", "yes"}
+
+
+def _is_truthy_env(value: str | None) -> bool:
+    text = str(value or "").strip().casefold()
+    if not text:
+        return False
+    return text not in {"0", "false", "no", "off", "none"}
+
+
+def _strict_golden_enabled() -> bool:
+    return _is_truthy_env(os.environ.get("AUTOCAPTURE_GOLDEN_STRICT", "1"))
+
+
+def _blocked_env_overrides(override_keys: list[str]) -> list[str]:
+    blocked: list[str] = []
+    for key in override_keys:
+        if _is_truthy_env(os.environ.get(key)):
+            blocked.append(str(key))
+    return sorted(blocked)
+
+
+def _coerce_int(raw: Any, default: int) -> int:
+    try:
+        return int(raw)
+    except Exception:
+        return int(default)
+
+
+def _resolve_strict_model_selection(*, selected_model: str, served_models: list[str], strict_golden: bool) -> tuple[str, str]:
+    selected = str(selected_model or "").strip()
+    models = [str(x).strip() for x in served_models if str(x).strip()]
+    if not strict_golden:
+        return selected, "configured"
+    if selected:
+        return selected, "configured"
+    if len(models) == 1:
+        return models[0], "auto_single_served_model"
+    if len(models) > 1:
+        raise RuntimeError(
+            f"strict_golden_requires_explicit_vllm_model_multiple_available:{','.join(models)}"
+        )
+    raise RuntimeError("strict_golden_requires_vllm_models")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = argv or sys.argv[1:]
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", required=True, help="Path to a PNG/JPG screenshot on disk.")
     parser.add_argument("--output-dir", default="artifacts/single_image_runs", help="Directory to write run artifacts.")
     parser.add_argument("--config-base", default="config/default.json", help="Base config JSON to load.")
+    parser.add_argument(
+        "--profile",
+        default="config/profiles/golden_full.json",
+        help="Optional config profile JSON overlay (golden pipeline defaults).",
+    )
     parser.add_argument("--query", default="", help="Optional query to run after processing.")
     parser.add_argument("--budget-ms", type=int, default=20000, help="Processing budget for the one-shot idle step.")
     parser.add_argument("--force-idle", action="store_true", help="Force idle processing regardless of activity signal.")
@@ -132,7 +251,39 @@ def main(argv: list[str] | None = None) -> int:
     data_dir = run_dir / "data"
     report_path = run_dir / "report.json"
 
+    strict_golden = _strict_golden_enabled()
     base_cfg = _load_json(resolve_repo_path(parsed.config_base))
+    profile_path = resolve_repo_path(parsed.profile)
+    profile_cfg: dict[str, Any] = {}
+    if profile_path.exists():
+        loaded_profile = _load_json(profile_path)
+        if isinstance(loaded_profile, dict):
+            profile_cfg = loaded_profile
+            base_cfg = _deep_merge_dict(base_cfg, profile_cfg)
+    determinism_cfg: dict[str, Any] = {}
+    if isinstance(base_cfg.get("plugins"), dict):
+        settings = (base_cfg.get("plugins") or {}).get("settings", {})
+        if isinstance(settings, dict):
+            gp = settings.get("__golden_profile", {})
+            if isinstance(gp, dict):
+                determinism_cfg = gp.get("determinism", {}) if isinstance(gp.get("determinism"), dict) else {}
+    blocked_override_keys = [
+        str(x).strip()
+        for x in (
+            determinism_cfg.get("blocked_env_overrides")
+            if isinstance(determinism_cfg.get("blocked_env_overrides"), list)
+            else list(STRICT_GOLDEN_ENV_BLOCKLIST)
+        )
+        if str(x).strip()
+    ]
+    if strict_golden:
+        blocked = _blocked_env_overrides(blocked_override_keys)
+        if blocked:
+            print(
+                f"ERROR: strict_golden_env_override_blocked:{','.join(blocked)}",
+                file=sys.stderr,
+            )
+            return 2
     remote_vlm_base_url = EXTERNAL_VLLM_BASE_URL
     remote_vlm_only = True
     # Hard policy invariants for safety.
@@ -220,21 +371,22 @@ def main(argv: list[str] | None = None) -> int:
             vllm_settings = settings.setdefault("builtin.vlm.vllm_localhost", {})
             if isinstance(vllm_settings, dict):
                 vllm_settings["base_url"] = remote_vlm_base_url
-                model = str(
-                    os.environ.get("AUTOCAPTURE_VLM_MODEL")
-                    or vllm_settings.get("model")
-                    or "/mnt/d/autocapture/models/qwen2-vl-2b-instruct"
-                ).strip()
+                model = str(vllm_settings.get("model") or os.environ.get("AUTOCAPTURE_VLM_MODEL") or "").strip()
                 if model:
                     vllm_settings["model"] = model
-                vllm_settings["timeout_s"] = float(os.environ.get("AUTOCAPTURE_VLM_TIMEOUT_S", "60"))
+                vllm_settings["timeout_s"] = float(vllm_settings.get("timeout_s") or 60.0)
                 vllm_settings["two_pass_enabled"] = True
-                vllm_settings["thumb_max_px"] = int(os.environ.get("AUTOCAPTURE_VLM_THUMB_MAX_PX", "960"))
-                vllm_settings["max_rois"] = int(os.environ.get("AUTOCAPTURE_VLM_MAX_ROIS", "6"))
-                vllm_settings["roi_max_side"] = int(os.environ.get("AUTOCAPTURE_VLM_ROI_MAX_SIDE", "896"))
-                vllm_settings["thumb_max_tokens"] = int(os.environ.get("AUTOCAPTURE_VLM_THUMB_MAX_TOKENS", "384"))
-                vllm_settings["roi_max_tokens"] = int(os.environ.get("AUTOCAPTURE_VLM_ROI_MAX_TOKENS", "512"))
-                vllm_settings["max_tokens"] = int(os.environ.get("AUTOCAPTURE_VLM_MAX_TOKENS", "512"))
+                vllm_settings["thumb_max_px"] = _coerce_int(vllm_settings.get("thumb_max_px"), 960)
+                vllm_settings["max_rois"] = _coerce_int(vllm_settings.get("max_rois"), 6)
+                vllm_settings["roi_max_side"] = _coerce_int(vllm_settings.get("roi_max_side"), 896)
+                vllm_settings["thumb_max_tokens"] = _coerce_int(vllm_settings.get("thumb_max_tokens"), 384)
+                vllm_settings["roi_max_tokens"] = _coerce_int(vllm_settings.get("roi_max_tokens"), 512)
+                vllm_settings["max_tokens"] = _coerce_int(vllm_settings.get("max_tokens"), 512)
+                vllm_settings["temperature"] = 0.0
+                vllm_settings["top_p"] = 1.0
+                vllm_settings["n"] = 1
+                if "seed" not in vllm_settings:
+                    vllm_settings["seed"] = 0
             qwen_settings = settings.setdefault("builtin.vlm.qwen2_vl_2b", {})
             if isinstance(qwen_settings, dict):
                 qwen_model = str(
@@ -293,6 +445,18 @@ def main(argv: list[str] | None = None) -> int:
                     ):
                         if path not in readwrite_paths:
                             readwrite_paths.append(path)
+            jepa_fs = fs_policies.setdefault("builtin.state.jepa.training", {})
+            if isinstance(jepa_fs, dict):
+                jepa_rw = jepa_fs.setdefault("readwrite", [])
+                if isinstance(jepa_rw, list):
+                    for path in (
+                        str(data_dir),
+                        str(data_dir / "state"),
+                        str(data_dir / "state" / "models"),
+                        str(data_dir / "state" / "models" / "jepa"),
+                    ):
+                        if path not in jepa_rw:
+                            jepa_rw.append(path)
         hosting_cfg = plugins_cfg.setdefault("hosting", {})
         if isinstance(hosting_cfg, dict):
             hosting_cfg["inproc_allow_all"] = True
@@ -337,6 +501,10 @@ def main(argv: list[str] | None = None) -> int:
     original_config = os.environ.get("AUTOCAPTURE_CONFIG_DIR")
     original_data = os.environ.get("AUTOCAPTURE_DATA_DIR")
     original_hosting_mode = os.environ.get("AUTOCAPTURE_PLUGINS_HOSTING_MODE")
+    original_tz = os.environ.get("TZ")
+    original_lang = os.environ.get("LANG")
+    original_lc_all = os.environ.get("LC_ALL")
+    original_pythonhashseed = os.environ.get("PYTHONHASHSEED")
     os.environ["AUTOCAPTURE_CONFIG_DIR"] = str(config_dir)
     os.environ["AUTOCAPTURE_DATA_DIR"] = str(data_dir)
     os.environ["AUTOCAPTURE_PLUGINS_HOSTING_MODE"] = "inproc"
@@ -350,10 +518,25 @@ def main(argv: list[str] | None = None) -> int:
         "image_path": str(image_path),
         "started_utc": ts_utc,
         "force_idle": bool(parsed.force_idle),
+        "profile_path": str(profile_path),
+        "strict_golden": bool(strict_golden),
+    }
+    if profile_path.exists():
+        report["profile_sha256"] = hashlib.sha256(profile_path.read_bytes()).hexdigest()
+    report["determinism_contract"] = {
+        "lang": str(determinism_cfg.get("lang") or "C.UTF-8"),
+        "timezone": str(determinism_cfg.get("timezone") or "UTC"),
+        "pythonhashseed": str(determinism_cfg.get("pythonhashseed") or "0"),
+        "blocked_env_overrides": blocked_override_keys,
+        "repro_runs": int(determinism_cfg.get("repro_runs") or 3),
     }
 
     kernel = None
     try:
+        os.environ["TZ"] = str(report["determinism_contract"]["timezone"])
+        os.environ["LANG"] = str(report["determinism_contract"]["lang"])
+        os.environ["LC_ALL"] = str(report["determinism_contract"]["lang"])
+        os.environ["PYTHONHASHSEED"] = str(report["determinism_contract"]["pythonhashseed"])
         kernel = Kernel(default_config_paths(), safe_mode=False)
         system = kernel.boot(start_conductor=False, fast_boot=False)
         report["boot_ok"] = True
@@ -369,9 +552,66 @@ def main(argv: list[str] | None = None) -> int:
             "storage.media": bool(getattr(system, "has", lambda _n: False)("storage.media")),
         }
         try:
-            report["plugins"] = {"load_report": collect_plugin_load_report(system)}
+            load_report = collect_plugin_load_report(system)
+            report["plugins"] = {"load_report": load_report}
         except Exception:
-            report["plugins"] = {"load_report": []}
+            load_report = {}
+            report["plugins"] = {"load_report": {}}
+        golden_cfg = {}
+        if isinstance(base_cfg, dict) and isinstance(base_cfg.get("plugins"), dict):
+            plugin_settings = (base_cfg.get("plugins") or {}).get("settings", {})
+            if isinstance(plugin_settings, dict):
+                explicit = plugin_settings.get("__golden_profile", {})
+                if isinstance(explicit, dict):
+                    golden_cfg = explicit
+        if not golden_cfg and isinstance(base_cfg, dict) and isinstance(base_cfg.get("runtime"), dict):
+            # Back-compat fallback for older profile overlays.
+            runtime_cfg = base_cfg.get("runtime") or {}
+            if isinstance(runtime_cfg, dict):
+                legacy = runtime_cfg.get("golden_qh")
+                if isinstance(legacy, dict):
+                    golden_cfg = legacy
+        required_plugins = []
+        if isinstance(golden_cfg, dict):
+            raw_required = golden_cfg.get("required_plugins", [])
+            if isinstance(raw_required, list):
+                required_plugins = [str(x).strip() for x in raw_required if str(x).strip()]
+            profile_id = str(golden_cfg.get("profile_id") or "").strip()
+            if profile_id:
+                report["profile_id"] = profile_id
+        gate_status = _plugin_gate_status(load_report if isinstance(load_report, dict) else {}, required_plugins)
+        report["plugins"]["required_gate"] = gate_status
+        gate_disabled = str(os.environ.get("AUTOCAPTURE_DISABLE_REQUIRED_PLUGIN_GATE") or "").strip().casefold() in {
+            "1",
+            "true",
+            "yes",
+        }
+        if required_plugins and not gate_status.get("ok", False) and not gate_disabled:
+            missing = ", ".join(gate_status.get("missing_required", []))
+            failed = ", ".join(gate_status.get("failed_required", []))
+            raise RuntimeError(
+                f"required_plugin_gate_failed: missing=[{missing}] failed=[{failed}]"
+            )
+        if _should_require_vlm(required_plugins):
+            vllm_status = check_external_vllm_ready()
+            report["vllm_status"] = vllm_status
+            if not bool(vllm_status.get("ok", False)):
+                raise RuntimeError(f"external_vllm_unavailable:{vllm_status}")
+            plugin_settings = (base_cfg.get("plugins") or {}).get("settings", {}) if isinstance(base_cfg, dict) else {}
+            vllm_cfg = plugin_settings.get("builtin.vlm.vllm_localhost", {}) if isinstance(plugin_settings, dict) else {}
+            models = [str(x).strip() for x in (vllm_status.get("models") or []) if str(x).strip()]
+            selected_model = str(vllm_cfg.get("model") or "").strip() if isinstance(vllm_cfg, dict) else ""
+            selected_model, model_source = _resolve_strict_model_selection(
+                selected_model=selected_model,
+                served_models=models,
+                strict_golden=bool(strict_golden),
+            )
+            report["vllm_model_selected"] = selected_model
+            report["vllm_model_source"] = model_source
+            if selected_model and models and selected_model not in models:
+                raise RuntimeError(
+                    f"strict_golden_model_not_served:selected={selected_model}:available={','.join(models)}"
+                )
         try:
             ocr_cap = system.get("ocr.engine") if getattr(system, "has", lambda _n: False)("ocr.engine") else None
             vlm_cap = system.get("vision.extractor") if getattr(system, "has", lambda _n: False)("vision.extractor") else None
@@ -406,6 +646,8 @@ def main(argv: list[str] | None = None) -> int:
         max_steps = max(1, int(parsed.max_idle_steps))
         done = False
         last_stats: dict[str, Any] = {}
+        cumulative_stats: dict[str, int] = {}
+        per_step_stats: list[dict[str, Any]] = []
         steps_taken = 0
         for step_idx in range(max_steps):
             step_done, stats = idle.process_step(
@@ -415,15 +657,24 @@ def main(argv: list[str] | None = None) -> int:
             )
             steps_taken = step_idx + 1
             last_stats = asdict(stats) if hasattr(stats, "__dataclass_fields__") else dict(stats)
+            per_step_stats.append({"step": int(steps_taken), "stats": dict(last_stats)})
+            for key, value in last_stats.items():
+                try:
+                    cumulative_stats[key] = int(cumulative_stats.get(key, 0)) + int(value or 0)
+                except Exception:
+                    continue
             done = bool(step_done)
-            # Treat a completed SST/state pass as terminal for this fixture run.
-            if done or int(last_stats.get("sst_runs", 0) or 0) > 0 or int(last_stats.get("state_runs", 0) or 0) > 0:
+            # Stop once the processor declares done, or when state-layer has run.
+            # Do not exit solely on sst_runs>0; that can leave state spans unbuilt.
+            if _should_stop_idle_loop(done=done, stats=last_stats):
                 break
         report["idle"] = {
             "done": bool(done),
             "steps_taken": int(steps_taken),
             "max_steps": int(max_steps),
             "stats": last_stats,
+            "stats_cumulative": cumulative_stats,
+            "step_stats": per_step_stats,
             "budget_ms": int(parsed.budget_ms),
         }
 
@@ -439,6 +690,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         report["error"] = f"{type(exc).__name__}: {exc}"
         _write_json(report_path, report)
+        print(json.dumps({"ok": False, "error": report["error"], "report": str(report_path)}, sort_keys=True))
         return 1
     finally:
         if kernel is not None:
@@ -458,6 +710,22 @@ def main(argv: list[str] | None = None) -> int:
             os.environ["AUTOCAPTURE_PLUGINS_HOSTING_MODE"] = original_hosting_mode
         else:
             os.environ.pop("AUTOCAPTURE_PLUGINS_HOSTING_MODE", None)
+        if original_tz is not None:
+            os.environ["TZ"] = original_tz
+        else:
+            os.environ.pop("TZ", None)
+        if original_lang is not None:
+            os.environ["LANG"] = original_lang
+        else:
+            os.environ.pop("LANG", None)
+        if original_lc_all is not None:
+            os.environ["LC_ALL"] = original_lc_all
+        else:
+            os.environ.pop("LC_ALL", None)
+        if original_pythonhashseed is not None:
+            os.environ["PYTHONHASHSEED"] = original_pythonhashseed
+        else:
+            os.environ.pop("PYTHONHASHSEED", None)
 
     report["finished_utc"] = datetime.now(timezone.utc).isoformat()
     _write_json(report_path, report)

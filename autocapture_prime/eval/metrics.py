@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -35,13 +36,24 @@ def record_qa_metric(
     model: str,
     retrieval_hits: int,
     latency_ms: float,
+    plugin_path: list[str] | None = None,
+    confidence: float = 0.0,
+    feedback_state: str = "unreviewed",
+    evidence_order_hash: str = "",
 ) -> None:
+    path = [str(item).strip() for item in (plugin_path or []) if str(item).strip()]
+    query_text = str(query)
     row = {
         "record_type": "derived.eval.qa_latency",
         "ts_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "query": str(query),
+        "query": query_text,
+        "query_sha256": sha256(query_text.encode("utf-8")).hexdigest(),
         "model": str(model),
         "retrieval_hits": int(retrieval_hits),
         "latency_ms": float(latency_ms),
+        "plugin_path": path,
+        "confidence": float(max(0.0, min(1.0, confidence))),
+        "feedback_state": str(feedback_state or "unreviewed"),
+        "evidence_order_hash": str(evidence_order_hash or ""),
     }
     _append_row(Path(storage_root) / "metrics" / "qa_metrics.ndjson", row)

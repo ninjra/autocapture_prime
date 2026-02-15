@@ -1,0 +1,216 @@
+{
+  "plugins": {
+    "allowlist": [
+      "builtin.answer.synth_vllm_localhost",
+      "builtin.embedder.vllm_localhost",
+      "builtin.embeddings.basic",
+      "builtin.index.colbert_hash",
+      "builtin.reranker.colbert_hash",
+      "builtin.state.anomaly",
+      "builtin.state.evidence.compiler",
+      "builtin.state.jepa.training",
+      "builtin.state.jepa_like",
+      "builtin.state.policy",
+      "builtin.state.retrieval",
+      "builtin.state.vector.hnsw",
+      "builtin.state.vector.sqlite_ts",
+      "builtin.state.workflow.miner"
+    ],
+    "capabilities": {
+      "answer.synthesizer": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.answer.synth_vllm_localhost"
+        ],
+        "provider_ids": []
+      },
+      "embedder.text": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.embedder.vllm_localhost",
+          "builtin.embedder.basic"
+        ],
+        "provider_ids": []
+      },
+      "reranker": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.reranker.colbert_hash",
+          "builtin.reranker.basic"
+        ],
+        "provider_ids": []
+      },
+      "state.vector_index": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.state.vector.hnsw",
+          "builtin.state.vector.sqlite_ts",
+          "builtin.state.vector.linear"
+        ],
+        "provider_ids": []
+      },
+      "vision.extractor": {
+        "fanout": true,
+        "max_providers": 8,
+        "mode": "multi",
+        "preferred": [
+          "builtin.vlm.vllm_localhost",
+          "builtin.vlm.basic"
+        ],
+        "provider_ids": []
+      }
+    },
+    "enabled": {
+      "builtin.answer.synth_vllm_localhost": true,
+      "builtin.capture.audio.windows": false,
+      "builtin.capture.basic": false,
+      "builtin.capture.screenshot.windows": false,
+      "builtin.capture.windows": false,
+      "builtin.embedder.vllm_localhost": true,
+      "builtin.embeddings.basic": true,
+      "builtin.index.colbert_hash": true,
+      "builtin.ocr.nemotron_torch": false,
+      "builtin.reranker.colbert_hash": true,
+      "builtin.sst.build.delta": true,
+      "builtin.sst.build.state": true,
+      "builtin.sst.compliance.redact": true,
+      "builtin.sst.extract.chart": true,
+      "builtin.sst.extract.code": true,
+      "builtin.sst.extract.spreadsheet": true,
+      "builtin.sst.extract.table": true,
+      "builtin.sst.index": true,
+      "builtin.sst.infer.action": true,
+      "builtin.sst.layout.assemble": true,
+      "builtin.sst.match.ids": true,
+      "builtin.sst.nemotron_objects": false,
+      "builtin.sst.ocr.onnx": true,
+      "builtin.sst.persist": true,
+      "builtin.sst.preprocess.normalize": true,
+      "builtin.sst.preprocess.tile": true,
+      "builtin.sst.qa.answers": false,
+      "builtin.sst.temporal.segment": true,
+      "builtin.sst.track.cursor": true,
+      "builtin.sst.ui.parse": true,
+      "builtin.state.anomaly": true,
+      "builtin.state.jepa.training": true,
+      "builtin.state.workflow.miner": true,
+      "builtin.tracking.clipboard.windows": false,
+      "builtin.tracking.file_activity.windows": false,
+      "builtin.tracking.input.windows": false,
+      "builtin.window.metadata.windows": false
+    },
+    "permissions": {
+      "localhost_allowed_plugin_ids": [
+        "builtin.answer.synth_vllm_localhost",
+        "builtin.embedder.vllm_localhost",
+        "builtin.vlm.vllm_localhost"
+      ]
+    },
+    "settings": {
+      "__golden_profile": {
+        "determinism": {
+          "blocked_env_overrides": [
+            "AUTOCAPTURE_DISABLE_REQUIRED_PLUGIN_GATE",
+            "AUTOCAPTURE_IDLE_VLM_EXTRACT",
+            "AUTOCAPTURE_QWEN_MAX_ROIS",
+            "AUTOCAPTURE_QWEN_MODEL",
+            "AUTOCAPTURE_QWEN_ROI_MAX_NEW_TOKENS",
+            "AUTOCAPTURE_QWEN_ROI_MAX_SIDE",
+            "AUTOCAPTURE_QWEN_THUMB_MAX_NEW_TOKENS",
+            "AUTOCAPTURE_VLM_MAX_ROIS",
+            "AUTOCAPTURE_VLM_MAX_TOKENS",
+            "AUTOCAPTURE_VLM_ROI_MAX_SIDE",
+            "AUTOCAPTURE_VLM_ROI_MAX_TOKENS",
+            "AUTOCAPTURE_VLM_THUMB_MAX_PX",
+            "AUTOCAPTURE_VLM_THUMB_MAX_TOKENS",
+            "AUTOCAPTURE_VLM_TIMEOUT_S"
+          ],
+          "lang": "C.UTF-8",
+          "pythonhashseed": "0",
+          "repro_runs": 3,
+          "timezone": "UTC"
+        },
+        "enable_synthesizer": true,
+        "profile_id": "golden_full_v1",
+        "required_plugins": [
+          "builtin.storage.sqlcipher",
+          "builtin.ocr.basic",
+          "builtin.processing.sst.pipeline",
+          "builtin.processing.sst.ui_vlm",
+          "builtin.vlm.vllm_localhost",
+          "builtin.embedder.basic",
+          "builtin.embedder.vllm_localhost",
+          "builtin.index.colbert_hash",
+          "builtin.reranker.colbert_hash",
+          "builtin.retrieval.basic",
+          "builtin.reranker.basic",
+          "builtin.state.evidence.compiler",
+          "builtin.state.jepa_like",
+          "builtin.state.retrieval",
+          "builtin.state.vector.hnsw",
+          "builtin.state.vector.sqlite_ts",
+          "builtin.observation.graph",
+          "builtin.prompt.bundle.default"
+        ]
+      },
+      "builtin.answer.synth_vllm_localhost": {
+        "base_url": "http://127.0.0.1:8000",
+        "max_evidence_chars": 3600,
+        "max_tokens": 768,
+        "timeout_s": 45.0
+      },
+      "builtin.embedder.vllm_localhost": {
+        "base_url": "http://127.0.0.1:8001",
+        "model": "BAAI/bge-small-en-v1.5",
+        "timeout_s": 20.0
+      },
+      "builtin.vlm.vllm_localhost": {
+        "base_url": "http://127.0.0.1:8000",
+        "model": "",
+        "n": 1,
+        "max_rois": 8,
+        "max_tokens": 640,
+        "max_retries": 3,
+        "timeout_s": 12.0,
+        "roi_max_side": 2048,
+        "roi_max_tokens": 1536,
+        "seed": 0,
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "thumb_max_px": 1920,
+        "thumb_max_tokens": 768,
+        "two_pass_enabled": true
+      }
+    }
+  },
+  "processing": {
+    "sst": {
+      "ui_parse": {
+        "enabled": true,
+        "fallback_detector": false,
+        "max_providers": 1,
+        "mode": "vlm_json"
+      },
+      "ui_vlm": {
+        "enabled": true,
+        "max_providers": 1
+      }
+    },
+    "state_layer": {
+      "features": {
+        "anomaly_enabled": true,
+        "index_enabled": true,
+        "training_enabled": true,
+        "workflow_enabled": true
+      }
+    }
+  }
+}

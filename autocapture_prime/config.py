@@ -59,6 +59,15 @@ class PrimeConfig:
         return str(self.raw.get("ocr", {}).get("engine", "paddleocr"))
 
     @property
+    def ocr_full_frame_scale(self) -> float:
+        value = float(self.raw.get("ocr", {}).get("full_frame_scale", 1.0))
+        return max(0.1, min(1.0, value))
+
+    @property
+    def ocr_roi_strategy(self) -> str:
+        return str(self.raw.get("ocr", {}).get("roi_strategy", "none")).strip().lower()
+
+    @property
     def layout_engine(self) -> str:
         return str(self.raw.get("layout", {}).get("engine", "uied"))
 
@@ -77,6 +86,10 @@ class PrimeConfig:
     @property
     def allow_agpl(self) -> bool:
         return bool(self.raw.get("layout", {}).get("allow_agpl", False))
+
+    @property
+    def trust_remote_code(self) -> bool:
+        return bool(self.raw.get("vllm", {}).get("trust_remote_code", False))
 
 
 def load_prime_config(path: str | Path | None = None) -> PrimeConfig:

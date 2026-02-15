@@ -30,7 +30,9 @@
     "storage.state_tape"
   ],
   "settings_paths": [
-    "processing"
+    "processing",
+    "storage",
+    "paths"
   ],
   "version": "0.1.0"
 }

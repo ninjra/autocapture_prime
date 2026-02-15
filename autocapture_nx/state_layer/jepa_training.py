@@ -31,8 +31,24 @@ class JEPATraining(PluginBase):
         builder_cfg = state_cfg.get("builder", {}) if isinstance(state_cfg.get("builder", {}), dict) else {}
         training_cfg = state_cfg.get("training", {}) if isinstance(state_cfg.get("training", {}), dict) else {}
         self._config_hash = compute_config_hash(builder_cfg)
-        data_dir = cfg.get("storage", {}).get("data_dir", "data")
-        self._root = Path(str(data_dir)) / "state" / "models" / "jepa"
+        # The plugin may receive a scoped config (e.g. only `processing`) depending
+        # on manifest settings_paths. Resolve data_dir robustly to avoid writing to
+        # repo-local `data/` when a run-specific AUTOCAPTURE_DATA_DIR is set.
+        data_dir_raw = (
+            cfg.get("storage", {}).get("data_dir")
+            if isinstance(cfg.get("storage", {}), dict)
+            else None
+        )
+        if not data_dir_raw and isinstance(cfg.get("paths", {}), dict):
+            data_dir_raw = cfg.get("paths", {}).get("data_dir")
+        if not data_dir_raw:
+            data_dir_raw = os.environ.get("AUTOCAPTURE_DATA_DIR")
+        data_dir = str(data_dir_raw or "data").strip() or "data"
+        model_root_raw = training_cfg.get("model_root") if isinstance(training_cfg, dict) else None
+        if str(model_root_raw or "").strip():
+            self._root = Path(str(model_root_raw).strip())
+        else:
+            self._root = Path(data_dir) / "state" / "models" / "jepa"
         self._root.mkdir(parents=True, exist_ok=True)
         self._key_path = self._root / "signing.key"
         self._approvals_path = self._root / "approvals.json"
