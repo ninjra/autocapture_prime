@@ -1021,6 +1021,12 @@ class EncryptedSQLiteStore:
         self._fsync_policy = str(fsync_policy or "").strip().lower() or "none"
         os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
         self._conn: sqlite3.Connection | None = None
+        self._metadata_has_payload = False
+        self._metadata_payload_required = False
+        self._entity_has_legacy_value = False
+        self._entity_has_legacy_kind = False
+        self._entity_has_legacy_key_version = False
+        self._entity_has_legacy_first_seen = False
 
     def _ensure(self) -> None:
         if self._conn is None:
@@ -1044,7 +1050,32 @@ class EncryptedSQLiteStore:
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS entity_map (token TEXT PRIMARY KEY, nonce_b64 TEXT, ciphertext_b64 TEXT, key_id TEXT)"
         )
+        self._ensure_columns()
         self._conn.commit()
+
+    def _table_info(self, table: str) -> dict[str, tuple[Any, ...]]:
+        cur = self._conn.execute(f"PRAGMA table_info({table})")
+        return {str(row[1]): tuple(row) for row in cur.fetchall()}
+
+    def _ensure_columns(self) -> None:
+        meta_cols = self._table_info("metadata")
+        for column in ("nonce_b64", "ciphertext_b64", "key_id"):
+            if column not in meta_cols:
+                self._conn.execute(f"ALTER TABLE metadata ADD COLUMN {column} TEXT")
+        meta_cols = self._table_info("metadata")
+        self._metadata_has_payload = "payload" in meta_cols
+        payload_info = meta_cols.get("payload")
+        self._metadata_payload_required = bool(payload_info and int(payload_info[3] or 0) == 1)
+
+        entity_cols = self._table_info("entity_map")
+        for column in ("nonce_b64", "ciphertext_b64", "key_id"):
+            if column not in entity_cols:
+                self._conn.execute(f"ALTER TABLE entity_map ADD COLUMN {column} TEXT")
+        entity_cols = self._table_info("entity_map")
+        self._entity_has_legacy_value = "value" in entity_cols
+        self._entity_has_legacy_kind = "kind" in entity_cols
+        self._entity_has_legacy_key_version = "key_version" in entity_cols
+        self._entity_has_legacy_first_seen = "first_seen_ts" in entity_cols
 
     def _encrypt(self, provider: DerivedKeyProvider, payload: Any) -> tuple[str, str, str]:
         key_id, key = provider.active()
@@ -1078,19 +1109,34 @@ class EncryptedSQLiteStore:
     def put_replace(self, record_id: str, value: Any) -> None:
         self._ensure()
         nonce_b64, ciphertext_b64, key_id = self._encrypt(self._meta_provider, value)
+        columns = ["id", "nonce_b64", "ciphertext_b64", "key_id"]
+        params: list[Any] = [record_id, nonce_b64, ciphertext_b64, key_id]
+        # Compatibility with legacy metadata schema that requires payload NOT NULL.
+        if self._metadata_has_payload:
+            columns.append("payload")
+            params.append("")
+        placeholders = ", ".join("?" for _ in columns)
+        cols = ", ".join(columns)
         self._conn.execute(
-            "INSERT OR REPLACE INTO metadata (id, nonce_b64, ciphertext_b64, key_id) VALUES (?, ?, ?, ?)",
-            (record_id, nonce_b64, ciphertext_b64, key_id),
+            f"INSERT OR REPLACE INTO metadata ({cols}) VALUES ({placeholders})",
+            tuple(params),
         )
         self._conn.commit()
 
     def put_new(self, record_id: str, value: Any) -> None:
         self._ensure()
         nonce_b64, ciphertext_b64, key_id = self._encrypt(self._meta_provider, value)
+        columns = ["id", "nonce_b64", "ciphertext_b64", "key_id"]
+        params: list[Any] = [record_id, nonce_b64, ciphertext_b64, key_id]
+        if self._metadata_has_payload:
+            columns.append("payload")
+            params.append("")
+        placeholders = ", ".join("?" for _ in columns)
+        cols = ", ".join(columns)
         try:
             self._conn.execute(
-                "INSERT INTO metadata (id, nonce_b64, ciphertext_b64, key_id) VALUES (?, ?, ?, ?)",
-                (record_id, nonce_b64, ciphertext_b64, key_id),
+                f"INSERT INTO metadata ({cols}) VALUES ({placeholders})",
+                tuple(params),
             )
             self._conn.commit()
         except sqlite3.IntegrityError as exc:
@@ -1098,14 +1144,30 @@ class EncryptedSQLiteStore:
 
     def get(self, record_id: str, default: Any = None) -> Any:
         self._ensure()
-        cur = self._conn.execute(
-            "SELECT nonce_b64, ciphertext_b64, key_id FROM metadata WHERE id = ?",
-            (record_id,),
-        )
+        select_cols = ["nonce_b64", "ciphertext_b64", "key_id"]
+        if self._metadata_has_payload:
+            select_cols.append("payload")
+        cur = self._conn.execute(f"SELECT {', '.join(select_cols)} FROM metadata WHERE id = ?", (record_id,))
         row = cur.fetchone()
         if not row:
             return default
-        return self._decrypt(self._meta_provider, row[0], row[1], row[2], default=default)
+        nonce_b64 = row[0]
+        ciphertext_b64 = row[1]
+        enc_key_id = row[2]
+        if nonce_b64 and ciphertext_b64:
+            return self._decrypt(
+                self._meta_provider,
+                nonce_b64,
+                ciphertext_b64,
+                enc_key_id,
+                default=default,
+            )
+        if self._metadata_has_payload and len(row) > 3 and row[3]:
+            try:
+                return json.loads(row[3])
+            except Exception:
+                return default
+        return default
 
     def keys(self) -> list[str]:
         self._ensure()
@@ -1205,24 +1267,85 @@ class EncryptedSQLiteStore:
 
     def entity_get(self, token: str) -> dict[str, Any] | None:
         self._ensure()
-        cur = self._conn.execute(
-            "SELECT nonce_b64, ciphertext_b64, key_id FROM entity_map WHERE token = ?",
-            (token,),
-        )
+        select_cols = ["nonce_b64", "ciphertext_b64", "key_id"]
+        if self._entity_has_legacy_value:
+            select_cols.append("value")
+        if self._entity_has_legacy_kind:
+            select_cols.append("kind")
+        if self._entity_has_legacy_key_version:
+            select_cols.append("key_version")
+        if self._entity_has_legacy_first_seen:
+            select_cols.append("first_seen_ts")
+        cur = self._conn.execute(f"SELECT {', '.join(select_cols)} FROM entity_map WHERE token = ?", (token,))
         row = cur.fetchone()
         if not row:
             return None
-        return self._decrypt(self._entity_provider, row[0], row[1], row[2], default=None)
+        nonce_b64 = row[0]
+        ciphertext_b64 = row[1]
+        enc_key_id = row[2]
+        if nonce_b64 and ciphertext_b64:
+            payload = self._decrypt(self._entity_provider, nonce_b64, ciphertext_b64, enc_key_id, default=None)
+            if isinstance(payload, dict):
+                return payload
+            return None
+        idx = 3
+        value = row[idx] if self._entity_has_legacy_value else None
+        idx += 1 if self._entity_has_legacy_value else 0
+        kind = row[idx] if self._entity_has_legacy_kind else None
+        idx += 1 if self._entity_has_legacy_kind else 0
+        key_version = row[idx] if self._entity_has_legacy_key_version else None
+        idx += 1 if self._entity_has_legacy_key_version else 0
+        first_seen_ts = row[idx] if self._entity_has_legacy_first_seen else None
+        if value is None and kind is None:
+            return None
+        return {
+            "value": value,
+            "kind": kind,
+            "key_id": enc_key_id,
+            "key_version": key_version,
+            "first_seen_ts": first_seen_ts,
+        }
 
     def entity_items(self) -> dict[str, dict[str, Any]]:
         self._ensure()
-        cur = self._conn.execute("SELECT token, nonce_b64, ciphertext_b64, key_id FROM entity_map")
+        select_cols = ["token", "nonce_b64", "ciphertext_b64", "key_id"]
+        if self._entity_has_legacy_value:
+            select_cols.append("value")
+        if self._entity_has_legacy_kind:
+            select_cols.append("kind")
+        if self._entity_has_legacy_key_version:
+            select_cols.append("key_version")
+        if self._entity_has_legacy_first_seen:
+            select_cols.append("first_seen_ts")
+        cur = self._conn.execute(f"SELECT {', '.join(select_cols)} FROM entity_map")
         out: dict[str, dict[str, Any]] = {}
         for row in cur.fetchall():
             token = row[0]
-            payload = self._decrypt(self._entity_provider, row[1], row[2], row[3], default=None)
-            if isinstance(payload, dict):
-                out[token] = payload
+            nonce_b64 = row[1]
+            ciphertext_b64 = row[2]
+            enc_key_id = row[3]
+            if nonce_b64 and ciphertext_b64:
+                payload = self._decrypt(self._entity_provider, nonce_b64, ciphertext_b64, enc_key_id, default=None)
+                if isinstance(payload, dict):
+                    out[token] = payload
+                continue
+            idx = 4
+            value = row[idx] if self._entity_has_legacy_value else None
+            idx += 1 if self._entity_has_legacy_value else 0
+            kind = row[idx] if self._entity_has_legacy_kind else None
+            idx += 1 if self._entity_has_legacy_kind else 0
+            key_version = row[idx] if self._entity_has_legacy_key_version else None
+            idx += 1 if self._entity_has_legacy_key_version else 0
+            first_seen_ts = row[idx] if self._entity_has_legacy_first_seen else None
+            if value is None and kind is None:
+                continue
+            out[token] = {
+                "value": value,
+                "kind": kind,
+                "key_id": enc_key_id,
+                "key_version": key_version,
+                "first_seen_ts": first_seen_ts,
+            }
         return out
 
 

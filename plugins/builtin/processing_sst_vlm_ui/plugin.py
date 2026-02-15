@@ -34,9 +34,11 @@ class VLMUIStageHook(PluginBase):
         frame_bbox = payload.get("frame_bbox")
         if not frame_bytes or not isinstance(tokens, list) or not frame_bbox:
             return None
-        cached_graph = _parse_element_graph_from_cached_vlm_tokens(tokens, frame_bbox)
-        if cached_graph is not None:
-            return {"element_graph": cached_graph}
+        use_cached_tokens = bool(cfg.get("use_cached_tokens", False))
+        if use_cached_tokens:
+            cached_graph = _parse_element_graph_from_cached_vlm_tokens(tokens, frame_bbox)
+            if cached_graph is not None:
+                return {"element_graph": cached_graph}
         providers = _providers(self._get_vlm())
         max_providers = int(cfg.get("max_providers", 1))
         best_graph: dict[str, Any] | None = None

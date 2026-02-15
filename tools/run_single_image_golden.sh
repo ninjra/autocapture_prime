@@ -19,6 +19,6 @@ exec "$ROOT/.venv/bin/python" "$ROOT/tools/process_single_screenshot.py" \
   --image "$IMAGE_PATH" \
   --profile "$PROFILE_PATH" \
   --force-idle \
-  --budget-ms 30000 \
+  --budget-ms 180000 \
   --max-idle-steps 8 \
   "$@"

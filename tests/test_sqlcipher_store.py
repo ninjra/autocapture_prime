@@ -81,6 +81,101 @@ class SQLCipherStoreTests(unittest.TestCase):
                 store.put_new("k_skip", {"v": 2})
                 self.assertIsNone(store.get("k_skip"))
 
+    def test_encrypted_sqlite_fallback_migrates_legacy_metadata_schema(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "metadata.db")
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "CREATE TABLE metadata (id TEXT PRIMARY KEY, payload TEXT NOT NULL, record_type TEXT, ts_utc TEXT, run_id TEXT)"
+            )
+            conn.execute(
+                "CREATE TABLE entity_map (token TEXT PRIMARY KEY, value TEXT, kind TEXT, key_id TEXT, key_version INTEGER, first_seen_ts TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO metadata (id, payload, record_type, ts_utc, run_id) VALUES (?, ?, ?, ?, ?)",
+                (
+                    "legacy_record",
+                    "{\"schema_version\":1,\"record_type\":\"derived.legacy\",\"run_id\":\"run0\",\"content_hash\":\"h0\",\"v\":0}",
+                    "derived.legacy",
+                    "2026-02-10T00:00:00Z",
+                    "run0",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO entity_map (token, value, kind, key_id, key_version, first_seen_ts) VALUES (?, ?, ?, ?, ?, ?)",
+                ("legacy_token", "legacy@example.com", "email", "legacy", 1, "2026-02-10T00:00:00Z"),
+            )
+            conn.commit()
+            conn.close()
+
+            config = {
+                "storage": {
+                    "data_dir": tmp,
+                    "metadata_path": db_path,
+                    "encryption_enabled": True,
+                    "encryption_required": False,
+                    "sqlcipher": {"enabled": False},
+                    "crypto": {
+                        "root_key_path": os.path.join(tmp, "vault", "root.key"),
+                        "keyring_path": os.path.join(tmp, "vault", "keyring.json"),
+                    },
+                },
+                "runtime": {"run_id": "run1"},
+            }
+            ctx = PluginContext(config=config, get_capability=lambda _k: None, logger=lambda _m: None)
+            plugin = SQLCipherStoragePlugin("sql", ctx)
+            metadata = plugin.capabilities()["storage.metadata"]
+            entity = plugin.capabilities()["storage.entity_map"]
+
+            legacy = metadata.get("legacy_record")
+            self.assertIsInstance(legacy, dict)
+            self.assertEqual(legacy.get("v"), 0)
+
+            metadata.put(
+                "new_record",
+                {
+                    "schema_version": 1,
+                    "record_type": "derived.test",
+                    "run_id": "run1",
+                    "content_hash": "h1",
+                    "v": 1,
+                },
+            )
+            roundtrip = metadata.get("new_record")
+            self.assertIsInstance(roundtrip, dict)
+            self.assertEqual(roundtrip.get("v"), 1)
+
+            legacy_entity = entity.get("legacy_token")
+            self.assertIsNotNone(legacy_entity)
+            self.assertEqual((legacy_entity or {}).get("value"), "legacy@example.com")
+            self.assertEqual((legacy_entity or {}).get("kind"), "email")
+
+            entity.put("new_token", "new@example.com", "email")
+            new_entity = entity.get("new_token")
+            self.assertIsNotNone(new_entity)
+            self.assertEqual((new_entity or {}).get("value"), "new@example.com")
+            self.assertEqual((new_entity or {}).get("kind"), "email")
+
+            conn = sqlite3.connect(db_path)
+            metadata_cols = {row[1] for row in conn.execute("PRAGMA table_info(metadata)").fetchall()}
+            entity_cols = {row[1] for row in conn.execute("PRAGMA table_info(entity_map)").fetchall()}
+            row = conn.execute(
+                "SELECT payload, nonce_b64, ciphertext_b64, key_id FROM metadata WHERE id = ?",
+                ("new_record",),
+            ).fetchone()
+            conn.close()
+
+            self.assertIn("nonce_b64", metadata_cols)
+            self.assertIn("ciphertext_b64", metadata_cols)
+            self.assertIn("key_id", metadata_cols)
+            self.assertIn("nonce_b64", entity_cols)
+            self.assertIn("ciphertext_b64", entity_cols)
+            self.assertIn("key_id", entity_cols)
+            self.assertIsNotNone(row)
+            self.assertEqual((row or ("", "", "", ""))[0], "")
+            self.assertTrue(bool((row or ("", "", "", ""))[1]))
+            self.assertTrue(bool((row or ("", "", "", ""))[2]))
+
 
 if __name__ == "__main__":
     unittest.main()

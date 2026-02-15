@@ -1,10 +1,10 @@
 # Question Validation + Plugin Path Trace (Q/H)
 
-- Generated: `2026-02-14T03:49:36.941978Z`
-- Artifact: `artifacts/advanced10/advanced20_20260214T034936Z.json`
-- Run report: `artifacts/single_image_runs/single_20260214T034306Z/report.json`
+- Generated: `2026-02-15T03:36:22.708585Z`
+- Artifact: `artifacts/advanced10/advanced20_20260215T033622Z.json`
+- Run report: `artifacts/single_image_runs/single_20260215T031919Z/report.json`
 - Evaluated summary: total=20 passed=1 failed=19
-- Overall confidence mean: `0.2705`
+- Overall confidence mean: `0.2745`
 
 ## Question Results (All Q and H)
 | ID | Strict Evaluated | Strict Passed | Answer State | Confidence | Label | Winner | Providers In Path |
@@ -21,73 +21,73 @@
 | Q10 | True | False | ok | 0.24 | low | classic | 1 |
 | H1 | True | False | ok | 0.24 | low | classic | 1 |
 | H2 | True | False | ok | 0.24 | low | classic | 1 |
-| H3 | True | False | ok | 0.24 | low | classic | 1 |
-| H4 | True | False | no_evidence | 0.16 | low | classic | 0 |
-| H5 | True | False | ok | 0.24 | low | classic | 2 |
-| H6 | True | False | ok | 0.24 | low | classic | 1 |
-| H7 | True | False | ok | 0.24 | low | classic | 1 |
-| H8 | True | False | ok | 0.24 | low | classic | 1 |
-| H9 | True | False | ok | 0.24 | low | classic | 1 |
-| H10 | True | False | ok | 0.24 | low | classic | 1 |
+| H3 | True | False |  | 0.24 | low |  | 0 |
+| H4 | True | False |  | 0.24 | low |  | 0 |
+| H5 | True | False |  | 0.24 | low |  | 0 |
+| H6 | True | False |  | 0.24 | low |  | 0 |
+| H7 | True | False |  | 0.24 | low |  | 0 |
+| H8 | True | False |  | 0.24 | low |  | 0 |
+| H9 | True | False |  | 0.24 | low |  | 0 |
+| H10 | True | False |  | 0.24 | low |  | 0 |
 
 ## Plugin Inventory + Effectiveness
 | Plugin ID | Status | In Path | Out Path | Strict Pass | Strict Fail | Neutral | Avg Conf | Conf Δ | Mean Est Latency ms | Decision |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| builtin.state.jepa.training | failed | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | fix_required |
-| builtin.observation.graph | loaded | 19 | 1 | 1 | 18 | 0 | 0.2763 | +0.0058 | 0.000 | tune |
-| builtin.sst.index | loaded | 1 | 19 | 0 | 1 | 0 | 0.2400 | -0.0305 | 0.000 | tune |
-| builtin.anchor.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.answer.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.answer.synth_vllm_localhost | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.backpressure.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.citation.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.devtools.ast_ir | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.devtools.diffusion | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.egress.gateway | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.embedder.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.embedder.vllm_localhost | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.embeddings.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.index.colbert_hash | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.journal.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.ledger.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.observability.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.ocr.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.privacy.egress_sanitizer | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.processing.sst.pipeline | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.processing.sst.ui_vlm | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.prompt.bundle.default | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.reranker.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.reranker.colbert_hash | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.research.default | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.retrieval.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.sst.build.delta | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.sst.build.state | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.sst.compliance.redact | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.sst.extract.chart | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.sst.extract.code | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.sst.extract.spreadsheet | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.sst.extract.table | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.sst.infer.action | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.sst.layout.assemble | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.sst.match.ids | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.sst.ocr.onnx | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.sst.persist | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.sst.preprocess.normalize | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.sst.preprocess.tile | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.sst.temporal.segment | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.sst.track.cursor | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.sst.ui.parse | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.state.anomaly | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.state.evidence.compiler | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.state.jepa_like | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.state.policy | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.state.retrieval | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.state.vector.hnsw | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.state.vector.sqlite_ts | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.state.workflow.miner | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.storage.sqlcipher | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.time.advanced | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
-| builtin.vlm.vllm_localhost | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2705 | 0.000 | remove_or_rewire |
+| builtin.observation.graph | loaded | 12 | 8 | 1 | 11 | 0 | 0.2975 | +0.0230 | 0.000 | tune |
+| builtin.anchor.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.answer.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.answer.synth_vllm_localhost | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.backpressure.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.citation.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.devtools.ast_ir | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.devtools.diffusion | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.egress.gateway | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.embedder.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.embedder.vllm_localhost | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.embeddings.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.index.colbert_hash | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.journal.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.ledger.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.observability.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.ocr.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.privacy.egress_sanitizer | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.processing.sst.pipeline | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.processing.sst.ui_vlm | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.prompt.bundle.default | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.reranker.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.reranker.colbert_hash | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.research.default | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.retrieval.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.sst.build.delta | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.sst.build.state | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.sst.compliance.redact | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.sst.extract.chart | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.sst.extract.code | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.sst.extract.spreadsheet | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.sst.extract.table | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.sst.index | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.sst.infer.action | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.sst.layout.assemble | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.sst.match.ids | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.sst.ocr.onnx | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.sst.persist | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.sst.preprocess.normalize | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.sst.preprocess.tile | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.sst.temporal.segment | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.sst.track.cursor | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.sst.ui.parse | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.state.anomaly | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.state.evidence.compiler | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.state.jepa.training | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.state.jepa_like | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.state.policy | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.state.retrieval | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.state.vector.hnsw | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.state.vector.sqlite_ts | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.state.workflow.miner | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.storage.sqlcipher | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.time.advanced | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
+| builtin.vlm.vllm_localhost | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.2745 | 0.000 | remove_or_rewire |
 
 ## Per-Question Plugin Path + Confidence
 ### Q1
@@ -96,7 +96,7 @@
 - Strict evaluated: `True` | strict passed: `True`
 - Confidence: `0.93` (high)
 - Plugins in answer path:
-  - `builtin.observation.graph` | contribution_bp=10000 | claim_count=4 | citation_count=4 | est_latency_ms=0
+  - `builtin.observation.graph` | contribution_bp=10000 | claim_count=3 | citation_count=3 | est_latency_ms=0
 
 ### Q2
 - Question: Which window has keyboard/input focus? Provide 2 pieces of visual evidence (e.g., highlighted title bar, selected row, caret) and include the exact highlighted text for each evidence item.
@@ -104,7 +104,7 @@
 - Strict evaluated: `True` | strict passed: `False`
 - Confidence: `0.24` (low)
 - Plugins in answer path:
-  - `builtin.observation.graph` | contribution_bp=10000 | claim_count=2 | citation_count=2 | est_latency_ms=0
+  - `builtin.observation.graph` | contribution_bp=10000 | claim_count=3 | citation_count=3 | est_latency_ms=0
 
 ### Q3
 - Question: In the VDI Outlook reading pane showing a task/incident email: extract (a) email subject, (b) sender display name, (c) sender email domain only (do not return the full address), and (d) the labels of the primary action buttons in the embedded task card.
@@ -184,68 +184,60 @@
 - Strict evaluated: `True` | strict passed: `False`
 - Confidence: `0.24` (low)
 - Plugins in answer path:
-  - `builtin.observation.graph` | contribution_bp=10000 | claim_count=1 | citation_count=1 | est_latency_ms=0
+  - `builtin.observation.graph` | contribution_bp=10000 | claim_count=2 | citation_count=2 | est_latency_ms=0
 
 ### H3
 - Question: Cross-window reasoning: Slack mentions running a "new converter" at two sizes. Identify those two numbers from Slack, then infer the best-matching parameter in the dev note (k vs dimension). Finally, produce two example GET query strings using k=64 and those two values as the inferred parameter.
-- Answer state: `ok`
+- Answer state: ``
 - Strict evaluated: `True` | strict passed: `False`
 - Confidence: `0.24` (low)
-- Plugins in answer path:
-  - `builtin.observation.graph` | contribution_bp=10000 | claim_count=2 | citation_count=2 | est_latency_ms=0
+- Plugins in answer path: none
 
 ### H4
 - Question: Code reasoning: Summarize the endpoint-selection + retry logic shown in the colored script into pseudocode with explicit conditionals. Include (a) the condition that switches to $saltEndpoint and (b) the condition that triggers a retry after Invoke-Expression.
-- Answer state: `no_evidence`
+- Answer state: ``
 - Strict evaluated: `True` | strict passed: `False`
-- Confidence: `0.16` (low)
+- Confidence: `0.24` (low)
 - Plugins in answer path: none
 
 ### H5
 - Question: Find one correctness bug/inconsistency in the script’s final success log line and provide the exact corrected line. (Hint: which variable is referenced in the message vs which endpoint may actually have succeeded?)
-- Answer state: `ok`
+- Answer state: ``
 - Strict evaluated: `True` | strict passed: `False`
 - Confidence: `0.24` (low)
-- Plugins in answer path:
-  - `builtin.observation.graph` | contribution_bp=7500 | claim_count=3 | citation_count=3 | est_latency_ms=0
-  - `builtin.sst.index` | contribution_bp=2500 | claim_count=1 | citation_count=1 | est_latency_ms=0
+- Plugins in answer path: none
 
 ### H6
 - Question: Data cleaning (Excel-like): In Details, the field label "Cell Phone Number (Y / N)? Y / N" has value "NA". Propose a normalized schema and a deterministic transform for this specific record (what values go into the normalized fields).
-- Answer state: `ok`
+- Answer state: ``
 - Strict evaluated: `True` | strict passed: `False`
 - Confidence: `0.24` (low)
-- Plugins in answer path:
-  - `builtin.observation.graph` | contribution_bp=10000 | claim_count=1 | citation_count=1 | est_latency_ms=0
+- Plugins in answer path: none
 
 ### H7
 - Question: Reasoning over the worklog: Count how many completed checkboxes ([x]) are visible in the bottom-left notes window, and name the currently running action shown directly underneath the checklist.
-- Answer state: `ok`
+- Answer state: ``
 - Strict evaluated: `True` | strict passed: `False`
 - Confidence: `0.24` (low)
-- Plugins in answer path:
-  - `builtin.observation.graph` | contribution_bp=10000 | claim_count=5 | citation_count=5 | est_latency_ms=0
+- Plugins in answer path: none
 
 ### H8
 - Question: Vision + UI semantics (not OCR-only): In the Outlook message list (Today section), count how many rows show the blue unread indicator bar. Return the count only for Today (not Thursday/Last week).
-- Answer state: `ok`
+- Answer state: ``
 - Strict evaluated: `True` | strict passed: `False`
 - Confidence: `0.24` (low)
-- Plugins in answer path:
-  - `builtin.observation.graph` | contribution_bp=10000 | claim_count=5 | citation_count=5 | est_latency_ms=0
+- Plugins in answer path: none
 
 ### H9
 - Question: Vision classification: In the SiriusXM carousel row at the bottom center, classify the 6 fully visible tiles into {talk/podcast, NCAA team, NFL event}. Return counts per class and list the titles/entities you used.
-- Answer state: `ok`
+- Answer state: ``
 - Strict evaluated: `True` | strict passed: `False`
 - Confidence: `0.24` (low)
-- Plugins in answer path:
-  - `builtin.observation.graph` | contribution_bp=10000 | claim_count=5 | citation_count=5 | est_latency_ms=0
+- Plugins in answer path: none
 
 ### H10
 - Question: Action grounding: Provide screenshot-normalized bounding boxes (x1,y1,x2,y2 in [0,1]) for the two task-card buttons in Outlook: COMPLETE and VIEW DETAILS. Coordinates are relative to the full screenshot (2048x575).
-- Answer state: `ok`
+- Answer state: ``
 - Strict evaluated: `True` | strict passed: `False`
 - Confidence: `0.24` (low)
-- Plugins in answer path:
-  - `builtin.observation.graph` | contribution_bp=10000 | claim_count=2 | citation_count=2 | est_latency_ms=0
+- Plugins in answer path: none

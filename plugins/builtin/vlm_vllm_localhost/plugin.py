@@ -690,6 +690,9 @@ def _collect_rois(raw: dict[str, Any], *, width: int, height: int, max_rois: int
         )
     out.sort(key=lambda r: (-int(r.priority_bp), r.roi_id))
     dedup: list[_Roi] = [full]
+    # Reserve room for deterministic coverage ROIs to avoid concentration
+    # in a single pane when the thumbnail pass is sparse/noisy.
+    model_cap = max(1, int(max_rois) - 4)
     for roi in out:
         if roi.roi_id == "full":
             continue
@@ -700,10 +703,10 @@ def _collect_rois(raw: dict[str, Any], *, width: int, height: int, max_rois: int
                 break
         if keep:
             dedup.append(roi)
-        if len(dedup) >= int(max_rois):
+        if len(dedup) >= int(model_cap):
             break
-    # Coverage backstop: if model-proposed ROIs are sparse or concentrated,
-    # add deterministic grid ROIs so high-res pass still scans the full desktop.
+    # Coverage backstop: add deterministic grid ROIs so high-res pass scans
+    # the full desktop, even when model-proposed ROIs are concentrated.
     if len(dedup) < int(max_rois):
         fallback_specs = [
             ("grid_tl", (0.00, 0.00, 0.36, 0.56)),

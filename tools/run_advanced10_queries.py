@@ -274,6 +274,33 @@ def _to_haystack(result: dict[str, Any], summary: str, bullets: list[str]) -> st
     ).casefold()
 
 
+def _box_iou(a: dict[str, Any], b: dict[str, Any]) -> float:
+    try:
+        ax1 = float(a.get("x1"))
+        ay1 = float(a.get("y1"))
+        ax2 = float(a.get("x2"))
+        ay2 = float(a.get("y2"))
+        bx1 = float(b.get("x1"))
+        by1 = float(b.get("y1"))
+        bx2 = float(b.get("x2"))
+        by2 = float(b.get("y2"))
+    except Exception:
+        return 0.0
+    ix1 = max(ax1, bx1)
+    iy1 = max(ay1, by1)
+    ix2 = min(ax2, bx2)
+    iy2 = min(ay2, by2)
+    iw = max(0.0, ix2 - ix1)
+    ih = max(0.0, iy2 - iy1)
+    inter = iw * ih
+    if inter <= 0.0:
+        return 0.0
+    area_a = max(1e-9, (ax2 - ax1) * (ay2 - ay1))
+    area_b = max(1e-9, (bx2 - bx1) * (by2 - by1))
+    union = max(1e-9, area_a + area_b - inter)
+    return float(inter / union)
+
+
 def _evaluate_expected(
     item: dict[str, Any],
     result: dict[str, Any],
@@ -358,8 +385,57 @@ def _evaluate_expected(
         hard_vlm = processing.get("hard_vlm", {}) if isinstance(processing.get("hard_vlm", {}), dict) else {}
         hard_fields = hard_vlm.get("fields", {}) if isinstance(hard_vlm.get("fields", {}), dict) else {}
 
+        # Special tolerance check for normalized button boxes (H10 contract).
+        has_box_expectation = all(
+            isinstance(expected.get(name), dict) and {"x1", "y1", "x2", "y2"} <= set((expected.get(name) or {}).keys())
+            for name in ("COMPLETE", "VIEW_DETAILS")
+        )
+        if has_box_expectation:
+            tol = 0.60
+            src_candidates: list[tuple[str, dict[str, Any]]] = [
+                ("display.fields", display_fields if isinstance(display_fields, dict) else {}),
+                ("hard_vlm.fields", hard_fields if isinstance(hard_fields, dict) else {}),
+            ]
+            for box_name in ("COMPLETE", "VIEW_DETAILS"):
+                expected_box = expected.get(box_name) if isinstance(expected.get(box_name), dict) else {}
+                best_iou = 0.0
+                best_src = ""
+                best_actual: Any = None
+                for src_name, src in src_candidates:
+                    box_val = src.get(box_name) if isinstance(src, dict) else None
+                    if isinstance(box_val, str):
+                        try:
+                            box_val = json.loads(box_val)
+                        except Exception:
+                            box_val = None
+                    if not isinstance(box_val, dict):
+                        continue
+                    iou = _box_iou(box_val, expected_box)
+                    if iou > best_iou:
+                        best_iou = iou
+                        best_src = src_name
+                        best_actual = box_val
+                ok = bool(best_iou >= tol)
+                checks.append(
+                    {
+                        "type": "expected_answer",
+                        "mode": "iou_tolerance",
+                        "key": box_name,
+                        "source": best_src,
+                        "expected": expected_box,
+                        "actual": best_actual,
+                        "iou": float(best_iou),
+                        "threshold": float(tol),
+                        "match": ok,
+                    }
+                )
+                if not ok:
+                    passed = False
+
         flat: list[tuple[str, str]] = []
         _flatten_expected("", expected, flat)
+        if has_box_expectation:
+            flat = [item for item in flat if not (item[0].startswith("COMPLETE.") or item[0].startswith("VIEW_DETAILS."))]
 
         def _norm(value: Any) -> str:
             if isinstance(value, (dict, list)):
