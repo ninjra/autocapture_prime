@@ -39,15 +39,20 @@
     "model": "",
     "timeout_s": 30.0,
     "prompt": "",
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "n": 1,
+    "seed": 0,
     "max_tokens": 256,
     "two_pass_enabled": true,
     "thumb_prompt": "",
     "roi_prompt": "",
     "thumb_max_px": 960,
-    "max_rois": 4,
-    "roi_max_side": 896,
-    "thumb_max_tokens": 320,
-    "roi_max_tokens": 384
+    "max_rois": 8,
+    "roi_max_side": 2048,
+    "thumb_max_tokens": 768,
+    "roi_max_tokens": 1536,
+    "max_retries": 3
   },
   "settings_schema": {
     "type": "object",
@@ -67,6 +72,21 @@
       },
       "prompt": {
         "type": "string"
+      },
+      "temperature": {
+        "type": "number"
+      },
+      "top_p": {
+        "type": "number"
+      },
+      "n": {
+        "type": "integer"
+      },
+      "seed": {
+        "type": [
+          "integer",
+          "null"
+        ]
       },
       "max_tokens": {
         "type": "integer"
@@ -93,6 +113,9 @@
         "type": "integer"
       },
       "roi_max_tokens": {
+        "type": "integer"
+      },
+      "max_retries": {
         "type": "integer"
       }
     }

@@ -40,7 +40,11 @@ def search_lexical_index(index_path: Path, rows: list[dict[str, Any]], query: st
             scores[int(idx)] += 1
     ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
     output: list[dict[str, Any]] = []
-    for idx, _ in ranked[: max(1, top_k)]:
+    for rank, (idx, score) in enumerate(ranked[: max(1, top_k)], start=1):
         if 0 <= idx < len(rows):
-            output.append(rows[idx])
+            row = dict(rows[idx])
+            row["_score"] = int(score)
+            row["_rank"] = int(rank)
+            row["_row_idx"] = int(idx)
+            output.append(row)
     return output

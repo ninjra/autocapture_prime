@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 import struct
 import tempfile
 import unittest
@@ -92,6 +93,27 @@ class JEPATrainingTests(unittest.TestCase):
             latest = trainer.latest_approved()
             self.assertIsNotNone(latest)
             self.assertEqual(latest.get("model_version"), result_a["model_version"])
+
+    def test_data_dir_falls_back_to_env_when_storage_scoped_out(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            old = os.environ.get("AUTOCAPTURE_DATA_DIR")
+            try:
+                os.environ["AUTOCAPTURE_DATA_DIR"] = tmp_dir
+                ctx = PluginContext(
+                    config={"processing": {"state_layer": {"builder": {}}}},
+                    get_capability=lambda _name: None,
+                    logger=lambda *_args, **_kwargs: None,
+                    rng=None,
+                    rng_seed=None,
+                    rng_seed_hex=None,
+                )
+                trainer = JEPATraining("test.training", ctx)
+                self.assertTrue(str(trainer._root).startswith(str(Path(tmp_dir))))
+            finally:
+                if old is None:
+                    os.environ.pop("AUTOCAPTURE_DATA_DIR", None)
+                else:
+                    os.environ["AUTOCAPTURE_DATA_DIR"] = old
 
 
 if __name__ == "__main__":

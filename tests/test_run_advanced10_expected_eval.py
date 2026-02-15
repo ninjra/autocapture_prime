@@ -147,6 +147,45 @@ class RunAdvanced10ExpectedEvalTests(unittest.TestCase):
             self.assertTrue(parsed.get("ok"))
             self.assertEqual(parsed.get("evaluated_total"), 1)
 
+    def test_canonical_signature_is_stable(self) -> None:
+        mod = _load_module()
+        result = {
+            "answer": {"display": {"summary": "abc", "bullets": ["x"], "fields": {"k": "v"}}},
+            "processing": {"query_trace": {"winner": "classic", "method": "state"}, "hard_vlm": {"fields": {"h": 1}}},
+        }
+        sig1 = mod._canonical_signature(result, "abc", ["x"])
+        sig2 = mod._canonical_signature(result, "abc", ["x"])
+        self.assertEqual(sig1, sig2)
+
+    def test_main_strict_fails_on_profile_checksum_mismatch(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "config" / "profiles").mkdir(parents=True, exist_ok=True)
+            profile = root / "config" / "profiles" / "golden_full.json"
+            profile.write_text(json.dumps({"x": 1}), encoding="utf-8")
+            bad_sha = "f" * 64
+            report = root / "report.json"
+            report.write_text(
+                json.dumps(
+                    {
+                        "config_dir": "/tmp/cfg",
+                        "data_dir": "/tmp/data",
+                        "profile_sha256": bad_sha,
+                        "plugins": {
+                            "load_report": {"loaded": ["builtin.a"]},
+                            "required_gate": {"ok": True, "missing_required": [], "failed_required": []},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            cases = root / "cases.json"
+            cases.write_text("[]", encoding="utf-8")
+            with mock.patch.object(mod, "_repo_root", return_value=root):
+                rc = mod.main(["--report", str(report), "--cases", str(cases), "--strict-all", "--output", str(root / "o.json")])
+            self.assertEqual(rc, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

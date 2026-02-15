@@ -92,6 +92,40 @@ class ObservationGraphVLMGroundingTests(unittest.TestCase):
         self.assertIn("\"x1\":0.7518", text)
         self.assertIn("\"y1\":0.3253", text)
 
+    def test_adv_incident_uses_ui_fact_overrides_when_present(self) -> None:
+        plugin = self._plugin()
+        payload = {
+            "text_lines": [],
+            "extra_docs": [],
+            "tokens_raw": [],
+            "frame_bytes": b"",
+            "element_graph": {
+                "state_id": "vlm",
+                "source_backend": "openai_compat_two_pass",
+                "source_provider_id": "builtin.vlm.vllm_localhost",
+                "elements": [
+                    {"label": "placeholder", "bbox": [0, 0, 100, 100]},
+                    {"label": "placeholder2", "bbox": [100, 100, 200, 200]},
+                ],
+                "ui_state": {
+                    "facts": [
+                        {"key": "adv.incident.subject", "value": "Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476", "confidence": 0.99},
+                        {"key": "adv.incident.sender_display", "value": "Permian Resources Service Desk", "confidence": 0.99},
+                        {"key": "adv.incident.sender_domain", "value": "permian.xyz.com", "confidence": 0.99},
+                        {"key": "adv.incident.action_buttons", "value": "COMPLETE|VIEW DETAILS", "confidence": 0.99},
+                    ]
+                },
+            },
+        }
+        result = plugin.run_stage("persist.bundle", payload)
+        docs = result.get("extra_docs", []) if isinstance(result, dict) else []
+        incident = [d for d in docs if isinstance(d, dict) and str(d.get("doc_kind") or "") == "adv.incident.card"]
+        self.assertTrue(incident)
+        text = str(incident[0].get("text") or "")
+        self.assertIn("adv.incident.subject=Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident 58476", text)
+        self.assertIn("adv.incident.sender_domain=permian.xyz.com", text)
+        self.assertIn("adv.incident.action_buttons=COMPLETEVIEW DETAILS", text)
+
 
 if __name__ == "__main__":
     unittest.main()

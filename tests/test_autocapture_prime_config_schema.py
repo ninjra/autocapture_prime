@@ -14,6 +14,9 @@ class AutocapturePrimeConfigSchemaTests(unittest.TestCase):
         self.assertTrue(str(cfg.vllm_base_url).startswith("http://127.0.0.1"))
         self.assertGreaterEqual(cfg.top_k_frames, 1)
         self.assertIsInstance(cfg.allow_mm_embeds, bool)
+        self.assertFalse(cfg.allow_mm_embeds)
+        self.assertFalse(cfg.allow_agpl)
+        self.assertFalse(cfg.trust_remote_code)
 
     def test_example_config_loads(self) -> None:
         cfg = load_prime_config("config/example.autocapture_prime.yaml")

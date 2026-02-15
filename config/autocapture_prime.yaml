@@ -13,7 +13,7 @@ ocr:
 
 layout:
   engine: uied
-  allow_agpl: true
+  allow_agpl: false
 
 storage:
   root_dir: /mnt/d/projects/autocapture_prime/artifacts/chronicle
@@ -26,7 +26,7 @@ index:
 vllm:
   base_url: http://127.0.0.1:8000
   model: OpenGVLab/InternVL3_5-8B
-  trust_remote_code: true
+  trust_remote_code: false
 
 chronicle_api:
   host: 127.0.0.1
@@ -36,4 +36,4 @@ qa:
   top_k_frames: 4
 
 privacy:
-  allow_mm_embeds: true
+  allow_mm_embeds: false

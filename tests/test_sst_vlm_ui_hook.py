@@ -110,6 +110,7 @@ class SSTVLMUIHookTests(unittest.TestCase):
     def test_ui_parse_hook_accepts_layout_payload_with_label_field(self) -> None:
         layout = {
             "state_id": "vlm",
+            "ui_state": {"windows": [{"label": "Inbox", "app": "Outlook"}], "facts": [{"key": "adv.focus.window", "value": "Outlook"}]},
             "elements": [
                 {
                     "type": "text",
@@ -142,6 +143,8 @@ class SSTVLMUIHookTests(unittest.TestCase):
         graph = result["element_graph"]
         self.assertEqual(str(graph.get("state_id") or ""), "vlm")
         self.assertEqual(str(graph.get("source_backend") or ""), "transformers.qwen2vl_two_pass")
+        self.assertIn("ui_state", graph)
+        self.assertIsInstance(graph.get("ui_state"), dict)
         labels = [str(el.get("label") or "") for el in graph.get("elements", []) if isinstance(el, dict)]
         self.assertIn("Inbox", labels)
 

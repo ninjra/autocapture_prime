@@ -289,7 +289,17 @@ def _parse_element_graph(
             add_element(item, root_id, 1, idx)
     _link_children(elements)
     elements.sort(key=lambda e: (e["z"], e["bbox"][1], e["bbox"][0], e["element_id"]))
-    return {"state_id": state_id, "elements": tuple(elements), "edges": tuple(edges)}
+    out: dict[str, Any] = {"state_id": state_id, "elements": tuple(elements), "edges": tuple(edges)}
+    ui_state = data.get("ui_state")
+    if isinstance(ui_state, dict):
+        out["ui_state"] = ui_state
+    # Preserve optional structured arrays when present so downstream plugins can
+    # consume VLM-native windows/facts without re-parsing OCR text.
+    for key in ("windows", "facts", "rois", "roi_reports"):
+        value = data.get(key)
+        if isinstance(value, list):
+            out[key] = value
+    return out
 
 
 _PARTIAL_ELEMENT_RE = re.compile(

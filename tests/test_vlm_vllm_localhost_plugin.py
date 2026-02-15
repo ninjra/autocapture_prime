@@ -60,6 +60,13 @@ class VllmLocalhostPluginTests(unittest.TestCase):
         self.assertEqual(len(rois), 2)
         self.assertEqual(rois[0].roi_id, "full")
 
+    def test_collect_rois_adds_grid_backstop_when_sparse(self) -> None:
+        rois = _collect_rois({}, width=1200, height=600, max_rois=4)
+        ids = [r.roi_id for r in rois]
+        self.assertEqual(ids[0], "full")
+        self.assertGreaterEqual(len(ids), 2)
+        self.assertTrue(any(rid.startswith("grid_") for rid in ids[1:]))
+
     def test_parse_elements_maps_roi_local_to_global_pixels(self) -> None:
         roi = _collect_rois({}, width=1000, height=500, max_rois=1)[0]
         child_roi = type(roi)(
@@ -86,6 +93,21 @@ class VllmLocalhostPluginTests(unittest.TestCase):
         self.assertEqual(len(parsed), 1)
         self.assertEqual(parsed[0]["bbox"], [200, 150, 300, 200])
         self.assertEqual(parsed[0]["text"], "OK")
+
+    def test_extract_layout_recovers_partial_rois_windows_and_facts(self) -> None:
+        text = (
+            '{"rois":[{"id":"r1","kind":"pane","label":"Left","bbox_norm":[0.0,0.0,0.5,1.0],"priority":0.8}],'
+            '"windows":[{"label":"Outlook","app":"Microsoft Outlook","context":"vdi","bbox_norm":[0.6,0.1,0.98,0.9],'
+            '"visibility":"fully_visible","z_hint":0.7}],'
+            '"facts":[{"key":"adv.incident.subject","value":"Task Set Up Open Invoice","confidence":0.99}],"elements":[{"type":"pane"'
+        )
+        layout = _extract_layout_from_text(text)
+        self.assertEqual(layout.get("source_backend"), "openai_compat_text_recovered")
+        self.assertIsInstance(layout.get("rois"), list)
+        self.assertIsInstance(layout.get("windows"), list)
+        self.assertIsInstance(layout.get("facts"), list)
+        facts = layout.get("facts", [])
+        self.assertTrue(any(isinstance(item, dict) and item.get("key") == "adv.incident.subject" for item in facts))
 
 
 if __name__ == "__main__":

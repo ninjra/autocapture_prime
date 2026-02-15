@@ -3725,6 +3725,19 @@ def _metadata_rows_for_record_type(metadata: Any | None, record_type: str, *, li
     return out
 
 
+def _source_has_vlm_record(metadata: Any | None, source_id: str) -> bool:
+    sid = str(source_id or "").strip()
+    if not sid:
+        return False
+    rows = _metadata_rows_for_record_type(metadata, "derived.text.vlm", limit=512)
+    for _rid, record in rows:
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("source_id") or "").strip() == sid:
+            return True
+    return False
+
+
 def _fallback_claim_sources_for_topic(topic: str, metadata: Any | None) -> list[dict[str, Any]]:
     kinds: set[str] = set()
     adv_kind = _topic_doc_kind(topic)
@@ -3740,18 +3753,36 @@ def _fallback_claim_sources_for_topic(topic: str, metadata: Any | None) -> list[
         if doc_kind not in kinds:
             continue
         record_text = str(record.get("text") or "").strip()
+        provider_id = _infer_provider_id(record)
+        source_id = str(record.get("source_id") or "")
+        meta: dict[str, Any] = {}
+        raw_meta = record.get("meta", {})
+        if isinstance(raw_meta, dict):
+            meta.update(raw_meta)
+        if doc_kind.startswith(("adv.", "obs.")) and provider_id == "builtin.observation.graph":
+            # Derived advanced docs are produced in persist.bundle after VLM parse.
+            # Some store backends drop nested metadata fields; recover grounding so
+            # strict advanced display routing can still evaluate these records.
+            if "source_modality" not in meta:
+                if _source_has_vlm_record(metadata, source_id):
+                    meta["source_modality"] = "vlm"
+                    meta["source_state_id"] = "vlm"
+                    meta.setdefault("source_backend", "observation_graph_fallback")
+                else:
+                    meta["source_modality"] = "ocr"
+                    meta["source_state_id"] = "ocr"
         out.append(
             {
                 "claim_index": -1,
                 "citation_index": -1,
-                "provider_id": _infer_provider_id(record),
+                "provider_id": provider_id,
                 "record_id": str(record_id),
                 "record_type": str(record.get("record_type") or ""),
                 "doc_kind": doc_kind,
-                "evidence_id": str(record.get("source_id") or ""),
+                "evidence_id": source_id,
                 "text_preview": _compact_line(record_text, limit=180),
                 "signal_pairs": _parse_observation_pairs(record_text),
-                "meta": record,
+                "meta": meta if meta else record,
             }
         )
     return out
@@ -3762,19 +3793,43 @@ def _augment_claim_sources_for_display(topic: str, claim_sources: list[dict[str,
     fallback = _fallback_claim_sources_for_topic(topic, metadata)
     if not fallback:
         return merged
-    seen: set[str] = set()
-    for src in merged:
+    key_to_index: dict[str, int] = {}
+    for idx, src in enumerate(merged):
         rec_id = str(src.get("record_id") or "").strip()
         doc_kind = str(src.get("doc_kind") or "").strip()
         if rec_id or doc_kind:
-            seen.add(f"{rec_id}|{doc_kind}")
+            key_to_index[f"{rec_id}|{doc_kind}"] = int(idx)
     for src in fallback:
         rec_id = str(src.get("record_id") or "").strip()
         doc_kind = str(src.get("doc_kind") or "").strip()
         key = f"{rec_id}|{doc_kind}"
-        if key in seen:
+        if key in key_to_index:
+            # Merge stronger metadata from fallback sources (for example restored
+            # VLM grounding tags on observation-graph docs) instead of skipping.
+            dst = merged[key_to_index[key]]
+            dst_meta = dst.get("meta", {})
+            if not isinstance(dst_meta, dict):
+                dst_meta = {}
+            src_meta = src.get("meta", {})
+            if isinstance(src_meta, dict):
+                for meta_key in (
+                    "source_modality",
+                    "source_state_id",
+                    "source_backend",
+                    "source_provider_id",
+                    "vlm_grounded",
+                    "vlm_element_count",
+                    "vlm_label_count",
+                ):
+                    candidate = src_meta.get(meta_key)
+                    if candidate in (None, ""):
+                        continue
+                    current = dst_meta.get(meta_key)
+                    if current in (None, "", "ocr", "pending"):
+                        dst_meta[meta_key] = candidate
+                dst["meta"] = dst_meta
             continue
-        seen.add(key)
+        key_to_index[key] = len(merged)
         merged.append(src)
     return merged
 

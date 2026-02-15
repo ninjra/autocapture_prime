@@ -116,6 +116,28 @@
     },
     "settings": {
       "__golden_profile": {
+        "determinism": {
+          "blocked_env_overrides": [
+            "AUTOCAPTURE_DISABLE_REQUIRED_PLUGIN_GATE",
+            "AUTOCAPTURE_IDLE_VLM_EXTRACT",
+            "AUTOCAPTURE_QWEN_MAX_ROIS",
+            "AUTOCAPTURE_QWEN_MODEL",
+            "AUTOCAPTURE_QWEN_ROI_MAX_NEW_TOKENS",
+            "AUTOCAPTURE_QWEN_ROI_MAX_SIDE",
+            "AUTOCAPTURE_QWEN_THUMB_MAX_NEW_TOKENS",
+            "AUTOCAPTURE_VLM_MAX_ROIS",
+            "AUTOCAPTURE_VLM_MAX_TOKENS",
+            "AUTOCAPTURE_VLM_ROI_MAX_SIDE",
+            "AUTOCAPTURE_VLM_ROI_MAX_TOKENS",
+            "AUTOCAPTURE_VLM_THUMB_MAX_PX",
+            "AUTOCAPTURE_VLM_THUMB_MAX_TOKENS",
+            "AUTOCAPTURE_VLM_TIMEOUT_S"
+          ],
+          "lang": "C.UTF-8",
+          "pythonhashseed": "0",
+          "repro_runs": 3,
+          "timezone": "UTC"
+        },
         "enable_synthesizer": true,
         "profile_id": "golden_full_v1",
         "required_plugins": [
@@ -153,10 +175,18 @@
       "builtin.vlm.vllm_localhost": {
         "base_url": "http://127.0.0.1:8000",
         "model": "",
+        "n": 1,
         "max_rois": 8,
         "max_tokens": 640,
-        "roi_max_side": 1024,
-        "thumb_max_px": 1280,
+        "max_retries": 3,
+        "timeout_s": 12.0,
+        "roi_max_side": 2048,
+        "roi_max_tokens": 1536,
+        "seed": 0,
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "thumb_max_px": 1920,
+        "thumb_max_tokens": 768,
         "two_pass_enabled": true
       }
     }

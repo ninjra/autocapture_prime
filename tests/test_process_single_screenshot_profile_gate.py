@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import pathlib
 import sys
 import unittest
@@ -81,6 +82,52 @@ class ProcessSingleScreenshotProfileGateTests(unittest.TestCase):
         mod = _load_module()
         self.assertTrue(mod._should_require_vlm(["builtin.vlm.vllm_localhost"]))
         self.assertFalse(mod._should_require_vlm(["builtin.ocr.basic"]))
+
+    def test_truthy_env_helper(self) -> None:
+        mod = _load_module()
+        self.assertTrue(mod._is_truthy_env("1"))
+        self.assertFalse(mod._is_truthy_env("0"))
+        self.assertFalse(mod._is_truthy_env(""))
+
+    def test_blocked_env_overrides_detects_truthy_only(self) -> None:
+        mod = _load_module()
+        old_a = os.environ.get("AUTOCAPTURE_VLM_TIMEOUT_S")
+        old_b = os.environ.get("AUTOCAPTURE_VLM_MAX_TOKENS")
+        try:
+            os.environ["AUTOCAPTURE_VLM_TIMEOUT_S"] = "1"
+            os.environ["AUTOCAPTURE_VLM_MAX_TOKENS"] = "0"
+            blocked = mod._blocked_env_overrides(
+                ["AUTOCAPTURE_VLM_TIMEOUT_S", "AUTOCAPTURE_VLM_MAX_TOKENS"]
+            )
+            self.assertEqual(blocked, ["AUTOCAPTURE_VLM_TIMEOUT_S"])
+        finally:
+            if old_a is None:
+                os.environ.pop("AUTOCAPTURE_VLM_TIMEOUT_S", None)
+            else:
+                os.environ["AUTOCAPTURE_VLM_TIMEOUT_S"] = old_a
+            if old_b is None:
+                os.environ.pop("AUTOCAPTURE_VLM_MAX_TOKENS", None)
+            else:
+                os.environ["AUTOCAPTURE_VLM_MAX_TOKENS"] = old_b
+
+    def test_resolve_strict_model_selection_auto_single(self) -> None:
+        mod = _load_module()
+        selected, source = mod._resolve_strict_model_selection(
+            selected_model="",
+            served_models=["internvl"],
+            strict_golden=True,
+        )
+        self.assertEqual(selected, "internvl")
+        self.assertEqual(source, "auto_single_served_model")
+
+    def test_resolve_strict_model_selection_rejects_ambiguous(self) -> None:
+        mod = _load_module()
+        with self.assertRaises(RuntimeError):
+            mod._resolve_strict_model_selection(
+                selected_model="",
+                served_models=["m1", "m2"],
+                strict_golden=True,
+            )
 
 
 if __name__ == "__main__":

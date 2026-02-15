@@ -57,6 +57,7 @@ def _messages() -> ChronicleMessages:
     _add_field(frame, name="width", number=5, label=1, field_type=13)
     _add_field(frame, name="height", number=6, label=1, field_type=13)
     _add_field(frame, name="desktop_rect", number=8, label=1, field_type=11, type_name=".chronicle.v0.RectI32")
+    _add_field(frame, name="dirty_rects", number=9, label=3, field_type=11, type_name=".chronicle.v0.RectI32")
     _add_field(frame, name="artifact_path", number=11, label=1, field_type=9)
 
     frame_batch = fdp.message_type.add()
@@ -74,6 +75,8 @@ def _messages() -> ChronicleMessages:
     mouse.name = "MouseEvent"
     _add_field(mouse, name="x", number=1, label=1, field_type=5)
     _add_field(mouse, name="y", number=2, label=1, field_type=5)
+    _add_field(mouse, name="delta_x", number=3, label=1, field_type=5)
+    _add_field(mouse, name="delta_y", number=4, label=1, field_type=5)
     _add_field(mouse, name="buttons", number=5, label=1, field_type=13)
     _add_field(mouse, name="wheel_delta", number=6, label=1, field_type=5)
 
@@ -209,6 +212,11 @@ def _frame_to_dict(item: Any) -> dict[str, Any]:
     if hasattr(item, "desktop_rect") and item.HasField("desktop_rect"):
         rect = item.desktop_rect
         out["desktop_rect"] = {"x": int(rect.x), "y": int(rect.y), "w": int(rect.w), "h": int(rect.h)}
+    dirty_rects: list[dict[str, int]] = []
+    for rect in getattr(item, "dirty_rects", []):
+        dirty_rects.append({"x": int(rect.x), "y": int(rect.y), "w": int(rect.w), "h": int(rect.h)})
+    if dirty_rects:
+        out["dirty_rects"] = dirty_rects
     return out
 
 
@@ -226,6 +234,8 @@ def _input_to_dict(item: Any) -> dict[str, Any]:
         out["mouse"] = {
             "x": int(mouse.x),
             "y": int(mouse.y),
+            "delta_x": int(getattr(mouse, "delta_x", 0)),
+            "delta_y": int(getattr(mouse, "delta_y", 0)),
             "buttons": int(mouse.buttons),
             "wheel_delta": int(mouse.wheel_delta),
         }
