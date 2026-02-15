@@ -159,10 +159,27 @@ def _plugin_gate_status(load_report: dict[str, Any], required_plugins: list[str]
     }
 
 
-def _should_stop_idle_loop(*, done: bool, stats: dict[str, Any]) -> bool:
+def _should_stop_idle_loop(
+    *,
+    done: bool,
+    stats: dict[str, Any],
+    need_vlm: bool = False,
+    need_sst: bool = False,
+    need_state: bool = False,
+) -> bool:
+    vlm_ok = int(stats.get("vlm_ok", 0) or 0) > 0
+    sst_ok = int(stats.get("sst_runs", 0) or 0) > 0
+    state_ok = int(stats.get("state_runs", 0) or 0) > 0
+
+    if need_vlm and not vlm_ok:
+        return False
+    if need_sst and not sst_ok:
+        return False
+    if need_state and not state_ok:
+        return False
     if bool(done):
         return True
-    return int(stats.get("state_runs", 0) or 0) > 0
+    return state_ok
 
 
 def _should_require_vlm(required_plugins: list[str]) -> bool:
@@ -227,7 +244,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Optional config profile JSON overlay (golden pipeline defaults).",
     )
     parser.add_argument("--query", default="", help="Optional query to run after processing.")
-    parser.add_argument("--budget-ms", type=int, default=20000, help="Processing budget for the one-shot idle step.")
+    parser.add_argument("--budget-ms", type=int, default=180000, help="Processing budget for the one-shot idle step.")
     parser.add_argument("--force-idle", action="store_true", help="Force idle processing regardless of activity signal.")
     parser.add_argument(
         "--max-idle-steps",
@@ -343,12 +360,25 @@ def main(argv: list[str] | None = None) -> int:
     if isinstance(plugins_cfg, dict):
         allowlist = plugins_cfg.setdefault("allowlist", [])
         if isinstance(allowlist, list):
+            required_from_profile: list[str] = []
+            settings_cfg = plugins_cfg.get("settings", {})
+            if isinstance(settings_cfg, dict):
+                golden_profile_cfg = settings_cfg.get("__golden_profile", {})
+                if isinstance(golden_profile_cfg, dict):
+                    raw_required = golden_profile_cfg.get("required_plugins", [])
+                    if isinstance(raw_required, list):
+                        required_from_profile = [str(x).strip() for x in raw_required if str(x).strip()]
             if "builtin.vlm.vllm_localhost" not in allowlist:
                 allowlist.append("builtin.vlm.vllm_localhost")
             if "builtin.vlm.qwen2_vl_2b" not in allowlist:
                 allowlist.append("builtin.vlm.qwen2_vl_2b")
             if "builtin.processing.sst.ui_vlm" not in allowlist:
                 allowlist.append("builtin.processing.sst.ui_vlm")
+            # Ensure required-gate plugins are not accidentally filtered out by
+            # profile overlays with a narrow allowlist.
+            for plugin_id in required_from_profile:
+                if plugin_id not in allowlist:
+                    allowlist.append(plugin_id)
         permissions_cfg = plugins_cfg.setdefault("permissions", {})
         if isinstance(permissions_cfg, dict):
             localhost_ids = permissions_cfg.setdefault("localhost_allowed_plugin_ids", [])
@@ -370,11 +400,16 @@ def main(argv: list[str] | None = None) -> int:
         if isinstance(settings, dict):
             vllm_settings = settings.setdefault("builtin.vlm.vllm_localhost", {})
             if isinstance(vllm_settings, dict):
+                min_timeout_s = 60.0
                 vllm_settings["base_url"] = remote_vlm_base_url
                 model = str(vllm_settings.get("model") or os.environ.get("AUTOCAPTURE_VLM_MODEL") or "").strip()
                 if model:
                     vllm_settings["model"] = model
-                vllm_settings["timeout_s"] = float(vllm_settings.get("timeout_s") or 60.0)
+                try:
+                    configured_timeout = float(vllm_settings.get("timeout_s") or 0.0)
+                except Exception:
+                    configured_timeout = 0.0
+                vllm_settings["timeout_s"] = max(min_timeout_s, configured_timeout)
                 vllm_settings["two_pass_enabled"] = True
                 vllm_settings["thumb_max_px"] = _coerce_int(vllm_settings.get("thumb_max_px"), 960)
                 vllm_settings["max_rois"] = _coerce_int(vllm_settings.get("max_rois"), 6)
@@ -642,6 +677,12 @@ def main(argv: list[str] | None = None) -> int:
             _safe_call(metadata, "put", record_id, frame_record)
         report["ingest_ok"] = True
 
+        need_vlm = _should_require_vlm(required_plugins)
+        need_sst = (
+            "builtin.processing.sst.pipeline" in required_plugins
+            or "builtin.processing.sst.ui_vlm" in required_plugins
+        )
+        need_state = any(str(plugin_id).startswith("builtin.state.") for plugin_id in required_plugins)
         idle = IdleProcessor(system)
         max_steps = max(1, int(parsed.max_idle_steps))
         done = False
@@ -666,7 +707,13 @@ def main(argv: list[str] | None = None) -> int:
             done = bool(step_done)
             # Stop once the processor declares done, or when state-layer has run.
             # Do not exit solely on sst_runs>0; that can leave state spans unbuilt.
-            if _should_stop_idle_loop(done=done, stats=last_stats):
+            if _should_stop_idle_loop(
+                done=done,
+                stats=cumulative_stats,
+                need_vlm=need_vlm,
+                need_sst=need_sst,
+                need_state=need_state,
+            ):
                 break
         report["idle"] = {
             "done": bool(done),
@@ -676,6 +723,14 @@ def main(argv: list[str] | None = None) -> int:
             "stats_cumulative": cumulative_stats,
             "step_stats": per_step_stats,
             "budget_ms": int(parsed.budget_ms),
+            "required_stats": {
+                "need_vlm": bool(need_vlm),
+                "need_sst": bool(need_sst),
+                "need_state": bool(need_state),
+                "vlm_ok": bool(int(cumulative_stats.get("vlm_ok", 0) or 0) > 0),
+                "sst_ok": bool(int(cumulative_stats.get("sst_runs", 0) or 0) > 0),
+                "state_ok": bool(int(cumulative_stats.get("state_runs", 0) or 0) > 0),
+            },
         }
 
         if parsed.query:

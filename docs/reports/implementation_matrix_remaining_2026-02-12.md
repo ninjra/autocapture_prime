@@ -4,10 +4,10 @@
 This matrix is generated from the full-repo miss inventory and represents every currently detected miss marker across all scanned files.
 
 ## Scan Metadata
-- Generated (matrix): `2026-02-14T02:17:13.224152+00:00`
-- Inventory generated: `2026-02-14T02:17:05.973315+00:00`
-- Scanned files: `1473`
-- Miss rows: `0`
+- Generated (matrix): `2026-02-15T03:18:38.866640+00:00`
+- Inventory generated: `2026-02-15T03:18:25.124533+00:00`
+- Scanned files: `1494`
+- Miss rows: `1`
 - Gate failures: `0`
 
 ## Canonical Full List
@@ -17,10 +17,12 @@ This matrix is generated from the full-repo miss inventory and represents every 
 ## Category Counts
 | Category | Count |
 | --- | ---: |
+| `doc_table_status` | 1 |
 
 ## Source Bucket Counts
 | Bucket | Count |
 | --- | ---: |
+| `derived_report` | 1 |
 
 ## Gate Failures
 - None
@@ -28,6 +30,7 @@ This matrix is generated from the full-repo miss inventory and represents every 
 ## Source Files With Misses (Full List)
 | SourceClass | Source | Total | Categories |
 | --- | --- | ---: | --- |
+| `derived_report` | `docs/reports/autocapture_prime_codex_implementation_matrix.md` | 1 | `doc_table_status:1` |
 
 ## Actionable Implementation Sources
 | SourceClass | Source | Rows |
@@ -36,6 +39,7 @@ This matrix is generated from the full-repo miss inventory and represents every 
 ## Non-Actionable Generated Sources
 | SourceClass | Source | Rows |
 | --- | --- | ---: |
+| `derived_report` | `docs/reports/autocapture_prime_codex_implementation_matrix.md` | 1 |
 
 ## Secondary Documentation Sources
 | SourceClass | Source | Rows |
@@ -69,16 +73,16 @@ This matrix is generated from the full-repo miss inventory and represents every 
 | `A8` | 40 | RAG evaluation + benchmark kit (RAGAs + RAGBench) | 1 | docs/reports/four_pillars_traceability_map.md:55:- A8) mapped to deterministic RAG-style regression harness: |
 | `A9` | 44 | Late-interaction retrieval (ColBERT) for higher-precision span retrieval | 1 | docs/reports/four_pillars_traceability_map.md:61:- A9) mapped to late-interaction retrieval pathway: |
 | `A10` | 48 | Local serving performance: vLLM V1 + optional FlashInfer backend | 1 | docs/reports/four_pillars_traceability_map.md:67:- A10) mapped to localhost vLLM integration and throughput-safe routing: |
-| `A-CORE-01` | 56 | Frame → UI IR extraction pipeline (OmniParser adapter) | 4 | optimal-implementation-order-plan.md:157:### Task 4.1: Implement A-CORE-01 UI-IR contract first; docs/reports/four_pillars_traceability_map.md:16:  - Superseded by: `A-CORE-01`, `A-GROUND-01`; docs/reports/four_pillars_traceability_map.md:22:  - Superseded by: `A-CORE-01`, `A-GROUND-01` |
-| `A-GROUND-01` | 66 | Grounding stage with verifier (GUI-Actor style contract) | 5 | docs/reports/four_pillars_traceability_map.md:16:  - Superseded by: `A-CORE-01`, `A-GROUND-01`; docs/reports/four_pillars_traceability_map.md:22:  - Superseded by: `A-CORE-01`, `A-GROUND-01`; docs/reports/four_pillars_traceability_map.md:35:  - Superseded by: `A-GROUND-01` |
-| `A-RAG-01` | 75 | Multimodal RAG evaluation harness (RAG-Check / RAGAs style) | 5 | docs/reports/four_pillars_traceability_map.md:47:  - Superseded by: `A-RAG-01`; docs/reports/four_pillars_traceability_map.md:53:  - Superseded by: `A-RAG-01`; docs/reports/four_pillars_traceability_map.md:59:  - Superseded by: `A-RAG-01` |
+| `A-CORE-01` | 56 | Frame → UI IR extraction pipeline (OmniParser adapter) | 4 | docs/reports/four_pillars_traceability_map.md:16:  - Superseded by: `A-CORE-01`, `A-GROUND-01`; docs/reports/four_pillars_traceability_map.md:22:  - Superseded by: `A-CORE-01`, `A-GROUND-01`; docs/reports/four_pillars_traceability_map.md:29:  - Superseded by: `A-CORE-01` |
+| `A-GROUND-01` | 66 | Grounding stage with verifier (GUI-Actor style contract) | 5 | optimal-implementation-order-plan.md:167:### Task 4.2: Implement A-GROUND-01 on top of IR (not before); docs/reports/four_pillars_traceability_map.md:16:  - Superseded by: `A-CORE-01`, `A-GROUND-01`; docs/reports/four_pillars_traceability_map.md:22:  - Superseded by: `A-CORE-01`, `A-GROUND-01` |
+| `A-RAG-01` | 75 | Multimodal RAG evaluation harness (RAG-Check / RAGAs style) | 5 | optimal-implementation-order-plan.md:177:### Task 4.3: Implement A-INDEX-01 retrieval abstraction before A-RAG-01; optimal-implementation-order-plan.md:187:### Task 4.4: Implement A-RAG-01 evaluation harness against abstracted retrieval; docs/reports/four_pillars_traceability_map.md:47:  - Superseded by: `A-RAG-01` |
 | `A-INDEX-01` | 83 | Retrieval backend abstraction (dense + ColBERT optional) | 2 | docs/reports/four_pillars_traceability_map.md:65:  - Superseded by: `A-INDEX-01`; optimal-implementation-order-plan.md:177:### Task 4.3: Implement A-INDEX-01 retrieval abstraction before A-RAG-01 |
 | `A-PERF-01` | 91 | Background batch scheduler w/ budgets | 3 | docs/reports/four_pillars_traceability_map.md:72:  - Superseded by: `A-PERF-01`; optimal-implementation-order-plan.md:39:  - Resolution rule: no A-PERF-01 work before A-CORE/A-GROUND/A-INDEX/A-RAG contracts and tests are green.; optimal-implementation-order-plan.md:197:### Task 4.5: Implement A-PERF-01 scheduling/budget enforcement last |
 
 ## Regenerated Misses (Actionable Clusters)
 | Cluster ID | Scope | Evidence | Required Closure |
 | --- | --- | --- | --- |
-| MX-000 | None | no actionable clusters detected | No remaining actionable misses from current inventory. |
+| MX-006 | Report/document drift | 1 rows from generated report docs | Mark archival snapshots as informational and keep generated reports out of actionable closure criteria. |
 
 ## Notes
 - This file is generated from inventory data and is intentionally exhaustive; use the actionable clusters above to prioritize implementation sequencing.
