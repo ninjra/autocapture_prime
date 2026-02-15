@@ -1586,7 +1586,9 @@ class ObservationGraphPlugin(PluginBase):
         dev_summary = _extract_dev_summary(rows, max_x=max_x if max_x > 0 else 1, max_y=max_y if max_y > 0 else 1)
         console_colors = _extract_console_color_lines(rows, payload.get("frame_bytes", b""))
         browser_windows = _extract_browser_windows(rows, max_y=max_y if max_y > 0 else 1, corpus_text=corpus_text)
-        has_adv_fact = lambda prefix: any(str(k).startswith(prefix) for k in ui_fact_map.keys())
+
+        def has_adv_fact(prefix: str) -> bool:
+            return any(str(k).startswith(prefix) for k in ui_fact_map.keys())
 
         def _doc_id(kind: str, text: str) -> str:
             digest = hashlib.sha256(f"{kind}\n{text}".encode("utf-8")).hexdigest()[:16]

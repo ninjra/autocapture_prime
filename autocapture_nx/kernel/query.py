@@ -5027,9 +5027,7 @@ def _build_answer_display(
             "topic": query_topic,
         }
     if query_topic == "hard_cell_phone_normalization":
-        schema_raw = hard_vlm_map.get("normalized_schema")
         transformed_raw = hard_vlm_map.get("transformed_record_values")
-        schema: dict[str, Any] = schema_raw if isinstance(schema_raw, dict) else {}
         transformed: dict[str, Any] = transformed_raw if isinstance(transformed_raw, dict) else {}
         note = str(hard_vlm_map.get("note") or "").strip()
         has_type = "boolean|null"

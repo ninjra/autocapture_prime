@@ -1,9 +1,9 @@
 # Full Repo Miss Inventory
 
-- Generated: `2026-02-15T03:18:25.124533+00:00`
-- Scanned files: `1494`
+- Generated: `2026-02-15T22:10:00.891633+00:00`
+- Scanned files: `1452`
 - Miss rows: `1`
-- Gate failures: `0`
+- Gate failures: `1`
 
 ## Source Classes
 | Source Class | Count |
@@ -11,7 +11,9 @@
 | `derived_report` | 1 |
 
 ## Gate Failures
-- None
+| Gate | Status | Failed Step | Exit Code |
+| --- | --- | --- | --- |
+| `tools/run_all_tests_report.json` | `failed` | `tools/gate_static.py` | `1` |
 
 ## Miss Rows
 | Category | Item | SourceClass | Source | Line | Reason | Snippet |

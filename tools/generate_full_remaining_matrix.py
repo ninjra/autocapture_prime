@@ -27,7 +27,7 @@ FOUR_PILLARS_REF_EXCLUDE_PREFIXES = (
     "docs/AutocapturePrime_4Pillars_Upgrade_Plan.md:",
     "docs/reports/implementation_matrix_remaining_2026-02-12.md:",
     "docs/reports/full_repo_miss_inventory_2026-02-12.md:",
-    "incomplete-items-matrix-plan.md:",
+    "docs/deprecated/",
 )
 
 
@@ -107,7 +107,19 @@ def _parse_four_pillars_items(repo_root: Path, rel_path: str) -> list[FourPillar
 
 def _search_refs(repo_root: Path, pattern: str) -> list[str]:
     proc = subprocess.run(
-        ["rg", "-n", "-e", pattern, "--hidden", "--glob", "!.git/*"],
+        [
+            "rg",
+            "-n",
+            "-e",
+            pattern,
+            "--hidden",
+            "--glob",
+            "!.git/*",
+            "--glob",
+            "!docs/deprecated/**",
+            "--glob",
+            "!docs/implemented-ignore/**",
+        ],
         cwd=str(repo_root),
         capture_output=True,
         text=True,
