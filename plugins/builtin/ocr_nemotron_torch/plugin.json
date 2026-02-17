@@ -35,12 +35,26 @@
   ],
   "required_capabilities": [],
   "default_settings": {
-    "model_id": "",
+    "model_id": "internvl3_5_8b",
     "device": "cuda",
-    "base_url": "http://127.0.0.1:8000",
+    "base_url": "http://127.0.0.1:8000/v1",
     "timeout_s": 25.0,
     "max_tokens": 384,
-    "prompt": "Extract visible on-screen text exactly as shown. Return plain text only. Do not add commentary."
+    "prompt": "Extract visible on-screen text exactly as shown. Return plain text only. Do not add commentary.",
+    "promptops": {
+      "enabled": true,
+      "mode": "auto_apply",
+      "model_strategy": "model_contract",
+      "persist_prompts": false,
+      "metrics": {
+        "enabled": true
+      },
+      "review": {
+        "enabled": true,
+        "on_failure_only": true,
+        "persist_prompts": true
+      }
+    }
   },
   "settings_schema": {
     "type": "object",
@@ -52,7 +66,20 @@
       "api_key": { "type": "string" },
       "timeout_s": { "type": "number" },
       "max_tokens": { "type": "integer" },
-      "prompt": { "type": "string" }
+      "prompt": { "type": "string" },
+      "promptops": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "mode": { "type": "string" },
+          "model_strategy": { "type": "string" },
+          "persist_prompts": { "type": "boolean" },
+          "data_dir": { "type": "string" },
+          "metrics": { "type": "object", "additionalProperties": true },
+          "review": { "type": "object", "additionalProperties": true }
+        }
+      }
     }
   },
   "version": "0.2.0"

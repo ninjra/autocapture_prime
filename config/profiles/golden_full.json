@@ -1,22 +1,6 @@
 {
   "plugins": {
-    "allowlist": [
-      "builtin.answer.synth_vllm_localhost",
-      "builtin.ocr.rapid",
-      "builtin.embedder.vllm_localhost",
-      "builtin.embeddings.basic",
-      "builtin.index.colbert_hash",
-      "builtin.reranker.colbert_hash",
-      "builtin.state.anomaly",
-      "builtin.state.evidence.compiler",
-      "builtin.state.jepa.training",
-      "builtin.state.jepa_like",
-      "builtin.state.policy",
-      "builtin.state.retrieval",
-      "builtin.state.vector.hnsw",
-      "builtin.state.vector.sqlite_ts",
-      "builtin.state.workflow.miner"
-    ],
+    "allowlist": [],
     "capabilities": {
       "answer.synthesizer": {
         "fanout": false,
@@ -32,8 +16,7 @@
         "max_providers": 1,
         "mode": "single",
         "preferred": [
-          "builtin.embedder.vllm_localhost",
-          "builtin.embedder.basic"
+          "builtin.embedder.vllm_localhost"
         ],
         "provider_ids": []
       },
@@ -52,6 +35,7 @@
         "max_providers": 1,
         "mode": "single",
         "preferred": [
+          "builtin.ocr.nemotron_torch",
           "builtin.ocr.rapid",
           "builtin.ocr.basic"
         ],
@@ -80,15 +64,19 @@
       }
     },
     "enabled": {
+      "builtin.anchor.basic": true,
       "builtin.answer.synth_vllm_localhost": true,
       "builtin.capture.audio.windows": false,
       "builtin.capture.basic": false,
       "builtin.capture.screenshot.windows": false,
       "builtin.capture.windows": false,
+      "builtin.embedder.basic": false,
       "builtin.embedder.vllm_localhost": true,
-      "builtin.embeddings.basic": true,
+      "builtin.embeddings.basic": false,
       "builtin.index.colbert_hash": true,
-      "builtin.ocr.nemotron_torch": false,
+      "builtin.journal.basic": true,
+      "builtin.ledger.basic": true,
+      "builtin.ocr.nemotron_torch": true,
       "builtin.ocr.rapid": true,
       "builtin.reranker.colbert_hash": true,
       "builtin.sst.build.delta": true,
@@ -153,13 +141,16 @@
         "enable_synthesizer": true,
         "profile_id": "golden_full_v1",
         "required_plugins": [
+          "builtin.anchor.basic",
           "builtin.storage.sqlcipher",
+          "builtin.journal.basic",
+          "builtin.ledger.basic",
           "builtin.ocr.basic",
+          "builtin.ocr.nemotron_torch",
           "builtin.ocr.rapid",
           "builtin.processing.sst.pipeline",
           "builtin.processing.sst.ui_vlm",
           "builtin.vlm.vllm_localhost",
-          "builtin.embedder.basic",
           "builtin.embedder.vllm_localhost",
           "builtin.index.colbert_hash",
           "builtin.reranker.colbert_hash",
@@ -171,13 +162,31 @@
           "builtin.state.vector.hnsw",
           "builtin.state.vector.sqlite_ts",
           "builtin.observation.graph",
-          "builtin.prompt.bundle.default"
+          "builtin.prompt.bundle.default",
+          "builtin.answer.synth_vllm_localhost"
         ]
       },
       "builtin.answer.synth_vllm_localhost": {
-        "base_url": "http://127.0.0.1:8000",
+        "base_url": "http://127.0.0.1:8000/v1",
         "max_evidence_chars": 3600,
         "max_tokens": 768,
+        "promptops": {
+          "enabled": true,
+          "metrics": {
+            "enabled": true
+          },
+          "mode": "auto_apply",
+          "model_strategy": "model_contract",
+          "persist_prompts": false,
+          "review": {
+            "auto_approve": true,
+            "base_url": "http://127.0.0.1:8000/v1",
+            "enabled": true,
+            "on_failure_only": true,
+            "persist_prompts": true,
+            "timeout_s": 20.0
+          }
+        },
         "timeout_s": 45.0
       },
       "builtin.ocr.rapid": {
@@ -188,28 +197,62 @@
           }
         }
       },
+      "builtin.ocr.nemotron_torch": {
+        "base_url": "http://127.0.0.1:8000/v1",
+        "max_tokens": 1024,
+        "timeout_s": 45.0
+      },
       "builtin.embedder.vllm_localhost": {
         "base_url": "http://127.0.0.1:8001",
         "model": "BAAI/bge-small-en-v1.5",
+        "strict_remote_only": true,
         "timeout_s": 20.0
       },
       "builtin.vlm.vllm_localhost": {
-        "base_url": "http://127.0.0.1:8000",
-        "model": "",
+        "base_url": "http://127.0.0.1:8000/v1",
+        "model": "internvl3_5_8b",
         "n": 1,
-        "max_rois": 14,
+        "max_rois": 9,
+        "grid_sections": 8,
+        "grid_enforced": true,
         "max_tokens": 640,
-        "max_retries": 5,
-        "timeout_s": 60.0,
-        "roi_max_side": 1600,
+        "max_retries": 1,
+        "timeout_s": 20.0,
+        "roi_max_side": 2048,
         "roi_max_tokens": 1024,
         "seed": 0,
         "temperature": 0.0,
         "top_p": 1.0,
-        "thumb_max_px": 1280,
+        "thumb_max_px": 1920,
         "thumb_max_tokens": 768,
+        "factpack_enabled": false,
+        "factpack_max_tokens": 2048,
+        "topic_factpack_enabled": false,
+        "promptops": {
+          "enabled": true,
+          "metrics": {
+            "enabled": true
+          },
+          "mode": "auto_apply",
+          "model_strategy": "model_contract",
+          "persist_prompts": false,
+          "review": {
+            "auto_approve": true,
+            "base_url": "http://127.0.0.1:8000/v1",
+            "enabled": true,
+            "on_failure_only": true,
+            "persist_prompts": true,
+            "timeout_s": 20.0
+          }
+        },
         "two_pass_enabled": true
       }
+    }
+  },
+  "promptops": {
+    "persist_query_prompts": true,
+    "review": {
+      "auto_approve": true
     }
   },
   "processing": {
@@ -222,7 +265,9 @@
       },
       "ui_vlm": {
         "enabled": true,
-        "max_providers": 1
+        "max_providers": 1,
+        "prefer_live_vlm": true,
+        "use_cached_tokens": false
       }
     },
     "state_layer": {

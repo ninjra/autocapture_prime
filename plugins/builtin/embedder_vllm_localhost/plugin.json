@@ -35,7 +35,8 @@
     "api_key": "",
     "model": "",
     "timeout_s": 20.0,
-    "fallback_model": ""
+    "fallback_model": "",
+    "strict_remote_only": true
   },
   "settings_schema": {
     "type": "object",
@@ -55,9 +56,11 @@
       },
       "fallback_model": {
         "type": "string"
+      },
+      "strict_remote_only": {
+        "type": "boolean"
       }
     }
   },
   "version": "0.1.0"
 }
-

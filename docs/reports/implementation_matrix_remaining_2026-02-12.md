@@ -4,11 +4,11 @@
 This matrix is generated from the full-repo miss inventory and represents every currently detected miss marker across all scanned files.
 
 ## Scan Metadata
-- Generated (matrix): `2026-02-15T22:10:10.339039+00:00`
-- Inventory generated: `2026-02-15T22:10:00.891633+00:00`
-- Scanned files: `1452`
-- Miss rows: `1`
-- Gate failures: `1`
+- Generated (matrix): `2026-02-17T06:20:25.186885+00:00`
+- Inventory generated: `2026-02-17T06:20:03.306389+00:00`
+- Scanned files: `1506`
+- Miss rows: `0`
+- Gate failures: `0`
 
 ## Canonical Full List
 - Full row-by-row list: `docs/reports/full_repo_miss_inventory_2026-02-12.md`
@@ -17,22 +17,17 @@ This matrix is generated from the full-repo miss inventory and represents every 
 ## Category Counts
 | Category | Count |
 | --- | ---: |
-| `doc_table_status` | 1 |
 
 ## Source Bucket Counts
 | Bucket | Count |
 | --- | ---: |
-| `derived_report` | 1 |
 
 ## Gate Failures
-| Gate | Status | Failed Step | Exit Code |
-| --- | --- | --- | --- |
-| `tools/run_all_tests_report.json` | `failed` | `tools/gate_static.py` | `1` |
+- None
 
 ## Source Files With Misses (Full List)
 | SourceClass | Source | Total | Categories |
 | --- | --- | ---: | --- |
-| `derived_report` | `docs/reports/autocapture_prime_codex_implementation_matrix.md` | 1 | `doc_table_status:1` |
 
 ## Actionable Implementation Sources
 | SourceClass | Source | Rows |
@@ -41,7 +36,6 @@ This matrix is generated from the full-repo miss inventory and represents every 
 ## Non-Actionable Generated Sources
 | SourceClass | Source | Rows |
 | --- | --- | ---: |
-| `derived_report` | `docs/reports/autocapture_prime_codex_implementation_matrix.md` | 1 |
 
 ## Secondary Documentation Sources
 | SourceClass | Source | Rows |
@@ -84,8 +78,7 @@ This matrix is generated from the full-repo miss inventory and represents every 
 ## Regenerated Misses (Actionable Clusters)
 | Cluster ID | Scope | Evidence | Required Closure |
 | --- | --- | --- | --- |
-| MX-001 | Deterministic gates | tools/run_all_tests_report.json:tools/gate_static.py | Restore all failed gate steps to green with deterministic pass artifacts. |
-| MX-006 | Report/document drift | 1 rows from generated report docs | Mark archival snapshots as informational and keep generated reports out of actionable closure criteria. |
+| MX-000 | None | no actionable clusters detected | No remaining actionable misses from current inventory. |
 
 ## Notes
 - This file is generated from inventory data and is intentionally exhaustive; use the actionable clusters above to prioritize implementation sequencing.

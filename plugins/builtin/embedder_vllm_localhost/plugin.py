@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from autocapture.indexing.vector import LocalEmbedder
 from autocapture_nx.inference.openai_compat import OpenAICompatClient
 from autocapture_nx.inference.vllm_endpoint import EXTERNAL_VLLM_BASE_URL, enforce_external_vllm_base_url
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
@@ -27,8 +26,9 @@ class VllmEmbedder(PluginBase):
         self._api_key = str(cfg.get("api_key") or "").strip() or None
         self._model = str(cfg.get("model") or "").strip() or None
         self._timeout_s = float(cfg.get("timeout_s") or 20.0)
+        self._strict_remote_only = bool(cfg.get("strict_remote_only", True))
         self._client: OpenAICompatClient | None = None
-        self._fallback = LocalEmbedder(cfg.get("fallback_model"))
+        self._last_error = ""
 
     def capabilities(self) -> dict[str, Any]:
         return {"embedder.text": self}
@@ -38,11 +38,10 @@ class VllmEmbedder(PluginBase):
             "backend": "openai_compat",
             "base_url": self._base_url,
             "model": self._model or "",
+            "strict_remote_only": bool(self._strict_remote_only),
         }
-        try:
-            ident["fallback"] = self._fallback.identity()
-        except Exception:
-            pass
+        if self._last_error:
+            ident["last_error"] = self._last_error
         return ident
 
     def embed(self, text: str) -> list[float]:
@@ -50,9 +49,11 @@ class VllmEmbedder(PluginBase):
         if not query.strip():
             return []
         if self._base_url_policy_error:
-            return self._fallback.embed(query)
+            self._last_error = self._base_url_policy_error
+            return []
         if self._model is None:
-            return self._fallback.embed(query)
+            self._last_error = "embed_model_unset"
+            return []
         if self._client is None:
             try:
                 self._client = OpenAICompatClient(
@@ -60,19 +61,23 @@ class VllmEmbedder(PluginBase):
                     api_key=self._api_key,
                     timeout_s=self._timeout_s,
                 )
-            except Exception:
+            except Exception as exc:
                 self._client = None
-                return self._fallback.embed(query)
+                self._last_error = f"embed_client_init_failed:{type(exc).__name__}"
+                return []
         try:
             resp = self._client.embeddings({"model": self._model, "input": [query]})
             data = resp.get("data", [])
             if isinstance(data, list) and data:
                 emb = data[0].get("embedding") if isinstance(data[0], dict) else None
                 if isinstance(emb, list):
+                    self._last_error = ""
                     return [float(v) for v in emb]
-        except Exception:
-            return self._fallback.embed(query)
-        return self._fallback.embed(query)
+            self._last_error = "embed_response_missing_embedding"
+            return []
+        except Exception as exc:
+            self._last_error = f"embed_request_failed:{type(exc).__name__}"
+            return []
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> VllmEmbedder:

@@ -172,6 +172,9 @@ def run_template_eval(
                 examples=case.examples,
                 persist=False,
                 strategy=case.strategy,
+                # Eval harness must use the case prompt as the source of truth;
+                # stored prompt templates would make results nondeterministic.
+                prefer_stored_prompt=False,
             )
             prompt_hash = _hash_prompt(result.prompt)
             sources_hash = _hash_sources(result.sources)
@@ -228,9 +231,12 @@ def run_template_eval(
                 "ok": ok,
                 "applied": bool(result.applied),
                 "mode": result.mode,
+                "strategy": str((result.trace or {}).get("strategy") or (case.strategy or "none")),
                 "promptops_config_sha256": case_promptops_hash,
                 "prompt_sha256": prompt_hash,
                 "sources_sha256": sources_hash,
+                "source_count": int(len(result.sources)),
+                "promptops_trace": result.trace if isinstance(result.trace, dict) else None,
                 "validation": result.validation,
                 "evaluation": result.evaluation,
                 "checks": checks,

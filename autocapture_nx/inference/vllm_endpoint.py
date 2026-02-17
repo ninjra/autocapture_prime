@@ -3,16 +3,26 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+import shlex
+import subprocess
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
 
-EXTERNAL_VLLM_BASE_URL = "http://127.0.0.1:8000"
+EXTERNAL_VLLM_ROOT_URL = (
+    str(os.environ.get("AUTOCAPTURE_VLM_ROOT_URL") or "").strip() or "http://127.0.0.1:8000"
+)
+EXTERNAL_VLLM_BASE_URL = f"{EXTERNAL_VLLM_ROOT_URL}/v1"
+EXTERNAL_VLLM_EXPECTED_MODEL = "internvl3_5_8b"
+EXTERNAL_VLLM_ORCHESTRATOR_CMD = "bash /mnt/d/projects/hypervisor/tools/wsl/start_internvl35_8b_with_watch.sh"
+EXTERNAL_VLLM_WATCH_STATE_PATH = "/tmp/hypervisor-thermal-brain/vllm_watch_state.json"
 _ALLOWED_SCHEME = "http"
 _ALLOWED_HOST = "127.0.0.1"
-_ALLOWED_PORT = 8000
+_ALLOWED_PORTS = {8000, 8001, 34221}
 
 
 def enforce_external_vllm_base_url(candidate: str | None) -> str:
@@ -23,39 +33,156 @@ def enforce_external_vllm_base_url(candidate: str | None) -> str:
     parsed = urllib.parse.urlparse(raw)
     scheme = str(parsed.scheme or "").strip().lower()
     host = str(parsed.hostname or "").strip()
-    port = int(parsed.port or (_ALLOWED_PORT if scheme == _ALLOWED_SCHEME else 0))
+    port = int(parsed.port or 0)
     if scheme != _ALLOWED_SCHEME:
         raise ValueError(f"invalid_vllm_scheme:{scheme or 'missing'}")
     if host != _ALLOWED_HOST:
         raise ValueError(f"invalid_vllm_host:{host or 'missing'}")
-    if port != _ALLOWED_PORT:
+    if port not in _ALLOWED_PORTS:
         raise ValueError(f"invalid_vllm_port:{port}")
-    return EXTERNAL_VLLM_BASE_URL
+    path = str(parsed.path or "").strip().rstrip("/")
+    if path not in {"", "/v1"}:
+        raise ValueError(f"invalid_vllm_path:{path or '/'}")
+    return f"http://{_ALLOWED_HOST}:{port}/v1"
 
 
-def check_external_vllm_ready(*, timeout_health_s: float = 3.0, timeout_models_s: float = 4.0) -> dict[str, Any]:
-    """Probe required external vLLM routes on localhost:8000.
+def _env_float(name: str, default: float) -> float:
+    raw = str(os.environ.get(name) or "").strip()
+    try:
+        return float(raw) if raw else float(default)
+    except Exception:
+        return float(default)
 
-    This repo consumes external vLLM only. No lifecycle actions are performed here.
-    """
-    out: dict[str, Any] = {"ok": False, "base_url": EXTERNAL_VLLM_BASE_URL}
+
+def _env_int(name: str, default: int) -> int:
+    raw = str(os.environ.get(name) or "").strip()
+    try:
+        return int(raw) if raw else int(default)
+    except Exception:
+        return int(default)
+
+
+def _norm_model_id(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
+
+
+def _model_aliases(expected_model: str) -> set[str]:
+    base = _norm_model_id(expected_model)
+    aliases = {base}
+    raw_aliases = str(os.environ.get("AUTOCAPTURE_VLM_MODEL_ALIASES") or "").strip()
+    if raw_aliases:
+        for item in raw_aliases.split(","):
+            norm = _norm_model_id(item)
+            if norm:
+                aliases.add(norm)
+    # Canonical internvl3.5-8b aliases.
+    aliases.update(
+        {
+            _norm_model_id("internvl3_5_8b"),
+            _norm_model_id("internvl3.5-8b"),
+            _norm_model_id("internvl35_8b"),
+            _norm_model_id("internvl3_5_8b_instruct"),
+        }
+    )
+    return {item for item in aliases if item}
+
+
+def _model_matches_expected(served_model_id: str, expected_aliases: set[str]) -> bool:
+    served_norm = _norm_model_id(served_model_id)
+    if not served_norm:
+        return False
+    for alias in expected_aliases:
+        if alias and (served_norm == alias or alias in served_norm or served_norm in alias):
+            return True
+    return False
+
+
+def _read_watch_state(path: str) -> dict[str, Any] | None:
+    p = str(path or "").strip()
+    if not p:
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if isinstance(payload, dict):
+            return payload
+    except Exception:
+        return None
+    return None
+
+
+def _invoke_orchestrator_once(cmd: str, *, timeout_s: float) -> dict[str, Any]:
+    command = str(cmd or "").strip()
+    if not command:
+        return {"ok": False, "error": "orchestrator_cmd_missing", "cmd": command}
     t0 = time.perf_counter()
+    grace_s = _env_float("AUTOCAPTURE_VLM_ORCHESTRATOR_GRACE_S", 3.0)
+    grace_s = max(0.5, min(float(timeout_s), grace_s))
     try:
-        req = urllib.request.Request(f"{EXTERNAL_VLLM_BASE_URL}/health", method="GET")
-        with urllib.request.urlopen(req, timeout=float(timeout_health_s)) as resp:
-            out["health_status"] = int(getattr(resp, "status", 0))
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        out["error"] = f"health_unreachable:{type(exc).__name__}"
-        out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
-        return out
+        proc = subprocess.Popen(
+            shlex.split(command),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=False,
+        )
+        try:
+            rc = proc.wait(timeout=grace_s)
+        except subprocess.TimeoutExpired:
+            # Long-running watcher/supervisor start command: treat as accepted
+            # and continue preflight retries against the endpoint.
+            return {
+                "ok": True,
+                "cmd": command,
+                "returncode": None,
+                "detached": True,
+                "pid": int(proc.pid),
+                "latency_ms": int(round((time.perf_counter() - t0) * 1000.0)),
+            }
+        return {
+            "ok": bool(rc == 0),
+            "cmd": command,
+            "returncode": int(rc),
+            "detached": False,
+            "pid": int(proc.pid),
+            "latency_ms": int(round((time.perf_counter() - t0) * 1000.0)),
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"orchestrator_exec_failed:{type(exc).__name__}",
+            "cmd": command,
+            "latency_ms": int(round((time.perf_counter() - t0) * 1000.0)),
+        }
+
+
+def _preflight_once(
+    *,
+    base_url: str,
+    expected_model: str,
+    timeout_models_s: float,
+    timeout_completion_s: float,
+    require_completion: bool,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {"ok": False, "base_url": str(base_url), "expected_model": str(expected_model)}
+    api_key = str(os.environ.get("AUTOCAPTURE_VLM_API_KEY") or "").strip()
+    auth_headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    t0 = time.perf_counter()
+    models_url = f"{base_url}/models"
+    completion_url = f"{base_url}/chat/completions"
     try:
-        req = urllib.request.Request(f"{EXTERNAL_VLLM_BASE_URL}/v1/models", method="GET")
+        req = urllib.request.Request(models_url, method="GET", headers=auth_headers)
         with urllib.request.urlopen(req, timeout=float(timeout_models_s)) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
+            out["models_status"] = int(getattr(resp, "status", 0))
+    except urllib.error.HTTPError as exc:
+        out["error"] = f"models_http_{int(getattr(exc, 'code', 0) or 0)}"
+        out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
+        return out
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
         out["error"] = f"models_unreachable:{type(exc).__name__}"
         out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
         return out
+
     models: list[str] = []
     data = payload.get("data", []) if isinstance(payload, dict) else []
     if isinstance(data, list):
@@ -65,8 +192,180 @@ def check_external_vllm_ready(*, timeout_health_s: float = 3.0, timeout_models_s
                 if model_id:
                     models.append(model_id)
     out["models"] = models
-    out["ok"] = bool(models)
-    if not out["ok"]:
+    if not models:
         out["error"] = "models_empty"
+        out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
+        return out
+
+    aliases = _model_aliases(expected_model)
+    selected = ""
+    for mid in models:
+        if _model_matches_expected(mid, aliases):
+            selected = mid
+            break
+    if not selected:
+        out["error"] = "models_missing_expected"
+        out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
+        return out
+    out["selected_model"] = selected
+
+    if bool(require_completion):
+        req_payload = json.dumps(
+            {
+                "model": selected,
+                "messages": [{"role": "user", "content": "ping"}],
+                "temperature": 0,
+                "max_completion_tokens": 8,
+                "max_tokens": 8,
+            }
+        ).encode("utf-8")
+        req = urllib.request.Request(
+            completion_url,
+            data=req_payload,
+            method="POST",
+            headers={"Content-Type": "application/json", **auth_headers},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=float(timeout_completion_s)) as resp:
+                completion_payload = json.loads(resp.read().decode("utf-8"))
+                out["completion_status"] = int(getattr(resp, "status", 0))
+        except urllib.error.HTTPError as exc:
+            out["error"] = f"completion_http_{int(getattr(exc, 'code', 0) or 0)}"
+            out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
+            return out
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            out["error"] = f"completion_unreachable:{type(exc).__name__}"
+            out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
+            return out
+        choices = completion_payload.get("choices", []) if isinstance(completion_payload, dict) else []
+        completion_ok = isinstance(choices, list) and len(choices) > 0
+        out["completion_ok"] = bool(completion_ok)
+        if not completion_ok:
+            out["error"] = "completion_empty"
+            out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
+            return out
+
+    out["ok"] = True
     out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
+    return out
+
+
+def check_external_vllm_ready(
+    *,
+    timeout_models_s: float = 4.0,
+    timeout_completion_s: float = 12.0,
+    require_completion: bool = True,
+    retries: int | None = None,
+    auto_recover: bool = True,
+) -> dict[str, Any]:
+    """Probe required external vLLM routes and optionally recover via orchestrator.
+
+    Contract:
+    A) GET /v1/models
+    B) expected model present (exact or canonical alias)
+    C) POST /v1/chat/completions ping
+    """
+    t0 = time.perf_counter()
+    base_raw = str(os.environ.get("AUTOCAPTURE_VLM_BASE_URL") or "").strip()
+    expected_model = str(os.environ.get("AUTOCAPTURE_VLM_MODEL") or "").strip() or EXTERNAL_VLLM_EXPECTED_MODEL
+    preflight_retries = int(retries if retries is not None else _env_int("AUTOCAPTURE_VLM_PREFLIGHT_RETRIES", 3))
+    preflight_retries = max(1, preflight_retries)
+    completion_timeout = float(timeout_completion_s or _env_float("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", 12.0))
+    if completion_timeout <= 0:
+        completion_timeout = _env_float("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", 12.0)
+    orchestrator_cmd = str(os.environ.get("AUTOCAPTURE_VLM_ORCHESTRATOR_CMD") or "").strip() or EXTERNAL_VLLM_ORCHESTRATOR_CMD
+    watch_path = str(os.environ.get("AUTOCAPTURE_VLM_WATCH_STATE_PATH") or "").strip() or EXTERNAL_VLLM_WATCH_STATE_PATH
+    out: dict[str, Any] = {
+        "ok": False,
+        "base_url": EXTERNAL_VLLM_BASE_URL,
+        "expected_model": expected_model,
+        "orchestrator_cmd": orchestrator_cmd,
+    }
+    try:
+        base_url = enforce_external_vllm_base_url(base_raw)
+    except Exception as exc:
+        out["error"] = f"invalid_base_url:{type(exc).__name__}:{exc}"
+        out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
+        return out
+    out["base_url"] = base_url
+
+    first = _preflight_once(
+        base_url=base_url,
+        expected_model=expected_model,
+        timeout_models_s=float(timeout_models_s),
+        timeout_completion_s=float(completion_timeout),
+        require_completion=bool(require_completion),
+    )
+    if bool(first.get("ok", False)):
+        first["attempts"] = 1
+        first["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
+        watch_state = _read_watch_state(watch_path)
+        if watch_state is not None:
+            first["watch_state"] = watch_state
+        return first
+
+    out["initial_error"] = str(first.get("error") or "preflight_failed")
+    out["initial"] = first
+    if not bool(auto_recover):
+        out["error"] = str(first.get("error") or "preflight_failed")
+        out["attempts"] = 1
+        out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
+        watch_state = _read_watch_state(watch_path)
+        if watch_state is not None:
+            out["watch_state"] = watch_state
+        return out
+
+    orchestrator = _invoke_orchestrator_once(orchestrator_cmd, timeout_s=_env_float("AUTOCAPTURE_VLM_ORCHESTRATOR_TIMEOUT_S", 120.0))
+    out["orchestrator"] = orchestrator
+    orch_exec_error = str(orchestrator.get("error") or "").strip()
+    if orch_exec_error.startswith("orchestrator_exec_failed") or orch_exec_error == "orchestrator_cmd_missing":
+        out["error"] = f"orchestrator_failed:{orchestrator.get('error') or orchestrator.get('returncode')}"
+        out["attempts"] = 1
+        out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
+        watch_state = _read_watch_state(watch_path)
+        if watch_state is not None:
+            out["watch_state"] = watch_state
+        return out
+
+    sleep_s = _env_float("AUTOCAPTURE_VLM_PREFLIGHT_RETRY_SLEEP_S", 1.0)
+    warmup_s = _env_float("AUTOCAPTURE_VLM_ORCHESTRATOR_WARMUP_S", 60.0)
+    warmup_s = max(0.0, warmup_s)
+    poll_s = _env_float("AUTOCAPTURE_VLM_ORCHESTRATOR_POLL_S", max(1.0, sleep_s))
+    poll_s = max(0.2, poll_s)
+    max_attempts = max(1, preflight_retries)
+    last = first
+    attempts_done = 1
+    deadline = time.perf_counter() + warmup_s
+    while True:
+        if sleep_s > 0:
+            time.sleep(sleep_s)
+        attempt = _preflight_once(
+            base_url=base_url,
+            expected_model=expected_model,
+            timeout_models_s=float(timeout_models_s),
+            timeout_completion_s=float(completion_timeout),
+            require_completion=bool(require_completion),
+        )
+        attempts_done += 1
+        last = attempt
+        if bool(attempt.get("ok", False)):
+            attempt["recovered"] = True
+            attempt["attempts"] = attempts_done
+            attempt["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
+            attempt["orchestrator"] = orchestrator
+            watch_state = _read_watch_state(watch_path)
+            if watch_state is not None:
+                attempt["watch_state"] = watch_state
+            return attempt
+        if attempts_done >= max_attempts + 1 and time.perf_counter() >= deadline:
+            break
+        sleep_s = poll_s
+
+    out["error"] = str(last.get("error") or "preflight_failed_after_retries")
+    out["attempts"] = int(attempts_done)
+    out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
+    out["final"] = last
+    watch_state = _read_watch_state(watch_path)
+    if watch_state is not None:
+        out["watch_state"] = watch_state
     return out

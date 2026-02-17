@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -14,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from autocapture_nx.inference.vllm_endpoint import EXTERNAL_VLLM_BASE_URL, check_external_vllm_ready
+from autocapture_nx.inference.vllm_endpoint import check_external_vllm_ready, enforce_external_vllm_base_url
 
 
 def _utc_stamp() -> str:
@@ -59,7 +60,15 @@ def _run_query_once(
     if str(image_path or "").strip():
         env["AUTOCAPTURE_QUERY_IMAGE_PATH"] = str(image_path).strip()
     env["AUTOCAPTURE_HARD_VLM_DEBUG"] = "1"
-    env["AUTOCAPTURE_VLM_BASE_URL"] = EXTERNAL_VLLM_BASE_URL
+    base_url_raw = str(env.get("AUTOCAPTURE_VLM_BASE_URL") or "").strip() or "http://127.0.0.1:8000/v1"
+    try:
+        env["AUTOCAPTURE_VLM_BASE_URL"] = enforce_external_vllm_base_url(base_url_raw)
+    except Exception:
+        env["AUTOCAPTURE_VLM_BASE_URL"] = "http://127.0.0.1:8000/v1"
+    if not str(env.get("AUTOCAPTURE_VLM_API_KEY") or "").strip():
+        api_key = _configured_vlm_api_key(Path(cfg))
+        if api_key:
+            env["AUTOCAPTURE_VLM_API_KEY"] = api_key
     det = determinism if isinstance(determinism, dict) else {}
     env["TZ"] = str(det.get("timezone") or "UTC")
     env["LANG"] = str(det.get("lang") or "C.UTF-8")
@@ -169,6 +178,19 @@ def _configured_vlm_model(config_dir: Path) -> str:
     return model
 
 
+def _configured_vlm_api_key(config_dir: Path) -> str:
+    try:
+        path = config_dir / "user.json"
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    plugins_cfg = raw.get("plugins", {}) if isinstance(raw, dict) else {}
+    settings = plugins_cfg.get("settings", {}) if isinstance(plugins_cfg, dict) else {}
+    vllm = settings.get("builtin.vlm.vllm_localhost", {}) if isinstance(settings, dict) else {}
+    api_key = str(vllm.get("api_key") or "").strip() if isinstance(vllm, dict) else ""
+    return api_key
+
+
 def _display(result: dict[str, Any]) -> tuple[str, list[str]]:
     answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
     display = answer.get("display", {}) if isinstance(answer.get("display", {}), dict) else {}
@@ -176,6 +198,28 @@ def _display(result: dict[str, Any]) -> tuple[str, list[str]]:
     bullets_raw = display.get("bullets", []) if isinstance(display.get("bullets", []), list) else []
     bullets = [str(x).strip() for x in bullets_raw if str(x).strip()]
     return summary, bullets
+
+
+def _confidence_pct(result: dict[str, Any]) -> float | None:
+    answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
+    display = answer.get("display", {}) if isinstance(answer.get("display", {}), dict) else {}
+    candidate = None
+    for key in ("confidence_pct", "confidence"):
+        if key in display:
+            candidate = display.get(key)
+            break
+        if key in answer:
+            candidate = answer.get(key)
+            break
+    if candidate is None:
+        return None
+    try:
+        value = float(candidate)
+    except Exception:
+        return None
+    if 0.0 <= value <= 1.0:
+        value *= 100.0
+    return float(value)
 
 
 def _canonical_signature(result: dict[str, Any], summary: str, bullets: list[str]) -> str:
@@ -309,10 +353,49 @@ def _evaluate_expected(
     *,
     strict_expected_answer: bool = False,
 ) -> dict[str, Any]:
+    case_id = str(item.get("id") or "").strip().upper()
     expected = item.get("expected_answer")
     checks: list[dict[str, Any]] = []
     haystack = _to_haystack(result, summary, bullets)
     passed = True
+
+    # Enforce that advanced visual questions are answered through the full
+    # reasoning path (PromptOps + structured hard-VLM extraction), not weak
+    # substring matches.
+    is_q_series = bool(re.match(r"^Q(?:[1-9]|10)$", case_id))
+    processing = result.get("processing", {}) if isinstance(result.get("processing", {}), dict) else {}
+    promptops_used = bool(processing.get("promptops_used", False))
+    hard_vlm = processing.get("hard_vlm", {}) if isinstance(processing.get("hard_vlm", {}), dict) else {}
+    hard_fields = hard_vlm.get("fields", {}) if isinstance(hard_vlm.get("fields", {}), dict) else {}
+    structured_hard_keys = [
+        str(k)
+        for k, v in hard_fields.items()
+        if str(k) != "answer_text" and v not in (None, "", [], {})
+    ]
+    attribution = processing.get("attribution", {}) if isinstance(processing.get("attribution", {}), dict) else {}
+    provider_rows = attribution.get("providers", []) if isinstance(attribution.get("providers", []), list) else []
+    synth_in_path = any(
+        isinstance(p, dict) and str(p.get("provider_id") or "") == "builtin.answer.synth_vllm_localhost"
+        for p in provider_rows
+    )
+    if is_q_series:
+        q_checks = [
+            ("promptops_used", promptops_used),
+            ("hard_vlm_structured", bool(structured_hard_keys)),
+            ("synth_provider_in_path", synth_in_path),
+        ]
+        for key, ok in q_checks:
+            checks.append(
+                {
+                    "type": "pipeline_enforcement",
+                    "key": key,
+                    "required": True,
+                    "present": bool(ok),
+                    "structured_keys": structured_hard_keys if key == "hard_vlm_structured" else None,
+                }
+            )
+            if not ok:
+                passed = False
 
     contains_all = item.get("expected_contains_all", [])
     if isinstance(contains_all, list):
@@ -381,7 +464,6 @@ def _evaluate_expected(
         answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
         display = answer.get("display", {}) if isinstance(answer.get("display", {}), dict) else {}
         display_fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
-        processing = result.get("processing", {}) if isinstance(result.get("processing", {}), dict) else {}
         hard_vlm = processing.get("hard_vlm", {}) if isinstance(processing.get("hard_vlm", {}), dict) else {}
         hard_fields = hard_vlm.get("fields", {}) if isinstance(hard_vlm.get("fields", {}), dict) else {}
 
@@ -539,6 +621,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lock-retries", type=int, default=4, help="Retries for transient instance_lock_held errors.")
     parser.add_argument("--lock-retry-wait-ms", type=float, default=250.0, help="Base wait between lock retries in ms.")
     parser.add_argument("--repro-runs", type=int, default=0, help="Repeat each query this many times for determinism checks (0=use contract default).")
+    parser.add_argument("--metadata-only", action="store_true", help="Do not pass screenshot path at query time; evaluate from extracted records only.")
+    parser.add_argument(
+        "--confidence-drift-tolerance-pct",
+        type=float,
+        default=1.0,
+        help="Maximum allowed absolute confidence drift (percentage points) across repro runs.",
+    )
     args = parser.parse_args(argv)
 
     report_path = Path(str(args.report or "").strip()) if str(args.report or "").strip() else _latest_report(root)
@@ -551,6 +640,23 @@ def main(argv: list[str] | None = None) -> int:
     if not cfg or not data:
         print(json.dumps({"ok": False, "error": "report_missing_config_or_data", "report": str(report_path)}))
         return 2
+    if not str(os.environ.get("AUTOCAPTURE_VLM_API_KEY") or "").strip():
+        api_key = _configured_vlm_api_key(Path(cfg))
+        if api_key:
+            os.environ["AUTOCAPTURE_VLM_API_KEY"] = api_key
+    base_url_raw = str(os.environ.get("AUTOCAPTURE_VLM_BASE_URL") or "").strip() or "http://127.0.0.1:8000/v1"
+    try:
+        os.environ["AUTOCAPTURE_VLM_BASE_URL"] = enforce_external_vllm_base_url(base_url_raw)
+    except Exception:
+        os.environ["AUTOCAPTURE_VLM_BASE_URL"] = "http://127.0.0.1:8000/v1"
+    os.environ.setdefault("AUTOCAPTURE_VLM_MODEL", "internvl3_5_8b")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", "12")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_RETRIES", "3")
+    os.environ.setdefault("AUTOCAPTURE_VLM_MAX_INFLIGHT", "1")
+    os.environ.setdefault(
+        "AUTOCAPTURE_VLM_ORCHESTRATOR_CMD",
+        "bash /mnt/d/projects/hypervisor/tools/wsl/start_internvl35_8b_with_watch.sh",
+    )
     plugins = report.get("plugins", {}) if isinstance(report.get("plugins", {}), dict) else {}
     load_report = plugins.get("load_report", {}) if isinstance(plugins.get("load_report", {}), dict) else {}
     required_gate = plugins.get("required_gate", {}) if isinstance(plugins.get("required_gate", {}), dict) else {}
@@ -611,7 +717,7 @@ def main(argv: list[str] | None = None) -> int:
         repro_runs = int(determinism_raw.get("repro_runs") or (3 if args.strict_all else 1))
     repro_runs = max(1, repro_runs)
 
-    vllm_status = check_external_vllm_ready()
+    vllm_status = check_external_vllm_ready(require_completion=bool(args.strict_all))
     if not bool(vllm_status.get("ok", False)):
         if args.allow_vllm_unavailable:
             vllm_status["degraded_mode"] = True
@@ -621,7 +727,8 @@ def main(argv: list[str] | None = None) -> int:
                     {
                         "ok": False,
                         "error": "external_vllm_unavailable",
-                        "message": "This repo no longer launches vLLM. Start vLLM from sidecar repo on 127.0.0.1:8000.",
+                        "message": "External vLLM preflight failed after orchestrator recovery attempts.",
+                        "orchestrator_cmd": str(vllm_status.get("orchestrator_cmd") or os.environ.get("AUTOCAPTURE_VLM_ORCHESTRATOR_CMD") or ""),
                         "vllm_status": vllm_status,
                     }
                 )
@@ -640,12 +747,13 @@ def main(argv: list[str] | None = None) -> int:
         question = str(item.get("question") or "").strip()
         if not question:
             continue
+        image_path = "" if bool(args.metadata_only) else str(report.get("image_path") or "").strip()
         result = _run_query(
             root,
             cfg=cfg,
             data=data,
             query=question,
-            image_path=str(report.get("image_path") or "").strip(),
+            image_path=image_path,
             timeout_s=float(args.query_timeout_s),
             lock_retries=int(args.lock_retries),
             lock_retry_wait_s=float(args.lock_retry_wait_ms) / 1000.0,
@@ -653,6 +761,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         summary, bullets = _display(result)
         signatures = [_canonical_signature(result, summary, bullets)]
+        confidence_samples: list[float] = []
+        conf0 = _confidence_pct(result)
+        if conf0 is not None:
+            confidence_samples.append(conf0)
         repro_ok = True
         repro_errors: list[str] = []
         for idx in range(1, repro_runs):
@@ -661,7 +773,7 @@ def main(argv: list[str] | None = None) -> int:
                 cfg=cfg,
                 data=data,
                 query=question,
-                image_path=str(report.get("image_path") or "").strip(),
+                image_path=image_path,
                 timeout_s=float(args.query_timeout_s),
                 lock_retries=int(args.lock_retries),
                 lock_retry_wait_s=float(args.lock_retry_wait_ms) / 1000.0,
@@ -669,11 +781,24 @@ def main(argv: list[str] | None = None) -> int:
             )
             rsum, rbul = _display(rerun)
             signatures.append(_canonical_signature(rerun, rsum, rbul))
+            conf = _confidence_pct(rerun)
+            if conf is not None:
+                confidence_samples.append(conf)
             if not bool(rerun.get("ok", False)):
                 repro_ok = False
                 repro_errors.append(str(rerun.get("error") or "rerun_failed"))
         if len(set(signatures)) != 1:
             repro_ok = False
+        confidence_tolerance = max(0.0, float(args.confidence_drift_tolerance_pct))
+        confidence_drift_max = 0.0
+        if len(confidence_samples) >= 2:
+            base = confidence_samples[0]
+            confidence_drift_max = max(abs(sample - base) for sample in confidence_samples[1:])
+            if confidence_drift_max > confidence_tolerance:
+                repro_ok = False
+                repro_errors.append(
+                    f"confidence_drift_exceeded:{round(confidence_drift_max,3)}>{round(confidence_tolerance,3)}"
+                )
         eval_result = _evaluate_expected(
             item,
             result,
@@ -686,6 +811,9 @@ def main(argv: list[str] | None = None) -> int:
             "runs": int(repro_runs),
             "match": bool(repro_ok),
             "signatures": signatures,
+            "confidence_samples_pct": [round(float(x), 3) for x in confidence_samples],
+            "confidence_drift_max_pct": round(float(confidence_drift_max), 3),
+            "confidence_drift_tolerance_pct": round(float(confidence_tolerance), 3),
             "errors": repro_errors,
         }
         if bool(eval_result.get("evaluated", False)):
@@ -734,6 +862,8 @@ def main(argv: list[str] | None = None) -> int:
         "profile_sha256_expected": profile_sha,
         "profile_sha256_report": report_profile_sha,
         "repro_runs": int(repro_runs),
+        "metadata_only": bool(args.metadata_only),
+        "confidence_drift_tolerance_pct": float(max(0.0, args.confidence_drift_tolerance_pct)),
         "determinism": determinism,
         "evaluated_total": int(evaluated_total),
         "evaluated_passed": int(passed_total),

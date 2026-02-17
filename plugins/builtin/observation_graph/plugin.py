@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import re
 from typing import Any
 
@@ -73,6 +74,48 @@ def _token_bbox(token: dict[str, Any]) -> tuple[int, int, int, int] | None:
 
 def _center(bbox: tuple[int, int, int, int]) -> tuple[float, float]:
     return ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0)
+
+
+def _env_truthy(name: str, default: str = "0") -> bool:
+    raw = str(os.environ.get(name, default) or "").strip().casefold()
+    if not raw:
+        return False
+    return raw not in {"0", "false", "no", "off", "none"}
+
+
+def _sanitize_bbox(
+    raw_bbox: Any,
+    *,
+    max_x: int,
+    max_y: int,
+) -> tuple[int, int, int, int] | None:
+    if not isinstance(raw_bbox, (list, tuple)) or len(raw_bbox) != 4:
+        return None
+    try:
+        x1, y1, x2, y2 = (int(raw_bbox[0]), int(raw_bbox[1]), int(raw_bbox[2]), int(raw_bbox[3]))
+    except Exception:
+        return None
+    if x2 < x1:
+        x1, x2 = x2, x1
+    if y2 < y1:
+        y1, y2 = y2, y1
+    if max_x > 0:
+        x1 = max(0, min(x1, max_x))
+        x2 = max(0, min(x2, max_x))
+    if max_y > 0:
+        y1 = max(0, min(y1, max_y))
+        y2 = max(0, min(y2, max_y))
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return (x1, y1, x2, y2)
+
+
+def _bbox_is_canvas_like(bbox: tuple[int, int, int, int], *, max_x: int, max_y: int) -> bool:
+    if max_x <= 0 or max_y <= 0:
+        return False
+    w = max(0, int(bbox[2]) - int(bbox[0]))
+    h = max(0, int(bbox[3]) - int(bbox[1]))
+    return (w >= int(max_x * 0.98)) and (h >= int(max_y * 0.98))
 
 
 def _normalize_name(first: str, second: str | None) -> str | None:
@@ -692,7 +735,61 @@ def _ui_state_dict(element_graph: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(element_graph, dict):
         return {}
     ui_state = element_graph.get("ui_state")
-    return ui_state if isinstance(ui_state, dict) else {}
+    if isinstance(ui_state, dict):
+        return ui_state
+    # Some VLM ui.parse providers persist structured windows/facts at the
+    # top-level element_graph. Normalize that shape here so advanced extractors
+    # consume the same canonical ui_state contract.
+    normalized: dict[str, Any] = {}
+    for key in ("windows", "facts", "rois", "roi_reports"):
+        value = element_graph.get(key)
+        if isinstance(value, list):
+            normalized[key] = value
+    # Some parse paths emit only `elements`; synthesize window rows so advanced
+    # inventory extraction stays on structured VLM geometry instead of OCR-only
+    # heuristics.
+    has_windows = isinstance(normalized.get("windows"), list) and len(normalized.get("windows", [])) > 0
+    elements = element_graph.get("elements")
+    if (not has_windows) and isinstance(elements, list):
+        inferred_windows: list[dict[str, Any]] = []
+        for idx, item in enumerate(elements, start=1):
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("type") or "").strip().casefold()
+            if kind != "window":
+                continue
+            bbox = item.get("bbox")
+            if not (isinstance(bbox, (list, tuple)) and len(bbox) == 4):
+                continue
+            try:
+                x1, y1, x2, y2 = (int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3]))
+            except Exception:
+                continue
+            w = max(0, x2 - x1)
+            h = max(0, y2 - y1)
+            if w <= 8 or h <= 8:
+                continue
+            label = _short_value(item.get("label") or item.get("text") or "", limit=120)
+            # Skip root/full-canvas pseudo-window rows.
+            if not label and w > 5000 and h > 1500:
+                continue
+            inferred_windows.append(
+                {
+                    "window_id": str(item.get("element_id") or f"window_{idx}"),
+                    "app": label,
+                    "label": label,
+                    "bbox": [x1, y1, x2, y2],
+                    "context": "unknown",
+                    "visibility": "unknown",
+                    "z_hint": item.get("z", idx),
+                }
+            )
+        if inferred_windows:
+            normalized["windows"] = inferred_windows
+    image_size = element_graph.get("image_size")
+    if isinstance(image_size, (list, tuple)) and len(image_size) == 2:
+        normalized["image_size"] = [image_size[0], image_size[1]]
+    return normalized
 
 
 def _ui_fact_map(ui_state: dict[str, Any]) -> dict[str, str]:
@@ -716,13 +813,77 @@ def _ui_fact_map(ui_state: dict[str, Any]) -> dict[str, str]:
     return {k: v[1] for k, v in out.items()}
 
 
-def _merge_adv_pairs_from_facts(pairs: dict[str, str], fact_map: dict[str, str], prefixes: tuple[str, ...]) -> dict[str, str]:
+def _normalized_match_text(value: str) -> str:
+    text = str(value or "").casefold()
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _looks_like_layout_json(text: str) -> bool:
+    raw = str(text or "").strip()
+    if not raw or not raw.startswith("{"):
+        return False
+    low = raw.casefold()
+    return '"elements"' in low or '"windows"' in low or '"facts"' in low
+
+
+def _fact_value_is_grounded(key: str, value: str, corpus_norm: str) -> bool:
+    key_norm = str(key or "").strip().casefold()
+    value_norm = _normalized_match_text(value)
+    if not key_norm.startswith("adv."):
+        return True
+    if ".n." in key_norm:
+        return False
+    if not value_norm:
+        return False
+    if value_norm in {"not found", "unknown", "none", "null", "n a", "n"}:
+        return False
+    if value_norm.startswith("unknown "):
+        return False
+    if value_norm in {"example com", "example org", "test com"}:
+        return False
+    if any(token in key_norm for token in (".count", ".z_order", ".tab_count", ".item_count")):
+        return True
+    if "bbox_norm" in key_norm:
+        return True
+    parts = [p.strip() for p in str(value or "").split("|") if p.strip()]
+    if "action_buttons" in key_norm or "red_lines" in key_norm:
+        return any(_normalized_match_text(part) in corpus_norm for part in parts)
+    if any(token in key_norm for token in ("sender_domain", ".hostname")):
+        return value_norm in corpus_norm
+    # Short values are noisy in OCR; allow if alphanumeric and not placeholder-like.
+    if len(value_norm) <= 3:
+        return True
+    return value_norm in corpus_norm
+
+
+def _filter_adv_fact_map(fact_map: dict[str, str], corpus_text: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    corpus_norm = _normalized_match_text(corpus_text)
+    if not corpus_norm:
+        return {str(k): _short_value(v, limit=220) for k, v in fact_map.items()}
+    for key, value in fact_map.items():
+        value_text = _short_value(value, limit=220)
+        if _fact_value_is_grounded(str(key), value_text, corpus_norm):
+            out[str(key)] = value_text
+    return out
+
+
+def _merge_adv_pairs_from_facts(
+    pairs: dict[str, str],
+    fact_map: dict[str, str],
+    prefixes: tuple[str, ...],
+    *,
+    prefer_existing: bool = False,
+) -> dict[str, str]:
     out = dict(pairs)
     for key, value in fact_map.items():
         key_norm = str(key).strip()
         if not key_norm:
             continue
         if any(key_norm.startswith(prefix) for prefix in prefixes):
+            if prefer_existing and key_norm in out and str(out.get(key_norm) or "").strip():
+                continue
             out[key_norm] = _short_value(value, limit=220)
     return out
 
@@ -737,19 +898,18 @@ def _windows_from_ui_state(ui_state: dict[str, Any], *, max_x: int, max_y: int) 
         if not app:
             continue
         context = str(item.get("context") or "unknown").strip().casefold()
-        if context not in {"host", "vdi"}:
-            context = "host"
+        if context not in {"host", "vdi", "unknown"}:
+            context = "unknown"
         visibility = str(item.get("visibility") or "unknown").strip().casefold()
         if visibility not in {"fully_visible", "partially_occluded"}:
             visibility = "unknown"
-        bbox = item.get("bbox")
-        if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
-            try:
-                bbox_px = (int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3]))
-            except Exception:
-                bbox_px = (0, 0, max_x if max_x > 0 else 1, max_y if max_y > 0 else 1)
-        else:
-            bbox_px = (0, 0, max_x if max_x > 0 else 1, max_y if max_y > 0 else 1)
+        bbox_px = _sanitize_bbox(item.get("bbox"), max_x=max_x, max_y=max_y)
+        if bbox_px is None:
+            # Fail closed: do not synthesize full-canvas boxes for missing geometry.
+            continue
+        if _bbox_is_canvas_like(bbox_px, max_x=max_x, max_y=max_y) and len(raw) > 1:
+            # Ignore suspicious "whole screen" window boxes when multiple windows exist.
+            continue
         z_bp = item.get("z_hint_bp", item.get("z_hint", 5000))
         try:
             z_score = int(float(z_bp) * 10000.0) if float(z_bp) <= 1.0 else int(float(z_bp))
@@ -906,6 +1066,124 @@ def _extract_window_inventory(rows: list[dict[str, Any]], max_x: int, max_y: int
     for idx, window in enumerate(windows, start=1):
         window["z_order"] = int(idx)
     return windows[:12]
+
+
+def _window_label_is_generic(label: str) -> bool:
+    low = _clean_token(str(label or "")).casefold()
+    if not low:
+        return True
+    generic = {
+        "window",
+        "chat",
+        "terminal",
+        "pane",
+        "task list",
+        "browser",
+        "tab",
+    }
+    return low in generic
+
+
+def _windows_low_signal(windows: list[dict[str, Any]]) -> bool:
+    if not windows:
+        return True
+    informative = 0
+    valid_bbox = 0
+    for item in windows:
+        app = str(item.get("app") or "").strip()
+        if not _window_label_is_generic(app):
+            informative += 1
+        bbox = item.get("bbox")
+        if isinstance(bbox, tuple) and len(bbox) == 4:
+            if int(bbox[2]) > int(bbox[0]) and int(bbox[3]) > int(bbox[1]):
+                valid_bbox += 1
+    if informative >= 2 and valid_bbox >= 2:
+        return False
+    if informative >= 3:
+        return False
+    return informative < max(2, int(len(windows) / 2))
+
+
+def _bbox_overlap_ratio(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+    ix1 = max(int(a[0]), int(b[0]))
+    iy1 = max(int(a[1]), int(b[1]))
+    ix2 = min(int(a[2]), int(b[2]))
+    iy2 = min(int(a[3]), int(b[3]))
+    iw = max(0, ix2 - ix1)
+    ih = max(0, iy2 - iy1)
+    inter = float(iw * ih)
+    if inter <= 0:
+        return 0.0
+    area_a = max(1.0, float(max(0, int(a[2]) - int(a[0])) * max(0, int(a[3]) - int(a[1]))))
+    area_b = max(1.0, float(max(0, int(b[2]) - int(b[0])) * max(0, int(b[3]) - int(b[1]))))
+    return inter / min(area_a, area_b)
+
+
+def _merge_windows_with_heuristics(structured: list[dict[str, Any]], heuristic: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not structured:
+        return heuristic[:12]
+    max_x = 0
+    max_y = 0
+    for item in list(structured) + list(heuristic):
+        bbox = item.get("bbox")
+        if isinstance(bbox, tuple) and len(bbox) == 4:
+            max_x = max(max_x, int(bbox[2]))
+            max_y = max(max_y, int(bbox[3]))
+
+    def _is_canvas_bbox(b: tuple[int, int, int, int]) -> bool:
+        if max_x <= 0 or max_y <= 0:
+            return False
+        w = max(0, int(b[2]) - int(b[0]))
+        h = max(0, int(b[3]) - int(b[1]))
+        return (w >= int(max_x * 0.85)) and (h >= int(max_y * 0.75))
+
+    out: list[dict[str, Any]] = []
+    used: set[int] = set()
+    for item in structured:
+        row = dict(item)
+        bbox = row.get("bbox")
+        bbox_t: tuple[int, int, int, int] | None = None
+        if isinstance(bbox, tuple) and len(bbox) == 4:
+            bbox_t = bbox
+        best_idx = -1
+        best_score = 0.0
+        needs_hint = _window_label_is_generic(str(row.get("app") or "")) or str(row.get("context") or "") not in {"host", "vdi"}
+        if bbox_t is not None and needs_hint:
+            for idx, cand in enumerate(heuristic):
+                if idx in used:
+                    continue
+                cb = cand.get("bbox")
+                if not (isinstance(cb, tuple) and len(cb) == 4):
+                    continue
+                if _is_canvas_bbox(cb):
+                    continue
+                score = _bbox_overlap_ratio(bbox_t, cb)
+                if score > best_score:
+                    best_score = score
+                    best_idx = idx
+        if best_idx >= 0 and best_score >= 0.22:
+            used.add(best_idx)
+            hint = heuristic[best_idx]
+            app = _short_value(hint.get("app") or "", limit=80)
+            if app:
+                row["app"] = app
+            ctx = str(hint.get("context") or "").strip().casefold()
+            if ctx in {"host", "vdi"}:
+                row["context"] = ctx
+            vis = str(hint.get("visibility") or "").strip().casefold()
+            if vis in {"fully_visible", "partially_occluded"}:
+                row["visibility"] = vis
+        out.append(row)
+    for idx, cand in enumerate(heuristic):
+        if idx in used:
+            continue
+        if len(out) >= 12:
+            break
+        out.append(dict(cand))
+    out.sort(key=lambda w: (int(w.get("z_order", 999)), -int(w.get("z_score", 0)), str(w.get("window_id") or "")))
+    for idx, row in enumerate(out, start=1):
+        row["z_order"] = int(idx)
+    return out[:12]
 
 
 def _extract_focus_evidence(rows: list[dict[str, Any]], corpus_text: str) -> dict[str, Any]:
@@ -1468,7 +1746,7 @@ class ObservationGraphPlugin(PluginBase):
         source_backend = str((element_graph or {}).get("source_backend") or "")
         source_provider_id = str((element_graph or {}).get("source_provider_id") or "")
         ui_state = _ui_state_dict(element_graph)
-        ui_fact_map = _ui_fact_map(ui_state)
+        ui_fact_map_raw = _ui_fact_map(ui_state)
         raw_elements = (element_graph or {}).get("elements", [])
         element_count = len(raw_elements) if isinstance(raw_elements, (list, tuple)) else 0
         backend_low = source_backend.casefold()
@@ -1484,9 +1762,15 @@ class ObservationGraphPlugin(PluginBase):
             sparse_backends = {"openai_compat_two_pass", "layout_inferred"}
             if backend_low in sparse_backends:
                 vlm_grounded = False
-        # Some VLM providers can emit a valid `state_id=vlm` graph but omit backend
-        # tags. Treat these as VLM-grounded when the provider identity is explicit.
-        if (not vlm_grounded) and state_low.startswith("vlm") and provider_low.startswith("builtin.vlm.") and element_count > 1:
+        # Some VLM providers can emit graphs where `source_state_id` is rewritten
+        # by downstream state stages (for example rid_* values). Treat explicit VLM
+        # provider identity + non-unavailable backend as VLM-grounded.
+        if (
+            (not vlm_grounded)
+            and provider_low.startswith("builtin.vlm.")
+            and element_count > 1
+            and backend_low not in unavailable_backends
+        ):
             vlm_grounded = True
             if not source_backend:
                 source_backend = "layout_inferred"
@@ -1504,6 +1788,25 @@ class ObservationGraphPlugin(PluginBase):
         )
 
         corpus_parts: list[str] = []
+        grounding_parts: list[str] = []
+        for line in text_lines:
+            if not isinstance(line, dict):
+                continue
+            raw_text = str(line.get("text") or "")
+            if _looks_like_layout_json(raw_text):
+                continue
+            t = _clean_token(raw_text)
+            if t:
+                grounding_parts.append(t)
+        for doc in extra_docs:
+            if not isinstance(doc, dict):
+                continue
+            stage_name = str(doc.get("stage") or "").strip().casefold()
+            if stage_name == "vision.vlm":
+                continue
+            t = _clean_token(str(doc.get("text") or ""))
+            if t:
+                grounding_parts.append(t)
         for label in element_labels:
             t = _clean_token(label)
             if t:
@@ -1525,7 +1828,10 @@ class ObservationGraphPlugin(PluginBase):
                 for line in text_lines:
                     if not isinstance(line, dict):
                         continue
-                    t = _clean_token(str(line.get("text") or ""))
+                    raw_text = str(line.get("text") or "")
+                    if _looks_like_layout_json(raw_text):
+                        continue
+                    t = _clean_token(raw_text)
                     if t:
                         corpus_parts.append(t)
                 for doc in extra_docs:
@@ -1541,22 +1847,28 @@ class ObservationGraphPlugin(PluginBase):
             for line in text_lines:
                 if not isinstance(line, dict):
                     continue
-                t = _clean_token(str(line.get("text") or ""))
+                raw_text = str(line.get("text") or "")
+                if _looks_like_layout_json(raw_text):
+                    continue
+                t = _clean_token(raw_text)
                 if t:
                     corpus_parts.append(t)
             for doc in extra_docs:
                 if not isinstance(doc, dict):
                     continue
-                t = _clean_token(str(doc.get("text") or ""))
-                if t:
-                    corpus_parts.append(t)
+                    t = _clean_token(str(doc.get("text") or ""))
+                    if t:
+                        corpus_parts.append(t)
         corpus_text = " ".join(corpus_parts)
+        grounding_corpus_text = " ".join(grounding_parts)
+        analysis_corpus_text = grounding_corpus_text or corpus_text
+        ui_fact_map = _filter_adv_fact_map(ui_fact_map_raw, grounding_corpus_text or corpus_text)
 
-        message_author, author_bbox, author_signal = _extract_message_author(text_lines, corpus_text)
-        contractor = _extract_contractor_name(corpus_text)
+        message_author, author_bbox, author_signal = _extract_message_author(text_lines, analysis_corpus_text)
+        contractor = _extract_contractor_name(analysis_corpus_text)
         vdi_time, time_bbox = _extract_vdi_time(tokens, text_lines)
-        inbox = _collect_inbox_signals(tokens, text_lines, corpus_text)
-        now_playing = _extract_now_playing(corpus_text)
+        inbox = _collect_inbox_signals(tokens, text_lines, analysis_corpus_text)
+        now_playing = _extract_now_playing(analysis_corpus_text)
         background_color, background_confidence, background_meta = _infer_background_color(payload.get("frame_bytes", b""))
         rows = vlm_rows if vlm_grounded else line_rows
         if use_vlm_mixed_fallback:
@@ -1568,9 +1880,22 @@ class ObservationGraphPlugin(PluginBase):
         if img_h > 0:
             max_y = max(max_y, img_h)
         ui_windows = _windows_from_ui_state(ui_state, max_x=max_x, max_y=max_y)
-        windows = ui_windows if ui_windows else _extract_window_inventory(rows, max_x=max_x, max_y=max_y, corpus_text=corpus_text)
-        focus = _extract_focus_evidence(rows, corpus_text)
-        incident = _extract_incident_card(corpus_text, rows=rows)
+        use_heuristic_windows = _env_truthy("AUTOCAPTURE_OBS_HEURISTIC_WINDOWS", "0")
+        heuristic_windows = (
+            _extract_window_inventory(rows, max_x=max_x, max_y=max_y, corpus_text=corpus_text)
+            if use_heuristic_windows
+            else []
+        )
+        if ui_windows:
+            windows = (
+                _merge_windows_with_heuristics(ui_windows, heuristic_windows)
+                if use_heuristic_windows and _windows_low_signal(ui_windows)
+                else ui_windows
+            )
+        else:
+            windows = heuristic_windows
+        focus = _extract_focus_evidence(rows, analysis_corpus_text)
+        incident = _extract_incident_card(analysis_corpus_text, rows=rows)
         if isinstance(focus, dict) and isinstance(incident, dict):
             subject_text = _short_value(str(incident.get("subject") or ""), limit=180)
             if subject_text:
@@ -1579,13 +1904,13 @@ class ObservationGraphPlugin(PluginBase):
                     evidence.append({"kind": "selected_message", "text": subject_text})
                     focus["evidence"] = evidence[:3]
         incident_boxes = _extract_incident_button_boxes(rows, max_x=max_x if max_x > 0 else 1, max_y=max_y if max_y > 0 else 1)
-        record_activity = _extract_record_activity(corpus_text)
-        details = _extract_details_kv(corpus_text)
-        calendar = _extract_calendar(corpus_text, rows, max_x=max_x if max_x > 0 else 1)
-        slack_dm = _extract_slack_dm(corpus_text)
+        record_activity = _extract_record_activity(analysis_corpus_text)
+        details = _extract_details_kv(analysis_corpus_text)
+        calendar = _extract_calendar(analysis_corpus_text, rows, max_x=max_x if max_x > 0 else 1)
+        slack_dm = _extract_slack_dm(analysis_corpus_text)
         dev_summary = _extract_dev_summary(rows, max_x=max_x if max_x > 0 else 1, max_y=max_y if max_y > 0 else 1)
         console_colors = _extract_console_color_lines(rows, payload.get("frame_bytes", b""))
-        browser_windows = _extract_browser_windows(rows, max_y=max_y if max_y > 0 else 1, corpus_text=corpus_text)
+        browser_windows = _extract_browser_windows(rows, max_y=max_y if max_y > 0 else 1, corpus_text=analysis_corpus_text)
 
         def has_adv_fact(prefix: str) -> bool:
             return any(str(k).startswith(prefix) for k in ui_fact_map.keys())
@@ -1723,7 +2048,16 @@ class ObservationGraphPlugin(PluginBase):
                 pairs[f"adv.window.{idx}.context"] = _short_value(win.get("context") or "", limit=24)
                 pairs[f"adv.window.{idx}.visibility"] = _short_value(win.get("visibility") or "", limit=32)
                 pairs[f"adv.window.{idx}.z_order"] = str(int(win.get("z_order") or idx))
-            pairs = _merge_adv_pairs_from_facts(pairs, ui_fact_map, ("adv.window.",))
+            window_fact_map: dict[str, str] = {}
+            for k, v in ui_fact_map.items():
+                key = str(k or "").strip()
+                if not key.startswith("adv.window."):
+                    continue
+                # Keep only indexed window keys to avoid noisy generic fields
+                # like adv.window.app/title overriding structured inventory.
+                if key == "adv.window.count" or re.match(r"^adv\.window\.\d+\.[a-z0-9_.-]+$", key):
+                    window_fact_map[key] = v
+            pairs = _merge_adv_pairs_from_facts(pairs, window_fact_map, ("adv.window.",), prefer_existing=True)
             _append_doc(
                 "adv.window.inventory",
                 "Window inventory with app names, host-vs-vdi context, visibility, and front-to-back z-order. "

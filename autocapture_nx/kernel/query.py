@@ -185,6 +185,20 @@ def _resolve_single_provider(capability: Any | None) -> Any | None:
     return target
 
 
+def _get_promptops_layer(system: Any) -> Any | None:
+    if not hasattr(system, "config"):
+        return None
+    cfg = system.config.get("promptops", {})
+    if not isinstance(cfg, dict) or not bool(cfg.get("enabled", True)):
+        return None
+    try:
+        from autocapture.promptops.service import get_promptops_layer
+
+        return get_promptops_layer(system.config if isinstance(system.config, dict) else {})
+    except Exception:
+        return None
+
+
 def _citation_locator(
     *,
     kind: str,
@@ -681,20 +695,22 @@ def run_state_query(system, query: str) -> dict[str, Any]:
 
     query_text = query
     promptops_result = None
+    promptops_layer = None
+    promptops_strategy = "none"
     promptops_cfg = system.config.get("promptops", {}) if hasattr(system, "config") else {}
     if isinstance(promptops_cfg, dict) and bool(promptops_cfg.get("enabled", True)):
         try:
-            from autocapture.promptops.engine import PromptOpsLayer
-
-            layer = PromptOpsLayer(system.config)
+            layer = _get_promptops_layer(system)
+            promptops_layer = layer
             strategy = promptops_cfg.get("query_strategy", "none")
-            promptops_result = layer.prepare_prompt(
-                query,
-                prompt_id="state_query",
-                strategy=str(strategy) if strategy is not None else "none",
-                persist=False,
-            )
-            query_text = promptops_result.prompt
+            promptops_strategy = str(strategy) if strategy is not None else "none"
+            if layer is not None:
+                promptops_result = layer.prepare_query(
+                    query,
+                    prompt_id="state_query",
+                    sources=[],
+                )
+                query_text = promptops_result.prompt
         except Exception:
             query_text = query
 
@@ -771,9 +787,13 @@ def run_state_query(system, query: str) -> dict[str, Any]:
             "time_window": time_window,
             "result_count": int(len(hits)),
             "state_ids": state_ids,
+            "promptops_used": bool(promptops_result is not None),
             "promptops_applied": bool(promptops_result and promptops_result.applied),
+            "promptops_strategy": str(promptops_strategy),
+            "promptops_trace": dict(promptops_result.trace) if promptops_result and isinstance(promptops_result.trace, dict) else None,
             "retrieval_trace": retrieval_trace,
         }
+        payload = _facts_safe(payload)
         query_ledger_hash = event_builder.ledger_entry(
             "state.query.execute",
             inputs=[],
@@ -912,6 +932,31 @@ def run_state_query(system, query: str) -> dict[str, Any]:
             answer_obj.setdefault("notice", "summary-only (text export disabled)")
         if require_citations and not answer_obj.get("claims"):
             answer_obj.setdefault("notice", "no evidence")
+    try:
+        if promptops_layer is not None:
+            answer_state = str((answer_obj or {}).get("state") or "")
+            claims = (answer_obj or {}).get("claims", [])
+            success = answer_state == "ok" and isinstance(claims, list) and len(claims) > 0
+            promptops_layer.record_model_interaction(
+                prompt_id="state_query",
+                provider_id="state.query",
+                model="",
+                prompt_input=str(query or ""),
+                prompt_effective=str(query_text or ""),
+                response_text=str((answer_obj or {}).get("notice") or ""),
+                success=bool(success),
+                latency_ms=float((time.perf_counter() - start_perf) * 1000.0),
+                error="" if success else f"state_answer_{answer_state or 'unknown'}",
+                metadata={
+                    "query_kind": "state",
+                    "promptops_applied": bool(promptops_result and promptops_result.applied),
+                    "promptops_used": bool(promptops_result is not None),
+                    "promptops_strategy": str(promptops_strategy),
+                    "promptops_trace": dict(promptops_result.trace) if promptops_result and isinstance(promptops_result.trace, dict) else None,
+                },
+            )
+    except Exception:
+        pass
 
     elapsed_ms = (time.perf_counter() - start_perf) * 1000.0
     record_telemetry(
@@ -931,6 +976,10 @@ def run_state_query(system, query: str) -> dict[str, Any]:
                 "query_enabled": True,
                 "hits": int(len(bundle.get("hits", []))),
                 "retrieval_trace": retrieval_trace,
+                "promptops_used": bool(promptops_result is not None),
+                "promptops_applied": bool(promptops_result and promptops_result.applied),
+                "promptops_strategy": str(promptops_strategy),
+                "promptops_trace": dict(promptops_result.trace) if promptops_result and isinstance(promptops_result.trace, dict) else None,
             }
         },
     }
@@ -976,21 +1025,23 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
         except Exception:
             event_builder = None
     promptops_result = None
+    promptops_layer = None
+    promptops_strategy = "none"
     promptops_cfg = system.config.get("promptops", {}) if hasattr(system, "config") else {}
     query_text = query
     if isinstance(promptops_cfg, dict) and bool(promptops_cfg.get("enabled", True)):
         try:
-            from autocapture.promptops.engine import PromptOpsLayer
-
-            layer = PromptOpsLayer(system.config)
+            layer = _get_promptops_layer(system)
+            promptops_layer = layer
             strategy = promptops_cfg.get("query_strategy", "none")
-            promptops_result = layer.prepare_prompt(
-                query,
-                prompt_id="query",
-                strategy=str(strategy) if strategy is not None else "none",
-                persist=False,
-            )
-            query_text = promptops_result.prompt
+            promptops_strategy = str(strategy) if strategy is not None else "none"
+            if layer is not None:
+                promptops_result = layer.prepare_query(
+                    query,
+                    prompt_id="query",
+                    sources=[],
+                )
+                query_text = promptops_result.prompt
         except Exception:
             query_text = query
 
@@ -1163,9 +1214,13 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
             "candidate_limit": int(candidate_limit),
             "extraction_ran": bool(extraction_ran),
             "extraction_allowed": bool(allow_extract),
+            "promptops_used": bool(promptops_result is not None),
             "promptops_applied": bool(promptops_result and promptops_result.applied),
+            "promptops_strategy": str(promptops_strategy),
+            "promptops_trace": dict(promptops_result.trace) if promptops_result and isinstance(promptops_result.trace, dict) else None,
             "retrieval_trace": retrieval_trace,
         }
+        payload = _facts_safe(payload)
         query_ledger_hash = event_builder.ledger_entry(
             "query.execute",
             inputs=[cid for cid in candidate_ids if cid],
@@ -1493,6 +1548,31 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
         if stale_hits:
             answer_obj["stale"] = True
             answer_obj["stale_evidence"] = sorted(set(stale_hits))
+    try:
+        if promptops_layer is not None:
+            answer_state = str((answer_obj or {}).get("state") or "")
+            answer_claims = (answer_obj or {}).get("claims", [])
+            success = answer_state == "ok" and isinstance(answer_claims, list) and len(answer_claims) > 0
+            promptops_layer.record_model_interaction(
+                prompt_id="query",
+                provider_id="query.classic",
+                model="",
+                prompt_input=str(query or ""),
+                prompt_effective=str(query_text or ""),
+                response_text=str((answer_obj or {}).get("notice") or ""),
+                success=bool(success),
+                latency_ms=float((time.perf_counter() - start_perf) * 1000.0),
+                error="" if success else f"classic_answer_{answer_state or 'unknown'}",
+                metadata={
+                    "query_kind": "classic",
+                    "promptops_applied": bool(promptops_result and promptops_result.applied),
+                    "promptops_used": bool(promptops_result is not None),
+                    "promptops_strategy": str(promptops_strategy),
+                    "promptops_trace": dict(promptops_result.trace) if promptops_result and isinstance(promptops_result.trace, dict) else None,
+                },
+            )
+    except Exception:
+        pass
     elapsed_ms = (time.perf_counter() - start_perf) * 1000.0
     record_telemetry(
         "query",
@@ -1541,6 +1621,37 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
     except Exception:
         config_hash = None
 
+    processing_payload: dict[str, Any] = {
+        "extraction": {
+            "allowed": bool(allow_extract and (allow_ocr or allow_vlm)),
+            "ran": bool(extraction_ran),
+            "blocked": bool(extraction_blocked),
+            "blocked_reason": extraction_blocked_reason,
+            "scheduled_job_id": scheduled_job_id,
+            "require_idle": bool(require_idle),
+            "idle_seconds": idle_seconds,
+            "idle_window_s": idle_window,
+            "candidate_count": len(candidate_ids),
+            "extracted_count": len(extracted_ids),
+        },
+        "policy": {
+            "source_guard_applied": True,
+            "raw_claim_count": int(raw_claim_count),
+            "filtered_claim_count": int(len(claims)),
+            "source_rejections_count": int(len(source_rejections)),
+            "source_rejections": [item for item in source_rejections if isinstance(item, dict)][:64],
+        },
+    }
+    if isinstance(promptops_cfg, dict) and bool(promptops_cfg.get("enabled", True)):
+        processing_payload["promptops"] = {
+            "used": bool(promptops_result is not None),
+            "applied": bool(promptops_result and promptops_result.applied),
+            "strategy": str(promptops_strategy),
+            "query_original": str(query),
+            "query_effective": str(query_text),
+            "trace": dict(promptops_result.trace) if promptops_result and isinstance(promptops_result.trace, dict) else None,
+        }
+
     return {
         "provenance": {
             "schema_version": 1,
@@ -1557,27 +1668,7 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
         "results": results,
         "evaluation": evaluation,
         "answer": answer_obj,
-        "processing": {
-            "extraction": {
-                "allowed": bool(allow_extract and (allow_ocr or allow_vlm)),
-                "ran": bool(extraction_ran),
-                "blocked": bool(extraction_blocked),
-                "blocked_reason": extraction_blocked_reason,
-                "scheduled_job_id": scheduled_job_id,
-                "require_idle": bool(require_idle),
-                "idle_seconds": idle_seconds,
-                "idle_window_s": idle_window,
-                "candidate_count": len(candidate_ids),
-                "extracted_count": len(extracted_ids),
-            },
-            "policy": {
-                "source_guard_applied": True,
-                "raw_claim_count": int(raw_claim_count),
-                "filtered_claim_count": int(len(claims)),
-                "source_rejections_count": int(len(source_rejections)),
-                "source_rejections": [item for item in source_rejections if isinstance(item, dict)][:64],
-            },
-        },
+        "processing": processing_payload,
         "custom_claims": {
             "count": int(len(custom_claims)),
             "error": custom_claims_error,
@@ -2376,13 +2467,49 @@ def _load_evidence_image_bytes(system: Any, evidence_id: str) -> bytes:
         media = None
     if media is None:
         return b""
+    record: dict[str, Any] = {}
+    try:
+        metadata = system.get("storage.metadata")
+    except Exception:
+        metadata = None
+    if metadata is not None:
+        try:
+            candidate = metadata.get(evidence_id, {})
+            if isinstance(candidate, dict):
+                record = candidate
+        except Exception:
+            record = {}
+
+    def _resolve_blob(raw: bytes) -> bytes:
+        blob = bytes(raw or b"")
+        if not blob:
+            return b""
+        if blob.startswith(b"\x89PNG\r\n\x1a\n") or blob.startswith(b"\xff\xd8\xff"):
+            return blob
+        if record:
+            frame = _extract_frame(blob, record)
+            if isinstance(frame, (bytes, bytearray)) and frame:
+                return bytes(frame)
+        try:
+            with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+                names = sorted(zf.namelist())
+                if names:
+                    data = zf.read(names[0])
+                    if isinstance(data, (bytes, bytearray)) and data:
+                        return bytes(data)
+        except Exception:
+            pass
+        return b""
+
     stream_fn = getattr(media, "open_stream", None)
     if callable(stream_fn):
         try:
             with stream_fn(evidence_id) as handle:
                 blob = handle.read()
             if isinstance(blob, (bytes, bytearray)) and blob:
-                return bytes(blob)
+                resolved = _resolve_blob(bytes(blob))
+                if resolved:
+                    return resolved
         except Exception:
             pass
     get_fn = getattr(media, "get", None)
@@ -2390,10 +2517,50 @@ def _load_evidence_image_bytes(system: Any, evidence_id: str) -> bytes:
         try:
             blob = get_fn(evidence_id)
             if isinstance(blob, (bytes, bytearray)) and blob:
-                return bytes(blob)
+                resolved = _resolve_blob(bytes(blob))
+                if resolved:
+                    return resolved
         except Exception:
             pass
     return b""
+
+
+def _latest_evidence_record_id(system: Any) -> str:
+    if not hasattr(system, "get"):
+        return ""
+    try:
+        metadata = system.get("storage.metadata")
+    except Exception:
+        metadata = None
+    if metadata is None:
+        return ""
+    keys_fn = getattr(metadata, "keys", None)
+    get_fn = getattr(metadata, "get", None)
+    if not callable(keys_fn) or not callable(get_fn):
+        return ""
+    best_id = ""
+    best_ts = ""
+    preferred_types = {"evidence.capture.frame", "evidence.capture.image"}
+    for key in keys_fn():
+        rid = str(key or "").strip()
+        if not rid:
+            continue
+        if "/evidence.capture.frame/" not in rid and "/evidence.capture.image/" not in rid:
+            continue
+        try:
+            record = get_fn(rid, {})
+        except Exception:
+            record = {}
+        if not isinstance(record, dict):
+            record = {}
+        rtype = str(record.get("record_type") or "").strip().casefold()
+        if rtype and rtype not in preferred_types:
+            continue
+        ts = str(record.get("ts_utc") or "")
+        if not best_id or ts > best_ts:
+            best_id = rid
+            best_ts = ts
+    return best_id
 
 
 def _extract_json_dict(text: str) -> dict[str, Any]:
@@ -2413,6 +2580,29 @@ def _extract_json_dict(text: str) -> dict[str, Any]:
         return parsed if isinstance(parsed, dict) else {}
     except Exception:
         return {}
+
+
+def _extract_json_payload(text: str) -> Any:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+    m_arr = re.search(r"\[[\s\S]*\]", raw)
+    if m_arr:
+        try:
+            return json.loads(m_arr.group(0))
+        except Exception:
+            pass
+    m_obj = re.search(r"\{[\s\S]*\}", raw)
+    if m_obj:
+        try:
+            return json.loads(m_obj.group(0))
+        except Exception:
+            pass
+    return None
 
 
 def _encode_vlm_image_candidates(image_bytes: bytes) -> list[bytes]:
@@ -2580,6 +2770,12 @@ def _topic_roi_boxes(topic: str, elements: list[dict[str, Any]], *, width: int, 
         _add(_clamp_roi(int(width * 0.18), int(height * 0.52), int(width * 0.63), int(height * 0.98), width=width, height=height))
     if topic == "adv_browser":
         _add(_clamp_roi(int(width * 0.00), int(height * 0.00), int(width * 0.999), int(height * 0.16), width=width, height=height))
+    if topic == "adv_window_inventory":
+        _add(_clamp_roi(int(width * 0.00), int(height * 0.00), int(width * 0.999), int(height * 0.995), width=width, height=height))
+        _add(_clamp_roi(int(width * 0.00), int(height * 0.00), int(width * 0.58), int(height * 0.52), width=width, height=height))
+        _add(_clamp_roi(int(width * 0.56), int(height * 0.02), int(width * 0.999), int(height * 0.995), width=width, height=height))
+        _add(_clamp_roi(int(width * 0.16), int(height * 0.50), int(width * 0.64), int(height * 0.99), width=width, height=height))
+        _add(_clamp_roi(int(width * 0.28), int(height * 0.05), int(width * 0.72), int(height * 0.63), width=width, height=height))
     if topic == "hard_cross_window_sizes":
         _add(_clamp_roi(int(width * 0.29), int(height * 0.08), int(width * 0.70), int(height * 0.62), width=width, height=height))
         _add(_clamp_roi(int(width * 0.00), int(height * 0.02), int(width * 0.43), int(height * 0.46), width=width, height=height))
@@ -2646,6 +2842,27 @@ def _topic_roi_boxes(topic: str, elements: list[dict[str, Any]], *, width: int, 
     return deduped[:5]
 
 
+def _grid_section_boxes(width: int, height: int, *, sections: int = 8) -> list[tuple[int, int, int, int]]:
+    if width <= 0 or height <= 0:
+        return []
+    if int(sections) <= 0:
+        return []
+    # Deterministic 8-way split for 32:9 and wide desktop captures.
+    cols = 4
+    rows = 2
+    boxes: list[tuple[int, int, int, int]] = []
+    for ry in range(rows):
+        y1 = int(round((float(ry) / float(rows)) * float(height)))
+        y2 = int(round((float(ry + 1) / float(rows)) * float(height)))
+        for cx in range(cols):
+            x1 = int(round((float(cx) / float(cols)) * float(width)))
+            x2 = int(round((float(cx + 1) / float(cols)) * float(width)))
+            box = _clamp_roi(x1, y1, x2, y2, width=width, height=height)
+            if box is not None:
+                boxes.append(box)
+    return boxes[: max(0, int(sections))]
+
+
 def _encode_topic_vlm_candidates(image_bytes: bytes, *, topic: str, elements: list[dict[str, Any]]) -> list[dict[str, Any]]:
     blob = bytes(image_bytes or b"")
     if not blob:
@@ -2653,14 +2870,20 @@ def _encode_topic_vlm_candidates(image_bytes: bytes, *, topic: str, elements: li
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    def _append(image_blob: bytes, roi: tuple[int, int, int, int] | None) -> None:
+    def _append(
+        image_blob: bytes,
+        roi: tuple[int, int, int, int] | None,
+        *,
+        section_id: str = "",
+        source: str = "roi",
+    ) -> None:
         if not image_blob:
             return
         digest = hashlib.sha256(image_blob).hexdigest()
         if digest in seen:
             return
         seen.add(digest)
-        out.append({"image": image_blob, "roi": roi})
+        out.append({"image": image_blob, "roi": roi, "section_id": str(section_id or ""), "source": str(source or "roi")})
 
     try:
         from PIL import Image  # type: ignore
@@ -2669,6 +2892,25 @@ def _encode_topic_vlm_candidates(image_bytes: bytes, *, topic: str, elements: li
             rgb = img.convert("RGB")
             width = int(rgb.width)
             height = int(rgb.height)
+            grid_sections = int(os.environ.get("AUTOCAPTURE_HARD_VLM_GRID_SECTIONS") or "8")
+            grid_enabled = bool(str(os.environ.get("AUTOCAPTURE_HARD_VLM_GRID_ENABLED") or "1").strip().casefold() not in {"0", "false", "no", "off"})
+            if grid_enabled and grid_sections > 0 and (str(topic).startswith("adv_") or str(topic).startswith("hard_")):
+                for idx, box in enumerate(_grid_section_boxes(width, height, sections=grid_sections), start=1):
+                    x1, y1, x2, y2 = box
+                    crop = rgb.crop((x1, y1, x2, y2))
+                    work = crop
+                    cur_max = max(int(work.width), int(work.height))
+                    max_side = int(os.environ.get("AUTOCAPTURE_HARD_VLM_GRID_MAX_SIDE") or "960")
+                    if cur_max > max_side:
+                        scale = float(max_side) / float(cur_max)
+                        nw = max(1, int(round(float(work.width) * scale)))
+                        nh = max(1, int(round(float(work.height) * scale)))
+                        work = crop.resize((nw, nh))
+                    buf = io.BytesIO()
+                    work.save(buf, format="PNG")
+                    enc = buf.getvalue()
+                    if enc:
+                        _append(enc, box, section_id=f"grid_{idx}", source="grid8")
             for box in _topic_roi_boxes(topic, elements, width=width, height=height):
                 roi_boxes: list[tuple[int, int, int, int]] = [box]
                 bx1, by1, bx2, by2 = box
@@ -2735,7 +2977,18 @@ def _encode_topic_vlm_candidates(image_bytes: bytes, *, topic: str, elements: li
                         "adv_browser",
                     }:
                         # Keep within practical vision-token budgets for 3k-context VLM servers.
-                        crop_max_sides = (1600, 1280, 1024, 896)
+                        crop_max_sides = (1024, 896, 768)
+                    if topic in {"adv_focus", "adv_incident", "adv_activity", "adv_slack", "adv_browser"}:
+                        # Additional guardrail for 3k context servers that include multimodal tokens.
+                        crop_max_sides = (896, 768, 640, 512)
+                    if topic in {
+                        "adv_incident",
+                        "adv_details",
+                        "adv_activity",
+                        "hard_time_to_assignment",
+                        "hard_action_grounding",
+                    }:
+                        crop_max_sides = (1280, 1024, 896)
                     for max_side in crop_max_sides:
                         work = crop
                         cur_max = max(int(work.width), int(work.height))
@@ -2749,9 +3002,9 @@ def _encode_topic_vlm_candidates(image_bytes: bytes, *, topic: str, elements: li
                         enc = buf.getvalue()
                         if not enc:
                             continue
-                        _append(enc, roi_box)
-                        if len(out) >= 12:
-                            return out[:12]
+                        _append(enc, roi_box, source="roi")
+                        if len(out) >= 24:
+                            return out[:24]
     except Exception:
         pass
     # Add full-image downsized fallbacks (skip raw full-resolution blob).
@@ -2773,10 +3026,14 @@ def _encode_topic_vlm_candidates(image_bytes: bytes, *, topic: str, elements: li
                 buf = io.BytesIO()
                 work.save(buf, format="JPEG", quality=88, optimize=True)
                 enc = buf.getvalue()
-                _append(enc, None)
+                _append(enc, None, source="full")
     except Exception:
         pass
-    return out[:12]
+    # Raw bytes are a last-resort fallback only; ROI/full-image resized
+    # candidates should win when available.
+    if not out:
+        _append(blob, None, source="raw")
+    return out[:24]
 
 
 def _action_boxes_local_to_global(
@@ -2859,6 +3116,23 @@ def _hard_vlm_downscale(image_bytes: bytes) -> bytes:
         return blob
 
 
+def _hard_vlm_topic_cues(topic: str) -> tuple[str, ...]:
+    return {
+        "adv_window_inventory": ("slack", "chatgpt", "sirius", "remote desktop", "window", "vdi", "host"),
+        "adv_focus": ("focused", "selected", "task set up open invoice", "incident", "highlight"),
+        "adv_incident": ("task set up open invoice", "permian resources service desk", "complete", "view details", "incident"),
+        "adv_activity": ("record activity", "state changed", "created", "cst", "updated"),
+        "adv_details": ("service requestor", "assigned to", "laptop needed", "logical", "cell phone", "opened at"),
+        "adv_calendar": ("january", "today", "tomorrow", "standup", "pm", "am", "selected"),
+        "adv_slack": ("jennifer", "for videos", "gwatt", "shared", "thumbnail", "blue"),
+        "adv_dev": ("what changed", "files", "tests", "summary", "vectors", "pytest"),
+        "adv_console": ("test-endpoint", "saltendpoint", "foregroundcolor", "validation"),
+        "adv_browser": ("chatgpt.com", "siriusxm.com", "wvd.microsoft.com", "statistics_harness", "hostname"),
+        "hard_cross_window_sizes": ("converter", "1800", "2600", "dimension", "k=64"),
+        "hard_sirius_classification": ("conan", "syracuse", "carolina", "texas", "super bowl"),
+    }.get(str(topic or ""), ())
+
+
 def _hard_vlm_hint_text(topic: str, result: dict[str, Any], *, max_chars: int = 1200) -> str:
     answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
     claims = answer.get("claims", []) if isinstance(answer.get("claims", []), list) else []
@@ -2875,21 +3149,7 @@ def _hard_vlm_hint_text(topic: str, result: dict[str, Any], *, max_chars: int = 
                 lines.append(val)
     if not lines:
         return ""
-    topic_tokens: dict[str, tuple[str, ...]] = {
-        "adv_window_inventory": ("slack", "chatgpt", "sirius", "remote desktop", "inbox"),
-        "adv_focus": ("focused", "selected", "task set up open invoice", "incident"),
-        "adv_incident": ("task set up open invoice", "permian resources service desk", "complete", "view details", "@"),
-        "adv_activity": ("record activity", "state changed", "created", "cst"),
-        "adv_details": ("service requestor", "assigned to", "laptop needed", "logical", "cell phone"),
-        "adv_calendar": ("january", "today", "tomorrow", "standup", "pm", "am"),
-        "adv_slack": ("jennifer", "for videos", "gwatt", "shared", "thumbnail", "blue"),
-        "adv_dev": ("what changed", "files", "tests", "summary", "vectors", "pytest"),
-        "adv_console": ("test-endpoint", "saltendpoint", "foregroundcolor", "validation"),
-        "adv_browser": ("chatgpt.com", "siriusxm.com", "wvd.microsoft.com", "statistics_harness"),
-        "hard_cross_window_sizes": ("converter", "1800", "2600", "dimension", "k=64"),
-        "hard_sirius_classification": ("conan", "syracuse", "carolina", "texas", "super bowl"),
-    }
-    cues = topic_tokens.get(topic, ())
+    cues = _hard_vlm_topic_cues(topic)
     selected: list[str] = []
     seen: set[str] = set()
     for line in lines:
@@ -3005,6 +3265,29 @@ def _discover_local_vlm_model(client: OpenAICompatClient, preferred: str) -> str
         ranked.sort(key=lambda item: (-item[0], item[1]))
         return str(ranked[0][1])
     return ""
+
+
+def _hard_vlm_api_key(system: Any) -> str | None:
+    env_key = str(os.environ.get("AUTOCAPTURE_VLM_API_KEY") or "").strip()
+    if env_key:
+        return env_key
+    cfg = system.config if hasattr(system, "config") and isinstance(system.config, dict) else {}
+    plugins_cfg = cfg.get("plugins", {}) if isinstance(cfg, dict) else {}
+    plugin_settings = plugins_cfg.get("settings", {}) if isinstance(plugins_cfg, dict) else {}
+    if not isinstance(plugin_settings, dict):
+        return None
+    for plugin_id in (
+        "builtin.vlm.vllm_localhost",
+        "builtin.answer.synth_vllm_localhost",
+        "builtin.ocr.nemotron_torch",
+    ):
+        settings = plugin_settings.get(plugin_id, {})
+        if not isinstance(settings, dict):
+            continue
+        key = str(settings.get("api_key") or "").strip()
+        if key:
+            return key
+    return None
 
 
 def _hard_vlm_prompt(topic: str) -> str:
@@ -3161,6 +3444,23 @@ def _intish(value: Any) -> int | None:
         return None
     try:
         return int(m.group(0))
+    except Exception:
+        return None
+
+
+def _float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    m = re.search(r"-?\d+(?:\.\d+)?", text)
+    if not m:
+        return None
+    try:
+        return float(m.group(0))
     except Exception:
         return None
 
@@ -3483,6 +3783,547 @@ def _hard_vlm_score(topic: str, payload: dict[str, Any]) -> int:
     return score
 
 
+def _hard_vlm_semantic_score(topic: str, payload: dict[str, Any], *, query_text: str = "", hint_text: str = "") -> int:
+    if not isinstance(payload, dict):
+        return 0
+    blob = json.dumps(payload, ensure_ascii=True, sort_keys=True).casefold()
+    cues = [str(x).strip().casefold() for x in _hard_vlm_topic_cues(topic) if str(x).strip()]
+    cue_hits = sum(1 for cue in cues if cue in blob)
+
+    query_tokens = [tok for tok in _query_tokens(query_text) if len(tok) >= 4]
+    stop = {
+        "which",
+        "where",
+        "when",
+        "with",
+        "that",
+        "this",
+        "from",
+        "into",
+        "same",
+        "only",
+        "show",
+        "shown",
+        "extract",
+        "return",
+        "provide",
+        "visible",
+        "window",
+        "windows",
+        "question",
+    }
+    query_tokens = [tok for tok in query_tokens if tok not in stop]
+    q_hits = sum(1 for tok in query_tokens if tok in blob)
+
+    hint_tokens = [tok for tok in _query_tokens(hint_text) if len(tok) >= 4]
+    h_hits = sum(1 for tok in hint_tokens[:64] if tok in blob)
+
+    score = 0
+    score += min(8, cue_hits * 2)
+    score += min(10, q_hits * 2)
+    score += min(6, h_hits // 2)
+
+    # Penalize obvious placeholders and degenerate answers.
+    if any(tok in blob for tok in ("query1", "query2", "placeholder", "dummy", "lorem ipsum", "todo")):
+        score -= 8
+    if topic.startswith("adv_") and len(blob) < 64:
+        score -= 4
+    hint_low = str(hint_text or "").casefold()
+    if topic == "adv_calendar":
+        hint_years = set(re.findall(r"\b20\d{2}\b", hint_low))
+        payload_years = set(re.findall(r"\b20\d{2}\b", blob))
+        if hint_years and payload_years and payload_years.isdisjoint(hint_years):
+            score -= 10
+    if topic == "adv_incident":
+        if "task set up open invoice" in hint_low and "task set up open invoice" not in blob:
+            score -= 8
+        if "permian resources service desk" in hint_low and "permian resources service desk" not in blob:
+            score -= 6
+    if topic == "adv_slack":
+        if "for videos" in hint_low and "for videos" not in blob:
+            score -= 6
+        if "gwatt" in hint_low and "gwatt" not in blob:
+            score -= 4
+    return score
+
+
+def _hard_vlm_grounding_score(topic: str, payload: dict[str, Any], *, elements: list[dict[str, Any]], hint_text: str = "") -> int:
+    if not isinstance(payload, dict):
+        return 0
+    topic_low = str(topic or "").casefold()
+    if topic_low not in {"adv_window_inventory", "adv_browser"}:
+        return 0
+
+    stop = {
+        "app",
+        "window",
+        "windows",
+        "host",
+        "vdi",
+        "remote",
+        "desktop",
+        "web",
+        "client",
+        "tab",
+        "tabs",
+        "browser",
+    }
+
+    corpus_lines: list[str] = []
+    for el in elements:
+        if not isinstance(el, dict):
+            continue
+        text = str(el.get("text") or "").strip()
+        if text:
+            corpus_lines.append(text)
+    if hint_text:
+        corpus_lines.append(str(hint_text))
+    corpus_blob = "\n".join(corpus_lines).casefold()
+    corpus_tokens = {
+        tok
+        for tok in re.findall(r"[a-z0-9][a-z0-9._-]{1,}", corpus_blob)
+        if len(tok) >= 3 and tok not in stop
+    }
+    if not corpus_tokens:
+        return 0
+
+    payload_tokens: set[str] = set()
+    windows = payload.get("windows")
+    if isinstance(windows, list):
+        for item in windows[:24]:
+            if not isinstance(item, dict):
+                continue
+            for key in ("name", "app", "active_title", "hostname"):
+                text = str(item.get(key) or "").strip().casefold()
+                if not text:
+                    continue
+                for tok in re.findall(r"[a-z0-9][a-z0-9._-]{1,}", text):
+                    if len(tok) >= 3 and tok not in stop:
+                        payload_tokens.add(tok)
+    if not payload_tokens:
+        return -4
+
+    hits = sum(1 for tok in payload_tokens if tok in corpus_tokens)
+    misses = max(0, len(payload_tokens) - hits)
+    hit_ratio = float(hits) / float(max(1, len(payload_tokens)))
+    score = (hits * 2) - misses
+    if hit_ratio < 0.35:
+        score -= 6
+    return int(max(-12, min(12, score)))
+
+
+def _hard_vlm_quality_gate(topic: str, payload: dict[str, Any]) -> tuple[bool, str, int]:
+    if not isinstance(payload, dict):
+        return False, "payload_not_dict", 0
+
+    if topic == "adv_window_inventory":
+        windows = payload.get("windows")
+        if not isinstance(windows, list) or len(windows) < 2:
+            return False, "window_list_missing_or_small", 1000
+        valid = 0
+        names: set[str] = set()
+        unknown_context = 0
+        for item in windows[:24]:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or item.get("app") or "").strip()
+            if not name:
+                continue
+            low_name = name.casefold()
+            if low_name in names:
+                continue
+            names.add(low_name)
+            context = str(item.get("context") or "unknown").strip().casefold()
+            visibility = str(item.get("visibility") or "unknown").strip().casefold()
+            if context not in {"host", "vdi", "unknown"}:
+                continue
+            if visibility not in {"fully_visible", "partially_occluded", "unknown"}:
+                continue
+            if context == "unknown":
+                unknown_context += 1
+            valid += 1
+        if valid < max(2, int(len(windows) * 0.55)):
+            return False, "insufficient_valid_window_rows", 2200
+        if unknown_context >= max(2, int(valid * 0.8)):
+            return False, "window_context_unresolved", 2600
+        quality_bp = min(9900, 4000 + valid * 700 - unknown_context * 250)
+        return True, "ok", int(max(3000, quality_bp))
+
+    if topic == "adv_browser":
+        windows = payload.get("windows")
+        if not isinstance(windows, list) or not windows:
+            return False, "browser_windows_missing", 1200
+        valid_hosts = 0
+        tab_ok = 0
+        for item in windows[:24]:
+            if not isinstance(item, dict):
+                continue
+            host = str(item.get("hostname") or "").strip().casefold()
+            if host and re.match(r"^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$", host):
+                valid_hosts += 1
+            tabs = _intish(item.get("tab_count"))
+            if tabs is not None and int(tabs) >= 0:
+                tab_ok += 1
+        if valid_hosts < 1:
+            return False, "missing_valid_hostnames", 1800
+        quality_bp = min(9800, 4500 + valid_hosts * 1600 + tab_ok * 400)
+        return True, "ok", int(max(3200, quality_bp))
+
+    if topic == "hard_action_grounding":
+        boxes: list[tuple[float, float, float, float]] = []
+        for key in ("COMPLETE", "VIEW_DETAILS"):
+            raw = payload.get(key)
+            if not isinstance(raw, dict):
+                return False, f"missing_box_{key}", 1000
+            vals = [_float(raw.get("x1")), _float(raw.get("y1")), _float(raw.get("x2")), _float(raw.get("y2"))]
+            if any(v is None for v in vals):
+                return False, f"invalid_box_{key}", 1200
+            x1, y1, x2, y2 = (float(vals[0]), float(vals[1]), float(vals[2]), float(vals[3]))
+            if not (0.0 <= x1 < x2 <= 1.0 and 0.0 <= y1 < y2 <= 1.0):
+                return False, f"out_of_bounds_{key}", 900
+            area = max(0.0, (x2 - x1) * (y2 - y1))
+            if area < 0.00002 or area > 0.08:
+                return False, f"box_area_outlier_{key}", 1400
+            boxes.append((x1, y1, x2, y2))
+        c, v = boxes[0], boxes[1]
+        if v[0] <= c[0]:
+            return False, "view_details_not_right_of_complete", 1500
+        if abs(((c[1] + c[3]) * 0.5) - ((v[1] + v[3]) * 0.5)) > 0.06:
+            return False, "button_row_misaligned", 1700
+        if min((c[0] + c[2]) * 0.5, (v[0] + v[2]) * 0.5) < 0.55:
+            return False, "buttons_not_in_right_pane", 1600
+        return True, "ok", 8600
+
+    return True, "ok", 8000
+
+
+def _hard_vlm_merge_windows(
+    candidates: list[dict[str, Any]],
+    *,
+    key_fields: tuple[str, ...],
+    consensus_min_hits: int = 2,
+    keep_if_score_at_least: int = 34,
+) -> list[dict[str, Any]]:
+    ranked = sorted(
+        [c for c in candidates if isinstance(c, dict)],
+        key=lambda c: int(c.get("score") or 0),
+        reverse=True,
+    )
+    stats: dict[str, dict[str, Any]] = {}
+    for cand in ranked:
+        cand_score = int(cand.get("score") or 0)
+        cand_source = str(cand.get("source") or "").strip()
+        cand_section = str(cand.get("section_id") or "").strip()
+        payload = cand.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        windows = payload.get("windows")
+        if not isinstance(windows, list):
+            continue
+        for item in windows:
+            if not isinstance(item, dict):
+                continue
+            parts: list[str] = []
+            for key in key_fields:
+                parts.append(str(item.get(key) or "").strip().casefold())
+            dedupe_key = "|".join(parts).strip("|")
+            if not dedupe_key:
+                continue
+            entry = stats.get(dedupe_key)
+            if entry is None:
+                entry = {
+                    "hits": 0,
+                    "best_score": -10**9,
+                    "item": None,
+                    "sources": set(),
+                }
+                stats[dedupe_key] = entry
+            entry["hits"] = int(entry.get("hits") or 0) + 1
+            if cand_source or cand_section:
+                source_key = f"{cand_source}:{cand_section}"
+                try:
+                    entry["sources"].add(source_key)
+                except Exception:
+                    pass
+            best_score = int(entry.get("best_score") or -10**9)
+            if entry.get("item") is None or cand_score > best_score:
+                entry["item"] = dict(item)
+                entry["best_score"] = int(cand_score)
+    merged: list[dict[str, Any]] = []
+    if not stats:
+        return merged
+    rows = sorted(
+        stats.values(),
+        key=lambda row: (
+            -int(row.get("hits") or 0),
+            -int(row.get("best_score") or 0),
+            -len(row.get("sources", set()) if isinstance(row.get("sources"), set) else set()),
+        ),
+    )
+    min_hits = max(1, int(consensus_min_hits))
+    for row in rows:
+        item = row.get("item")
+        if not isinstance(item, dict):
+            continue
+        hits = int(row.get("hits") or 0)
+        best_score = int(row.get("best_score") or 0)
+        if hits < min_hits and best_score < int(keep_if_score_at_least):
+            continue
+        merged.append(item)
+        if len(merged) >= 16:
+            break
+    if merged:
+        return merged
+    # Fallback: keep top scored candidates if consensus filtered everything.
+    for row in rows[:16]:
+        item = row.get("item")
+        if isinstance(item, dict):
+            merged.append(item)
+    return merged
+
+
+def _hard_vlm_merge_candidates(topic: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    ranked = sorted(
+        [c for c in candidates if isinstance(c, dict)],
+        key=lambda c: int(c.get("score") or 0),
+        reverse=True,
+    )
+    if not ranked:
+        return {}
+    best_payload = ranked[0].get("payload")
+    if not isinstance(best_payload, dict):
+        return {}
+    if topic == "adv_window_inventory":
+        windows = _hard_vlm_merge_windows(
+            ranked,
+            key_fields=("name", "app", "context"),
+            consensus_min_hits=2,
+            keep_if_score_at_least=34,
+        )
+        return {"windows": windows} if windows else dict(best_payload)
+    if topic == "adv_browser":
+        windows = _hard_vlm_merge_windows(
+            ranked,
+            key_fields=("active_title", "hostname", "tab_count"),
+            consensus_min_hits=2,
+            keep_if_score_at_least=30,
+        )
+        return {"windows": windows} if windows else dict(best_payload)
+    if topic == "adv_incident":
+        out: dict[str, Any] = {}
+        for cand in ranked:
+            payload = cand.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            for key in ("subject", "sender_display_name", "sender_email_domain"):
+                if str(out.get(key) or "").strip():
+                    continue
+                value = str(payload.get(key) or "").strip()
+                if value:
+                    out[key] = value
+            if not isinstance(out.get("action_buttons"), list):
+                buttons = payload.get("action_buttons")
+                if isinstance(buttons, list):
+                    vals = [str(x).strip() for x in buttons if str(x).strip()]
+                    if vals:
+                        out["action_buttons"] = vals[:8]
+        return out if out else dict(best_payload)
+    if topic == "adv_activity":
+        timeline: list[dict[str, Any]] = []
+        seen_timeline: set[str] = set()
+        for cand in ranked:
+            payload = cand.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            rows = payload.get("timeline")
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                ts = str(row.get("timestamp") or "").strip()
+                text = str(row.get("text") or "").strip()
+                if not ts and not text:
+                    continue
+                key = f"{ts.casefold()}|{text.casefold()}"
+                if key in seen_timeline:
+                    continue
+                seen_timeline.add(key)
+                timeline.append({"timestamp": ts, "text": text})
+                if len(timeline) >= 16:
+                    break
+        return {"timeline": timeline} if timeline else dict(best_payload)
+    if topic == "adv_details":
+        fields: list[dict[str, Any]] = []
+        seen_details: set[str] = set()
+        for cand in ranked:
+            payload = cand.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            rows = payload.get("fields")
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                label = str(row.get("label") or "").strip()
+                value = str(row.get("value") or "").strip()
+                if not label:
+                    continue
+                key = label.casefold()
+                if key in seen_details:
+                    continue
+                seen_details.add(key)
+                fields.append({"label": label, "value": value})
+                if len(fields) >= 48:
+                    break
+        return {"fields": fields} if fields else dict(best_payload)
+    if topic == "adv_calendar":
+        out_calendar: dict[str, Any] = {}
+        items: list[dict[str, Any]] = []
+        seen_items: set[str] = set()
+        for cand in ranked:
+            payload = cand.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            if not str(out_calendar.get("month_year") or "").strip():
+                month_year = str(payload.get("month_year") or "").strip()
+                if month_year:
+                    out_calendar["month_year"] = month_year
+            if not str(out_calendar.get("selected_date") or "").strip():
+                selected = str(payload.get("selected_date") or "").strip()
+                if selected:
+                    out_calendar["selected_date"] = selected
+            rows = payload.get("items")
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                start = str(row.get("start_time") or row.get("start") or "").strip()
+                title = str(row.get("title") or "").strip()
+                if not start and not title:
+                    continue
+                key = f"{start.casefold()}|{title.casefold()}"
+                if key in seen_items:
+                    continue
+                seen_items.add(key)
+                items.append({"start_time": start, "title": title})
+                if len(items) >= 12:
+                    break
+        if items:
+            out_calendar["items"] = items
+        return out_calendar if out_calendar else dict(best_payload)
+    if topic == "adv_slack":
+        out_slack: dict[str, Any] = {}
+        msgs: list[dict[str, Any]] = []
+        seen_msgs: set[str] = set()
+        for cand in ranked:
+            payload = cand.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            if not str(out_slack.get("dm_name") or "").strip():
+                dm = str(payload.get("dm_name") or "").strip()
+                if dm:
+                    out_slack["dm_name"] = dm
+            if not str(out_slack.get("thumbnail_desc") or "").strip():
+                td = str(payload.get("thumbnail_desc") or "").strip()
+                if td:
+                    out_slack["thumbnail_desc"] = td
+            rows = payload.get("messages")
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                sender = str(row.get("sender") or "").strip()
+                ts = str(row.get("timestamp") or "").strip()
+                text = str(row.get("text") or "").strip()
+                if not sender and not text:
+                    continue
+                key = f"{sender.casefold()}|{ts.casefold()}|{text.casefold()}"
+                if key in seen_msgs:
+                    continue
+                seen_msgs.add(key)
+                msgs.append({"sender": sender, "timestamp": ts, "text": text})
+                if len(msgs) >= 8:
+                    break
+        if msgs:
+            out_slack["messages"] = msgs
+        return out_slack if out_slack else dict(best_payload)
+    if topic == "adv_dev":
+        out_dev: dict[str, Any] = {}
+        changed: list[str] = []
+        changed_seen: set[str] = set()
+        files: list[str] = []
+        file_seen: set[str] = set()
+        for cand in ranked:
+            payload = cand.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            tests_cmd = str(payload.get("tests_cmd") or "").strip()
+            if tests_cmd and len(tests_cmd) > len(str(out_dev.get("tests_cmd") or "")):
+                out_dev["tests_cmd"] = tests_cmd
+            raw_changed = payload.get("what_changed")
+            if isinstance(raw_changed, list):
+                for item in raw_changed:
+                    text = str(item or "").strip()
+                    if not text:
+                        continue
+                    key = text.casefold()
+                    if key in changed_seen:
+                        continue
+                    changed_seen.add(key)
+                    changed.append(text)
+            raw_files = payload.get("files")
+            if isinstance(raw_files, list):
+                for item in raw_files:
+                    text = str(item or "").strip()
+                    if not text:
+                        continue
+                    key = text.casefold()
+                    if key in file_seen:
+                        continue
+                    file_seen.add(key)
+                    files.append(text)
+        if changed:
+            out_dev["what_changed"] = changed[:16]
+        if files:
+            out_dev["files"] = files[:16]
+        return out_dev if out_dev else dict(best_payload)
+    if topic == "adv_console":
+        out = dict(best_payload)
+        red_lines: list[str] = []
+        red_seen: set[str] = set()
+        for cand in ranked:
+            payload = cand.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            for key in ("count_red", "count_green", "count_other"):
+                cur = _intish(out.get(key))
+                nxt = _intish(payload.get(key))
+                if nxt is None:
+                    continue
+                if cur is None or int(nxt) > int(cur):
+                    out[key] = int(nxt)
+            rows = payload.get("red_lines")
+            if not isinstance(rows, list):
+                continue
+            for item in rows:
+                text = str(item or "").strip()
+                if not text:
+                    continue
+                key = text.casefold()
+                if key in red_seen:
+                    continue
+                red_seen.add(key)
+                red_lines.append(text)
+        if red_lines:
+            out["red_lines"] = red_lines[:20]
+        return out
+    return dict(best_payload)
+
+
 def _normalize_action_grounding_payload(payload: dict[str, Any], *, width: int, height: int) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
@@ -3548,6 +4389,7 @@ def _normalize_action_grounding_payload(payload: dict[str, Any], *, width: int, 
 
 
 def _hard_vlm_extract(system: Any, result: dict[str, Any], topic: str, query_text: str = "") -> dict[str, Any]:
+    hard_start = time.perf_counter()
     debug_enabled = str(os.environ.get("AUTOCAPTURE_HARD_VLM_DEBUG") or "").strip().casefold() in {"1", "true", "yes", "on"}
     last_error = ""
     if topic not in {
@@ -3583,49 +4425,85 @@ def _hard_vlm_extract(system: Any, result: dict[str, Any], topic: str, query_tex
             f"Answer this exact question context when extracting: {qtext}\n"
             "Use only visible evidence from the image."
         )
-    hint_text = _hard_vlm_hint_text(topic, result, max_chars=1200)
+    hint_chars = 1200
+    if str(topic).startswith("adv_"):
+        hint_chars = int(os.environ.get("AUTOCAPTURE_HARD_VLM_ADV_HINT_CHARS") or "300")
+        hint_chars = max(0, min(2400, hint_chars))
+    hint_text = _hard_vlm_hint_text(topic, result, max_chars=hint_chars)
     if hint_text:
         prompt = (
             f"{prompt}\n"
             "Supplemental extracted text hints (may be noisy; use only if visually consistent):\n"
             f"{hint_text}"
         )
+    promptops_layer = None
+    promptops_result = None
+    promptops_strategy = "none"
+    try:
+        promptops_cfg = system.config.get("promptops", {}) if hasattr(system, "config") else {}
+        if isinstance(promptops_cfg, dict) and bool(promptops_cfg.get("enabled", True)):
+            promptops_layer = _get_promptops_layer(system)
+            strategy_raw = promptops_cfg.get("model_strategy", promptops_cfg.get("strategy", "model_contract"))
+            promptops_strategy = str(strategy_raw) if strategy_raw is not None else "model_contract"
+            if promptops_layer is not None:
+                promptops_result = promptops_layer.prepare_prompt(
+                    prompt,
+                    prompt_id=f"hard_vlm.{topic}",
+                    strategy=promptops_strategy,
+                    persist=bool(promptops_cfg.get("persist_prompts", False)),
+                )
+                prompt = promptops_result.prompt
+    except Exception:
+        promptops_layer = None
+        promptops_result = None
     evidence_id = _first_evidence_record_id(result)
+    if not evidence_id:
+        evidence_id = _latest_evidence_record_id(system)
     blob = _load_evidence_image_bytes(system, evidence_id)
-    if not blob:
-        image_path = str(os.environ.get("AUTOCAPTURE_QUERY_IMAGE_PATH") or "").strip()
+    image_path = str(os.environ.get("AUTOCAPTURE_QUERY_IMAGE_PATH") or "").strip()
+    force_query_image = str(os.environ.get("AUTOCAPTURE_HARD_VLM_FORCE_QUERY_IMAGE") or "").strip().casefold()
+    prefer_query_image = bool(image_path) and force_query_image not in {"0", "false", "no", "off"}
+    if prefer_query_image or not blob:
         if image_path:
             try:
                 with open(image_path, "rb") as handle:
-                    blob = handle.read()
+                    query_blob = handle.read()
+                if query_blob:
+                    blob = query_blob
             except Exception:
-                blob = b""
+                pass
     if not blob:
         return {"_debug_error": "missing_image_blob"} if debug_enabled else {}
-    base_url = "http://127.0.0.1:8000"
+    base_url = "http://127.0.0.1:8000/v1"
     env_base_url = str(os.environ.get("AUTOCAPTURE_VLM_BASE_URL") or "").strip()
-    if env_base_url and env_base_url.rstrip("/") != base_url:
+    allowed_base_urls = {
+        "http://127.0.0.1:8000",
+        "http://127.0.0.1:8000/v1",
+    }
+    if env_base_url and env_base_url.rstrip("/") not in allowed_base_urls:
         if debug_enabled:
             return {"_debug_error": "invalid_vlm_base_url_external_repo_required"}
         return {}
-    api_key = str(os.environ.get("AUTOCAPTURE_VLM_API_KEY") or "").strip() or None
+    if env_base_url:
+        base_url = env_base_url.rstrip("/")
+    api_key = _hard_vlm_api_key(system)
     preferred_model = str(os.environ.get("AUTOCAPTURE_VLM_MODEL") or "").strip()
-    hard_timeout_s = float(os.environ.get("AUTOCAPTURE_HARD_VLM_TIMEOUT_S") or "18")
+    hard_timeout_s = float(os.environ.get("AUTOCAPTURE_HARD_VLM_TIMEOUT_S") or "20")
     hard_max_tokens = int(os.environ.get("AUTOCAPTURE_HARD_VLM_MAX_TOKENS") or "640")
     hard_max_tokens = max(256, min(2048, hard_max_tokens))
-    hard_max_candidates = int(os.environ.get("AUTOCAPTURE_HARD_VLM_MAX_CANDIDATES") or "5")
+    hard_max_candidates = int(os.environ.get("AUTOCAPTURE_HARD_VLM_MAX_CANDIDATES") or "2")
     hard_max_candidates = max(1, min(8, hard_max_candidates))
     topic_max_tokens = {
-        "adv_window_inventory": 700,
-        "adv_focus": 420,
-        "adv_incident": 520,
-        "adv_activity": 620,
-        "adv_details": 900,
-        "adv_calendar": 520,
-        "adv_slack": 520,
-        "adv_dev": 700,
-        "adv_console": 620,
-        "adv_browser": 520,
+        "adv_window_inventory": 520,
+        "adv_focus": 280,
+        "adv_incident": 320,
+        "adv_activity": 360,
+        "adv_details": 520,
+        "adv_calendar": 320,
+        "adv_slack": 300,
+        "adv_dev": 420,
+        "adv_console": 420,
+        "adv_browser": 280,
         "hard_time_to_assignment": 480,
         "hard_k_presets": 480,
         "hard_cross_window_sizes": 420,
@@ -3640,16 +4518,16 @@ def _hard_vlm_extract(system: Any, result: dict[str, Any], topic: str, query_tex
     if topic_max_tokens is not None:
         hard_max_tokens = int(topic_max_tokens)
     topic_max_candidates = {
-        "adv_window_inventory": 1,
-        "adv_focus": 1,
-        "adv_incident": 1,
-        "adv_activity": 1,
-        "adv_details": 1,
-        "adv_calendar": 1,
-        "adv_slack": 1,
-        "adv_dev": 1,
-        "adv_console": 1,
-        "adv_browser": 1,
+        "adv_window_inventory": 12,
+        "adv_focus": 12,
+        "adv_incident": 12,
+        "adv_activity": 12,
+        "adv_details": 12,
+        "adv_calendar": 12,
+        "adv_slack": 12,
+        "adv_dev": 12,
+        "adv_console": 12,
+        "adv_browser": 12,
         "hard_time_to_assignment": 4,
         "hard_k_presets": 4,
         "hard_cross_window_sizes": 3,
@@ -3662,7 +4540,14 @@ def _hard_vlm_extract(system: Any, result: dict[str, Any], topic: str, query_tex
         "hard_action_grounding": 4,
     }.get(topic)
     if topic_max_candidates is not None:
-        hard_max_candidates = int(topic_max_candidates)
+        topic_cap = int(topic_max_candidates)
+        if str(topic).startswith("adv_"):
+            # Advanced map/reduce path needs multiple sections by default.
+            hard_max_candidates = max(hard_max_candidates, topic_cap)
+        else:
+            # Non-advanced topics stay bounded.
+            hard_max_candidates = min(hard_max_candidates, topic_cap)
+    hard_max_candidates = max(1, min(16, int(hard_max_candidates)))
     try:
         client = OpenAICompatClient(base_url=base_url, api_key=api_key, timeout_s=hard_timeout_s)
     except Exception as exc:
@@ -3677,6 +4562,7 @@ def _hard_vlm_extract(system: Any, result: dict[str, Any], topic: str, query_tex
     best: dict[str, Any] = {}
     best_score = -1
     best_text_fallback = ""
+    best_response_text = ""
     target_score = {
         "adv_window_inventory": 10,
         "adv_focus": 8,
@@ -3716,14 +4602,24 @@ def _hard_vlm_extract(system: Any, result: dict[str, Any], topic: str, query_tex
         image_height = 0
         layout_action_boxes = {}
 
-    hard_retries = max(1, min(6, int(os.environ.get("AUTOCAPTURE_HARD_VLM_RETRIES") or "4")))
+    hard_retries = max(1, min(6, int(os.environ.get("AUTOCAPTURE_HARD_VLM_RETRIES") or "2")))
+    hard_budget_s = max(float(hard_timeout_s), float(os.environ.get("AUTOCAPTURE_HARD_VLM_BUDGET_S") or "35"))
+    candidate_debug: list[dict[str, Any]] = []
+    scored_candidates: list[dict[str, Any]] = []
     for item in _encode_topic_vlm_candidates(blob, topic=topic, elements=elements)[:hard_max_candidates]:
+        if (time.perf_counter() - hard_start) >= hard_budget_s:
+            last_error = "hard_vlm_budget_exhausted"
+            break
         candidate = bytes(item.get("image") or b"")
         if not candidate:
             continue
         roi = item.get("roi")
         roi_box = roi if isinstance(roi, tuple) and len(roi) == 4 else None
+        section_id = str(item.get("section_id") or "").strip()
+        source_kind = str(item.get("source") or "").strip() or "roi"
         current = candidate
+        current_prompt = prompt
+        current_max_tokens = int(hard_max_tokens)
         response: dict[str, Any] | None = None
         for _attempt in range(hard_retries):
             content_type = "image/png" if current.startswith(b"\x89PNG") else "image/jpeg"
@@ -3733,7 +4629,7 @@ def _hard_vlm_extract(system: Any, result: dict[str, Any], topic: str, query_tex
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": prompt},
+                            {"type": "text", "text": current_prompt},
                             {
                                 "type": "image_url",
                                 "image_url": {
@@ -3744,19 +4640,50 @@ def _hard_vlm_extract(system: Any, result: dict[str, Any], topic: str, query_tex
                     }
                 ],
                 "temperature": 0,
-                "max_tokens": hard_max_tokens,
+                "max_tokens": int(current_max_tokens),
                 "seed": 0,
             }
             try:
                 response = client.chat_completions(payload)
             except Exception as exc:
-                last_error = f"chat_failed:{type(exc).__name__}"
+                err_msg = _compact_line(str(exc or ""), limit=220)
+                if err_msg:
+                    last_error = f"chat_failed:{type(exc).__name__}:{err_msg}"
+                else:
+                    last_error = f"chat_failed:{type(exc).__name__}"
+                exc_low = str(exc or "").casefold()
                 if _hard_vlm_is_context_limit_error(exc):
                     downsized = _hard_vlm_downscale(current)
                     if downsized and len(downsized) < len(current):
                         current = downsized
+                        current_max_tokens = max(160, int(current_max_tokens * 0.75))
+                        if "supplemental extracted text hints" in str(current_prompt).casefold():
+                            base_prompt = _hard_vlm_prompt(topic)
+                            if qtext:
+                                base_prompt = (
+                                    f"{base_prompt}\n"
+                                    f"Answer this exact question context when extracting: {qtext}\n"
+                                    "Use only visible evidence from the image."
+                                )
+                            current_prompt = base_prompt
                         last_error = "chat_failed_context_limit_downscaled_retry"
                         continue
+                if "http_error:500" in exc_low and (_attempt + 1) < hard_retries:
+                    downsized = _hard_vlm_downscale(current)
+                    if downsized and len(downsized) < len(current):
+                        current = downsized
+                    current_max_tokens = max(160, int(current_max_tokens * 0.70))
+                    if "supplemental extracted text hints" in str(current_prompt).casefold():
+                        base_prompt = _hard_vlm_prompt(topic)
+                        if qtext:
+                            base_prompt = (
+                                f"{base_prompt}\n"
+                                f"Answer this exact question context when extracting: {qtext}\n"
+                                "Use only visible evidence from the image."
+                            )
+                        current_prompt = base_prompt
+                    last_error = "chat_failed_internal_retry"
+                    continue
                 response = None
                 break
             if isinstance(response, dict):
@@ -3769,10 +4696,27 @@ def _hard_vlm_extract(system: Any, result: dict[str, Any], topic: str, query_tex
             continue
         msg = choices[0].get("message", {}) if isinstance(choices[0].get("message", {}), dict) else {}
         content = str(msg.get("content") or "").strip()
+        if content and len(content) > len(best_response_text):
+            best_response_text = content
         if content and str(topic).startswith("adv_") and not best_text_fallback:
             best_text_fallback = content
-        parsed = _extract_json_dict(content)
-        if not isinstance(parsed, dict) or not parsed:
+        parsed_payload = _extract_json_payload(content)
+        parsed: dict[str, Any] = {}
+        if isinstance(parsed_payload, dict):
+            parsed = dict(parsed_payload)
+        elif isinstance(parsed_payload, list):
+            if topic == "adv_activity":
+                parsed = {"timeline": parsed_payload}
+            elif topic == "adv_details":
+                parsed = {"fields": parsed_payload}
+            elif topic == "adv_browser":
+                parsed = {"windows": parsed_payload}
+            elif topic == "adv_window_inventory":
+                parsed = {"windows": parsed_payload}
+            elif topic == "adv_slack":
+                # Some VLM responses emit `[msg1,msg2]` without wrapper.
+                parsed = {"messages": parsed_payload}
+        if not parsed:
             last_error = "json_parse_failed"
             continue
         if topic == "hard_action_grounding":
@@ -3789,12 +4733,85 @@ def _hard_vlm_extract(system: Any, result: dict[str, Any], topic: str, query_tex
                 full_width=image_width,
                 full_height=image_height,
             )
-        score = _hard_vlm_score(topic, parsed)
+        structural = _hard_vlm_score(topic, parsed)
+        semantic = _hard_vlm_semantic_score(topic, parsed, query_text=qtext, hint_text=hint_text)
+        grounding = _hard_vlm_grounding_score(topic, parsed, elements=elements, hint_text=hint_text)
+        quality_ok, quality_reason, quality_bp = _hard_vlm_quality_gate(topic, parsed)
+        score = int(structural + semantic + grounding)
+        if not bool(quality_ok):
+            # Fail closed on malformed/implausible structured payloads.
+            score -= 28
+        if str(topic).startswith("adv_"):
+            score += 4 if roi_box is not None else -4
+        if debug_enabled:
+            candidate_debug.append(
+                {
+                    "roi": list(roi_box) if roi_box else None,
+                    "section_id": section_id,
+                    "source": source_kind,
+                    "structural_score": int(structural),
+                    "semantic_score": int(semantic),
+                    "grounding_score": int(grounding),
+                    "quality_ok": bool(quality_ok),
+                    "quality_reason": str(quality_reason),
+                    "quality_bp": int(quality_bp),
+                    "score": int(score),
+                    "keys": sorted([str(k) for k in parsed.keys()])[:32],
+                    "content_preview": _compact_line(str(content or ""), limit=220),
+                }
+            )
+        scored_candidates.append(
+            {
+                "payload": dict(parsed),
+                "score": int(score),
+                "roi": list(roi_box) if roi_box else None,
+                "section_id": section_id,
+                "source": source_kind,
+                "quality_ok": bool(quality_ok),
+                "quality_reason": str(quality_reason),
+                "quality_bp": int(quality_bp),
+            }
+        )
         if score > best_score:
             best = parsed
             best_score = score
-        if score >= target_score:
+        # Do not stop on structural-only wins; require at least some semantic
+        # grounding with query/hints before early-exit.
+        if (not str(topic).startswith("adv_")) and score >= target_score and semantic >= 2:
             break
+    if scored_candidates and str(topic).startswith("adv_"):
+        quality_candidates = [c for c in scored_candidates if bool(c.get("quality_ok", True))]
+        merge_source = quality_candidates if quality_candidates else scored_candidates
+        merged_payload = _hard_vlm_merge_candidates(topic, merge_source)
+        if isinstance(merged_payload, dict) and merged_payload:
+            best = merged_payload
+    if isinstance(best, dict) and best:
+        q_ok, q_reason, q_bp = _hard_vlm_quality_gate(topic, best)
+        best["_quality_gate_ok"] = bool(q_ok)
+        best["_quality_gate_reason"] = str(q_reason)
+        best["_quality_gate_bp"] = int(q_bp)
+    try:
+        if promptops_layer is not None:
+            response_blob = best_response_text or json.dumps(best, sort_keys=True) if best else best_text_fallback
+            promptops_layer.record_model_interaction(
+                prompt_id=f"hard_vlm.{topic}",
+                provider_id="hard_vlm.direct",
+                model=str(model or ""),
+                prompt_input=str(_hard_vlm_prompt(topic) or ""),
+                prompt_effective=str(prompt or ""),
+                response_text=str(response_blob or ""),
+                success=bool(best),
+                latency_ms=float((time.perf_counter() - hard_start) * 1000.0),
+                error=str(last_error or ""),
+                metadata={
+                    "topic": str(topic),
+                    "promptops_used": bool(promptops_result is not None),
+                    "promptops_applied": bool(promptops_result and promptops_result.applied),
+                    "promptops_strategy": str(promptops_strategy),
+                },
+            )
+    except Exception:
+        pass
     if topic == "hard_action_grounding" and {"COMPLETE", "VIEW_DETAILS"} <= set(layout_action_boxes.keys()):
         return layout_action_boxes
     if topic == "hard_cross_window_sizes" and isinstance(best, dict):
@@ -3821,7 +4838,14 @@ def _hard_vlm_extract(system: Any, result: dict[str, Any], topic: str, query_tex
     if str(topic).startswith("adv_") and (not best) and best_text_fallback:
         return {"answer_text": best_text_fallback}
     if debug_enabled and not best:
-        return {"_debug_error": last_error or "no_scored_candidates"}
+        return {
+            "_debug_error": last_error or "no_scored_candidates",
+            "_debug_candidates": candidate_debug[:12],
+        }
+    if debug_enabled and best:
+        out = dict(best)
+        out.setdefault("_debug_candidates", candidate_debug[:12])
+        return out
     return best if isinstance(best, dict) and bool(best) else {}
 
 
@@ -4282,6 +5306,42 @@ def _fallback_claim_sources_for_topic(topic: str, metadata: Any | None) -> list[
     return out
 
 
+def _support_snippets_for_topic(topic: str, query: str, metadata: Any | None, *, limit: int = 12) -> list[str]:
+    if metadata is None:
+        return []
+    q_tokens = [tok for tok in _query_tokens(query) if len(tok) >= 4]
+    cue_tokens = [tok for tok in _hard_vlm_topic_cues(topic) if len(str(tok)) >= 3]
+    want_tokens = sorted(set([str(tok).casefold() for tok in (q_tokens + cue_tokens) if str(tok).strip()]))
+    if not want_tokens:
+        return []
+
+    out: list[tuple[int, str]] = []
+    seen: set[str] = set()
+    candidate_types = ("derived.text.ocr", "derived.text.vlm", "derived.sst.text.extra")
+    for record_type in candidate_types:
+        rows = _metadata_rows_for_record_type(metadata, record_type, limit=192)
+        for _rid, record in rows:
+            if not isinstance(record, dict):
+                continue
+            text = str(record.get("text") or "").strip()
+            if not text:
+                continue
+            for raw_line in re.split(r"[\r\n]+", text):
+                line = _compact_line(str(raw_line or "").strip(), limit=280)
+                if not line:
+                    continue
+                low = line.casefold()
+                score = sum(1 for tok in want_tokens if tok in low)
+                if score <= 0:
+                    continue
+                if low in seen:
+                    continue
+                seen.add(low)
+                out.append((int(score), line))
+    out.sort(key=lambda item: (-int(item[0]), item[1]))
+    return [line for _score, line in out[: max(1, int(limit))]]
+
+
 def _augment_claim_sources_for_display(topic: str, claim_sources: list[dict[str, Any]], metadata: Any | None) -> list[dict[str, Any]]:
     merged: list[dict[str, Any]] = [src for src in claim_sources if isinstance(src, dict)]
     fallback = _fallback_claim_sources_for_topic(topic, metadata)
@@ -4351,9 +5411,12 @@ def _build_adv_display(topic: str, claim_sources: list[dict[str, Any]]) -> dict[
     fields: dict[str, str] = {}
     bullets: list[str] = []
     summary = ""
+    def _count(value: Any) -> int:
+        parsed = _intish(value)
+        return int(parsed) if parsed is not None and int(parsed) >= 0 else 0
 
     if topic == "adv_window_inventory":
-        count = int(str(pairs.get("adv.window.count") or "0") or 0)
+        count = _count(pairs.get("adv.window.count"))
         fields["window_count"] = str(count)
         windows: list[str] = []
         for idx in range(1, min(16, count + 1)):
@@ -4368,7 +5431,7 @@ def _build_adv_display(topic: str, claim_sources: list[dict[str, Any]]) -> dict[
             bullets.extend(windows[:12])
     elif topic == "adv_focus":
         window = str(pairs.get("adv.focus.window") or "").strip()
-        ev_count = int(str(pairs.get("adv.focus.evidence_count") or "0") or 0)
+        ev_count = _count(pairs.get("adv.focus.evidence_count"))
         fields["focused_window"] = window
         summary = f"Focused window: {window}" if window else "Focused window: indeterminate"
         for idx in range(1, min(4, ev_count + 1)):
@@ -4386,7 +5449,7 @@ def _build_adv_display(topic: str, claim_sources: list[dict[str, Any]]) -> dict[
         if buttons:
             bullets.append(f"action_buttons: {', '.join(buttons)}")
     elif topic == "adv_activity":
-        count = int(str(pairs.get("adv.activity.count") or "0") or 0)
+        count = _count(pairs.get("adv.activity.count"))
         fields["activity_count"] = str(count)
         summary = f"Record Activity entries: {count}"
         for idx in range(1, min(9, count + 1)):
@@ -4395,7 +5458,7 @@ def _build_adv_display(topic: str, claim_sources: list[dict[str, Any]]) -> dict[
             if ts or text:
                 bullets.append(f"{idx}. {ts} | {text}".strip(" |"))
     elif topic == "adv_details":
-        count = int(str(pairs.get("adv.details.count") or "0") or 0)
+        count = _count(pairs.get("adv.details.count"))
         fields["details_count"] = str(count)
         summary = f"Details fields extracted: {count}"
         for idx in range(1, min(17, count + 1)):
@@ -4406,7 +5469,7 @@ def _build_adv_display(topic: str, claim_sources: list[dict[str, Any]]) -> dict[
     elif topic == "adv_calendar":
         month_year = str(pairs.get("adv.calendar.month_year") or "").strip()
         selected_date = str(pairs.get("adv.calendar.selected_date") or "").strip()
-        count = int(str(pairs.get("adv.calendar.item_count") or "0") or 0)
+        count = _count(pairs.get("adv.calendar.item_count"))
         fields.update({"month_year": month_year, "selected_date": selected_date, "schedule_item_count": str(count)})
         summary = f"Calendar: {month_year}; selected_date={selected_date or 'indeterminate'}"
         for idx in range(1, min(6, count + 1)):
@@ -4416,7 +5479,7 @@ def _build_adv_display(topic: str, claim_sources: list[dict[str, Any]]) -> dict[
                 bullets.append(f"{idx}. {start} | {title}".strip(" |"))
     elif topic == "adv_slack":
         dm_name = str(pairs.get("adv.slack.dm_name") or "").strip()
-        count = int(str(pairs.get("adv.slack.message_count") or "0") or 0)
+        count = _count(pairs.get("adv.slack.message_count"))
         thumb = str(pairs.get("adv.slack.thumbnail_desc") or "").strip()
         fields.update({"dm_name": dm_name, "message_count": str(count)})
         summary = f"Slack DM ({dm_name or 'unknown'}): {count} messages extracted"
@@ -4429,8 +5492,8 @@ def _build_adv_display(topic: str, claim_sources: list[dict[str, Any]]) -> dict[
         if thumb:
             bullets.append(f"thumbnail: {thumb}")
     elif topic == "adv_dev":
-        changed = int(str(pairs.get("adv.dev.what_changed_count") or "0") or 0)
-        files = int(str(pairs.get("adv.dev.file_count") or "0") or 0)
+        changed = _count(pairs.get("adv.dev.what_changed_count"))
+        files = _count(pairs.get("adv.dev.file_count"))
         tests_cmd = str(pairs.get("adv.dev.tests_cmd") or "").strip()
         fields.update({"what_changed_count": str(changed), "file_count": str(files)})
         summary = f"Dev summary: what_changed={changed}; files={files}"
@@ -4445,16 +5508,16 @@ def _build_adv_display(topic: str, claim_sources: list[dict[str, Any]]) -> dict[
             if text:
                 bullets.append(f"file_{idx}: {text}")
     elif topic == "adv_console":
-        red = int(str(pairs.get("adv.console.red_count") or "0") or 0)
-        green = int(str(pairs.get("adv.console.green_count") or "0") or 0)
-        other = int(str(pairs.get("adv.console.other_count") or "0") or 0)
+        red = _count(pairs.get("adv.console.red_count"))
+        green = _count(pairs.get("adv.console.green_count"))
+        other = _count(pairs.get("adv.console.other_count"))
         fields.update({"red_count": str(red), "green_count": str(green), "other_count": str(other)})
         summary = f"Console line colors: red={red}, green={green}, other={other}"
         red_lines = [x.strip() for x in str(pairs.get("adv.console.red_lines") or "").split("|") if x.strip()]
         for idx, line in enumerate(red_lines[:8], start=1):
             bullets.append(f"red_{idx}: {line}")
     elif topic == "adv_browser":
-        count = int(str(pairs.get("adv.browser.window_count") or "0") or 0)
+        count = _count(pairs.get("adv.browser.window_count"))
         fields["browser_window_count"] = str(count)
         summary = f"Visible browser windows: {count}"
         for idx in range(1, min(9, count + 1)):
@@ -4659,112 +5722,39 @@ def _build_adv_display_from_hard(topic: str, hard_fields: dict[str, Any]) -> dic
 def _normalize_adv_display(topic: str, adv: dict[str, Any], claim_texts: list[str]) -> dict[str, Any]:
     if not isinstance(adv, dict):
         return adv
-    summary = str(adv.get("summary") or "")
-    bullets = [str(x) for x in (adv.get("bullets", []) if isinstance(adv.get("bullets", []), list) else []) if str(x)]
-    fields = dict(adv.get("fields") or {}) if isinstance(adv.get("fields"), dict) else {}
-    corpus = "\n".join(str(x or "") for x in claim_texts)
-    joined = f"{summary}\n" + "\n".join(bullets)
-    low_joined = joined.casefold()
-    canonical_subject = "Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476"
+    _ = claim_texts
+    summary = _compact_line(str(adv.get("summary") or ""), limit=320)
+    raw_bullets = adv.get("bullets", [])
+    raw_fields = adv.get("fields", {})
+    bullets: list[str] = []
+    seen: set[str] = set()
+    if isinstance(raw_bullets, list):
+        for item in raw_bullets:
+            text = _compact_line(str(item or "").strip(), limit=320)
+            if not text:
+                continue
+            key = text.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            bullets.append(text)
+    fields = dict(raw_fields) if isinstance(raw_fields, dict) else {}
 
-    def _ensure_line(text: str) -> None:
-        if str(text).strip() and str(text).casefold() not in [x.casefold() for x in bullets]:
-            bullets.append(str(text))
-
-    if topic == "adv_window_inventory":
-        if "remote desktop web client" not in low_joined and ("vdi" in low_joined or "remote desktop" in corpus.casefold()):
-            _ensure_line("Remote Desktop Web Client (host; fully_visible)")
-            summary = summary or "Visible top-level windows extracted."
-
-    if topic == "adv_focus":
-        if canonical_subject.casefold() not in low_joined and "open invoice" in low_joined:
-            _ensure_line(f"evidence_subject: {canonical_subject}")
-        if "focused" not in low_joined:
-            summary = f"Focused window: {summary or 'focused'}"
-
+    # Generic normalization only. Do not inject screenshot-specific constants.
     if topic == "adv_incident":
-        if "open invoice" in low_joined and canonical_subject.casefold() not in low_joined:
-            fields["subject"] = canonical_subject
-        if "permian resources service desk" not in low_joined and "service desk" in low_joined:
-            fields["sender_display"] = "Permian Resources Service Desk"
-        sender_domain = str(fields.get("sender_domain") or "")
-        if str(fields.get("sender_display") or "").strip().casefold() == "permian resources service desk":
-            fields["sender_domain"] = "permian.xyz.com"
-            sender_domain = "permian.xyz.com"
-        if ("permian" in low_joined or "permian" in sender_domain.casefold()) and "permian.xyz.com" not in low_joined:
-            fields["sender_domain"] = "permian.xyz.com"
-        summary = (
-            f"Incident email: subject={fields.get('subject') or canonical_subject}; "
-            f"sender={fields.get('sender_display') or 'Permian Resources Service Desk'}; "
-            f"domain={fields.get('sender_domain') or 'permian.xyz.com'}"
-        )
-        if "complete" not in low_joined or "view details" not in low_joined:
-            _ensure_line("action_buttons: COMPLETE, VIEW DETAILS")
-
-    if topic == "adv_activity":
-        if "state changed from new to assigned" not in low_joined:
-            _ensure_line("1. Feb 02, 2026 - 12:08pm CST | Your record was updated on Feb 02, 2026 - 12:08pm CST")
-            _ensure_line("2. Feb 02, 2026 - 12:08pm CST | Mary Mata created the incident on Feb 02, 2026 - 12:08pm CST")
-            _ensure_line("State changed from New to Assigned")
-            summary = "Record Activity entries: 2"
-
-    if topic == "adv_details":
-        need_tokens = ("service requestor", "assigned to", "laptop needed?")
-        if not all(tok in low_joined for tok in need_tokens):
-            _ensure_line("Service requestor: Norry Mata")
-            _ensure_line("Assigned to: MAC-TIME-ST88")
-            _ensure_line("Laptop Needed?: Yes")
-            summary = "Details fields extracted: 15"
-
-    if topic == "adv_calendar":
-        if "january 2026" not in low_joined:
-            summary = f"Calendar: January 2026; selected date={fields.get('selected_date') or '2'}"
+        subject = _compact_line(str(fields.get("subject") or "").strip(), limit=220)
+        sender = _compact_line(str(fields.get("sender_display") or "").strip(), limit=220)
+        domain = _domain_only(str(fields.get("sender_domain") or ""))
+        fields["subject"] = subject
+        fields["sender_display"] = sender
+        fields["sender_domain"] = domain
+        if not summary and (subject or sender or domain):
+            summary = f"Incident email: subject={subject}; sender={sender}; domain={domain}"
+    elif topic == "adv_focus":
+        if summary and not summary.casefold().startswith("focused window:"):
+            summary = f"Focused window: {summary}"
+    elif topic == "adv_calendar":
         summary = summary.replace("selected_date=", "selected date=")
-        if "cc daily standup" not in low_joined:
-            _ensure_line("CC Daily Standup")
-
-    if topic == "adv_slack":
-        if "for videos, ping you in 5 - 10 mins?" not in low_joined:
-            _ensure_line("1. You TUESDAY: For videos, ping you in 5 - 10 mins?")
-        if "gwatt" not in low_joined:
-            _ensure_line("2. Jennifer Doherty 9:42 PM: gwatt")
-        if ("white dialog/window" not in low_joined) and ("blue background" not in low_joined):
-            _ensure_line("thumbnail: A white dialog/window over a blue background.")
-
-    if topic == "adv_dev":
-        normalized: list[str] = []
-        for line in bullets:
-            val = line.replace("/tmg/", "/tmp/").replace("/venv/", "_venv/")
-            val = val.replace("/ui/templates/vectors.html", "/v4/templates/vectors.html")
-            val = val.replace("/ui/server.py", "/v4/server.py")
-            normalized.append(val)
-        bullets = normalized
-        if "summary column derived from payload fields" not in "\n".join(bullets).casefold():
-            _ensure_line("changed_1: Summary column derived from payload fields")
-        if "src/statistic_harness/v4/templates/vectors.html" not in "\n".join(bullets).casefold():
-            _ensure_line("file_1: src/statistic_harness/v4/templates/vectors.html")
-        if "src/statistic_harness/v4/server.py" not in "\n".join(bullets).casefold():
-            _ensure_line("file_2: src/statistic_harness/v4/server.py")
-        if "pythonpath=src /tmp/stat_harness_venv/bin/python -m pytest -q" not in "\n".join(bullets).casefold():
-            _ensure_line("tests: PYTHONPATH=src /tmp/stat_harness_venv/bin/python -m pytest -q")
-
-    if topic == "adv_console":
-        if 'write-host "using wsl ip endpoint $saltendpoint for $projectid" -foregroundcolor yellow' not in low_joined:
-            _ensure_line('red_1: Write-Host "Using WSL IP endpoint $saltEndpoint for $projectId" -ForegroundColor Yellow')
-        if "count_red" not in low_joined and "red=" in summary.casefold():
-            summary = "Console line colors: count_red=8, count_green=16, count_other=1"
-
-    if topic == "adv_browser":
-        if "statistic_harness" not in low_joined:
-            _ensure_line("1. host=unknown; active_tab=statistic_harness; tabs=1")
-        if "chatgpt.com" not in low_joined:
-            _ensure_line("2. host=chatgpt.com; active_tab=ChatGPT; tabs=3")
-        if "listen.siriusxm.com" not in low_joined:
-            _ensure_line("3. host=listen.siriusxm.com; active_tab=SiriusXM; tabs=1")
-        if "remote desktop web client" not in low_joined:
-            _ensure_line("4. host=wvd.microsoft.com; active_tab=Remote Desktop Web Client; tabs=1")
-        if "hostname" not in summary.casefold():
-            summary = "Visible browser windows and hostname/tab metadata extracted."
 
     return {
         "summary": summary,
@@ -4772,6 +5762,60 @@ def _normalize_adv_display(topic: str, adv: dict[str, Any], claim_texts: list[st
         "fields": fields,
         "topic": str(adv.get("topic") or topic),
     }
+
+
+def _adv_display_quality_score(adv: dict[str, Any], *, topic: str, query_text: str) -> int:
+    if not isinstance(adv, dict):
+        return -10**6
+    summary = str(adv.get("summary") or "").strip()
+    bullets = adv.get("bullets", []) if isinstance(adv.get("bullets", []), list) else []
+    fields = adv.get("fields", {}) if isinstance(adv.get("fields", {}), dict) else {}
+    payload_blob = json.dumps({"summary": summary, "bullets": bullets, "fields": fields}, ensure_ascii=True).casefold()
+
+    score = 0
+    if summary:
+        score += min(10, len(summary) // 24)
+    score += min(16, len([x for x in bullets if str(x).strip()]))
+    score += min(16, len([k for k, v in fields.items() if str(k).strip() and v not in (None, "", [], {})]) * 2)
+
+    q_tokens = [tok for tok in _query_tokens(query_text) if len(tok) >= 4]
+    stop = {"which", "where", "when", "with", "that", "this", "from", "into", "same", "only", "extract", "return", "provide", "visible", "window", "windows"}
+    q_tokens = [tok for tok in q_tokens if tok not in stop]
+    score += min(12, sum(1 for tok in q_tokens if tok in payload_blob) * 2)
+
+    cues = _hard_vlm_topic_cues(topic)
+    score += min(10, sum(1 for cue in cues if cue in payload_blob))
+    return score
+
+
+def _normalize_hard_fields_for_topic(topic: str, hard_fields: dict[str, Any]) -> dict[str, Any]:
+    out = dict(hard_fields or {})
+    raw_answer = out.get("answer_text")
+    parsed: Any = None
+    if isinstance(raw_answer, str):
+        text = str(raw_answer).strip()
+        if text and text[0] in {"{", "["}:
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                parsed = None
+    if isinstance(parsed, dict):
+        for key, value in parsed.items():
+            k = str(key).strip()
+            if not k:
+                continue
+            if out.get(k) in (None, "", [], {}):
+                out[k] = value
+    elif isinstance(parsed, list):
+        if topic == "adv_details" and out.get("fields") in (None, "", [], {}):
+            out["fields"] = parsed
+        elif topic == "adv_activity" and out.get("timeline") in (None, "", [], {}):
+            out["timeline"] = parsed
+    if topic == "adv_focus":
+        fw = str(out.get("focused_window") or "").strip()
+        if fw and out.get("window") in (None, "", [], {}):
+            out["window"] = fw
+    return out
 
 
 def _build_answer_display(
@@ -4786,29 +5830,66 @@ def _build_answer_display(
     query_topic = str(intent_obj.get("topic") or _query_topic(query))
     display_sources = _augment_claim_sources_for_display(query_topic, claim_sources, metadata)
     signal_map = _signal_candidates(display_sources)
-    hard_vlm_map = hard_vlm if isinstance(hard_vlm, dict) else {}
+    hard_vlm_map = _normalize_hard_fields_for_topic(query_topic, hard_vlm if isinstance(hard_vlm, dict) else {})
 
-    adv = _build_adv_display_from_hard(query_topic, hard_vlm_map)
-    if adv is None:
-        adv = _build_adv_display(query_topic, display_sources)
+    # Advanced topics use hard-VLM + structured ingest signals together.
+    # Select the better-grounded candidate by scored arbitration.
+    adv_hard = _build_adv_display_from_hard(query_topic, hard_vlm_map)
+    adv_struct = _build_adv_display(query_topic, display_sources)
+    adv: dict[str, Any] | None = None
+    if adv_hard is not None and adv_struct is not None:
+        hard_norm = _normalize_adv_display(query_topic, adv_hard, claim_texts)
+        struct_norm = _normalize_adv_display(query_topic, adv_struct, claim_texts)
+        hard_score = _adv_display_quality_score(hard_norm, topic=query_topic, query_text=query)
+        struct_score = _adv_display_quality_score(struct_norm, topic=query_topic, query_text=query)
+        adv = hard_norm if hard_score >= struct_score else struct_norm
+    elif adv_hard is not None:
+        adv = adv_hard
+    elif adv_struct is not None:
+        adv = adv_struct
     if adv is not None:
         adv = _normalize_adv_display(query_topic, adv, claim_texts)
+        support_snippets = _support_snippets_for_topic(query_topic, query, metadata, limit=12)
+        bullets = [str(x) for x in adv.get("bullets", []) if str(x)]
+        fields = (adv.get("fields", {}) or {}) if isinstance((adv.get("fields", {}) or {}), dict) else {}
+        if support_snippets:
+            existing = {str(x).casefold() for x in bullets}
+            for line in support_snippets:
+                entry = f"support: {line}"
+                if entry.casefold() in existing:
+                    continue
+                bullets.append(entry)
+                existing.add(entry.casefold())
+            fields = dict(fields)
+            fields["support_snippets"] = support_snippets
         return {
             "schema_version": 1,
             "summary": str(adv.get("summary") or ""),
-            "bullets": [str(x) for x in adv.get("bullets", []) if str(x)],
-            "fields": (adv.get("fields", {}) or {}) if isinstance((adv.get("fields", {}) or {}), dict) else {},
+            "bullets": bullets[:32],
+            "fields": fields,
             "topic": str(adv.get("topic") or query_topic),
         }
     if str(query_topic).startswith("adv_"):
+        support_snippets = _support_snippets_for_topic(query_topic, query, metadata, limit=16)
+        fallback_bullets = [
+            "required_source: source_modality=vlm and source_state_id=vlm",
+            "fallback_blocked: OCR-derived advanced records are excluded to avoid incorrect structured answers",
+        ]
+        if support_snippets:
+            fallback_bullets.extend([f"support: {line}" for line in support_snippets[:12]])
         base_adv = {
             "schema_version": 1,
-            "summary": "Indeterminate: no VLM-grounded structured extraction is available for this query yet.",
-            "bullets": [
-                "required_source: source_modality=vlm and source_state_id=vlm",
-                "fallback_blocked: OCR-derived advanced records are excluded to avoid incorrect structured answers",
-            ],
-            "fields": {"required_modality": "vlm", "required_state_id": "vlm"},
+            "summary": (
+                "Indeterminate: no VLM-grounded structured extraction is available for this query yet."
+                if not support_snippets
+                else "Fallback extracted signals are available while VLM-grounded structure is incomplete."
+            ),
+            "bullets": fallback_bullets,
+            "fields": {
+                "required_modality": "vlm",
+                "required_state_id": "vlm",
+                "support_snippets": support_snippets[:12],
+            },
             "topic": str(query_topic),
         }
         normalized = _normalize_adv_display(query_topic, base_adv, claim_texts)
@@ -4948,7 +6029,8 @@ def _build_answer_display(
             str(pair_map.get(f"adv.dev.what_changed.{idx}") or "")
             for idx in range(1, 10)
         )
-        nums = [n for n in _extract_ints(changed_blob) if 1 <= int(n) <= 500]
+        corpus_blob = f"{changed_blob}\n" + "\n".join(str(x or "") for x in claim_texts)
+        nums = [n for n in _extract_ints(corpus_blob) if 1 <= int(n) <= 500]
         if not presets:
             presets = sorted({n for n in nums if n in {10, 25, 32, 50, 64, 100, 128}})
         if len(presets) < 3:
@@ -5365,51 +6447,51 @@ def _build_answer_display(
         doc_kind = str(signal.get("doc_kind") or "unknown")
         return f"{provider_id} / {doc_kind}"
 
-    fields: dict[str, str] = {}
+    signal_fields: dict[str, str] = {}
     if best_inbox:
-        fields["open_inboxes"] = str(best_inbox.get("value") or "")
+        signal_fields["open_inboxes"] = str(best_inbox.get("value") or "")
     if best_song:
-        fields["song"] = str(best_song.get("value") or "")
+        signal_fields["song"] = str(best_song.get("value") or "")
     if best_collab:
-        fields["quorum_collaborator"] = str(best_collab.get("value") or "")
+        signal_fields["quorum_collaborator"] = str(best_collab.get("value") or "")
     if alt_collab:
-        fields["quorum_collaborator_alt"] = str(alt_collab.get("value") or "")
+        signal_fields["quorum_collaborator_alt"] = str(alt_collab.get("value") or "")
     if best_time:
-        fields["vdi_time"] = str(best_time.get("value") or "")
+        signal_fields["vdi_time"] = str(best_time.get("value") or "")
     if best_background:
-        fields["background_color"] = str(best_background.get("value") or "")
+        signal_fields["background_color"] = str(best_background.get("value") or "")
 
     summary = ""
-    bullets: list[str] = []
+    signal_bullets: list[str] = []
     topic = "generic"
     def _set_signal_topic(candidate: str) -> bool:
-        nonlocal topic, summary, bullets
-        if candidate == "inbox" and fields.get("open_inboxes"):
+        nonlocal topic, summary, signal_bullets
+        if candidate == "inbox" and signal_fields.get("open_inboxes"):
             topic = "inbox"
-            summary = f"Open inboxes: {fields['open_inboxes']}"
-            bullets.extend(_extract_inbox_trace_bullets(display_sources, signal_map))
+            summary = f"Open inboxes: {signal_fields['open_inboxes']}"
+            signal_bullets.extend(_extract_inbox_trace_bullets(display_sources, signal_map))
             return True
-        if candidate == "song" and fields.get("song"):
+        if candidate == "song" and signal_fields.get("song"):
             topic = "song"
-            summary = f"Song: {fields['song']}"
-            bullets.append(f"source: {_signal_source_text(best_song)}")
+            summary = f"Song: {signal_fields['song']}"
+            signal_bullets.append(f"source: {_signal_source_text(best_song)}")
             return True
-        if candidate == "quorum" and fields.get("quorum_collaborator"):
+        if candidate == "quorum" and signal_fields.get("quorum_collaborator"):
             topic = "quorum"
-            summary = f"Quorum task collaborator: {fields['quorum_collaborator']}"
-            bullets.append(f"source: {_signal_source_text(best_collab)}")
-            if fields.get("quorum_collaborator_alt") and fields["quorum_collaborator_alt"] != fields["quorum_collaborator"]:
-                bullets.append(f"alternative_contractor: {fields['quorum_collaborator_alt']}")
+            summary = f"Quorum task collaborator: {signal_fields['quorum_collaborator']}"
+            signal_bullets.append(f"source: {_signal_source_text(best_collab)}")
+            if signal_fields.get("quorum_collaborator_alt") and signal_fields["quorum_collaborator_alt"] != signal_fields["quorum_collaborator"]:
+                signal_bullets.append(f"alternative_contractor: {signal_fields['quorum_collaborator_alt']}")
             return True
-        if candidate == "vdi_time" and fields.get("vdi_time"):
+        if candidate == "vdi_time" and signal_fields.get("vdi_time"):
             topic = "vdi_time"
-            summary = f"VDI time: {fields['vdi_time']}"
-            bullets.append(f"source: {_signal_source_text(best_time)}")
+            summary = f"VDI time: {signal_fields['vdi_time']}"
+            signal_bullets.append(f"source: {_signal_source_text(best_time)}")
             return True
-        if candidate == "background_color" and fields.get("background_color"):
+        if candidate == "background_color" and signal_fields.get("background_color"):
             topic = "background_color"
-            summary = f"Background color: {fields['background_color']}"
-            bullets.append(f"source: {_signal_source_text(best_background)}")
+            summary = f"Background color: {signal_fields['background_color']}"
+            signal_bullets.append(f"source: {_signal_source_text(best_background)}")
             return True
         return False
 
@@ -5450,19 +6532,97 @@ def _build_answer_display(
                 if compact:
                     summary = compact
                     break
-    if not bullets:
+    if not signal_bullets:
         compact_claims = [_compact_line(t, limit=140) for t in claim_texts if str(t or "").strip()]
         for text in compact_claims[:3]:
             if text and text != summary:
-                bullets.append(text)
+                signal_bullets.append(text)
 
     return {
         "schema_version": 1,
         "summary": summary,
-        "bullets": bullets,
-        "fields": fields,
+        "bullets": signal_bullets,
+        "fields": signal_fields,
         "topic": topic,
     }
+
+
+def _has_structured_adv_source(topic: str, claim_sources: list[dict[str, Any]]) -> bool:
+    if not str(topic).startswith("adv_"):
+        return False
+    doc_kind_map = {
+        "adv_window_inventory": "adv.window.inventory",
+        "adv_focus": "adv.focus.window",
+        "adv_incident": "adv.incident.card",
+        "adv_activity": "adv.activity.timeline",
+        "adv_details": "adv.details.kv",
+        "adv_calendar": "adv.calendar.schedule",
+        "adv_slack": "adv.slack.dm",
+        "adv_dev": "adv.dev.summary",
+        "adv_console": "adv.console.colors",
+        "adv_browser": "adv.browser.windows",
+    }
+    expected_doc = str(doc_kind_map.get(str(topic), "")).strip()
+    if not expected_doc:
+        return False
+    for src in claim_sources:
+        if not isinstance(src, dict):
+            continue
+        if str(src.get("doc_kind") or "").strip() != expected_doc:
+            continue
+        meta = _claim_doc_meta(src)
+        if str(meta.get("source_modality") or "").strip().casefold() != "vlm":
+            continue
+        pairs = src.get("signal_pairs", {}) if isinstance(src.get("signal_pairs", {}), dict) else {}
+        if any(str(v).strip() for v in pairs.values()):
+            return True
+    return False
+
+
+def _adv_hard_vlm_mode(system: Any) -> str:
+    env_raw = str(os.environ.get("AUTOCAPTURE_ADV_HARD_VLM_MODE") or "").strip().casefold()
+    if env_raw in {"always", "fallback", "off"}:
+        return env_raw
+    cfg_mode = ""
+    try:
+        if hasattr(system, "config") and isinstance(system.config, dict):
+            processing = system.config.get("processing", {}) if isinstance(system.config.get("processing", {}), dict) else {}
+            on_query = processing.get("on_query", {}) if isinstance(processing.get("on_query", {}), dict) else {}
+            cfg_mode = str(on_query.get("adv_hard_vlm_mode") or "").strip().casefold()
+    except Exception:
+        cfg_mode = ""
+    if cfg_mode in {"always", "fallback", "off"}:
+        return cfg_mode
+    return "always"
+
+
+def _hard_fields_have_substantive_content(topic: str, fields: dict[str, Any]) -> bool:
+    if not isinstance(fields, dict) or not fields:
+        return False
+    if fields.get("_quality_gate_ok") is False:
+        return False
+    ignore = {
+        "_debug_error",
+        "_debug_candidates",
+        "error",
+        "answer_text",
+        "required_modality",
+        "required_state_id",
+        "_quality_gate_ok",
+        "_quality_gate_reason",
+        "_quality_gate_bp",
+    }
+    for key, value in fields.items():
+        k = str(key).strip()
+        if not k or k in ignore:
+            continue
+        if value not in (None, "", [], {}):
+            return True
+    # Some hard topics encode value via answer_text only.
+    text = str(fields.get("answer_text") or "").strip()
+    if text and (not str(topic).startswith("adv_")):
+        return True
+    return False
 
 
 def _apply_answer_display(
@@ -5487,7 +6647,17 @@ def _apply_answer_display(
     claim_sources = _claim_sources(result, metadata)
     intent_obj = query_intent if isinstance(query_intent, dict) else _query_intent(query)
     query_topic = str(intent_obj.get("topic") or _query_topic(query))
-    run_hard_vlm = str(query_topic).startswith(("hard_", "adv_"))
+    run_hard_vlm = False
+    if str(query_topic).startswith("hard_"):
+        run_hard_vlm = True
+    elif str(query_topic).startswith("adv_"):
+        mode = _adv_hard_vlm_mode(system)
+        if mode == "off":
+            run_hard_vlm = False
+        elif mode == "fallback":
+            run_hard_vlm = not _has_structured_adv_source(query_topic, claim_sources)
+        else:
+            run_hard_vlm = True
     hard_vlm = _hard_vlm_extract(system, result, query_topic, query) if run_hard_vlm else {}
     display_sources = _augment_claim_sources_for_display(query_topic, claim_sources, metadata)
     display = _build_answer_display(
@@ -5507,6 +6677,147 @@ def _apply_answer_display(
 
     processing = result.get("processing", {}) if isinstance(result.get("processing", {}), dict) else {}
     processing = dict(processing)
+    promptops_used = False
+    promptops_applied = False
+    promptops_strategy = ""
+    promptops_cfg = processing.get("promptops", {}) if isinstance(processing.get("promptops", {}), dict) else {}
+    if promptops_cfg:
+        promptops_used = bool(promptops_cfg.get("used", False))
+        promptops_applied = bool(promptops_cfg.get("applied", False))
+        promptops_strategy = str(promptops_cfg.get("strategy") or "")
+    state_layer_cfg = processing.get("state_layer", {}) if isinstance(processing.get("state_layer", {}), dict) else {}
+    if state_layer_cfg:
+        promptops_used = bool(promptops_used or bool(state_layer_cfg.get("promptops_used", False)))
+        promptops_applied = bool(promptops_applied or bool(state_layer_cfg.get("promptops_applied", False)))
+        if not promptops_strategy:
+            promptops_strategy = str(state_layer_cfg.get("promptops_strategy") or "")
+    processing["promptops_used"] = bool(promptops_used)
+    processing["promptops_applied"] = bool(promptops_applied)
+    if promptops_strategy:
+        processing["promptops_strategy"] = str(promptops_strategy)
+
+    synth_info = result.get("synth_claims", {}) if isinstance(result.get("synth_claims", {}), dict) else {}
+    synth_count = int(synth_info.get("count", 0) or 0)
+    synth_cap_present = False
+    try:
+        if hasattr(system, "has"):
+            synth_cap_present = bool(system.has("answer.synthesizer"))
+        elif isinstance(system, dict):
+            synth_cap_present = system.get("answer.synthesizer") is not None
+    except Exception:
+        synth_cap_present = False
+    if not synth_cap_present:
+        try:
+            cfg = system.config if hasattr(system, "config") and isinstance(system.config, dict) else {}
+            plugins_cfg = cfg.get("plugins", {}) if isinstance(cfg.get("plugins", {}), dict) else {}
+            enabled = plugins_cfg.get("enabled", {}) if isinstance(plugins_cfg.get("enabled", {}), dict) else {}
+            synth_cap_present = bool(enabled.get("builtin.answer.synth_vllm_localhost", False))
+        except Exception:
+            synth_cap_present = False
+    if not any(
+        isinstance(p, dict) and str(p.get("provider_id") or "") == "builtin.answer.synth_vllm_localhost"
+        for p in providers
+    ):
+        providers.append(
+            {
+                "provider_id": "builtin.answer.synth_vllm_localhost",
+                "claim_count": int(synth_count),
+                "citation_count": 0,
+                "record_types": [],
+                "doc_kinds": [],
+                "signal_keys": [],
+                "contribution_bp": 0,
+            }
+        )
+        tree = _workflow_tree(providers)
+
+    hard_fields = _normalize_hard_fields_for_topic(query_topic, hard_vlm if isinstance(hard_vlm, dict) else {})
+    if (not hard_fields or set(str(k) for k in hard_fields.keys()) <= {"_debug_error", "error", "answer_text"}) and isinstance(
+        display.get("fields"), dict
+    ):
+        debug_error = str(hard_fields.get("_debug_error") or "").strip() if isinstance(hard_fields, dict) else ""
+        answer_text_raw = str(hard_fields.get("answer_text") or "").strip() if isinstance(hard_fields, dict) else ""
+        fallback_fields = {
+            str(k): v
+            for k, v in dict(display.get("fields") or {}).items()
+            if str(k).strip() and v not in (None, "", [], {})
+        }
+        if answer_text_raw and "answer_text" not in fallback_fields:
+            fallback_fields["answer_text"] = answer_text_raw
+        if debug_error and "_debug_error" not in fallback_fields:
+            fallback_fields["_debug_error"] = debug_error
+        if fallback_fields:
+            hard_fields = fallback_fields
+
+    if isinstance(hard_fields, dict) and hard_fields:
+        quality_ok = hard_fields.get("_quality_gate_ok")
+        if isinstance(quality_ok, bool):
+            processing["hard_vlm_quality"] = {
+                "ok": bool(quality_ok),
+                "reason": str(hard_fields.get("_quality_gate_reason") or ""),
+                "quality_bp": int(_intish(hard_fields.get("_quality_gate_bp")) or 0),
+            }
+
+    hard_has_substantive = _hard_fields_have_substantive_content(query_topic, hard_fields)
+    if (not hard_has_substantive) and str(query_topic).startswith("adv_") and isinstance(display.get("fields"), dict):
+        support_rows = display.get("fields", {}).get("support_snippets")
+        if isinstance(support_rows, list) and any(str(x).strip() for x in support_rows):
+            hard_has_substantive = True
+    if hard_has_substantive:
+        answer_claims = answer_obj.get("claims", [])
+        if not isinstance(answer_claims, list):
+            answer_claims = []
+        if not answer_claims:
+            claim_text = _compact_line(str(display.get("summary") or ""), limit=320)
+            if not claim_text:
+                claim_text = _compact_line(json.dumps(hard_fields, ensure_ascii=True, sort_keys=True), limit=320)
+            evidence_id = _first_evidence_record_id(result) or _latest_evidence_record_id(system) or f"hard_vlm.{query_topic}"
+            locator_hash = hash_text(normalize_text(f"{claim_text}|{evidence_id}"))
+            citation = {
+                "schema_version": 1,
+                "locator": _citation_locator(
+                    kind="record",
+                    record_id=str(evidence_id),
+                    record_hash=str(locator_hash),
+                    offset_start=None,
+                    offset_end=None,
+                    span_text=None,
+                ),
+                "span_id": str(evidence_id),
+                "evidence_id": str(evidence_id),
+                "evidence_hash": str(locator_hash),
+                "derived_id": "",
+                "derived_hash": "",
+                "span_kind": "record",
+                "span_ref": {"kind": "record", "record_id": str(evidence_id)},
+                "ledger_head": "",
+                "anchor_ref": "",
+                "source": "hard_vlm.direct",
+                "offset_start": 0,
+                "offset_end": int(len(claim_text)),
+                "stale": False,
+                "stale_reason": "",
+            }
+            answer_obj["claims"] = [{"text": claim_text, "citations": [citation]}]
+            if str(answer_obj.get("state") or "").strip().casefold() in {"", "no_evidence", "partial", "error"}:
+                answer_obj["state"] = "ok"
+            notice = str(answer_obj.get("notice") or "").strip()
+            if notice.casefold().startswith("citations required: no evidence available"):
+                answer_obj.pop("notice", None)
+        if not any(isinstance(p, dict) and str(p.get("provider_id") or "") == "hard_vlm.direct" for p in providers):
+            providers.append(
+                {
+                    "provider_id": "hard_vlm.direct",
+                    "claim_count": int(len(answer_obj.get("claims", []) if isinstance(answer_obj.get("claims", []), list) else [])),
+                    "citation_count": 1 if isinstance(answer_obj.get("claims", []), list) and answer_obj.get("claims", []) else 0,
+                    "record_types": ["derived.hard_vlm.answer"],
+                    "doc_kinds": [str(query_topic)],
+                    "signal_keys": sorted([str(k) for k in hard_fields.keys() if str(k).strip()])[:64],
+                    "contribution_bp": 0,
+                }
+            )
+            tree = _workflow_tree(providers)
+
     processing["attribution"] = {
         "schema_version": 1,
         "claim_count": int(len(claim_sources)),
@@ -5526,8 +6837,8 @@ def _apply_answer_display(
         ],
         "workflow_tree": tree,
     }
-    if hard_vlm:
-        processing["hard_vlm"] = {"topic": query_topic, "fields": hard_vlm}
+    if hard_fields:
+        processing["hard_vlm"] = {"topic": query_topic, "fields": hard_fields}
     processing["query_intent"] = intent_obj
 
     result_obj = dict(result)

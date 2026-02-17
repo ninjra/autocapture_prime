@@ -9,6 +9,7 @@ Backend order:
 from __future__ import annotations
 
 from io import BytesIO
+import time
 from typing import Any
 
 from autocapture_nx.inference.openai_compat import OpenAICompatClient, image_bytes_to_data_url
@@ -53,6 +54,20 @@ class NemotronOCR(PluginBase):
         self._processor = None
         self._model = None
         self._local_error = ""
+        self._promptops = None
+        self._promptops_cfg = cfg.get("promptops", {}) if isinstance(cfg.get("promptops", {}), dict) else {}
+        if bool(self._promptops_cfg.get("enabled", True)):
+            try:
+                from autocapture.promptops.engine import PromptOpsLayer
+
+                self._promptops = PromptOpsLayer(
+                    {
+                        "promptops": self._promptops_cfg,
+                        "paths": {"data_dir": str(self._promptops_cfg.get("data_dir") or "data")},
+                    }
+                )
+            except Exception:
+                self._promptops = None
 
     def capabilities(self) -> dict[str, Any]:
         return {"ocr.engine": self}
@@ -85,6 +100,7 @@ class NemotronOCR(PluginBase):
         }
 
     def _extract_local_torch(self, frame_bytes: bytes) -> dict[str, Any]:
+        started = time.perf_counter()
         out = {"text": "", "engine": "nemotron", "model_id": self._model_id, "backend": "nemotron_torch_local"}
         if not self._model_id:
             out["error"] = "model_id_missing"
@@ -102,7 +118,12 @@ class NemotronOCR(PluginBase):
             out["error"] = f"image_decode_failed:{type(exc).__name__}"
             return out
         try:
-            messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": self._prompt}]}]
+            prompt_effective, prompt_meta = self._prepare_promptops_prompt(
+                self._prompt,
+                prompt_id="llm.ocr.local",
+                fallback_strategy="model_contract",
+            )
+            messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": prompt_effective}]}]
             prompt = self._processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
             inputs = self._processor(text=[prompt], images=[image], return_tensors="pt")
             model_device = getattr(self._model, "device", None)
@@ -128,9 +149,29 @@ class NemotronOCR(PluginBase):
             out["text"] = text
             if not text:
                 out["error"] = "local_empty_response"
+            self._record_promptops_interaction(
+                prompt_id="llm.ocr.local",
+                prompt_input=self._prompt,
+                prompt_effective=prompt_effective,
+                response_text=text,
+                success=bool(text),
+                latency_ms=float((time.perf_counter() - started) * 1000.0),
+                error=str(out.get("error") or ""),
+                metadata={"backend": "local_torch", "promptops": prompt_meta},
+            )
             return out
         except Exception as exc:
             out["error"] = f"local_inference_failed:{type(exc).__name__}"
+            self._record_promptops_interaction(
+                prompt_id="llm.ocr.local",
+                prompt_input=self._prompt,
+                prompt_effective=self._prompt,
+                response_text="",
+                success=False,
+                latency_ms=float((time.perf_counter() - started) * 1000.0),
+                error=str(out.get("error") or ""),
+                metadata={"backend": "local_torch"},
+            )
             return out
 
     def _ensure_local_model(self) -> None:
@@ -174,6 +215,7 @@ class NemotronOCR(PluginBase):
             self._model = None
 
     def _extract_openai_compat(self, frame_bytes: bytes) -> dict[str, Any]:
+        started = time.perf_counter()
         out = {"text": "", "engine": "nemotron", "model_id": self._openai_model or "", "backend": "openai_compat_ocr"}
         client = self._ensure_client()
         if client is None:
@@ -186,13 +228,18 @@ class NemotronOCR(PluginBase):
         if not model:
             out["error"] = "openai_model_missing"
             return out
+        prompt_effective, prompt_meta = self._prepare_promptops_prompt(
+            self._prompt,
+            prompt_id="llm.ocr.openai_compat",
+            fallback_strategy="model_contract",
+        )
         request = {
             "model": model,
             "messages": [
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": self._prompt},
+                        {"type": "text", "text": prompt_effective},
                         {"type": "image_url", "image_url": {"url": image_bytes_to_data_url(frame_bytes, content_type="image/png")}},
                     ],
                 }
@@ -204,10 +251,30 @@ class NemotronOCR(PluginBase):
             response = client.chat_completions(request)
         except Exception as exc:
             out["error"] = f"openai_request_failed:{type(exc).__name__}"
+            self._record_promptops_interaction(
+                prompt_id="llm.ocr.openai_compat",
+                prompt_input=self._prompt,
+                prompt_effective=prompt_effective,
+                response_text="",
+                success=False,
+                latency_ms=float((time.perf_counter() - started) * 1000.0),
+                error=str(out.get("error") or ""),
+                metadata={"backend": "openai_compat", "promptops": prompt_meta},
+            )
             return out
         choices = response.get("choices", []) if isinstance(response, dict) else []
         if not isinstance(choices, list) or not choices:
             out["error"] = "openai_empty_choices"
+            self._record_promptops_interaction(
+                prompt_id="llm.ocr.openai_compat",
+                prompt_input=self._prompt,
+                prompt_effective=prompt_effective,
+                response_text="",
+                success=False,
+                latency_ms=float((time.perf_counter() - started) * 1000.0),
+                error=str(out.get("error") or ""),
+                metadata={"backend": "openai_compat", "promptops": prompt_meta},
+            )
             return out
         message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
         text = str(message.get("content") or "").strip()
@@ -215,7 +282,68 @@ class NemotronOCR(PluginBase):
         out["model_id"] = str(model)
         if not text:
             out["error"] = "openai_empty_response"
+        self._record_promptops_interaction(
+            prompt_id="llm.ocr.openai_compat",
+            prompt_input=self._prompt,
+            prompt_effective=prompt_effective,
+            response_text=text,
+            success=bool(text),
+            latency_ms=float((time.perf_counter() - started) * 1000.0),
+            error=str(out.get("error") or ""),
+            metadata={"backend": "openai_compat", "promptops": prompt_meta},
+        )
         return out
+
+    def _prepare_promptops_prompt(self, prompt: str, *, prompt_id: str, fallback_strategy: str) -> tuple[str, dict[str, Any]]:
+        meta: dict[str, Any] = {
+            "used": bool(self._promptops is not None),
+            "applied": False,
+            "strategy": str(self._promptops_cfg.get("model_strategy", fallback_strategy)),
+        }
+        if self._promptops is None:
+            return str(prompt or ""), meta
+        try:
+            strategy = str(self._promptops_cfg.get("model_strategy", fallback_strategy))
+            result = self._promptops.prepare_prompt(
+                str(prompt or ""),
+                prompt_id=str(prompt_id),
+                strategy=strategy,
+                persist=bool(self._promptops_cfg.get("persist_prompts", False)),
+            )
+            meta["applied"] = bool(result.applied)
+            return str(result.prompt or ""), meta
+        except Exception:
+            return str(prompt or ""), meta
+
+    def _record_promptops_interaction(
+        self,
+        *,
+        prompt_id: str,
+        prompt_input: str,
+        prompt_effective: str,
+        response_text: str,
+        success: bool,
+        latency_ms: float,
+        error: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        if self._promptops is None:
+            return
+        try:
+            self._promptops.record_model_interaction(
+                prompt_id=str(prompt_id),
+                provider_id=self.plugin_id,
+                model=str(self._openai_model or self._model_id or ""),
+                prompt_input=str(prompt_input or ""),
+                prompt_effective=str(prompt_effective or ""),
+                response_text=str(response_text or ""),
+                success=bool(success),
+                latency_ms=float(latency_ms),
+                error=str(error or ""),
+                metadata=metadata if isinstance(metadata, dict) else {},
+            )
+        except Exception:
+            return
 
     def _ensure_client(self) -> OpenAICompatClient | None:
         if self._client is not None:

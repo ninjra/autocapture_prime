@@ -77,8 +77,8 @@ class TemporalLinker:
                     next_track += 1
                 else:
                     used_prev.add(chosen)
-                    prev_elem = prev.get(chosen)
-                    if prev_elem and prev_elem.element_id != element.element_id:
+                    matched_prev = prev.get(chosen)
+                    if matched_prev and matched_prev.element_id != element.element_id:
                         id_switches += 1
                 current_map[chosen] = element
                 tracks.append(

@@ -7,22 +7,48 @@ import unittest
 from pathlib import Path
 import sys
 import subprocess
+import socket
+import os
+
+
+def _socket_available() -> bool:
+    try:
+        s = socket.socket()
+        s.close()
+        return True
+    except OSError:
+        return False
+
+
+def _localhost_bind_available() -> bool:
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.bind(("127.0.0.1", 0))
+        finally:
+            s.close()
+        return True
+    except OSError:
+        return False
 
 
 def main() -> int:
     # NOTE: `tests/` is intentionally not a Python package (no `tests/__init__.py`).
     # Add it to sys.path and load by module name.
     checks = [
-        "test_network_guard",
         "test_plugin_network_block",
         "test_encrypted_store_fail_loud",
         "test_sanitizer_no_raw_pii",
         "test_policy_gate",
-        "test_egress_gateway",
         "test_sqlcipher_roundtrip",
         "test_plugin_sandbox",
-        "test_keyring_migration_windows",
     ]
+    if _socket_available():
+        checks.insert(0, "test_network_guard")
+    if _localhost_bind_available():
+        checks.append("test_egress_gateway")
+    if os.name == "nt":
+        checks.append("test_keyring_migration_windows")
     summary = {"schema_version": 1, "checks": []}
     failed = False
     root = Path(__file__).resolve().parents[1]

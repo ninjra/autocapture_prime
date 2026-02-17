@@ -47,6 +47,10 @@ def _run_query(root: Path, query: str, cfg: str, data: str) -> dict[str, Any]:
     env["AUTOCAPTURE_DATA_DIR"] = str(data)
     env.setdefault("AUTOCAPTURE_HARD_VLM_DEBUG", "1")
     env["AUTOCAPTURE_VLM_BASE_URL"] = EXTERNAL_VLLM_BASE_URL
+    if not str(env.get("AUTOCAPTURE_VLM_API_KEY") or "").strip():
+        api_key = _configured_vlm_api_key(Path(cfg))
+        if api_key:
+            env["AUTOCAPTURE_VLM_API_KEY"] = api_key
     if not str(env.get("AUTOCAPTURE_VLM_MODEL") or "").strip():
         model = _configured_vlm_model(Path(cfg))
         if model:
@@ -80,6 +84,19 @@ def _configured_vlm_model(config_dir: Path) -> str:
     vllm = settings.get("builtin.vlm.vllm_localhost", {}) if isinstance(settings, dict) else {}
     model = str(vllm.get("model") or "").strip() if isinstance(vllm, dict) else ""
     return model
+
+
+def _configured_vlm_api_key(config_dir: Path) -> str:
+    try:
+        path = config_dir / "user.json"
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    plugins_cfg = raw.get("plugins", {}) if isinstance(raw, dict) else {}
+    settings = plugins_cfg.get("settings", {}) if isinstance(plugins_cfg, dict) else {}
+    vllm = settings.get("builtin.vlm.vllm_localhost", {}) if isinstance(settings, dict) else {}
+    api_key = str(vllm.get("api_key") or "").strip() if isinstance(vllm, dict) else ""
+    return api_key
 
 
 def _summary(result: dict[str, Any]) -> tuple[str, list[str]]:
@@ -188,12 +205,26 @@ def main(argv: list[str] | None = None) -> int:
     if not cfg or not data:
         print("ERROR: latest report missing config_dir/data_dir.", file=sys.stderr)
         return 2
+    if not str(os.environ.get("AUTOCAPTURE_VLM_API_KEY") or "").strip():
+        api_key = _configured_vlm_api_key(Path(cfg))
+        if api_key:
+            os.environ["AUTOCAPTURE_VLM_API_KEY"] = api_key
+    os.environ.setdefault("AUTOCAPTURE_VLM_BASE_URL", EXTERNAL_VLLM_BASE_URL)
+    os.environ.setdefault("AUTOCAPTURE_VLM_MODEL", "internvl3_5_8b")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", "12")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_RETRIES", "3")
+    os.environ.setdefault("AUTOCAPTURE_VLM_MAX_INFLIGHT", "1")
+    os.environ.setdefault(
+        "AUTOCAPTURE_VLM_ORCHESTRATOR_CMD",
+        "bash /mnt/d/projects/hypervisor/tools/wsl/start_internvl35_8b_with_watch.sh",
+    )
 
     vllm_status = check_external_vllm_ready()
     if not bool(vllm_status.get("ok", False)):
+        cmd = str(vllm_status.get("orchestrator_cmd") or os.environ.get("AUTOCAPTURE_VLM_ORCHESTRATOR_CMD") or "").strip()
         print(
-            "ERROR: external vLLM unavailable at http://127.0.0.1:8000. "
-            "This repo no longer starts vLLM locally; start it from the sidecar repo.",
+            f"ERROR: external vLLM unavailable at {EXTERNAL_VLLM_BASE_URL}. "
+            f"orchestrator_cmd={cmd}",
             file=sys.stderr,
         )
         print(json.dumps(vllm_status, indent=2), file=sys.stderr)

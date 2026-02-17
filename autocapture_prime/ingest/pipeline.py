@@ -212,7 +212,8 @@ def _rescale_spans(spans: list[Any], scale: float) -> list[Any]:
 def _merge_spans(rows: list[_SpanWithSource]) -> list[_SpanWithSource]:
     best: dict[tuple[str, tuple[int, int, int, int]], _SpanWithSource] = {}
     for item in rows:
-        key = (str(item.span.text or "").strip(), tuple(int(v) for v in item.span.bbox))
+        x0, y0, x1, y1 = (int(item.span.bbox[0]), int(item.span.bbox[1]), int(item.span.bbox[2]), int(item.span.bbox[3]))
+        key = (str(item.span.text or "").strip(), (x0, y0, x1, y1))
         current = best.get(key)
         if current is None:
             best[key] = item
@@ -231,10 +232,12 @@ def ingest_one_session(session: SessionCandidate, config: PrimeConfig) -> dict[s
     loader = SessionLoader(session.session_dir)
     loaded = loader.load()
     decoder = FrameDecoder()
+    ocr_engine: Any
     if config.ocr_engine.lower() == "tesseract":
         ocr_engine = TesseractOcrEngine()
     else:
         ocr_engine = PaddleOcrEngine(config.ocr_cache_dir, config={"engine": config.ocr_engine})
+    layout_engine: Any
     if config.layout_engine.lower() == "omniparser":
         layout_engine = OmniParserEngine(config.allow_agpl)
     else:

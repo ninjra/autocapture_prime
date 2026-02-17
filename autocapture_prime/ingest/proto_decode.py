@@ -253,11 +253,12 @@ def _input_to_dict(item: Any) -> dict[str, Any]:
 
 
 def _detection_to_dict(item: Any) -> dict[str, Any]:
-    out = {
+    elements: list[dict[str, Any]] = []
+    out: dict[str, Any] = {
         "session_id": str(getattr(item, "session_id", "") or ""),
         "frame_index": int(getattr(item, "frame_index", 0) or 0),
         "qpc_ticks": int(getattr(item, "qpc_ticks", 0) or 0),
-        "elements": [],
+        "elements": elements,
     }
     for elem in getattr(item, "elements", []):
         row = {
@@ -270,5 +271,5 @@ def _detection_to_dict(item: Any) -> dict[str, Any]:
         }
         if elem.HasField("bbox"):
             row["bbox"] = {"x": int(elem.bbox.x), "y": int(elem.bbox.y), "w": int(elem.bbox.w), "h": int(elem.bbox.h)}
-        out["elements"].append(row)
+        elements.append(row)
     return out

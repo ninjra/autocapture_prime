@@ -78,8 +78,11 @@ class GenerateQHPluginValidationReportTests(unittest.TestCase):
             self.assertTrue(md.exists())
             self.assertTrue(js.exists())
             self.assertIn("Plugin Inventory + Effectiveness", md.read_text(encoding="utf-8"))
+            self.assertIn("Class Summary (Q/H/Other)", md.read_text(encoding="utf-8"))
+            payload = json.loads(js.read_text(encoding="utf-8"))
+            self.assertIn("class_rows", payload)
+            self.assertIn("answer_state_confusion", payload)
 
 
 if __name__ == "__main__":
     unittest.main()
-

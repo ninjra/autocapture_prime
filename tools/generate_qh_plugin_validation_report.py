@@ -120,6 +120,15 @@ def _plugin_decision(*, status: str, in_path: int, strict_pass: int, strict_fail
     return "neutral"
 
 
+def _question_class(case_id: str) -> str:
+    text = str(case_id or "").strip().upper()
+    if text.startswith("Q"):
+        return "Q"
+    if text.startswith("H"):
+        return "H"
+    return "OTHER"
+
+
 def main() -> int:
     artifact_path = _latest_advanced20()
     artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
@@ -209,6 +218,46 @@ def main() -> int:
         )
     plugin_rows.sort(key=lambda item: (str(item["status"]), -int(item["in_path_count"]), str(item["plugin_id"])))
 
+    class_summary: dict[str, dict[str, Any]] = {}
+    state_confusion: dict[str, dict[str, int]] = {}
+    for row in rows:
+        cls = _question_class(str(row.get("id") or ""))
+        ev = row.get("expected_eval") if isinstance(row.get("expected_eval"), dict) else {}
+        evaluated = bool(ev.get("evaluated", False))
+        passed = bool(ev.get("passed", False))
+        state = str(row.get("answer_state") or "").strip().lower() or "unknown"
+        bucket = class_summary.setdefault(
+            cls,
+            {
+                "class": cls,
+                "total": 0,
+                "strict_evaluated": 0,
+                "strict_passed": 0,
+                "strict_failed": 0,
+                "confidence_mean": 0.0,
+                "confidence_samples": [],
+            },
+        )
+        bucket["total"] = int(bucket["total"]) + 1
+        bucket["confidence_samples"].append(float(row.get("_confidence") or 0.0))
+        if evaluated:
+            bucket["strict_evaluated"] = int(bucket["strict_evaluated"]) + 1
+            if passed:
+                bucket["strict_passed"] = int(bucket["strict_passed"]) + 1
+            else:
+                bucket["strict_failed"] = int(bucket["strict_failed"]) + 1
+
+        state_row = state_confusion.setdefault(cls, {})
+        state_row[state] = int(state_row.get(state, 0) + 1)
+
+    class_rows: list[dict[str, Any]] = []
+    for cls in sorted(class_summary.keys()):
+        item = class_summary[cls]
+        conf_samples = item.pop("confidence_samples", [])
+        conf_mean = float(mean(float(v) for v in conf_samples)) if conf_samples else 0.0
+        item["confidence_mean"] = round(conf_mean, 4)
+        class_rows.append(item)
+
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     output_path = ROOT / "docs" / "reports" / "question-validation-plugin-trace-2026-02-13.md"
     json_output = ROOT / "artifacts" / "advanced10" / "question_validation_plugin_trace_latest.json"
@@ -232,6 +281,25 @@ def main() -> int:
         lines.append(
             f"| {row.get('id')} | {ev.get('evaluated')} | {ev.get('passed')} | {row.get('answer_state')} | {float(row.get('_confidence')):.2f} | {row.get('_confidence_label')} | {row.get('winner')} | {len(row.get('providers') or [])} |"
         )
+
+    lines.append("")
+    lines.append("## Class Summary (Q/H/Other)")
+    lines.append("| Class | Total | Strict Evaluated | Strict Passed | Strict Failed | Confidence Mean |")
+    lines.append("| --- | ---: | ---: | ---: | ---: | ---: |")
+    for item in class_rows:
+        lines.append(
+            f"| {item['class']} | {item['total']} | {item['strict_evaluated']} | {item['strict_passed']} | {item['strict_failed']} | {float(item['confidence_mean']):.4f} |"
+        )
+
+    lines.append("")
+    lines.append("## Answer State Confusion By Class")
+    for cls in sorted(state_confusion.keys()):
+        lines.append(f"### Class {cls}")
+        lines.append("| Answer State | Count |")
+        lines.append("| --- | ---: |")
+        for state, count in sorted(state_confusion[cls].items(), key=lambda kv: kv[0]):
+            lines.append(f"| {state} | {count} |")
+        lines.append("")
 
     lines.append("")
     lines.append("## Plugin Inventory + Effectiveness")
@@ -278,6 +346,8 @@ def main() -> int:
                 "run_report": str(run_report_path),
                 "overall_confidence": round(overall_conf, 6),
                 "rows": rows,
+                "class_rows": class_rows,
+                "answer_state_confusion": state_confusion,
                 "plugin_rows": plugin_rows,
             },
             indent=2,

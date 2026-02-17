@@ -7,8 +7,11 @@ It must never be used for non-loopback egress.
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
 import json
+import os
 import socket
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,6 +21,66 @@ from typing import Any
 
 class LocalhostOnlyError(RuntimeError):
     pass
+
+
+_VLM_GATE_LOCK = threading.Lock()
+_VLM_GATE_SEM: threading.BoundedSemaphore | None = None
+_VLM_GATE_LIMIT = 0
+
+
+def _managed_vlm_max_inflight() -> int:
+    raw = str(os.environ.get("AUTOCAPTURE_VLM_MAX_INFLIGHT") or "").strip()
+    try:
+        value = int(raw) if raw else 1
+    except Exception:
+        value = 1
+    return max(1, min(64, value))
+
+
+def _managed_vlm_semaphore() -> tuple[threading.BoundedSemaphore, int]:
+    global _VLM_GATE_SEM, _VLM_GATE_LIMIT
+    limit = _managed_vlm_max_inflight()
+    with _VLM_GATE_LOCK:
+        if _VLM_GATE_SEM is None or _VLM_GATE_LIMIT != limit:
+            _VLM_GATE_SEM = threading.BoundedSemaphore(limit)
+            _VLM_GATE_LIMIT = limit
+        sem = _VLM_GATE_SEM
+    assert sem is not None
+    return sem, limit
+
+
+def _is_managed_vlm_url(url: str) -> bool:
+    try:
+        parsed = urllib.parse.urlparse(str(url or ""))
+    except Exception:
+        return False
+    host = str(parsed.hostname or "").strip()
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        return False
+    try:
+        port = int(parsed.port or 80)
+    except Exception:
+        return False
+    if port != 8000:
+        return False
+    path = str(parsed.path or "")
+    return path.startswith("/v1/")
+
+
+@contextmanager
+def _maybe_managed_vlm_gate(*, url: str, timeout_s: float):
+    if not _is_managed_vlm_url(url):
+        yield
+        return
+    sem, limit = _managed_vlm_semaphore()
+    wait_timeout = max(5.0, float(timeout_s) + 2.0)
+    acquired = sem.acquire(timeout=wait_timeout)
+    if not acquired:
+        raise RuntimeError(f"vlm_gate_timeout:max_inflight={limit}")
+    try:
+        yield
+    finally:
+        sem.release()
 
 
 def _is_loopback_host(host: str) -> bool:
@@ -87,8 +150,9 @@ def _request_json(
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=float(timeout_s)) as resp:
-            data = resp.read(int(max_response_bytes) + 1)
+        with _maybe_managed_vlm_gate(url=url, timeout_s=float(timeout_s)):
+            with urllib.request.urlopen(req, timeout=float(timeout_s)) as resp:
+                data = resp.read(int(max_response_bytes) + 1)
     except urllib.error.HTTPError as exc:
         try:
             blob = exc.read(4096)
@@ -122,8 +186,17 @@ class OpenAICompatClient:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
+    def _endpoint_url(self, suffix: str) -> str:
+        base = self.base_url.rstrip("/")
+        part = str(suffix or "")
+        if not part.startswith("/"):
+            part = "/" + part
+        if base.endswith("/v1") and part.startswith("/v1/"):
+            return f"{base}{part[3:]}"
+        return f"{base}{part}"
+
     def list_models(self) -> dict[str, Any]:
-        url = f"{self.base_url}/v1/models"
+        url = self._endpoint_url("/v1/models")
         return _request_json(
             method="GET",
             url=url,
@@ -134,7 +207,7 @@ class OpenAICompatClient:
         )
 
     def chat_completions(self, payload: dict[str, Any]) -> dict[str, Any]:
-        url = f"{self.base_url}/v1/chat/completions"
+        url = self._endpoint_url("/v1/chat/completions")
         return _request_json(
             method="POST",
             url=url,
@@ -145,7 +218,7 @@ class OpenAICompatClient:
         )
 
     def embeddings(self, payload: dict[str, Any]) -> dict[str, Any]:
-        url = f"{self.base_url}/v1/embeddings"
+        url = self._endpoint_url("/v1/embeddings")
         return _request_json(
             method="POST",
             url=url,

@@ -9,7 +9,7 @@ from autocapture.config.defaults import default_config_paths
 from autocapture.config.load import load_config
 from autocapture.gateway.schemas import ChatRequest, ChatResponse, ChatChoice, ChatMessage
 from autocapture.memory.answer_orchestrator import create_local_llm
-from autocapture.promptops.engine import PromptOpsLayer
+from autocapture.promptops.service import get_promptops_layer
 from autocapture.plugins.policy_gate import PolicyGate
 from autocapture.ux.redaction import EgressSanitizer
 from autocapture.core.http import EgressClient
@@ -25,7 +25,7 @@ def _config():
 def chat(req: ChatRequest):
     config = _config()
     prompt = "\n".join([m.content for m in req.messages])
-    promptops = PromptOpsLayer(config)
+    promptops = get_promptops_layer(config)
     prepared = promptops.prepare_prompt(prompt, prompt_id="gateway.chat")
     prepared_prompt = prepared.prompt
 

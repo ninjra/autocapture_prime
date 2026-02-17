@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 
 def _run_suite(module: str) -> tuple[str, dict]:
@@ -50,8 +55,9 @@ def main() -> int:
         "tests.test_keyring_require_protection",
         "tests.test_keyring_status",
         "tests.test_key_rotation",
-        "tests.test_keyring_migration_windows",
     ]
+    if os.name == "nt":
+        checks.append("tests.test_keyring_migration_windows")
     summary = {"schema_version": 1, "checks": []}
     failed = False
     for module in checks:

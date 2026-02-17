@@ -22,4 +22,11 @@
 ## Definition of Done
 - All test suites in MOD-021 pass.
 - Coverage_Map is satisfied: every SRC implemented and verifiable.
-Always provide a single short one-line command with no line breaks and keep it under terminal width; create any needed script/cmd to implement the command and provide a short full-path command to run that script.
+
+## Operator Rules (Hard Gate)
+- Commands shown to the user MUST be short, one-line, no line breaks, and practical to paste/run directly.
+- Before any file/code change:
+  - Print the full available skills list.
+  - State selected skill(s) and rationale.
+  - If no specialized skill is needed, state that explicitly.
+- If this sequence is not followed, stop, acknowledge, and restart from the skill-list step before continuing.

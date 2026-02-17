@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import math
 import re
+import time
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Any
@@ -51,6 +53,94 @@ DEFAULT_ROI_PROMPT = (
     "Use only visible evidence, valid normalized bboxes, and return valid JSON only."
 )
 
+DEFAULT_FACTPACK_PROMPT = (
+    "Return JSON only.\n"
+    "Schema: "
+    '{"facts":[{"key":"adv.* key","value":"visible value","confidence":0.0}],'
+    '"windows":[{"label":"text","app":"text","context":"host|vdi|unknown","bbox_norm":[x1,y1,x2,y2],"visibility":"fully_visible|partially_occluded|unknown","z_hint":0.0}]}. '
+    "Extract high-fidelity canonical facts from visible UI only (no guessing). "
+    "Preferred keys include: "
+    "adv.window.count, adv.window.N.app/context/visibility/z_order, "
+    "adv.focus.window, adv.focus.evidence_N_kind/text, "
+    "adv.incident.subject/sender_display/sender_domain/action_buttons/button.complete_bbox_norm/button.view_details_bbox_norm, "
+    "adv.activity.count/adv.activity.N.timestamp/text, "
+    "adv.details.count/adv.details.N.label/value, "
+    "adv.calendar.month_year/selected_date/item_count/item.N.start/item.N.title, "
+    "adv.slack.dm_name/message_count/thumbnail_desc/msg.N.sender/timestamp/text, "
+    "adv.dev.tests_cmd/what_changed_count/what_changed.N/file_count/file.N, "
+    "adv.console.red_count/green_count/other_count/red_lines, "
+    "adv.browser.window_count/browser.N.hostname/active_title/tab_count. "
+    "If a value is not clearly visible, omit that key."
+)
+
+DEFAULT_TOPIC_FACTPACK_TOPICS = [
+    "window",
+    "focus",
+    "incident",
+    "activity",
+    "details",
+    "calendar",
+    "slack",
+    "dev",
+    "console",
+    "browser",
+]
+
+DEFAULT_TOPIC_FACTPACK_PROMPTS: dict[str, str] = {
+    "window": (
+        "Return JSON only with schema "
+        '{"facts":[{"key":"adv.window.*","value":"text","confidence":0.0}],"windows":[{"label":"text","app":"text","context":"host|vdi|unknown","bbox_norm":[x1,y1,x2,y2],"visibility":"fully_visible|partially_occluded|unknown","z_hint":0.0}]}. '
+        "Extract top-level visible windows and emit canonical keys: adv.window.count and adv.window.N.app/context/visibility/z_order. "
+        "Use only visible evidence and omit unclear values."
+    ),
+    "focus": (
+        "Return JSON only with schema "
+        '{"facts":[{"key":"adv.focus.*","value":"text","confidence":0.0}]}. '
+        "Extract focused window with two evidence items using keys adv.focus.window, adv.focus.evidence_1_kind/text, adv.focus.evidence_2_kind/text."
+    ),
+    "incident": (
+        "Return JSON only with schema "
+        '{"facts":[{"key":"adv.incident.*","value":"text","confidence":0.0}]}. '
+        "Extract incident reading-pane fields using keys adv.incident.subject, adv.incident.sender_display, adv.incident.sender_domain, adv.incident.action_buttons. "
+        "sender_domain must be domain only."
+    ),
+    "activity": (
+        "Return JSON only with schema "
+        '{"facts":[{"key":"adv.activity.*","value":"text","confidence":0.0}]}. '
+        "Extract Record Activity timeline with adv.activity.count and adv.activity.N.timestamp/text in top-to-bottom order."
+    ),
+    "details": (
+        "Return JSON only with schema "
+        '{"facts":[{"key":"adv.details.*","value":"text","confidence":0.0}]}. '
+        "Extract Details key-value rows with adv.details.count and adv.details.N.label/value."
+    ),
+    "calendar": (
+        "Return JSON only with schema "
+        '{"facts":[{"key":"adv.calendar.*","value":"text","confidence":0.0}]}. '
+        "Extract calendar month/year, selected date, and visible schedule rows with adv.calendar.month_year, adv.calendar.selected_date, adv.calendar.item_count, adv.calendar.item.N.start/title."
+    ),
+    "slack": (
+        "Return JSON only with schema "
+        '{"facts":[{"key":"adv.slack.*","value":"text","confidence":0.0}]}. '
+        "Extract Slack DM fields using adv.slack.dm_name, adv.slack.message_count, adv.slack.msg.N.sender/timestamp/text, adv.slack.thumbnail_desc."
+    ),
+    "dev": (
+        "Return JSON only with schema "
+        '{"facts":[{"key":"adv.dev.*","value":"text","confidence":0.0}]}. '
+        "Extract dev summary fields using adv.dev.tests_cmd, adv.dev.what_changed_count, adv.dev.what_changed.N, adv.dev.file_count, adv.dev.file.N."
+    ),
+    "console": (
+        "Return JSON only with schema "
+        '{"facts":[{"key":"adv.console.*","value":"text","confidence":0.0}]}. '
+        "Extract console color metrics with adv.console.red_count, adv.console.green_count, adv.console.other_count, adv.console.red_lines."
+    ),
+    "browser": (
+        "Return JSON only with schema "
+        '{"facts":[{"key":"adv.browser.*","value":"text","confidence":0.0}]}. '
+        "Extract browser tuples with adv.browser.window_count and adv.browser.N.hostname/active_title/tab_count."
+    ),
+}
+
 
 @dataclass(frozen=True)
 class _Roi:
@@ -91,13 +181,47 @@ class VllmVLM(PluginBase):
         self._roi_prompt = str(cfg.get("roi_prompt") or DEFAULT_ROI_PROMPT).strip()
         self._thumb_max_px = max(512, int(cfg.get("thumb_max_px") or 960))
         self._max_rois = max(1, int(cfg.get("max_rois") or 8))
+        self._grid_sections = max(1, min(24, int(cfg.get("grid_sections") or 8)))
+        self._grid_enforced = bool(cfg.get("grid_enforced", True))
         self._roi_max_side = max(512, int(cfg.get("roi_max_side") or 2048))
         self._thumb_max_tokens = max(128, int(cfg.get("thumb_max_tokens") or 768))
         self._roi_max_tokens = max(128, int(cfg.get("roi_max_tokens") or 1536))
+        self._factpack_enabled = bool(cfg.get("factpack_enabled", True))
+        self._factpack_prompt = str(cfg.get("factpack_prompt") or DEFAULT_FACTPACK_PROMPT).strip()
+        self._factpack_max_tokens = max(256, int(cfg.get("factpack_max_tokens") or 1536))
+        self._topic_factpack_enabled = bool(cfg.get("topic_factpack_enabled", True))
+        topics_raw = cfg.get("topic_factpack_topics")
+        topics: list[str] = []
+        if isinstance(topics_raw, list):
+            topics = [str(x).strip().lower() for x in topics_raw if str(x).strip()]
+        if not topics:
+            topics = list(DEFAULT_TOPIC_FACTPACK_TOPICS)
+        self._topic_factpack_topics = [x for x in topics if x in DEFAULT_TOPIC_FACTPACK_PROMPTS]
+        default_topic_max = min(self._factpack_max_tokens, 1024)
+        self._topic_factpack_max_tokens = max(128, int(cfg.get("topic_factpack_max_tokens") or default_topic_max))
+        self._topic_factpack_min_topics = max(0, min(10, int(cfg.get("topic_factpack_min_topics") or 6)))
         self._max_retries = max(1, min(5, int(cfg.get("max_retries") or 3)))
+        self._fail_open_after_errors = max(1, min(6, int(cfg.get("fail_open_after_errors") or 2)))
+        self._failure_cooldown_s = max(5.0, float(cfg.get("failure_cooldown_s") or 45.0))
+        self._consecutive_failures = 0
+        self._circuit_open_until = 0.0
         self._client: OpenAICompatClient | None = None
         self._last_chat_error = ""
         self._model_validated = False
+        self._promptops = None
+        self._promptops_cfg = cfg.get("promptops", {}) if isinstance(cfg.get("promptops", {}), dict) else {}
+        if bool(self._promptops_cfg.get("enabled", True)):
+            try:
+                from autocapture.promptops.engine import PromptOpsLayer
+
+                self._promptops = PromptOpsLayer(
+                    {
+                        "promptops": self._promptops_cfg,
+                        "paths": {"data_dir": str(self._promptops_cfg.get("data_dir") or "data")},
+                    }
+                )
+            except Exception:
+                self._promptops = None
 
     def capabilities(self) -> dict[str, Any]:
         return {"vision.extractor": self}
@@ -105,6 +229,10 @@ class VllmVLM(PluginBase):
     def extract(self, image_bytes: bytes) -> dict[str, Any]:
         payload: dict[str, Any] = {"layout": {"elements": [], "edges": []}, "backend": "unavailable", "text": ""}
         if not image_bytes:
+            return payload
+        if self._is_circuit_open():
+            payload["model_error"] = "vlm_temporarily_unavailable:circuit_open"
+            payload["circuit_open_until_s"] = float(self._circuit_open_until)
             return payload
         client = self._ensure_client(payload)
         if client is None:
@@ -149,7 +277,14 @@ class VllmVLM(PluginBase):
 
     def _run_single_pass(self, client: OpenAICompatClient, image_bytes: bytes) -> dict[str, Any]:
         out: dict[str, Any] = {"layout": {"elements": [], "edges": []}, "backend": "unavailable", "text": ""}
-        content = self._chat_image(client, image_bytes, self._prompt, max_tokens=self._max_tokens)
+        content = self._chat_image(
+            client,
+            image_bytes,
+            self._prompt,
+            max_tokens=self._max_tokens,
+            prompt_id="vlm.single_pass.layout",
+            metadata={"pass": "single"},
+        )
         if not content:
             detail = str(self._last_chat_error or "").strip()
             out["model_error"] = f"vlm_empty_response:{detail}" if detail else "vlm_empty_response"
@@ -182,31 +317,59 @@ class VllmVLM(PluginBase):
 
         thumb = _make_thumbnail(image, max_width=self._thumb_max_px)
         thumb_bytes = _encode_png(thumb)
-        thumb_content = self._chat_image(client, thumb_bytes, self._thumb_prompt, max_tokens=self._thumb_max_tokens)
+        thumb_content = self._chat_image(
+            client,
+            thumb_bytes,
+            self._thumb_prompt,
+            max_tokens=self._thumb_max_tokens,
+            prompt_id="vlm.two_pass.thumb",
+            metadata={"pass": "thumb"},
+        )
         if not thumb_content:
             detail = str(self._last_chat_error or "").strip()
             out["model_error"] = f"vlm_two_pass_thumb_empty:{detail}" if detail else "vlm_two_pass_thumb_empty"
             return out
         thumb_json = _extract_layout_from_text(thumb_content)
 
-        rois = _collect_rois(thumb_json, width=int(image.width), height=int(image.height), max_rois=self._max_rois)
+        rois = _collect_rois(
+            thumb_json,
+            width=int(image.width),
+            height=int(image.height),
+            max_rois=self._max_rois,
+            grid_sections=self._grid_sections,
+            grid_enforced=self._grid_enforced,
+        )
         windows = _parse_windows(thumb_json, width=int(image.width), height=int(image.height), parent_roi=None)
         layout_elements: list[dict[str, Any]] = []
         facts: list[dict[str, Any]] = []
         roi_reports: list[dict[str, Any]] = []
 
         for roi in rois:
+            if self._is_circuit_open():
+                break
+            if self._grid_enforced and roi.roi_id == "full":
+                # Full-frame context is handled by factpack/topic-factpack.
+                # Skip duplicate full ROI parsing when deterministic grid map/reduce is enabled.
+                continue
             crop = image.crop(roi.bbox_px)
             if max(crop.width, crop.height) > self._roi_max_side:
                 scale = float(self._roi_max_side) / float(max(crop.width, crop.height))
                 crop = crop.resize((max(1, int(round(crop.width * scale))), max(1, int(round(crop.height * scale)))))
             crop_bytes = _encode_png(crop)
-            roi_content = self._chat_image(client, crop_bytes, self._roi_prompt, max_tokens=self._roi_max_tokens)
+            roi_content = self._chat_image(
+                client,
+                crop_bytes,
+                self._roi_prompt,
+                max_tokens=self._roi_max_tokens,
+                prompt_id="vlm.two_pass.roi",
+                metadata={"pass": "roi", "roi_id": roi.roi_id, "roi_kind": roi.kind},
+            )
             roi_json = _extract_layout_from_text(roi_content)
             roi_reports.append(
                 {
                     "id": roi.roi_id,
                     "kind": roi.kind,
+                    "source": ("grid" if str(roi.roi_id).startswith("grid_") else ("full" if roi.roi_id == "full" else "model")),
                     "label": roi.label,
                     "priority_bp": int(roi.priority_bp),
                     "bbox_px": list(roi.bbox_px),
@@ -218,6 +381,47 @@ class VllmVLM(PluginBase):
             layout_elements.extend(_parse_elements(roi_json, parent_roi=roi))
             windows.extend(_parse_windows(roi_json, width=int(image.width), height=int(image.height), parent_roi=roi))
             facts.extend(_parse_facts(roi_json, parent_roi=roi))
+
+        full_roi = rois[0] if rois else _Roi("full", "window", "full_image", 10000, (0, 0, int(image.width), int(image.height)))
+        if self._factpack_enabled:
+            if self._is_circuit_open():
+                self._last_chat_error = "vlm_circuit_open_factpack_skipped"
+            else:
+                factpack_content = self._chat_image(
+                    client,
+                    image_bytes,
+                    self._factpack_prompt,
+                    max_tokens=self._factpack_max_tokens,
+                    prompt_id="vlm.two_pass.factpack",
+                    metadata={"pass": "factpack"},
+                )
+                factpack_json = _extract_layout_from_text(factpack_content)
+                if isinstance(factpack_json, dict):
+                    windows.extend(_parse_windows(factpack_json, width=int(image.width), height=int(image.height), parent_roi=None))
+                    facts.extend(_parse_facts(factpack_json, parent_roi=full_roi))
+        if self._topic_factpack_enabled:
+            present_topics = _adv_fact_topics(facts)
+            missing_topics = [topic for topic in self._topic_factpack_topics if topic not in present_topics]
+            if len(present_topics) < self._topic_factpack_min_topics:
+                for topic in missing_topics:
+                    if self._is_circuit_open():
+                        break
+                    topic_prompt = DEFAULT_TOPIC_FACTPACK_PROMPTS.get(topic, "")
+                    if not topic_prompt:
+                        continue
+                    topic_content = self._chat_image(
+                        client,
+                        image_bytes,
+                        topic_prompt,
+                        max_tokens=self._topic_factpack_max_tokens,
+                        prompt_id=f"vlm.two_pass.factpack.{topic}",
+                        metadata={"pass": "factpack_topic", "topic": topic},
+                    )
+                    topic_json = _extract_layout_from_text(topic_content)
+                    if not isinstance(topic_json, dict):
+                        continue
+                    windows.extend(_parse_windows(topic_json, width=int(image.width), height=int(image.height), parent_roi=None))
+                    facts.extend(_parse_facts(topic_json, parent_roi=full_roi))
 
         # Include window-level elements for better observation graph coverage.
         for win in _dedupe_windows(windows):
@@ -232,6 +436,15 @@ class VllmVLM(PluginBase):
                 }
             )
         layout_elements = _dedupe_elements(layout_elements)
+        processed_reports = [item for item in roi_reports if isinstance(item, dict)]
+        processed_count = len(processed_reports)
+        failed_count = len([item for item in processed_reports if not bool(item.get("raw_ok"))])
+        grid_count = len([item for item in processed_reports if str(item.get("source") or "") == "grid"])
+        coverage_bp = _roi_coverage_bp(
+            [tuple(item.bbox_px) for item in rois if isinstance(item, _Roi)],
+            width=int(image.width),
+            height=int(image.height),
+        )
         ui_state = {
             "schema_version": 1,
             "image_size": [int(image.width), int(image.height)],
@@ -239,6 +452,15 @@ class VllmVLM(PluginBase):
             "windows": _dedupe_windows(windows),
             "facts": _dedupe_facts(facts),
             "roi_reports": roi_reports,
+            "map_reduce": {
+                "grid_sections": int(self._grid_sections),
+                "grid_enforced": bool(self._grid_enforced),
+                "roi_total": int(len(rois)),
+                "roi_processed": int(processed_count),
+                "roi_failed": int(failed_count),
+                "grid_roi_processed": int(grid_count),
+                "coverage_bp": int(coverage_bp),
+            },
         }
         layout = {
             "elements": layout_elements,
@@ -266,12 +488,73 @@ class VllmVLM(PluginBase):
             out["model_error"] = f"vlm_two_pass_empty:{detail}" if detail else "vlm_two_pass_empty"
         return out
 
-    def _chat_image(self, client: OpenAICompatClient, image_bytes: bytes, prompt: str, *, max_tokens: int) -> str:
+    def _is_circuit_open(self) -> bool:
+        if float(self._circuit_open_until) <= 0.0:
+            return False
+        if time.perf_counter() < float(self._circuit_open_until):
+            return True
+        self._circuit_open_until = 0.0
+        return False
+
+    def _mark_chat_success(self) -> None:
+        self._consecutive_failures = 0
+        self._circuit_open_until = 0.0
+
+    def _mark_chat_failure(self, reason: str) -> None:
+        _ = reason
+        self._consecutive_failures = int(self._consecutive_failures) + 1
+        if int(self._consecutive_failures) >= int(self._fail_open_after_errors):
+            self._circuit_open_until = float(time.perf_counter()) + float(self._failure_cooldown_s)
+
+    def _chat_image(
+        self,
+        client: OpenAICompatClient,
+        image_bytes: bytes,
+        prompt: str,
+        *,
+        max_tokens: int,
+        prompt_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        started = time.perf_counter()
+        if self._is_circuit_open():
+            self._last_chat_error = "vlm_circuit_open"
+            return ""
         if not self._model:
             self._last_chat_error = "model_missing"
+            self._mark_chat_failure(self._last_chat_error)
+            self._record_promptops_interaction(
+                prompt_id=prompt_id,
+                prompt_input=prompt,
+                prompt_effective=prompt,
+                response_text="",
+                success=False,
+                latency_ms=float((time.perf_counter() - started) * 1000.0),
+                error="model_missing",
+                metadata=metadata,
+            )
             return ""
         self._last_chat_error = ""
         current = bytes(image_bytes or b"")
+        prompt_effective = prompt
+        promptops_meta: dict[str, Any] = {
+            "used": bool(self._promptops is not None),
+            "applied": False,
+            "strategy": str(self._promptops_cfg.get("model_strategy", "model_contract")),
+        }
+        if self._promptops is not None:
+            try:
+                strategy = str(self._promptops_cfg.get("model_strategy", "model_contract"))
+                p = self._promptops.prepare_prompt(
+                    prompt,
+                    prompt_id=str(prompt_id),
+                    strategy=strategy,
+                    persist=bool(self._promptops_cfg.get("persist_prompts", False)),
+                )
+                prompt_effective = p.prompt
+                promptops_meta["applied"] = bool(p.applied)
+            except Exception:
+                pass
         for _attempt in range(int(self._max_retries)):
             req: dict[str, Any] = {
                 "model": self._model,
@@ -279,7 +562,7 @@ class VllmVLM(PluginBase):
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": prompt},
+                            {"type": "text", "text": prompt_effective},
                             {"type": "image_url", "image_url": {"url": image_bytes_to_data_url(current, content_type="image/png")}},
                         ],
                     }
@@ -297,6 +580,17 @@ class VllmVLM(PluginBase):
                 msg = str(exc or "").casefold()
                 if "http_error:500" in msg or "internal server error" in msg:
                     self._last_chat_error = str(exc or "chat_exception").strip()[:240]
+                    self._mark_chat_failure(self._last_chat_error)
+                    self._record_promptops_interaction(
+                        prompt_id=prompt_id,
+                        prompt_input=prompt,
+                        prompt_effective=prompt_effective,
+                        response_text="",
+                        success=False,
+                        latency_ms=float((time.perf_counter() - started) * 1000.0),
+                        error=str(self._last_chat_error or "chat_exception"),
+                        metadata=self._merge_promptops_meta(metadata, promptops_meta),
+                    )
                     return ""
                 if _is_model_not_found_error(msg):
                     previous = str(self._model or "").strip()
@@ -312,15 +606,48 @@ class VllmVLM(PluginBase):
                         self._last_chat_error = "context_limit_downscaled_retry"
                         continue
                 self._last_chat_error = str(exc or "chat_exception").strip()[:240]
+                self._mark_chat_failure(self._last_chat_error)
+                self._record_promptops_interaction(
+                    prompt_id=prompt_id,
+                    prompt_input=prompt,
+                    prompt_effective=prompt_effective,
+                    response_text="",
+                    success=False,
+                    latency_ms=float((time.perf_counter() - started) * 1000.0),
+                    error=str(self._last_chat_error or "chat_exception"),
+                    metadata=self._merge_promptops_meta(metadata, promptops_meta),
+                )
                 return ""
             choices = resp.get("choices", [])
             if not isinstance(choices, list) or not choices:
                 self._last_chat_error = "empty_choices"
+                self._mark_chat_failure(self._last_chat_error)
+                self._record_promptops_interaction(
+                    prompt_id=prompt_id,
+                    prompt_input=prompt,
+                    prompt_effective=prompt_effective,
+                    response_text="",
+                    success=False,
+                    latency_ms=float((time.perf_counter() - started) * 1000.0),
+                    error="empty_choices",
+                    metadata=self._merge_promptops_meta(metadata, promptops_meta),
+                )
                 return ""
             msg = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
             content = str(msg.get("content") or "").strip()
             if content:
                 self._last_chat_error = ""
+                self._mark_chat_success()
+                self._record_promptops_interaction(
+                    prompt_id=prompt_id,
+                    prompt_input=prompt,
+                    prompt_effective=prompt_effective,
+                    response_text=content,
+                    success=True,
+                    latency_ms=float((time.perf_counter() - started) * 1000.0),
+                    error="",
+                    metadata=self._merge_promptops_meta(metadata, promptops_meta),
+                )
                 return content
             downsized = _downscale_png_bytes(current)
             if downsized and len(downsized) < len(current):
@@ -328,9 +655,68 @@ class VllmVLM(PluginBase):
                 self._last_chat_error = "empty_content_downscaled_retry"
                 continue
             self._last_chat_error = "empty_content"
+            self._mark_chat_failure(self._last_chat_error)
+            self._record_promptops_interaction(
+                prompt_id=prompt_id,
+                prompt_input=prompt,
+                prompt_effective=prompt_effective,
+                response_text="",
+                success=False,
+                latency_ms=float((time.perf_counter() - started) * 1000.0),
+                error="empty_content",
+                metadata=self._merge_promptops_meta(metadata, promptops_meta),
+            )
             return ""
         self._last_chat_error = "max_retries_exhausted"
+        self._mark_chat_failure(self._last_chat_error)
+        self._record_promptops_interaction(
+            prompt_id=prompt_id,
+            prompt_input=prompt,
+            prompt_effective=prompt_effective,
+            response_text="",
+            success=False,
+            latency_ms=float((time.perf_counter() - started) * 1000.0),
+            error="max_retries_exhausted",
+            metadata=self._merge_promptops_meta(metadata, promptops_meta),
+        )
         return ""
+
+    def _merge_promptops_meta(self, metadata: dict[str, Any] | None, promptops_meta: dict[str, Any]) -> dict[str, Any]:
+        merged: dict[str, Any] = {}
+        if isinstance(metadata, dict) and metadata:
+            merged.update(metadata)
+        merged["promptops"] = dict(promptops_meta)
+        return merged
+
+    def _record_promptops_interaction(
+        self,
+        *,
+        prompt_id: str,
+        prompt_input: str,
+        prompt_effective: str,
+        response_text: str,
+        success: bool,
+        latency_ms: float,
+        error: str,
+        metadata: dict[str, Any] | None,
+    ) -> None:
+        if self._promptops is None:
+            return
+        try:
+            self._promptops.record_model_interaction(
+                prompt_id=str(prompt_id),
+                provider_id=self.plugin_id,
+                model=str(self._model or ""),
+                prompt_input=str(prompt_input or ""),
+                prompt_effective=str(prompt_effective or ""),
+                response_text=str(response_text or ""),
+                success=bool(success),
+                latency_ms=float(latency_ms),
+                error=str(error or ""),
+                metadata=metadata if isinstance(metadata, dict) else {},
+            )
+        except Exception:
+            return
 
     @staticmethod
     def _discover_model(client: OpenAICompatClient) -> str | None:
@@ -669,7 +1055,41 @@ def _iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
     return inter / union
 
 
-def _collect_rois(raw: dict[str, Any], *, width: int, height: int, max_rois: int) -> list[_Roi]:
+def _grid_roi_specs(sections: int) -> list[tuple[str, tuple[float, float, float, float]]]:
+    n = max(0, int(sections))
+    if n <= 0:
+        return []
+    # Deterministic wide-screen defaults for 7680x2160 workflows.
+    if n == 8:
+        cols = 4
+        rows = 2
+    else:
+        rows = 2 if n >= 4 else 1
+        cols = int(math.ceil(float(n) / float(rows)))
+    out: list[tuple[str, tuple[float, float, float, float]]] = []
+    idx = 1
+    for ry in range(rows):
+        y1 = float(ry) / float(rows)
+        y2 = float(ry + 1) / float(rows)
+        for cx in range(cols):
+            if idx > n:
+                break
+            x1 = float(cx) / float(cols)
+            x2 = float(cx + 1) / float(cols)
+            out.append((f"grid_{idx}", (x1, y1, x2, y2)))
+            idx += 1
+    return out
+
+
+def _collect_rois(
+    raw: dict[str, Any],
+    *,
+    width: int,
+    height: int,
+    max_rois: int,
+    grid_sections: int = 8,
+    grid_enforced: bool = False,
+) -> list[_Roi]:
     full = _Roi("full", "window", "full_image", 10000, (0, 0, int(width), int(height)))
     out: list[_Roi] = [full]
     rois = raw.get("rois", []) if isinstance(raw.get("rois"), list) else []
@@ -690,9 +1110,16 @@ def _collect_rois(raw: dict[str, Any], *, width: int, height: int, max_rois: int
         )
     out.sort(key=lambda r: (-int(r.priority_bp), r.roi_id))
     dedup: list[_Roi] = [full]
-    # Reserve room for deterministic coverage ROIs to avoid concentration
-    # in a single pane when the thumbnail pass is sparse/noisy.
-    model_cap = max(1, int(max_rois) - 4)
+    fallback_specs = _grid_roi_specs(grid_sections)
+    if grid_enforced:
+        # Guarantee map/reduce over all grid chunks, then spend remaining
+        # budget on model-proposed ROIs.
+        target_cap = max(int(max_rois), 1 + len(fallback_specs))
+        model_cap = max(0, int(target_cap) - 1 - len(fallback_specs))
+    else:
+        # Legacy behavior: reserve only a subset of room for coverage ROIs.
+        reserve = min(4, len(fallback_specs))
+        model_cap = max(1, int(max_rois) - 1 - reserve)
     for roi in out:
         if roi.roi_id == "full":
             continue
@@ -703,35 +1130,79 @@ def _collect_rois(raw: dict[str, Any], *, width: int, height: int, max_rois: int
                 break
         if keep:
             dedup.append(roi)
-        if len(dedup) >= int(model_cap):
+        if len(dedup) >= int(model_cap) + 1:
             break
     # Coverage backstop: add deterministic grid ROIs so high-res pass scans
     # the full desktop, even when model-proposed ROIs are concentrated.
-    if len(dedup) < int(max_rois):
-        fallback_specs = [
-            ("grid_tl", (0.00, 0.00, 0.36, 0.56)),
-            ("grid_tc", (0.30, 0.00, 0.70, 0.56)),
-            ("grid_tr", (0.64, 0.00, 1.00, 0.56)),
-            ("grid_bl", (0.00, 0.44, 0.36, 1.00)),
-            ("grid_bc", (0.30, 0.44, 0.70, 1.00)),
-            ("grid_br", (0.64, 0.44, 1.00, 1.00)),
-        ]
-        for roi_id, norm in fallback_specs:
-            bbox = _norm_bbox_to_px(norm, width=width, height=height)
-            if bbox is None:
-                continue
-            candidate = _Roi(roi_id=roi_id, kind="pane", label=roi_id, priority_bp=4500, bbox_px=bbox)
-            keep = True
-            for existing in dedup:
-                if _iou(candidate.bbox_px, existing.bbox_px) >= 0.92:
-                    keep = False
-                    break
-            if not keep:
-                continue
-            dedup.append(candidate)
-            if len(dedup) >= int(max_rois):
+    for roi_id, norm in fallback_specs:
+        if (not grid_enforced) and len(dedup) >= int(max_rois):
+            break
+        bbox = _norm_bbox_to_px(norm, width=width, height=height)
+        if bbox is None:
+            continue
+        candidate = _Roi(roi_id=roi_id, kind="pane", label=roi_id, priority_bp=4500, bbox_px=bbox)
+        keep = True
+        for existing in dedup:
+            if _iou(candidate.bbox_px, existing.bbox_px) >= 0.92:
+                keep = False
                 break
+        if not keep:
+            continue
+        dedup.append(candidate)
+    if not grid_enforced:
+        return dedup[: max(1, int(max_rois))]
     return dedup
+
+
+def _roi_coverage_bp(boxes: list[tuple[int, int, int, int]], *, width: int, height: int) -> int:
+    if width <= 0 or height <= 0:
+        return 0
+    clean: list[tuple[int, int, int, int]] = []
+    for box in boxes:
+        if not isinstance(box, tuple) or len(box) != 4:
+            continue
+        x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+        if x2 <= x1 or y2 <= y1:
+            continue
+        x1 = max(0, min(width, x1))
+        y1 = max(0, min(height, y1))
+        x2 = max(0, min(width, x2))
+        y2 = max(0, min(height, y2))
+        if x2 <= x1 or y2 <= y1:
+            continue
+        clean.append((x1, y1, x2, y2))
+    if not clean:
+        return 0
+    xs = sorted({x1 for x1, _, x2, _ in clean} | {x2 for _, _, x2, _ in clean})
+    if len(xs) <= 1:
+        return 0
+    area = 0
+    for idx in range(len(xs) - 1):
+        sx1 = xs[idx]
+        sx2 = xs[idx + 1]
+        if sx2 <= sx1:
+            continue
+        intervals: list[tuple[int, int]] = []
+        for x1, y1, x2, y2 in clean:
+            if x1 < sx2 and x2 > sx1:
+                intervals.append((y1, y2))
+        if not intervals:
+            continue
+        intervals.sort(key=lambda item: (item[0], item[1]))
+        merged: list[tuple[int, int]] = []
+        cy1, cy2 = intervals[0]
+        for ny1, ny2 in intervals[1:]:
+            if ny1 <= cy2:
+                cy2 = max(cy2, ny2)
+            else:
+                merged.append((cy1, cy2))
+                cy1, cy2 = ny1, ny2
+        merged.append((cy1, cy2))
+        covered_y = sum(max(0, y2 - y1) for y1, y2 in merged)
+        area += max(0, sx2 - sx1) * covered_y
+    total = max(1, int(width) * int(height))
+    bp = int(round((float(area) / float(total)) * 10000.0))
+    return max(0, min(10000, bp))
 
 
 def _parse_elements(raw: dict[str, Any], *, parent_roi: _Roi) -> list[dict[str, Any]]:
@@ -837,6 +1308,21 @@ def _parse_facts(raw: dict[str, Any], *, parent_roi: _Roi) -> list[dict[str, Any
             }
         )
     return out
+
+
+def _adv_fact_topics(facts: list[dict[str, Any]]) -> set[str]:
+    topics: set[str] = set()
+    for item in facts:
+        if not isinstance(item, dict):
+            continue
+        key = _clean_text(item.get("key")).casefold()
+        if not key.startswith("adv."):
+            continue
+        match = re.match(r"^adv\.([a-z0-9_]+)\.", key)
+        if not match:
+            continue
+        topics.add(str(match.group(1)))
+    return topics
 
 
 def _dedupe_elements(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
