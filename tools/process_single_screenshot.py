@@ -144,6 +144,164 @@ def _build_frame_record(*, run_id: str, record_id: str, ts_utc: str, image_bytes
     return payload
 
 
+def _record_with_payload_hash(payload: dict[str, Any]) -> dict[str, Any]:
+    out = dict(payload)
+    out["payload_hash"] = sha256_canonical({k: v for k, v in out.items() if k != "payload_hash"})
+    return out
+
+
+def _parse_ts_utc(value: str) -> datetime:
+    raw = str(value or "").strip()
+    if not raw:
+        return datetime.now(timezone.utc)
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except Exception:
+        return datetime.now(timezone.utc)
+
+
+def _to_utc_z(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _metadata_put(metadata: Any, record_id: str, payload: dict[str, Any]) -> None:
+    if hasattr(metadata, "put_new"):
+        try:
+            _safe_call(metadata, "put_new", record_id, payload)
+            return
+        except Exception:
+            pass
+    _safe_call(metadata, "put", record_id, payload)
+
+
+def _append_journal_event(journal: Any | None, *, event_type: str, payload: dict[str, Any], ts_utc: str) -> bool:
+    if journal is None:
+        return False
+    try:
+        if hasattr(journal, "append_event"):
+            _safe_call(journal, "append_event", event_type, payload, ts_utc=ts_utc)
+            return True
+        entry = {
+            "schema_version": 1,
+            "event_id": "",
+            "sequence": None,
+            "ts_utc": ts_utc,
+            "tzid": "UTC",
+            "offset_minutes": 0,
+            "event_type": event_type,
+            "payload": payload,
+            "run_id": str(payload.get("run_id") or ""),
+        }
+        _safe_call(journal, "append", entry)
+        return True
+    except Exception:
+        return False
+
+
+def _inject_synthetic_hid(
+    *,
+    metadata: Any,
+    journal: Any | None,
+    run_id: str,
+    base_ts_utc: str,
+    mode: str,
+) -> dict[str, Any]:
+    start_dt = _parse_ts_utc(base_ts_utc)
+    events: list[dict[str, Any]] = [
+        {"kind": "key", "action": "press", "key": "ctrl", "ts_utc": _to_utc_z(start_dt)},
+        {"kind": "key", "action": "press", "key": "k", "ts_utc": _to_utc_z(start_dt)},
+        {"kind": "mouse", "action": "move", "x": 768, "y": 432, "ts_utc": _to_utc_z(start_dt)},
+        {"kind": "mouse", "action": "click", "button": "left", "x": 768, "y": 432, "ts_utc": _to_utc_z(start_dt)},
+    ]
+    cursor_points: list[dict[str, Any]] = [
+        {"x": 740, "y": 410},
+        {"x": 768, "y": 432},
+        {"x": 812, "y": 460},
+    ]
+    if mode == "rich":
+        events.extend(
+            [
+                {"kind": "key", "action": "press", "key": "alt", "ts_utc": _to_utc_z(start_dt)},
+                {"kind": "key", "action": "press", "key": "tab", "ts_utc": _to_utc_z(start_dt)},
+                {"kind": "mouse", "action": "wheel", "delta": -120, "x": 1730, "y": 980, "ts_utc": _to_utc_z(start_dt)},
+                {"kind": "mouse", "action": "click", "button": "left", "x": 1730, "y": 980, "ts_utc": _to_utc_z(start_dt)},
+            ]
+        )
+        cursor_points.extend([{"x": 1320, "y": 620}, {"x": 1730, "y": 980}])
+
+    key_count = sum(1 for item in events if str(item.get("kind")) == "key")
+    mouse_count = sum(1 for item in events if str(item.get("kind")) == "mouse")
+    end_dt = start_dt
+    if events:
+        end_dt = start_dt.replace(microsecond=0)
+    summary_id = prefixed_id(run_id, "derived.input.summary", 0)
+    summary_payload = _record_with_payload_hash(
+        {
+            "schema_version": 1,
+            "record_type": "derived.input.summary",
+            "run_id": run_id,
+            "event_id": prefixed_id(run_id, "input.batch", 0),
+            "start_ts_utc": _to_utc_z(start_dt),
+            "end_ts_utc": _to_utc_z(end_dt),
+            "event_count": int(len(events)),
+            "counts": {"key": int(key_count), "mouse": int(mouse_count)},
+            "events": events,
+            "source": "tools.process_single_screenshot.synthetic_hid",
+        }
+    )
+    _metadata_put(metadata, summary_id, summary_payload)
+    cursor_ids: list[str] = []
+    for idx, point in enumerate(cursor_points):
+        cursor_id = prefixed_id(run_id, "derived.cursor.sample", idx)
+        cursor_payload = _record_with_payload_hash(
+            {
+                "schema_version": 1,
+                "record_type": "derived.cursor.sample",
+                "run_id": run_id,
+                "ts_utc": _to_utc_z(start_dt),
+                "cursor": {"x": int(point.get("x", 0)), "y": int(point.get("y", 0))},
+                "source": "tools.process_single_screenshot.synthetic_hid",
+            }
+        )
+        _metadata_put(metadata, cursor_id, cursor_payload)
+        cursor_ids.append(cursor_id)
+
+    journal_events_written = 0
+    input_payload = {
+        "record_type": "derived.input.summary",
+        "record_id": summary_id,
+        "run_id": run_id,
+        "start_ts_utc": summary_payload["start_ts_utc"],
+        "end_ts_utc": summary_payload["end_ts_utc"],
+        "events": events,
+        "counts": summary_payload["counts"],
+    }
+    if _append_journal_event(journal, event_type="input.batch", payload=input_payload, ts_utc=summary_payload["end_ts_utc"]):
+        journal_events_written += 1
+    if cursor_ids:
+        cursor_payload = {
+            "record_type": "derived.cursor.sample",
+            "record_id": cursor_ids[-1],
+            "run_id": run_id,
+            "cursor": {"x": int(cursor_points[-1]["x"]), "y": int(cursor_points[-1]["y"])},
+        }
+        if _append_journal_event(
+            journal,
+            event_type="cursor.sample",
+            payload=cursor_payload,
+            ts_utc=summary_payload["end_ts_utc"],
+        ):
+            journal_events_written += 1
+
+    return {
+        "enabled": True,
+        "mode": mode,
+        "metadata_record_ids": [summary_id] + cursor_ids,
+        "journal_events_written": int(journal_events_written),
+        "event_count": int(len(events)),
+    }
+
+
 def _safe_call(obj: Any, name: str, *args, **kwargs) -> Any:
     fn = getattr(obj, name, None)
     if fn is None or not callable(fn):
@@ -294,6 +452,12 @@ def main(argv: list[str] | None = None) -> int:
         default=24,
         help="Maximum number of idle processor steps to run before giving up.",
     )
+    parser.add_argument(
+        "--synthetic-hid",
+        choices=("off", "minimal", "rich"),
+        default="minimal",
+        help="Inject deterministic synthetic HID metadata/journal records before idle processing.",
+    )
     parsed = parser.parse_args(args)
 
     image_path = Path(str(parsed.image))
@@ -345,8 +509,12 @@ def main(argv: list[str] | None = None) -> int:
             return 2
     os.environ.setdefault("AUTOCAPTURE_VLM_BASE_URL", EXTERNAL_VLLM_BASE_URL)
     os.environ.setdefault("AUTOCAPTURE_VLM_MODEL", "internvl3_5_8b")
-    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", "12")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", "45")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_MAX_S", "120")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_SCALE", "1.5")
     os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_RETRIES", "3")
+    os.environ.setdefault("AUTOCAPTURE_VLM_ORCHESTRATOR_WARMUP_S", "20")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_RETRY_SLEEP_S", "1")
     os.environ.setdefault("AUTOCAPTURE_VLM_MAX_INFLIGHT", "1")
     os.environ.setdefault(
         "AUTOCAPTURE_VLM_ORCHESTRATOR_CMD",
@@ -664,6 +832,7 @@ def main(argv: list[str] | None = None) -> int:
 
         metadata = system.get("storage.metadata")
         media = system.get("storage.media")
+        journal = system.get("journal.writer") if getattr(system, "has", lambda _n: False)("journal.writer") else None
         report["stores"] = {"metadata": type(metadata).__name__, "media": type(media).__name__}
         report["caps_present"] = {
             "ocr.engine": bool(getattr(system, "has", lambda _n: False)("ocr.engine")),
@@ -760,14 +929,18 @@ def main(argv: list[str] | None = None) -> int:
         else:
             _safe_call(media, "put", record_id, image_bytes, ts_utc=ts_utc)
 
-        if hasattr(metadata, "put_new"):
-            try:
-                _safe_call(metadata, "put_new", record_id, frame_record)
-            except Exception:
-                _safe_call(metadata, "put", record_id, frame_record)
-        else:
-            _safe_call(metadata, "put", record_id, frame_record)
+        _metadata_put(metadata, record_id, frame_record)
         report["ingest_ok"] = True
+        if str(parsed.synthetic_hid or "").strip() in {"minimal", "rich"}:
+            report["synthetic_hid"] = _inject_synthetic_hid(
+                metadata=metadata,
+                journal=journal,
+                run_id=run_id,
+                base_ts_utc=ts_utc,
+                mode=str(parsed.synthetic_hid),
+            )
+        else:
+            report["synthetic_hid"] = {"enabled": False, "mode": "off", "metadata_record_ids": [], "journal_events_written": 0}
 
         need_vlm = _should_require_vlm(required_plugins)
         need_sst = (

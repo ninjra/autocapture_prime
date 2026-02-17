@@ -2368,6 +2368,24 @@
                 "type": "string"
               },
               "type": "array"
+            },
+            "allow_empty_examples": {
+              "type": "boolean"
+            },
+            "require_preflight": {
+              "type": "boolean"
+            },
+            "preflight_require_completion": {
+              "type": "boolean"
+            },
+            "preflight_auto_recover": {
+              "type": "boolean"
+            },
+            "preflight_completion_timeout_s": {
+              "type": "number"
+            },
+            "preflight_retries": {
+              "type": "integer"
             }
           },
           "required": [

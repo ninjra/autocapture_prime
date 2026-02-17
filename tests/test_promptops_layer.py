@@ -178,6 +178,87 @@ class PromptOpsLayerTests(unittest.TestCase):
             self.assertTrue(out.get("pending_approval"))
             self.assertFalse(prompt_path.exists())
 
+    def test_review_no_examples_does_not_persist_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            metrics_path = Path(tmp) / "metrics.jsonl"
+            prompt_path = Path(tmp) / "query.txt"
+            config = _base_config(tmp)
+            config["promptops"]["metrics"]["output_path"] = str(metrics_path)
+            config["promptops"]["review"] = {
+                "enabled": True,
+                "on_failure_only": True,
+                "persist_prompts": True,
+                "auto_approve": True,
+                "base_url": "http://127.0.0.1:8000",
+                "model": "internvl3_5_8b",
+                "timeout_s": 5.0,
+                "max_tokens": 64,
+                "allow_empty_examples": False,
+            }
+            config["promptops"]["prompt_dir"] = str(Path(tmp))
+            layer = PromptOpsLayer(config)
+            with mock.patch.object(layer, "_review_with_model", return_value="hello [source]"):
+                out = layer.record_model_interaction(
+                    prompt_id="query",
+                    provider_id="query.classic",
+                    model="",
+                    prompt_input="hello",
+                    prompt_effective="hello",
+                    response_text="",
+                    success=False,
+                    latency_ms=5.0,
+                    error="failed",
+                    metadata={"case": "missing_examples"},
+                )
+            self.assertTrue(out.get("reviewed"))
+            self.assertFalse(out.get("updated"))
+            self.assertFalse(prompt_path.exists())
+            rows = [json.loads(line) for line in metrics_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            review_rows = [row for row in rows if row.get("type") == "promptops.review_result"]
+            self.assertTrue(review_rows)
+            self.assertEqual(int(review_rows[-1].get("evaluation_total", -1)), 0)
+            self.assertFalse(bool(review_rows[-1].get("evaluation_ok", True)))
+
+    def test_review_failure_records_reason_metric(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            metrics_path = Path(tmp) / "metrics.jsonl"
+            config = _base_config(tmp)
+            config["promptops"]["metrics"]["output_path"] = str(metrics_path)
+            config["promptops"]["review"] = {
+                "enabled": True,
+                "on_failure_only": True,
+                "persist_prompts": True,
+                "auto_approve": True,
+                "base_url": "http://127.0.0.1:8000",
+                "model": "internvl3_5_8b",
+                "timeout_s": 5.0,
+                "max_tokens": 64,
+            }
+            layer = PromptOpsLayer(config)
+            with mock.patch.object(
+                layer,
+                "_review_with_model",
+                return_value={"candidate": "", "error": "review_preflight_failed:models_unreachable", "meta": {"preflight": {"ok": False}}},
+            ):
+                out = layer.record_model_interaction(
+                    prompt_id="query",
+                    provider_id="query.classic",
+                    model="",
+                    prompt_input="hello",
+                    prompt_effective="hello",
+                    response_text="",
+                    success=False,
+                    latency_ms=5.0,
+                    error="failed",
+                    metadata={"case": "review_fail"},
+                )
+            self.assertTrue(out.get("reviewed"))
+            self.assertFalse(out.get("updated"))
+            rows = [json.loads(line) for line in metrics_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            review_rows = [row for row in rows if row.get("type") == "promptops.review_result"]
+            self.assertTrue(review_rows)
+            self.assertIn("review_preflight_failed", str(review_rows[-1].get("review_error") or ""))
+
 
 if __name__ == "__main__":
     unittest.main()

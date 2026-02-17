@@ -717,6 +717,10 @@ def main(argv: list[str] | None = None) -> int:
         repro_runs = int(determinism_raw.get("repro_runs") or (3 if args.strict_all else 1))
     repro_runs = max(1, repro_runs)
 
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", "45")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_MAX_S", "120")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_SCALE", "1.5")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_RETRIES", "6")
     vllm_status = check_external_vllm_ready(require_completion=bool(args.strict_all))
     if not bool(vllm_status.get("ok", False)):
         if args.allow_vllm_unavailable:

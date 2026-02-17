@@ -4,9 +4,9 @@
 This matrix is generated from the full-repo miss inventory and represents every currently detected miss marker across all scanned files.
 
 ## Scan Metadata
-- Generated (matrix): `2026-02-17T06:20:25.186885+00:00`
-- Inventory generated: `2026-02-17T06:20:03.306389+00:00`
-- Scanned files: `1506`
+- Generated (matrix): `2026-02-17T23:05:11.749863+00:00`
+- Inventory generated: `2026-02-17T23:05:04.161612+00:00`
+- Scanned files: `1525`
 - Miss rows: `0`
 - Gate failures: `0`
 

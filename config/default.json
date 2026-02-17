@@ -1489,11 +1489,17 @@
     "review": {
       "approved_prompt_ids": [],
       "auto_approve": true,
+      "allow_empty_examples": false,
       "base_url": "http://127.0.0.1:8000/v1",
       "enabled": true,
       "max_tokens": 256,
       "model": "internvl3_5_8b",
       "on_failure_only": true,
+      "preflight_auto_recover": true,
+      "preflight_completion_timeout_s": 15.0,
+      "preflight_retries": 1,
+      "preflight_require_completion": true,
+      "require_preflight": true,
       "persist_prompts": true,
       "timeout_s": 15.0
     },

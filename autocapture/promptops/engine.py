@@ -498,7 +498,7 @@ class PromptOpsLayer:
             return {"reviewed": False, "updated": False}
         if bool(review_cfg.get("on_failure_only", True)) and bool(success):
             return {"reviewed": False, "updated": False}
-        candidate = self._review_with_model(
+        review_out = self._review_with_model(
             prompt_input=str(prompt_input or ""),
             prompt_effective=str(prompt_effective or ""),
             response_text=str(response_text or ""),
@@ -507,20 +507,56 @@ class PromptOpsLayer:
             model=str(model or ""),
             review_cfg=review_cfg,
         )
+        candidate = ""
+        review_error = ""
+        review_meta: dict[str, Any] = {}
+        if isinstance(review_out, str):
+            candidate = str(review_out or "")
+        elif isinstance(review_out, dict):
+            candidate = str(review_out.get("candidate") or "")
+            review_error = str(review_out.get("error") or "")
+            if isinstance(review_out.get("meta"), dict):
+                review_meta = dict(review_out.get("meta") or {})
+
         if not candidate:
-            return {"reviewed": True, "updated": False}
+            self._append_metric(
+                {
+                    "type": "promptops.review_result",
+                    "prompt_id": str(prompt_id),
+                    "updated": False,
+                    "pending_approval": False,
+                    "approval_required": not bool(review_cfg.get("auto_approve", False)),
+                    "approved": False,
+                    "validation_ok": False,
+                    "evaluation_ok": False,
+                    "review_error": str(review_error or "no_candidate"),
+                    "meta": review_meta,
+                }
+            )
+            return {
+                "reviewed": True,
+                "updated": False,
+                "pending_approval": False,
+                "approval_required": not bool(review_cfg.get("auto_approve", False)),
+            }
         validation = validate_prompt(
             candidate,
             max_chars=int(cfg.get("max_chars", 8000)),
             max_tokens=int(cfg.get("max_tokens", 2000)),
             banned_patterns=cfg.get("banned_patterns", DEFAULT_BANNED),
         )
+        eval_examples = self._examples_for(str(prompt_id))
         eval_out = evaluate_prompt(
             candidate,
-            self._examples_for(str(prompt_id)),
+            eval_examples,
             min_pass_rate=float(max(0.0, min(1.0, float(int(cfg.get("min_pass_rate_pct", 100)) / 100.0)))),
             require_citations=bool(cfg.get("require_citations", True)),
         )
+        allow_empty_examples = bool(review_cfg.get("allow_empty_examples", False))
+        eval_total = int(eval_out.get("total", 0) or 0)
+        if eval_total <= 0 and not allow_empty_examples:
+            eval_out["ok"] = False
+            eval_out["error"] = "insufficient_examples_for_review_update"
         updated = False
         approval_required = not bool(review_cfg.get("auto_approve", False))
         approved_prompt_ids = review_cfg.get("approved_prompt_ids", [])
@@ -547,6 +583,9 @@ class PromptOpsLayer:
                 "approved": bool(is_approved),
                 "validation_ok": bool(validation.get("ok", False)),
                 "evaluation_ok": bool(eval_out.get("ok", False)),
+                "evaluation_total": int(eval_total),
+                "review_error": str(review_error or ""),
+                "meta": review_meta,
             }
         )
         return {
@@ -566,16 +605,29 @@ class PromptOpsLayer:
         provider_id: str,
         model: str,
         review_cfg: dict[str, Any],
-    ) -> str:
+    ) -> dict[str, Any]:
         try:
             from autocapture_nx.inference.openai_compat import OpenAICompatClient
-            from autocapture_nx.inference.vllm_endpoint import enforce_external_vllm_base_url
+            from autocapture_nx.inference.vllm_endpoint import check_external_vllm_ready, enforce_external_vllm_base_url
         except Exception:
-            return ""
+            return {"candidate": "", "error": "review_dependencies_unavailable", "meta": {}}
         try:
             base_url = enforce_external_vllm_base_url(str(review_cfg.get("base_url") or "").strip())
         except Exception:
-            return ""
+            return {"candidate": "", "error": "review_invalid_base_url", "meta": {}}
+        require_preflight = bool(review_cfg.get("require_preflight", True))
+        preflight_meta: dict[str, Any] = {}
+        if require_preflight:
+            preflight = check_external_vllm_ready(
+                timeout_completion_s=float(review_cfg.get("preflight_completion_timeout_s") or review_cfg.get("timeout_s") or 15.0),
+                require_completion=bool(review_cfg.get("preflight_require_completion", True)),
+                retries=int(review_cfg.get("preflight_retries") or 1),
+                auto_recover=bool(review_cfg.get("preflight_auto_recover", True)),
+            )
+            preflight_meta["preflight"] = preflight
+            if not bool(preflight.get("ok", False)):
+                err = str(preflight.get("error") or preflight.get("initial_error") or "preflight_failed")
+                return {"candidate": "", "error": f"review_preflight_failed:{err}", "meta": preflight_meta}
         model_name = str(review_cfg.get("model") or "").strip()
         timeout_s = float(review_cfg.get("timeout_s") or 15.0)
         max_tokens = int(review_cfg.get("max_tokens") or 256)
@@ -585,7 +637,11 @@ class PromptOpsLayer:
         try:
             client = OpenAICompatClient(base_url=base_url, api_key=api_key, timeout_s=timeout_s)
         except Exception:
-            return ""
+            return {"candidate": "", "error": "review_client_init_failed", "meta": preflight_meta}
+        if not model_name:
+            selected = str(preflight_meta.get("preflight", {}).get("selected_model") or "").strip()
+            if selected:
+                model_name = selected
         if not model_name:
             try:
                 models = client.list_models()
@@ -595,7 +651,7 @@ class PromptOpsLayer:
             except Exception:
                 model_name = ""
         if not model_name:
-            return ""
+            return {"candidate": "", "error": "review_model_not_found", "meta": preflight_meta}
         prompt = (
             "Rewrite the EFFECTIVE_PROMPT to improve grounding and clarity.\n"
             "Keep user intent unchanged. Prefer correctness over speed.\n"
@@ -616,13 +672,13 @@ class PromptOpsLayer:
         try:
             resp = client.chat_completions(req)
         except Exception:
-            return ""
+            return {"candidate": "", "error": "review_chat_completion_failed", "meta": preflight_meta}
         choices = resp.get("choices", []) if isinstance(resp, dict) else []
         if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
-            return ""
+            return {"candidate": "", "error": "review_empty_choices", "meta": preflight_meta}
         msg = choices[0].get("message", {}) if isinstance(choices[0].get("message", {}), dict) else {}
         content = str(msg.get("content") or "").strip()
         if not content:
-            return ""
+            return {"candidate": "", "error": "review_empty_content", "meta": preflight_meta}
         cleaned = content.strip().strip("`").strip()
-        return cleaned
+        return {"candidate": cleaned, "error": "", "meta": preflight_meta}

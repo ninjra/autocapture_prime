@@ -211,8 +211,10 @@ def main(argv: list[str] | None = None) -> int:
             os.environ["AUTOCAPTURE_VLM_API_KEY"] = api_key
     os.environ.setdefault("AUTOCAPTURE_VLM_BASE_URL", EXTERNAL_VLLM_BASE_URL)
     os.environ.setdefault("AUTOCAPTURE_VLM_MODEL", "internvl3_5_8b")
-    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", "12")
-    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_RETRIES", "3")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", "45")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_MAX_S", "120")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_SCALE", "1.5")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_RETRIES", "6")
     os.environ.setdefault("AUTOCAPTURE_VLM_MAX_INFLIGHT", "1")
     os.environ.setdefault(
         "AUTOCAPTURE_VLM_ORCHESTRATOR_CMD",

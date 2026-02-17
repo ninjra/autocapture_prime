@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from getpass import getpass
 from dataclasses import asdict
 from pathlib import Path
@@ -15,7 +16,7 @@ from autocapture_nx.kernel.config import load_config
 from autocapture_nx.kernel.audit import append_audit_event
 from autocapture_nx.kernel.errors import AutocaptureError
 from autocapture_nx.kernel.keyring import KeyRing, export_keyring_bundle, import_keyring_bundle
-from autocapture_nx.kernel.loader import default_config_paths
+from autocapture_nx.kernel.loader import Kernel, default_config_paths
 from autocapture_nx.ux.facade import create_facade
 
 from autocapture_nx.kernel.backup_bundle import create_backup_bundle, restore_backup_bundle
@@ -413,6 +414,60 @@ def cmd_query(args: argparse.Namespace) -> int:
     result = facade.query(args.text)
     _print_json(result)
     return 0
+
+
+def cmd_export_chatgpt(args: argparse.Namespace) -> int:
+    from autocapture_nx.kernel.export_chatgpt import run_export_pass
+
+    paths = default_config_paths()
+    kernel = Kernel(paths, safe_mode=bool(args.safe_mode))
+    follow = bool(getattr(args, "follow", False))
+    max_segments = int(getattr(args, "max_segments", 0) or 0)
+    since_ts_raw = str(getattr(args, "since_ts", "") or "").strip()
+    since_ts = since_ts_raw or None
+    max_segments_value = max_segments if max_segments > 0 else None
+    try:
+        system = kernel.boot(start_conductor=False, fast_boot=True)
+        if not follow:
+            result = run_export_pass(system, max_segments=max_segments_value, since_ts=since_ts)
+            _print_json(result)
+            return 0 if bool(result.get("ok")) else 2
+        loops = 0
+        lines_appended = 0
+        segments_exported = 0
+        while True:
+            loops += 1
+            result = run_export_pass(system, max_segments=max_segments_value, since_ts=since_ts)
+            lines_appended += int(result.get("lines_appended", 0) or 0)
+            segments_exported += int(result.get("segments_exported", 0) or 0)
+            _print_json(
+                {
+                    "ok": bool(result.get("ok", False)),
+                    "loop": loops,
+                    "lines_appended": int(result.get("lines_appended", 0) or 0),
+                    "segments_exported": int(result.get("segments_exported", 0) or 0),
+                    "export_path": result.get("export_path"),
+                    "duration_ms": int(result.get("duration_ms", 0) or 0),
+                }
+            )
+            time.sleep(2.0)
+    except KeyboardInterrupt:
+        _print_json(
+            {
+                "ok": True,
+                "stopped": True,
+                "reason": "keyboard_interrupt",
+                "mode": "follow",
+                "summary": {
+                    "loops": loops if "loops" in locals() else 0,
+                    "lines_appended": lines_appended if "lines_appended" in locals() else 0,
+                    "segments_exported": segments_exported if "segments_exported" in locals() else 0,
+                },
+            }
+        )
+        return 0
+    finally:
+        kernel.shutdown()
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -1064,6 +1119,14 @@ def build_parser() -> argparse.ArgumentParser:
     query_cmd = sub.add_parser("query")
     query_cmd.add_argument("text")
     query_cmd.set_defaults(func=cmd_query)
+
+    export = sub.add_parser("export")
+    export_sub = export.add_subparsers(dest="export_cmd", required=True)
+    export_chatgpt = export_sub.add_parser("chatgpt")
+    export_chatgpt.add_argument("--max-segments", type=int, default=0)
+    export_chatgpt.add_argument("--since-ts", default="")
+    export_chatgpt.add_argument("--follow", action=argparse.BooleanOptionalAction, default=False)
+    export_chatgpt.set_defaults(func=cmd_export_chatgpt)
 
     state = sub.add_parser("state")
     state_sub = state.add_subparsers(dest="state_cmd", required=True)

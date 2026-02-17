@@ -252,8 +252,8 @@ def _preflight_once(
 
 def check_external_vllm_ready(
     *,
-    timeout_models_s: float = 4.0,
-    timeout_completion_s: float = 12.0,
+    timeout_models_s: float | None = None,
+    timeout_completion_s: float | None = None,
     require_completion: bool = True,
     retries: int | None = None,
     auto_recover: bool = True,
@@ -268,11 +268,18 @@ def check_external_vllm_ready(
     t0 = time.perf_counter()
     base_raw = str(os.environ.get("AUTOCAPTURE_VLM_BASE_URL") or "").strip()
     expected_model = str(os.environ.get("AUTOCAPTURE_VLM_MODEL") or "").strip() or EXTERNAL_VLLM_EXPECTED_MODEL
+    models_timeout = float(timeout_models_s) if timeout_models_s is not None else _env_float("AUTOCAPTURE_VLM_PREFLIGHT_MODELS_TIMEOUT_S", 4.0)
+    if models_timeout <= 0:
+        models_timeout = _env_float("AUTOCAPTURE_VLM_PREFLIGHT_MODELS_TIMEOUT_S", 4.0)
     preflight_retries = int(retries if retries is not None else _env_int("AUTOCAPTURE_VLM_PREFLIGHT_RETRIES", 3))
     preflight_retries = max(1, preflight_retries)
-    completion_timeout = float(timeout_completion_s or _env_float("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", 12.0))
+    completion_timeout = float(timeout_completion_s) if timeout_completion_s is not None else _env_float("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", 12.0)
     if completion_timeout <= 0:
         completion_timeout = _env_float("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", 12.0)
+    completion_timeout_max = _env_float("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_MAX_S", 60.0)
+    completion_timeout_max = max(completion_timeout, completion_timeout_max)
+    completion_timeout_scale = _env_float("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_SCALE", 1.5)
+    completion_timeout_scale = max(1.0, completion_timeout_scale)
     orchestrator_cmd = str(os.environ.get("AUTOCAPTURE_VLM_ORCHESTRATOR_CMD") or "").strip() or EXTERNAL_VLLM_ORCHESTRATOR_CMD
     watch_path = str(os.environ.get("AUTOCAPTURE_VLM_WATCH_STATE_PATH") or "").strip() or EXTERNAL_VLLM_WATCH_STATE_PATH
     out: dict[str, Any] = {
@@ -292,7 +299,7 @@ def check_external_vllm_ready(
     first = _preflight_once(
         base_url=base_url,
         expected_model=expected_model,
-        timeout_models_s=float(timeout_models_s),
+        timeout_models_s=float(models_timeout),
         timeout_completion_s=float(completion_timeout),
         require_completion=bool(require_completion),
     )
@@ -335,15 +342,19 @@ def check_external_vllm_ready(
     max_attempts = max(1, preflight_retries)
     last = first
     attempts_done = 1
+    timeout_s_current = float(completion_timeout)
     deadline = time.perf_counter() + warmup_s
     while True:
         if sleep_s > 0:
             time.sleep(sleep_s)
+        last_error = str(last.get("error") or "")
+        if last_error.startswith("completion_unreachable:TimeoutError"):
+            timeout_s_current = min(float(completion_timeout_max), float(timeout_s_current) * float(completion_timeout_scale))
         attempt = _preflight_once(
             base_url=base_url,
             expected_model=expected_model,
-            timeout_models_s=float(timeout_models_s),
-            timeout_completion_s=float(completion_timeout),
+            timeout_models_s=float(models_timeout),
+            timeout_completion_s=float(timeout_s_current),
             require_completion=bool(require_completion),
         )
         attempts_done += 1

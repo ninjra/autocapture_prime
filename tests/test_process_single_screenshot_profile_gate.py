@@ -171,6 +171,75 @@ class ProcessSingleScreenshotProfileGateTests(unittest.TestCase):
         self.assertTrue(enabled.get("builtin.ledger.basic"))
         self.assertTrue(enabled.get("builtin.anchor.basic"))
 
+    def test_inject_synthetic_hid_minimal(self) -> None:
+        mod = _load_module()
+
+        class _Meta:
+            def __init__(self) -> None:
+                self.rows: dict[str, dict] = {}
+
+            def put(self, record_id: str, payload: dict, **_kwargs) -> None:
+                self.rows[str(record_id)] = dict(payload)
+
+        class _Journal:
+            def __init__(self) -> None:
+                self.events: list[tuple[str, dict]] = []
+
+            def append_event(self, event_type: str, payload: dict, **_kwargs) -> str:
+                self.events.append((str(event_type), dict(payload)))
+                return "evt"
+
+        meta = _Meta()
+        journal = _Journal()
+        out = mod._inject_synthetic_hid(
+            metadata=meta,
+            journal=journal,
+            run_id="run_test",
+            base_ts_utc="2026-02-17T00:00:00Z",
+            mode="minimal",
+        )
+        self.assertTrue(out["enabled"])
+        self.assertEqual(out["mode"], "minimal")
+        self.assertGreaterEqual(int(out["event_count"]), 4)
+        self.assertGreaterEqual(len(meta.rows), 2)
+        summary_rows = [row for row in meta.rows.values() if row.get("record_type") == "derived.input.summary"]
+        self.assertEqual(len(summary_rows), 1)
+        summary = summary_rows[0]
+        self.assertEqual(summary.get("run_id"), "run_test")
+        self.assertGreaterEqual(int(summary.get("event_count", 0)), 4)
+        self.assertTrue(str(summary.get("payload_hash") or ""))
+        event_types = [name for name, _ in journal.events]
+        self.assertIn("input.batch", event_types)
+        self.assertIn("cursor.sample", event_types)
+
+    def test_inject_synthetic_hid_rich_has_more_events_than_minimal(self) -> None:
+        mod = _load_module()
+
+        class _Meta:
+            def __init__(self) -> None:
+                self.rows: dict[str, dict] = {}
+
+            def put(self, record_id: str, payload: dict, **_kwargs) -> None:
+                self.rows[str(record_id)] = dict(payload)
+
+        meta_min = _Meta()
+        meta_rich = _Meta()
+        out_min = mod._inject_synthetic_hid(
+            metadata=meta_min,
+            journal=None,
+            run_id="run_test",
+            base_ts_utc="2026-02-17T00:00:00Z",
+            mode="minimal",
+        )
+        out_rich = mod._inject_synthetic_hid(
+            metadata=meta_rich,
+            journal=None,
+            run_id="run_test",
+            base_ts_utc="2026-02-17T00:00:00Z",
+            mode="rich",
+        )
+        self.assertGreater(int(out_rich["event_count"]), int(out_min["event_count"]))
+
 
 if __name__ == "__main__":
     unittest.main()

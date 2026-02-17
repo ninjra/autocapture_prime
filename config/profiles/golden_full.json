@@ -180,9 +180,15 @@
           "persist_prompts": false,
           "review": {
             "auto_approve": true,
+            "allow_empty_examples": false,
             "base_url": "http://127.0.0.1:8000/v1",
             "enabled": true,
             "on_failure_only": true,
+            "preflight_auto_recover": true,
+            "preflight_completion_timeout_s": 20.0,
+            "preflight_retries": 1,
+            "preflight_require_completion": true,
+            "require_preflight": true,
             "persist_prompts": true,
             "timeout_s": 20.0
           }
@@ -216,18 +222,18 @@
         "grid_sections": 8,
         "grid_enforced": true,
         "max_tokens": 640,
-        "max_retries": 1,
-        "timeout_s": 20.0,
+        "max_retries": 2,
+        "timeout_s": 45.0,
         "roi_max_side": 2048,
-        "roi_max_tokens": 1024,
+        "roi_max_tokens": 1536,
         "seed": 0,
         "temperature": 0.0,
         "top_p": 1.0,
         "thumb_max_px": 1920,
         "thumb_max_tokens": 768,
-        "factpack_enabled": false,
+        "factpack_enabled": true,
         "factpack_max_tokens": 2048,
-        "topic_factpack_enabled": false,
+        "topic_factpack_enabled": true,
         "promptops": {
           "enabled": true,
           "metrics": {
@@ -238,9 +244,15 @@
           "persist_prompts": false,
           "review": {
             "auto_approve": true,
+            "allow_empty_examples": false,
             "base_url": "http://127.0.0.1:8000/v1",
             "enabled": true,
             "on_failure_only": true,
+            "preflight_auto_recover": true,
+            "preflight_completion_timeout_s": 20.0,
+            "preflight_retries": 1,
+            "preflight_require_completion": true,
+            "require_preflight": true,
             "persist_prompts": true,
             "timeout_s": 20.0
           }
@@ -252,7 +264,13 @@
   "promptops": {
     "persist_query_prompts": true,
     "review": {
-      "auto_approve": true
+      "auto_approve": true,
+      "allow_empty_examples": false,
+      "preflight_auto_recover": true,
+      "preflight_completion_timeout_s": 20.0,
+      "preflight_retries": 1,
+      "preflight_require_completion": true,
+      "require_preflight": true
     }
   },
   "processing": {

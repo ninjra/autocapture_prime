@@ -72,6 +72,21 @@ class QueryHardVlmQualityGateTests(unittest.TestCase):
         self.assertIsInstance(evidence, list)
         self.assertGreaterEqual(len(evidence), 1)
 
+    def test_grid_section_boxes_supports_twelve_segments(self) -> None:
+        boxes = query_mod._grid_section_boxes(7680, 2160, sections=12)
+        self.assertEqual(len(boxes), 12)
+        self.assertEqual(len(set(boxes)), 12)
+        # Deterministic row-major ordering: first row starts at y=0, second row below it.
+        self.assertEqual(boxes[0][1], 0)
+        self.assertGreaterEqual(boxes[4][1], boxes[0][3])
+
+    def test_unread_topic_rois_are_not_truncated_to_five(self) -> None:
+        width, height = 7680, 2160
+        boxes = query_mod._topic_roi_boxes("hard_unread_today", [], width=width, height=height)
+        self.assertGreaterEqual(len(boxes), 4)
+        # Ensure dedicated unread-list slice exists in the right pane.
+        self.assertTrue(any(b[0] >= int(width * 0.64) and b[2] >= int(width * 0.80) for b in boxes))
+
 
 if __name__ == "__main__":
     unittest.main()
