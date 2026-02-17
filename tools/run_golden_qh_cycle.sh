@@ -145,7 +145,7 @@ fi
 latest_run="$(ls -1t "$ROOT/artifacts/single_image_runs" | head -n 1)"
 report_path="$ROOT/artifacts/single_image_runs/${latest_run}/report.json"
 
-query_timeout_s="${AUTOCAPTURE_ADV_QUERY_TIMEOUT_S:-60}"
+query_timeout_s="${AUTOCAPTURE_ADV_QUERY_TIMEOUT_S:-180}"
 repro_runs="${AUTOCAPTURE_ADV_REPRO_RUNS:-1}"
 lock_retries="${AUTOCAPTURE_ADV_LOCK_RETRIES:-2}"
 

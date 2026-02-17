@@ -238,6 +238,59 @@ class RunAdvanced10ExpectedEvalTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(seen_key.get("value"), "cfg-key")
 
+    def test_metadata_only_still_passes_report_image_path_to_query(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            cfg = root / "cfg"
+            data = root / "data"
+            cfg.mkdir(parents=True, exist_ok=True)
+            data.mkdir(parents=True, exist_ok=True)
+            image = root / "frame.png"
+            image.write_bytes(b"\x89PNG\r\n\x1a\n")
+            report = root / "report.json"
+            report.write_text(
+                json.dumps(
+                    {
+                        "config_dir": str(cfg),
+                        "data_dir": str(data),
+                        "image_path": str(image),
+                        "plugins": {
+                            "load_report": {"loaded": ["builtin.a"]},
+                            "required_gate": {"ok": True, "missing_required": [], "failed_required": []},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            cases = root / "cases.json"
+            cases.write_text(json.dumps([{"id": "Q1", "question": "q", "expected_contains_all": ["ok"]}]), encoding="utf-8")
+            output = root / "out.json"
+            seen_image_path: dict[str, str] = {}
+
+            def _mock_run_query(*args: object, **kwargs: object) -> dict[str, object]:
+                seen_image_path["value"] = str(kwargs.get("image_path") or "")
+                return {"ok": True, "answer": {"display": {"summary": "ok", "bullets": []}}, "processing": {}}
+
+            with (
+                mock.patch.object(mod, "_repo_root", return_value=root),
+                mock.patch.object(mod, "check_external_vllm_ready", return_value={"ok": True}),
+                mock.patch.object(mod, "_run_query", side_effect=_mock_run_query),
+            ):
+                rc = mod.main(
+                    [
+                        "--report",
+                        str(report),
+                        "--cases",
+                        str(cases),
+                        "--output",
+                        str(output),
+                        "--metadata-only",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(seen_image_path.get("value"), str(image))
+
 
 if __name__ == "__main__":
     unittest.main()

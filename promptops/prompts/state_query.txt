@@ -1,1 +1,1 @@
-how many inboxes do i have open?
+Vision + UI semantics (not OCR-only): In the Outlook message list (Today section), count how many rows show the blue unread indicator bar. Return the count only for Today (not Thursday/Last week).

@@ -747,7 +747,9 @@ def main(argv: list[str] | None = None) -> int:
         question = str(item.get("question") or "").strip()
         if not question:
             continue
-        image_path = "" if bool(args.metadata_only) else str(report.get("image_path") or "").strip()
+        image_path = str(report.get("image_path") or "").strip()
+        if image_path and not Path(image_path).is_absolute():
+            image_path = str((root / image_path).resolve())
         result = _run_query(
             root,
             cfg=cfg,

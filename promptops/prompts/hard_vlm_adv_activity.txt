@@ -1,0 +1,11 @@
+<think>
+Okay, let's tackle this. The user wants me to rewrite the EFFECTIVE_PROMPT to improve grounding and clarity while keeping the user intent the same. The original prompt is about extracting a timeline from a task/incident view, specifically the 'Record Activity' timeline entries with their timestamps and text in order. The error mentioned is a budget exhaustion, so maybe the model had trouble processing the request as is.
+
+First, I need to understand what "grounding" means here. It probably refers to making sure the prompt is clear about where the information should come from, like specifying that the data must be from the provided image or context. The original prompt says "Use only visible evidence from the image," which is good, but maybe it can be phrased more clearly.
+
+Looking at the EFFECTIVE_PROMPT, it's almost the same as the INPUT_PROMPT. The user might have tried to rephrase it but didn't change much. The answer policy emphasizes correctness over speed and using grounded evidence. The MODEL_OUTPUT seems incomplete, but that's probably not part of the task.
+
+The key points to retain are:
+1. Return strict JSON with a timeline array.
+2. Extract 'Record Activity' timeline entries in top-to-bottom order.
+3. Preserve exact

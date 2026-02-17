@@ -2768,6 +2768,7 @@ def _topic_roi_boxes(topic: str, elements: list[dict[str, Any]], *, width: int, 
         _add(_clamp_roi(int(width * 0.00), int(height * 0.02), int(width * 0.43), int(height * 0.46), width=width, height=height))
     if topic == "adv_console":
         _add(_clamp_roi(int(width * 0.18), int(height * 0.52), int(width * 0.63), int(height * 0.98), width=width, height=height))
+        _add(_clamp_roi(int(width * 0.20), int(height * 0.52), int(width * 0.53), int(height * 0.94), width=width, height=height))
     if topic == "adv_browser":
         _add(_clamp_roi(int(width * 0.00), int(height * 0.00), int(width * 0.999), int(height * 0.16), width=width, height=height))
     if topic == "adv_window_inventory":
@@ -2863,6 +2864,43 @@ def _grid_section_boxes(width: int, height: int, *, sections: int = 8) -> list[t
     return boxes[: max(0, int(sections))]
 
 
+def _prioritize_topic_vlm_candidates(topic: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not isinstance(items, list) or not items:
+        return []
+    if not (str(topic).startswith("adv_") or str(topic).startswith("hard_")):
+        return [it for it in items if isinstance(it, dict)]
+
+    def _priority(item: dict[str, Any]) -> tuple[int, int, int]:
+        source = str(item.get("source") or "").strip().casefold()
+        section_id = str(item.get("section_id") or "").strip().casefold()
+        roi = item.get("roi")
+        if source == "roi":
+            if isinstance(roi, tuple) and len(roi) == 4:
+                try:
+                    area = max(1, int(roi[2]) - int(roi[0])) * max(1, int(roi[3]) - int(roi[1]))
+                except Exception:
+                    area = 10**9
+            else:
+                area = 10**9
+            if str(topic) == "adv_window_inventory":
+                return (0, -area, 0)
+            return (0, area, 0)
+        if source.startswith("grid"):
+            idx = 99
+            if section_id.startswith("grid_"):
+                raw = section_id.split("_", 1)[1]
+                if raw.isdigit():
+                    idx = int(raw)
+            return (1, idx, 0)
+        if source == "full":
+            return (2, 0, 0)
+        return (3, 0, 0)
+
+    ranked = [it for it in items if isinstance(it, dict)]
+    ranked.sort(key=_priority)
+    return ranked
+
+
 def _encode_topic_vlm_candidates(image_bytes: bytes, *, topic: str, elements: list[dict[str, Any]]) -> list[dict[str, Any]]:
     blob = bytes(image_bytes or b"")
     if not blob:
@@ -2901,6 +2939,8 @@ def _encode_topic_vlm_candidates(image_bytes: bytes, *, topic: str, elements: li
                     work = crop
                     cur_max = max(int(work.width), int(work.height))
                     max_side = int(os.environ.get("AUTOCAPTURE_HARD_VLM_GRID_MAX_SIDE") or "960")
+                    if topic in {"adv_window_inventory", "adv_browser"}:
+                        max_side = min(max_side, 768)
                     if cur_max > max_side:
                         scale = float(max_side) / float(cur_max)
                         nw = max(1, int(round(float(work.width) * scale)))
@@ -3004,7 +3044,7 @@ def _encode_topic_vlm_candidates(image_bytes: bytes, *, topic: str, elements: li
                             continue
                         _append(enc, roi_box, source="roi")
                         if len(out) >= 24:
-                            return out[:24]
+                            return _prioritize_topic_vlm_candidates(topic, out)[:24]
     except Exception:
         pass
     # Add full-image downsized fallbacks (skip raw full-resolution blob).
@@ -3014,6 +3054,8 @@ def _encode_topic_vlm_candidates(image_bytes: bytes, *, topic: str, elements: li
         with Image.open(io.BytesIO(blob)) as img:
             rgb = img.convert("RGB")
             for max_side in (1280, 1024, 768):
+                if topic in {"adv_browser"}:
+                    break
                 if len(out) >= 12:
                     break
                 work = rgb
@@ -3033,7 +3075,7 @@ def _encode_topic_vlm_candidates(image_bytes: bytes, *, topic: str, elements: li
     # candidates should win when available.
     if not out:
         _append(blob, None, source="raw")
-    return out[:24]
+    return _prioritize_topic_vlm_candidates(topic, out)[:24]
 
 
 def _action_boxes_local_to_global(
@@ -3167,6 +3209,73 @@ def _hard_vlm_hint_text(topic: str, result: dict[str, Any], *, max_chars: int = 
         selected = [_compact_line(x, limit=220) for x in lines[:8]]
     hint = "\n".join(selected)
     return hint[:max_chars].strip()
+
+
+def _hard_k_presets_from_hint(payload: dict[str, Any], hint_text: str) -> dict[str, Any]:
+    out = dict(payload or {})
+    text = str(hint_text or "")
+    if not text:
+        return out
+
+    presets: list[int] = []
+    raw_presets = out.get("k_presets")
+    if isinstance(raw_presets, list):
+        for item in raw_presets:
+            val = _intish(item)
+            if val is not None:
+                presets.append(int(val))
+    presets = [int(x) for x in presets if 1 <= int(x) <= 4096]
+
+    if not presets:
+        groups = re.findall(r"\b(\d{1,4})\s*/\s*(\d{1,4})(?:\s*/\s*(\d{1,4}))?", text)
+        for grp in groups:
+            vals = [int(v) for v in grp if str(v).strip()]
+            vals = [int(v) for v in vals if 1 <= int(v) <= 4096]
+            if len(vals) >= 2:
+                presets = vals
+                break
+    if not presets:
+        candidates = [int(x) for x in re.findall(r"\b(\d{1,4})\b", text)]
+        candidates = [int(v) for v in candidates if 1 <= int(v) <= 4096]
+        if len(candidates) >= 3:
+            uniq: list[int] = []
+            for value in candidates:
+                if value in uniq:
+                    continue
+                uniq.append(value)
+                if len(uniq) >= 3:
+                    break
+            presets = uniq
+
+    clamp_vals: list[int] = []
+    raw_clamp = out.get("clamp_range_inclusive")
+    if isinstance(raw_clamp, list):
+        for item in raw_clamp:
+            val = _intish(item)
+            if val is not None:
+                clamp_vals.append(int(val))
+    clamp_vals = [int(v) for v in clamp_vals if 0 <= int(v) <= 4096]
+    if len(clamp_vals) < 2:
+        clamp_match = re.search(r"clamp[^0-9]{0,12}(\d{1,4})\s*[-–]\s*(\d{1,4})", text, flags=re.IGNORECASE)
+        if clamp_match:
+            clamp_vals = [int(clamp_match.group(1)), int(clamp_match.group(2))]
+    if len(clamp_vals) >= 2:
+        clamp_vals = [int(clamp_vals[0]), int(clamp_vals[1])]
+        if clamp_vals[0] > clamp_vals[1]:
+            clamp_vals = [clamp_vals[1], clamp_vals[0]]
+        out["clamp_range_inclusive"] = clamp_vals[:2]
+
+    if presets:
+        out["k_presets"] = [int(x) for x in presets]
+        out["k_presets_sum"] = int(sum(int(x) for x in presets))
+        clamp = out.get("clamp_range_inclusive")
+        if isinstance(clamp, list) and len(clamp) == 2:
+            mn = _intish(clamp[0])
+            mx = _intish(clamp[1])
+            if mn is not None and mx is not None:
+                low, high = sorted((int(mn), int(mx)))
+                out["preset_validity"] = [{"k": int(v), "valid": bool(low <= int(v) <= high)} for v in presets]
+    return out
 
 
 def _layout_button_boxes(elements: list[dict[str, Any]], *, width: int, height: int) -> dict[str, dict[str, float]]:
@@ -4097,16 +4206,16 @@ def _hard_vlm_merge_candidates(topic: str, candidates: list[dict[str, Any]]) -> 
         windows = _hard_vlm_merge_windows(
             ranked,
             key_fields=("name", "app", "context"),
-            consensus_min_hits=2,
-            keep_if_score_at_least=34,
+            consensus_min_hits=1,
+            keep_if_score_at_least=24,
         )
         return {"windows": windows} if windows else dict(best_payload)
     if topic == "adv_browser":
         windows = _hard_vlm_merge_windows(
             ranked,
             key_fields=("active_title", "hostname", "tab_count"),
-            consensus_min_hits=2,
-            keep_if_score_at_least=30,
+            consensus_min_hits=1,
+            keep_if_score_at_least=22,
         )
         return {"windows": windows} if windows else dict(best_payload)
     if topic == "adv_incident":
@@ -4456,6 +4565,24 @@ def _hard_vlm_extract(system: Any, result: dict[str, Any], topic: str, query_tex
     except Exception:
         promptops_layer = None
         promptops_result = None
+    prompt_cap = int(os.environ.get("AUTOCAPTURE_HARD_VLM_PROMPT_MAX_CHARS") or "1400")
+    topic_prompt_cap = {
+        "adv_window_inventory": 900,
+        "adv_focus": 900,
+        "adv_incident": 900,
+        "adv_activity": 1000,
+        "adv_details": 1000,
+        "adv_calendar": 800,
+        "adv_slack": 900,
+        "adv_dev": 1000,
+        "adv_console": 900,
+        "adv_browser": 720,
+    }.get(topic)
+    if topic_prompt_cap is not None:
+        prompt_cap = min(int(prompt_cap), int(topic_prompt_cap))
+    prompt_cap = max(240, min(4000, int(prompt_cap)))
+    if len(prompt) > prompt_cap:
+        prompt = (prompt[:prompt_cap].rstrip() + "\nReturn strict JSON only with no extra commentary.").strip()
     evidence_id = _first_evidence_record_id(result)
     if not evidence_id:
         evidence_id = _latest_evidence_record_id(system)
@@ -4495,15 +4622,15 @@ def _hard_vlm_extract(system: Any, result: dict[str, Any], topic: str, query_tex
     hard_max_candidates = max(1, min(8, hard_max_candidates))
     topic_max_tokens = {
         "adv_window_inventory": 520,
-        "adv_focus": 280,
-        "adv_incident": 320,
-        "adv_activity": 360,
+        "adv_focus": 520,
+        "adv_incident": 420,
+        "adv_activity": 800,
         "adv_details": 520,
         "adv_calendar": 320,
-        "adv_slack": 300,
+        "adv_slack": 520,
         "adv_dev": 420,
         "adv_console": 420,
-        "adv_browser": 280,
+        "adv_browser": 420,
         "hard_time_to_assignment": 480,
         "hard_k_presets": 480,
         "hard_cross_window_sizes": 420,
@@ -4602,7 +4729,7 @@ def _hard_vlm_extract(system: Any, result: dict[str, Any], topic: str, query_tex
         image_height = 0
         layout_action_boxes = {}
 
-    hard_retries = max(1, min(6, int(os.environ.get("AUTOCAPTURE_HARD_VLM_RETRIES") or "2")))
+    hard_retries = max(1, min(6, int(os.environ.get("AUTOCAPTURE_HARD_VLM_RETRIES") or "3")))
     hard_budget_s = max(float(hard_timeout_s), float(os.environ.get("AUTOCAPTURE_HARD_VLM_BUDGET_S") or "35"))
     candidate_debug: list[dict[str, Any]] = []
     scored_candidates: list[dict[str, Any]] = []
@@ -4812,8 +4939,20 @@ def _hard_vlm_extract(system: Any, result: dict[str, Any], topic: str, query_tex
             )
     except Exception:
         pass
+    if topic == "hard_action_grounding" and (not best) and scored_candidates:
+        scored_sorted = sorted(
+            [c for c in scored_candidates if isinstance(c, dict)],
+            key=lambda row: int(row.get("score") or -10**9),
+            reverse=True,
+        )
+        if scored_sorted:
+            payload = scored_sorted[0].get("payload")
+            if isinstance(payload, dict):
+                best = dict(payload)
     if topic == "hard_action_grounding" and {"COMPLETE", "VIEW_DETAILS"} <= set(layout_action_boxes.keys()):
         return layout_action_boxes
+    if topic == "hard_k_presets" and isinstance(best, dict):
+        best = _hard_k_presets_from_hint(best, hint_text)
     if topic == "hard_cross_window_sizes" and isinstance(best, dict):
         raw_nums = best.get("slack_numbers")
         nums: list[int] = []
@@ -5794,11 +5933,33 @@ def _normalize_hard_fields_for_topic(topic: str, hard_fields: dict[str, Any]) ->
     parsed: Any = None
     if isinstance(raw_answer, str):
         text = str(raw_answer).strip()
-        if text and text[0] in {"{", "["}:
-            try:
-                parsed = json.loads(text)
-            except Exception:
-                parsed = None
+        if text:
+            parsed_payload = _extract_json_payload(text)
+            if isinstance(parsed_payload, dict):
+                parsed = parsed_payload
+            elif isinstance(parsed_payload, list):
+                if topic in {"adv_activity", "adv_details"}:
+                    parsed = parsed_payload
+                else:
+                    parsed = None
+            elif text[0] in {"{", "["}:
+                try:
+                    parsed = json.loads(text)
+                except Exception:
+                    parsed = None
+            if parsed is None:
+                for open_ch, close_ch in (("{", "}"), ("[", "]")):
+                    start = text.find(open_ch)
+                    end = text.rfind(close_ch)
+                    if start < 0 or end <= start:
+                        continue
+                    candidate = text[start : end + 1]
+                    try:
+                        parsed = json.loads(candidate)
+                    except Exception:
+                        parsed = None
+                    if isinstance(parsed, (dict, list)):
+                        break
     if isinstance(parsed, dict):
         for key, value in parsed.items():
             k = str(key).strip()
