@@ -495,16 +495,32 @@ class UiParsePlugin(SSTStagePluginBase):
         enabled = bool(ui_cfg.get("enabled", True))
         max_providers = int(ui_cfg.get("max_providers", 1))
         fallback_detector = bool(ui_cfg.get("fallback_detector", True))
+        ui_vlm_cfg = raw_sst.get("ui_vlm", {}) if isinstance(raw_sst, dict) else {}
+        if not isinstance(ui_vlm_cfg, dict):
+            ui_vlm_cfg = {}
+        use_cached_tokens = bool(ui_vlm_cfg.get("use_cached_tokens", False))
+        prefer_live_vlm = bool(ui_vlm_cfg.get("prefer_live_vlm", True))
 
         # If a prior ui.parse hook already produced a VLM graph, keep it.
         existing_graph = items.get("element_graph")
         if isinstance(existing_graph, dict):
             existing_state = str(existing_graph.get("state_id") or "").strip().casefold()
             existing_elements = existing_graph.get("elements")
+            existing_backend = str(existing_graph.get("source_backend") or "").strip().casefold()
+            existing_ui = existing_graph.get("ui_state") if isinstance(existing_graph.get("ui_state"), dict) else {}
+            has_structured_ui = bool(
+                isinstance(existing_ui, dict)
+                and (
+                    (isinstance(existing_ui.get("windows"), list) and len(cast(list[Any], existing_ui.get("windows"))) > 0)
+                    or (isinstance(existing_ui.get("facts"), list) and len(cast(list[Any], existing_ui.get("facts"))) > 0)
+                )
+            )
+            backend_is_strong = existing_backend not in {"", "cached_vlm_token", "layout_inferred", "openai_compat_text_recovered"}
             if (
                 existing_state.startswith("vlm")
                 and isinstance(existing_elements, (list, tuple))
                 and len(existing_elements) > 0
+                and (has_structured_ui or backend_is_strong)
             ):
                 diagnostics.append({"kind": "sst.ui_parse_preserve_existing", "state_id": existing_state})
                 return PluginOutput(
@@ -521,6 +537,8 @@ class UiParsePlugin(SSTStagePluginBase):
                 tokens,
                 frame_bbox,
                 max_providers=max_providers,
+                use_cached_tokens=use_cached_tokens,
+                prefer_live_vlm=prefer_live_vlm,
                 diagnostics=diagnostics,
             )
         if element_graph is None and enabled and (mode == "detector" or fallback_detector):
@@ -995,12 +1013,14 @@ def _parse_element_graph_from_vlm(
     frame_bbox: tuple[int, int, int, int] | None,
     *,
     max_providers: int,
+    use_cached_tokens: bool,
+    prefer_live_vlm: bool,
     diagnostics: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
     if capability is None or not frame_bytes or frame_bbox is None:
         return None
-    cached_graph = _parse_element_graph_from_cached_vlm_tokens(tokens=tokens, frame_bbox=frame_bbox)
-    if cached_graph is not None:
+    cached_graph = _parse_element_graph_from_cached_vlm_tokens(tokens=tokens, frame_bbox=frame_bbox) if use_cached_tokens else None
+    if cached_graph is not None and not prefer_live_vlm:
         diagnostics.append(
             {
                 "kind": "sst.ui_vlm_used_cached_tokens",
@@ -1104,6 +1124,15 @@ def _parse_element_graph_from_vlm(
                 break
     if best_graph is not None:
         return best_graph
+    if cached_graph is not None:
+        diagnostics.append(
+            {
+                "kind": "sst.ui_vlm_used_cached_tokens_fallback",
+                "provider_id": str(cached_graph.get("source_provider_id") or "vision.extractor"),
+                "backend": str(cached_graph.get("source_backend") or "cached_vlm_token"),
+            }
+        )
+        return cached_graph
     diagnostics.append({"kind": "sst.ui_vlm_empty"})
     return None
 
@@ -1148,6 +1177,9 @@ def _parse_element_graph_from_cached_vlm_tokens(
             continue
         if len(element_graph.get("elements", ())) <= 1:
             continue
+        parsed_backend = str(element_graph.get("source_backend") or "").strip()
+        if parsed_backend:
+            backend = parsed_backend
         element_graph["source_backend"] = backend
         element_graph["source_provider_id"] = provider_id
         score = _provider_priority(provider_id) + int(len(element_graph.get("elements", ())))
@@ -1214,6 +1246,22 @@ def _parse_element_graph(
         return None
     if not _validate_element_schema(raw_elements):
         return None
+    source_backend = str(data.get("source_backend") or "").strip()
+    source_provider_id = str(data.get("source_provider_id") or provider_id).strip() or str(provider_id)
+    ui_state = data.get("ui_state") if isinstance(data.get("ui_state"), dict) else {}
+    if not isinstance(ui_state, dict):
+        ui_state = {}
+    # Preserve two-pass structured payloads when supplied at top-level.
+    for key in ("windows", "facts", "rois", "roi_reports"):
+        if key in data and isinstance(data.get(key), list) and not isinstance(ui_state.get(key), list):
+            ui_state[key] = list(cast(list[Any], data.get(key)))
+    if not isinstance(ui_state.get("image_size"), (list, tuple)):
+        ui_state["image_size"] = [int(frame_bbox[2]), int(frame_bbox[3])]
+    if (not source_backend) and (
+        (isinstance(ui_state.get("windows"), list) and len(cast(list[Any], ui_state.get("windows"))) > 0)
+        or (isinstance(ui_state.get("facts"), list) and len(cast(list[Any], ui_state.get("facts"))) > 0)
+    ):
+        source_backend = "openai_compat_two_pass_inferred"
     elements: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
 
@@ -1278,7 +1326,17 @@ def _parse_element_graph(
             add_element(item, root_id, 1, idx)
     _link_children(elements)
     elements.sort(key=lambda e: (e["z"], e["bbox"][1], e["bbox"][0], e["element_id"]))
-    return {"state_id": state_id, "elements": tuple(elements), "edges": tuple(edges)}
+    out: dict[str, Any] = {
+        "state_id": state_id,
+        "elements": tuple(elements),
+        "edges": tuple(edges),
+        "source_provider_id": source_provider_id,
+    }
+    if source_backend:
+        out["source_backend"] = source_backend
+    if ui_state:
+        out["ui_state"] = ui_state
+    return out
 
 
 _PARTIAL_ELEMENT_RE = re.compile(

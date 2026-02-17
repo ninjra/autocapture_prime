@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -185,6 +186,57 @@ class RunAdvanced10ExpectedEvalTests(unittest.TestCase):
             with mock.patch.object(mod, "_repo_root", return_value=root):
                 rc = mod.main(["--report", str(report), "--cases", str(cases), "--strict-all", "--output", str(root / "o.json")])
             self.assertEqual(rc, 2)
+
+    def test_main_seeds_vlm_api_key_from_config_for_preflight(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            cfg = root / "cfg"
+            cfg.mkdir(parents=True, exist_ok=True)
+            (cfg / "user.json").write_text(
+                json.dumps(
+                    {
+                        "plugins": {
+                            "settings": {
+                                "builtin.vlm.vllm_localhost": {"api_key": "cfg-key"},
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            report = root / "report.json"
+            report.write_text(
+                json.dumps(
+                    {
+                        "config_dir": str(cfg),
+                        "data_dir": "/tmp/data",
+                        "plugins": {
+                            "load_report": {"loaded": ["builtin.a"]},
+                            "required_gate": {"ok": True, "missing_required": [], "failed_required": []},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            cases = root / "cases.json"
+            cases.write_text("[]", encoding="utf-8")
+            output = root / "out.json"
+
+            seen_key: dict[str, str] = {}
+
+            def _probe(*args: object, **kwargs: object) -> dict[str, object]:
+                seen_key["value"] = str(os.environ.get("AUTOCAPTURE_VLM_API_KEY") or "")
+                return {"ok": True, "models": ["OpenGVLab/InternVL3_5-8B-HF"]}
+
+            with (
+                mock.patch.object(mod, "_repo_root", return_value=root),
+                mock.patch.object(mod, "check_external_vllm_ready", side_effect=_probe),
+                mock.patch.dict(os.environ, {"AUTOCAPTURE_VLM_API_KEY": ""}, clear=False),
+            ):
+                rc = mod.main(["--report", str(report), "--cases", str(cases), "--output", str(output)])
+            self.assertEqual(rc, 0)
+            self.assertEqual(seen_key.get("value"), "cfg-key")
 
 
 if __name__ == "__main__":

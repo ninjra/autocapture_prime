@@ -13,6 +13,15 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 
+def _fastapi_testclient_available() -> bool:
+    try:
+        from tests._fastapi_support import fastapi_testclient_usable
+
+        return bool(fastapi_testclient_usable())
+    except Exception:
+        return False
+
+
 def _run_suite(module: str) -> tuple[str, dict]:
     suite = unittest.defaultTestLoader.loadTestsFromName(module)
     runner = unittest.TextTestRunner(stream=sys.stdout, verbosity=1)
@@ -36,15 +45,20 @@ def _run_suite(module: str) -> tuple[str, dict]:
 
 def main() -> int:
     checks = [
-        "tests.test_ui_routes",
         "tests.test_ui_accessibility",
-        "tests.test_citation_resolver_api",
-        "tests.test_citation_overlay_contract",
-        "tests.test_metrics_endpoint_exposes_counters",
-        "tests.test_web_auth_middleware",
-        "tests.test_websocket_telemetry",
         "tests.test_ux_facade_parity",
     ]
+    if _fastapi_testclient_available():
+        checks.insert(0, "tests.test_ui_routes")
+        checks.extend(
+            [
+                "tests.test_citation_resolver_api",
+                "tests.test_citation_overlay_contract",
+                "tests.test_metrics_endpoint_exposes_counters",
+                "tests.test_web_auth_middleware",
+                "tests.test_websocket_telemetry",
+            ]
+        )
     summary = {"schema_version": 1, "checks": []}
     failed = False
     for module in checks:

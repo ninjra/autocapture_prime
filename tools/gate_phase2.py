@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 
 def _run_suite(module: str) -> tuple[str, dict]:
@@ -32,7 +37,6 @@ def _run_suite(module: str) -> tuple[str, dict]:
 def main() -> int:
     checks = [
         "tests.test_capture_backend_default",
-        "tests.test_capture_backend_fallback",
         "tests.test_capture_container_resolution",
         "tests.test_capture_zip_container",
         "tests.test_capture_streaming",
@@ -61,6 +65,8 @@ def main() -> int:
         "tests.test_fullscreen_halt",
         "tests.test_monitor_selection",
     ]
+    if os.name == "nt":
+        checks.insert(1, "tests.test_capture_backend_fallback")
     summary = {"schema_version": 1, "checks": []}
     failed = False
     for module in checks:

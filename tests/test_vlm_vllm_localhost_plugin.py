@@ -1,16 +1,24 @@
 import unittest
 
+from autocapture_nx.plugin_system.api import PluginContext
 from plugins.builtin.vlm_vllm_localhost.plugin import (
     VllmVLM,
+    _adv_fact_topics,
     _collect_rois,
     _extract_layout_from_text,
+    _grid_roi_specs,
     _is_model_not_found_error,
     _parse_elements,
+    _roi_coverage_bp,
     _valid_layout,
 )
 
 
 class VllmLocalhostPluginTests(unittest.TestCase):
+    def _plugin(self) -> VllmVLM:
+        ctx = PluginContext(config={}, get_capability=lambda _name: None, logger=lambda _m: None)
+        return VllmVLM("builtin.vlm.vllm_localhost", ctx)
+
     def test_discover_model_ids_returns_ordered_ids(self) -> None:
         class _FakeClient:
             def list_models(self):
@@ -67,6 +75,25 @@ class VllmLocalhostPluginTests(unittest.TestCase):
         self.assertGreaterEqual(len(ids), 2)
         self.assertTrue(any(rid.startswith("grid_") for rid in ids[1:]))
 
+    def test_grid_roi_specs_produces_eight_sections(self) -> None:
+        specs = _grid_roi_specs(8)
+        self.assertEqual(len(specs), 8)
+        self.assertEqual(specs[0][0], "grid_1")
+        self.assertEqual(specs[-1][0], "grid_8")
+
+    def test_collect_rois_enforces_full_eight_grid_map_reduce(self) -> None:
+        rois = _collect_rois({}, width=1600, height=800, max_rois=2, grid_sections=8, grid_enforced=True)
+        ids = [r.roi_id for r in rois]
+        self.assertEqual(ids[0], "full")
+        self.assertTrue(all(f"grid_{idx}" in ids for idx in range(1, 9)))
+        self.assertGreaterEqual(len(ids), 9)
+
+    def test_roi_coverage_bp_union_caps_at_full_frame(self) -> None:
+        boxes = [(0, 0, 100, 100), (50, 50, 150, 150)]
+        bp = _roi_coverage_bp(boxes, width=150, height=150)
+        self.assertGreater(bp, 0)
+        self.assertLessEqual(bp, 10000)
+
     def test_parse_elements_maps_roi_local_to_global_pixels(self) -> None:
         roi = _collect_rois({}, width=1000, height=500, max_rois=1)[0]
         child_roi = type(roi)(
@@ -108,6 +135,28 @@ class VllmLocalhostPluginTests(unittest.TestCase):
         self.assertIsInstance(layout.get("facts"), list)
         facts = layout.get("facts", [])
         self.assertTrue(any(isinstance(item, dict) and item.get("key") == "adv.incident.subject" for item in facts))
+
+    def test_adv_fact_topics_extracts_unique_topic_names(self) -> None:
+        facts = [
+            {"key": "adv.window.1.app", "value": "Slack"},
+            {"key": "adv.window.2.app", "value": "Outlook"},
+            {"key": "adv.calendar.month_year", "value": "January 2026"},
+            {"key": "adv.slack.msg.1.text", "value": "hello"},
+            {"key": "other.key", "value": "x"},
+        ]
+        topics = _adv_fact_topics(facts)
+        self.assertIn("window", topics)
+        self.assertIn("calendar", topics)
+        self.assertIn("slack", topics)
+        self.assertNotIn("other", topics)
+
+    def test_circuit_breaker_returns_unavailable_without_crash(self) -> None:
+        plugin = self._plugin()
+        plugin._mark_chat_failure("http_failed")  # type: ignore[attr-defined]
+        plugin._mark_chat_failure("http_failed")  # type: ignore[attr-defined]
+        payload = plugin.extract(b"not-an-image")
+        self.assertEqual(payload.get("backend"), "unavailable")
+        self.assertIn("circuit_open", str(payload.get("model_error") or ""))
 
 
 if __name__ == "__main__":

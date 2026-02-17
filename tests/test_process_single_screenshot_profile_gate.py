@@ -5,6 +5,7 @@ import os
 import pathlib
 import sys
 import unittest
+from unittest import mock
 
 
 def _load_module():
@@ -128,6 +129,47 @@ class ProcessSingleScreenshotProfileGateTests(unittest.TestCase):
                 served_models=["m1", "m2"],
                 strict_golden=True,
             )
+
+    def test_configured_vlm_api_key_from_config_reads_plugin_setting(self) -> None:
+        mod = _load_module()
+        with mock.patch.object(
+            mod,
+            "_load_json",
+            return_value={
+                "plugins": {
+                    "settings": {
+                        "builtin.vlm.vllm_localhost": {"api_key": "cfg-key"},
+                    }
+                }
+            },
+        ):
+            key = mod._configured_vlm_api_key_from_config(pathlib.Path("/tmp/fake.json"))
+        self.assertEqual(key, "cfg-key")
+
+    def test_repo_default_vlm_api_key_uses_repo_user_config(self) -> None:
+        mod = _load_module()
+        with (
+            mock.patch.object(mod, "resolve_repo_path", return_value=pathlib.Path("/tmp/repo_user.json")),
+            mock.patch.object(mod, "_configured_vlm_api_key_from_config", return_value="repo-key"),
+        ):
+            key = mod._repo_default_vlm_api_key()
+        self.assertEqual(key, "repo-key")
+
+    def test_ensure_core_writer_plugins_updates_allowlist(self) -> None:
+        mod = _load_module()
+        allowlist = ["builtin.vlm.vllm_localhost"]
+        mod._ensure_core_writer_plugins(allowlist=allowlist)
+        self.assertIn("builtin.journal.basic", allowlist)
+        self.assertIn("builtin.ledger.basic", allowlist)
+        self.assertIn("builtin.anchor.basic", allowlist)
+
+    def test_ensure_core_writer_plugins_updates_enabled_map(self) -> None:
+        mod = _load_module()
+        enabled = {"builtin.vlm.vllm_localhost": True}
+        mod._ensure_core_writer_plugins(enabled=enabled)
+        self.assertTrue(enabled.get("builtin.journal.basic"))
+        self.assertTrue(enabled.get("builtin.ledger.basic"))
+        self.assertTrue(enabled.get("builtin.anchor.basic"))
 
 
 if __name__ == "__main__":

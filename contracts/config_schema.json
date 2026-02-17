@@ -2124,6 +2124,12 @@
                 },
                 "max_providers": {
                   "type": "integer"
+                },
+                "prefer_live_vlm": {
+                  "type": "boolean"
+                },
+                "use_cached_tokens": {
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -2284,6 +2290,22 @@
           ],
           "type": "object"
         },
+        "metrics": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "output_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "enabled",
+            "output_path"
+          ],
+          "type": "object"
+        },
         "history_dir": {
           "type": "string"
         },
@@ -2299,7 +2321,13 @@
         "mode": {
           "type": "string"
         },
+        "model_strategy": {
+          "type": "string"
+        },
         "persist_prompts": {
+          "type": "boolean"
+        },
+        "persist_query_prompts": {
           "type": "boolean"
         },
         "prompt_dir": {
@@ -2307,6 +2335,53 @@
         },
         "query_strategy": {
           "type": "string"
+        },
+        "review": {
+          "additionalProperties": false,
+          "properties": {
+            "base_url": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "max_tokens": {
+              "type": "integer"
+            },
+            "model": {
+              "type": "string"
+            },
+            "on_failure_only": {
+              "type": "boolean"
+            },
+            "persist_prompts": {
+              "type": "boolean"
+            },
+            "timeout_s": {
+              "type": "number"
+            },
+            "auto_approve": {
+              "type": "boolean"
+            },
+            "approved_prompt_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "base_url",
+            "enabled",
+            "max_tokens",
+            "model",
+            "on_failure_only",
+            "persist_prompts",
+            "timeout_s",
+            "auto_approve",
+            "approved_prompt_ids"
+          ],
+          "type": "object"
         },
         "require_citations": {
           "type": "boolean"
@@ -2328,11 +2403,15 @@
         "max_tokens",
         "min_pass_rate_pct",
         "require_citations",
+        "model_strategy",
         "persist_prompts",
+        "persist_query_prompts",
         "sources",
         "examples",
         "eval",
         "history",
+        "metrics",
+        "review",
         "github",
         "bundle_name",
         "banned_patterns"

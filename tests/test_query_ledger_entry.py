@@ -71,6 +71,32 @@ class QueryLedgerEntryTests(unittest.TestCase):
         self.assertEqual(entry["inputs"], ["run1/segment/0"])
         self.assertEqual(entry["outputs"], ["run1/segment/0"])
 
+    def test_query_promptops_normalizes_query_in_ledger(self) -> None:
+        system = _System()
+        system.config["promptops"] = {
+            "enabled": True,
+            "mode": "auto_apply",
+            "query_strategy": "normalize_query",
+            "model_strategy": "model_contract",
+            "require_citations": True,
+            "history": {"enabled": False},
+            "github": {"enabled": False},
+            "sources": [],
+            "examples": {},
+            "metrics": {"enabled": False},
+            "review": {"enabled": False},
+        }
+        _ = run_query(system, "pls help w/ query")
+        entry = system.get("event.builder").entries[-1]
+        payload = entry["payload"]
+        self.assertEqual(payload["query_original"], "pls help w/ query")
+        self.assertEqual(payload["query"], "please help with query?")
+        self.assertTrue(payload["promptops_used"])
+        self.assertTrue(payload["promptops_applied"])
+        self.assertEqual(payload["promptops_strategy"], "normalize_query")
+        self.assertIsInstance(payload.get("promptops_trace"), dict)
+        self.assertIn("stages_ms", payload["promptops_trace"])
+
 
 if __name__ == "__main__":
     unittest.main()

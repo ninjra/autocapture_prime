@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import sys
 import unittest
 from pathlib import Path
@@ -11,6 +12,15 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+
+
+def _socket_available() -> bool:
+    try:
+        s = socket.socket()
+        s.close()
+        return True
+    except OSError:
+        return False
 
 
 def _run_suite(module: str) -> tuple[str, dict]:
@@ -36,8 +46,6 @@ def _run_suite(module: str) -> tuple[str, dict]:
 
 def main() -> int:
     checks = [
-        "tests.test_network_guard",
-        "tests.test_kernel_network_deny",
         "tests.test_plugin_network_block",
         "tests.test_plugin_capability_policies",
         "tests.test_plugin_filesystem_policy",
@@ -54,6 +62,9 @@ def main() -> int:
         "tests.test_tokenizer_versioning",
         "tests.test_egress_packet_ledger",
     ]
+    if _socket_available():
+        checks.insert(0, "tests.test_network_guard")
+        checks.insert(1, "tests.test_kernel_network_deny")
     summary = {"schema_version": 1, "checks": []}
     failed = False
     for module in checks:

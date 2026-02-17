@@ -32,13 +32,16 @@ class VLMUIStageHook(PluginBase):
         frame_bytes = payload.get("frame_bytes")
         tokens = payload.get("tokens", [])
         frame_bbox = payload.get("frame_bbox")
+        if not frame_bbox:
+            frame_bbox = _infer_frame_bbox(frame_bytes, tokens)
         if not frame_bytes or not isinstance(tokens, list) or not frame_bbox:
             return None
+        # Live VLM is the default. Cached token parsing is explicit fallback only.
         use_cached_tokens = bool(cfg.get("use_cached_tokens", False))
-        if use_cached_tokens:
-            cached_graph = _parse_element_graph_from_cached_vlm_tokens(tokens, frame_bbox)
-            if cached_graph is not None:
-                return {"element_graph": cached_graph}
+        prefer_live_vlm = bool(cfg.get("prefer_live_vlm", True))
+        cached_graph = _parse_element_graph_from_cached_vlm_tokens(tokens, frame_bbox) if use_cached_tokens else None
+        if cached_graph is not None and not prefer_live_vlm:
+            return {"element_graph": cached_graph}
         providers = _providers(self._get_vlm())
         max_providers = int(cfg.get("max_providers", 1))
         best_graph: dict[str, Any] | None = None
@@ -120,6 +123,8 @@ class VLMUIStageHook(PluginBase):
                     break
         if best_graph is not None:
             return {"element_graph": best_graph}
+        if cached_graph is not None:
+            return {"element_graph": cached_graph}
         return None
 
     def _get_vlm(self) -> Any | None:
@@ -366,6 +371,38 @@ def _state_id_from_vlm_backend(backend: str) -> str:
     if value in {"heuristic", "toy.vlm", "toy_vlm", "ocr_heuristic", "vlm_heuristic"}:
         return "vlm_heuristic"
     return "vlm"
+
+
+def _infer_frame_bbox(frame_bytes: Any, tokens: list[dict[str, Any]]) -> tuple[int, int, int, int] | None:
+    if isinstance(frame_bytes, (bytes, bytearray)) and frame_bytes:
+        try:
+            from io import BytesIO
+            from PIL import Image  # type: ignore
+
+            with Image.open(BytesIO(bytes(frame_bytes))) as img:
+                w, h = img.size
+            if int(w) > 1 and int(h) > 1:
+                return (0, 0, int(w), int(h))
+        except Exception:
+            pass
+    max_x = 0
+    max_y = 0
+    for tok in tokens:
+        if not isinstance(tok, dict):
+            continue
+        bbox = tok.get("bbox")
+        if not (isinstance(bbox, (list, tuple)) and len(bbox) == 4):
+            continue
+        try:
+            x2 = int(float(bbox[2]))
+            y2 = int(float(bbox[3]))
+        except Exception:
+            continue
+        max_x = max(max_x, x2)
+        max_y = max(max_y, y2)
+    if max_x > 1 and max_y > 1:
+        return (0, 0, int(max_x), int(max_y))
+    return None
 
 
 def _validate_element_schema(elements: list[Any]) -> bool:

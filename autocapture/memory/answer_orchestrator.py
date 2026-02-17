@@ -36,9 +36,9 @@ class LocalLLM:
     def generate(self, prompt: str, max_tokens: int = 128, *, apply_promptops: bool = True) -> str:
         if apply_promptops:
             try:
-                from autocapture.promptops.engine import PromptOpsLayer
+                from autocapture.promptops.service import get_promptops_layer
 
-                layer = PromptOpsLayer(self._config)
+                layer = get_promptops_layer(self._config)
                 result = layer.prepare_prompt(prompt, prompt_id="llm.local")
                 prompt = result.prompt
             except Exception:

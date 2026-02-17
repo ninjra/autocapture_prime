@@ -53,6 +53,11 @@ STRICT_GOLDEN_ENV_BLOCKLIST: tuple[str, ...] = (
     "AUTOCAPTURE_VLM_THUMB_MAX_TOKENS",
     "AUTOCAPTURE_VLM_TIMEOUT_S",
 )
+CORE_WRITER_PLUGINS: tuple[str, ...] = (
+    "builtin.journal.basic",
+    "builtin.ledger.basic",
+    "builtin.anchor.basic",
+)
 
 
 def _utc_stamp() -> str:
@@ -66,6 +71,33 @@ def _load_json(path: Path) -> dict[str, Any]:
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _configured_vlm_api_key_from_config(path: Path) -> str:
+    try:
+        raw = _load_json(path)
+    except Exception:
+        return ""
+    plugins_cfg = raw.get("plugins", {}) if isinstance(raw, dict) else {}
+    settings = plugins_cfg.get("settings", {}) if isinstance(plugins_cfg, dict) else {}
+    if not isinstance(settings, dict):
+        return ""
+    for plugin_id in (
+        "builtin.vlm.vllm_localhost",
+        "builtin.answer.synth_vllm_localhost",
+        "builtin.ocr.nemotron_torch",
+    ):
+        cfg = settings.get(plugin_id, {})
+        if not isinstance(cfg, dict):
+            continue
+        key = str(cfg.get("api_key") or "").strip()
+        if key:
+            return key
+    return ""
+
+
+def _repo_default_vlm_api_key() -> str:
+    return _configured_vlm_api_key_from_config(resolve_repo_path("config/user.json"))
 
 
 def _image_size(image_bytes: bytes) -> tuple[int, int]:
@@ -197,6 +229,16 @@ def _is_truthy_env(value: str | None) -> bool:
     return text not in {"0", "false", "no", "off", "none"}
 
 
+def _ensure_core_writer_plugins(*, allowlist: list[str] | None = None, enabled: dict[str, Any] | None = None) -> None:
+    if isinstance(allowlist, list):
+        for plugin_id in CORE_WRITER_PLUGINS:
+            if plugin_id not in allowlist:
+                allowlist.append(plugin_id)
+    if isinstance(enabled, dict):
+        for plugin_id in CORE_WRITER_PLUGINS:
+            enabled[plugin_id] = True
+
+
 def _strict_golden_enabled() -> bool:
     return _is_truthy_env(os.environ.get("AUTOCAPTURE_GOLDEN_STRICT", "1"))
 
@@ -301,6 +343,15 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
+    os.environ.setdefault("AUTOCAPTURE_VLM_BASE_URL", EXTERNAL_VLLM_BASE_URL)
+    os.environ.setdefault("AUTOCAPTURE_VLM_MODEL", "internvl3_5_8b")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", "12")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_RETRIES", "3")
+    os.environ.setdefault("AUTOCAPTURE_VLM_MAX_INFLIGHT", "1")
+    os.environ.setdefault(
+        "AUTOCAPTURE_VLM_ORCHESTRATOR_CMD",
+        "bash /mnt/d/projects/hypervisor/tools/wsl/start_internvl35_8b_with_watch.sh",
+    )
     remote_vlm_base_url = EXTERNAL_VLLM_BASE_URL
     remote_vlm_only = True
     # Hard policy invariants for safety.
@@ -374,6 +425,9 @@ def main(argv: list[str] | None = None) -> int:
                 allowlist.append("builtin.vlm.qwen2_vl_2b")
             if "builtin.processing.sst.ui_vlm" not in allowlist:
                 allowlist.append("builtin.processing.sst.ui_vlm")
+            if "builtin.answer.synth_vllm_localhost" not in allowlist:
+                allowlist.append("builtin.answer.synth_vllm_localhost")
+            _ensure_core_writer_plugins(allowlist=allowlist)
             # Ensure required-gate plugins are not accidentally filtered out by
             # profile overlays with a narrow allowlist.
             for plugin_id in required_from_profile:
@@ -393,15 +447,32 @@ def main(argv: list[str] | None = None) -> int:
             enabled["builtin.sst.qa.answers"] = False
             enabled["builtin.observation.graph"] = True
             enabled["builtin.processing.sst.ui_vlm"] = True
+            enabled["builtin.answer.synth_vllm_localhost"] = True
             enabled["builtin.vlm.vllm_localhost"] = True
             enabled["builtin.vlm.qwen2_vl_2b"] = not remote_vlm_only
             enabled["builtin.vlm.basic"] = False
+            _ensure_core_writer_plugins(enabled=enabled)
         settings = plugins_cfg.setdefault("settings", {})
         if isinstance(settings, dict):
+            shared_api_key = str(os.environ.get("AUTOCAPTURE_VLM_API_KEY") or "").strip() or _repo_default_vlm_api_key()
             vllm_settings = settings.setdefault("builtin.vlm.vllm_localhost", {})
             if isinstance(vllm_settings, dict):
-                min_timeout_s = 60.0
+                timeout_floor_env = str(os.environ.get("AUTOCAPTURE_VLM_TIMEOUT_FLOOR_S") or "").strip()
+                try:
+                    min_timeout_s = float(timeout_floor_env) if timeout_floor_env else 12.0
+                except Exception:
+                    min_timeout_s = 12.0
+                min_timeout_s = max(4.0, min_timeout_s)
                 vllm_settings["base_url"] = remote_vlm_base_url
+                env_api_key = str(os.environ.get("AUTOCAPTURE_VLM_API_KEY") or "").strip()
+                cfg_api_key = str(vllm_settings.get("api_key") or "").strip()
+                if env_api_key:
+                    cfg_api_key = env_api_key
+                if not cfg_api_key:
+                    cfg_api_key = shared_api_key
+                if cfg_api_key:
+                    vllm_settings["api_key"] = cfg_api_key
+                    shared_api_key = cfg_api_key
                 model = str(vllm_settings.get("model") or os.environ.get("AUTOCAPTURE_VLM_MODEL") or "").strip()
                 if model:
                     vllm_settings["model"] = model
@@ -410,6 +481,12 @@ def main(argv: list[str] | None = None) -> int:
                 except Exception:
                     configured_timeout = 0.0
                 vllm_settings["timeout_s"] = max(min_timeout_s, configured_timeout)
+                vllm_settings["fail_open_after_errors"] = _coerce_int(vllm_settings.get("fail_open_after_errors"), 2)
+                try:
+                    cooldown_s = float(vllm_settings.get("failure_cooldown_s") or 45.0)
+                except Exception:
+                    cooldown_s = 45.0
+                vllm_settings["failure_cooldown_s"] = max(5.0, cooldown_s)
                 vllm_settings["two_pass_enabled"] = True
                 vllm_settings["thumb_max_px"] = _coerce_int(vllm_settings.get("thumb_max_px"), 960)
                 vllm_settings["max_rois"] = _coerce_int(vllm_settings.get("max_rois"), 6)
@@ -422,6 +499,16 @@ def main(argv: list[str] | None = None) -> int:
                 vllm_settings["n"] = 1
                 if "seed" not in vllm_settings:
                     vllm_settings["seed"] = 0
+            ocr_vlm_settings = settings.setdefault("builtin.ocr.nemotron_torch", {})
+            if isinstance(ocr_vlm_settings, dict):
+                ocr_vlm_settings["base_url"] = remote_vlm_base_url
+                if shared_api_key and not str(ocr_vlm_settings.get("api_key") or "").strip():
+                    ocr_vlm_settings["api_key"] = shared_api_key
+            synth_settings = settings.setdefault("builtin.answer.synth_vllm_localhost", {})
+            if isinstance(synth_settings, dict):
+                synth_settings["base_url"] = remote_vlm_base_url
+                if shared_api_key and not str(synth_settings.get("api_key") or "").strip():
+                    synth_settings["api_key"] = shared_api_key
             qwen_settings = settings.setdefault("builtin.vlm.qwen2_vl_2b", {})
             if isinstance(qwen_settings, dict):
                 qwen_model = str(
@@ -542,7 +629,6 @@ def main(argv: list[str] | None = None) -> int:
     original_pythonhashseed = os.environ.get("PYTHONHASHSEED")
     os.environ["AUTOCAPTURE_CONFIG_DIR"] = str(config_dir)
     os.environ["AUTOCAPTURE_DATA_DIR"] = str(data_dir)
-    os.environ["AUTOCAPTURE_PLUGINS_HOSTING_MODE"] = "inproc"
 
     report: dict[str, Any] = {
         "run_dir": str(run_dir),
@@ -628,12 +714,18 @@ def main(argv: list[str] | None = None) -> int:
                 f"required_plugin_gate_failed: missing=[{missing}] failed=[{failed}]"
             )
         if _should_require_vlm(required_plugins):
-            vllm_status = check_external_vllm_ready()
+            plugin_settings = (base_cfg.get("plugins") or {}).get("settings", {}) if isinstance(base_cfg, dict) else {}
+            vllm_cfg = plugin_settings.get("builtin.vlm.vllm_localhost", {}) if isinstance(plugin_settings, dict) else {}
+            if not str(os.environ.get("AUTOCAPTURE_VLM_API_KEY") or "").strip():
+                cfg_key = str(vllm_cfg.get("api_key") or "").strip() if isinstance(vllm_cfg, dict) else ""
+                if not cfg_key:
+                    cfg_key = _repo_default_vlm_api_key()
+                if cfg_key:
+                    os.environ["AUTOCAPTURE_VLM_API_KEY"] = cfg_key
+            vllm_status = check_external_vllm_ready(require_completion=True)
             report["vllm_status"] = vllm_status
             if not bool(vllm_status.get("ok", False)):
                 raise RuntimeError(f"external_vllm_unavailable:{vllm_status}")
-            plugin_settings = (base_cfg.get("plugins") or {}).get("settings", {}) if isinstance(base_cfg, dict) else {}
-            vllm_cfg = plugin_settings.get("builtin.vlm.vllm_localhost", {}) if isinstance(plugin_settings, dict) else {}
             models = [str(x).strip() for x in (vllm_status.get("models") or []) if str(x).strip()]
             selected_model = str(vllm_cfg.get("model") or "").strip() if isinstance(vllm_cfg, dict) else ""
             selected_model, model_source = _resolve_strict_model_selection(

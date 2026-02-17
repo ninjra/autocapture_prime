@@ -177,12 +177,19 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataroot", required=True, help="Shared DataRoot path (Mode B)")
     ap.add_argument("--max-journal-lines", type=int, default=20000)
+    ap.add_argument(
+        "--contract-profile",
+        choices=["strict", "metadata_first"],
+        default="strict",
+        help="Validation profile: strict requires journal+ledger; metadata_first requires activity+media+metadata.",
+    )
     args = ap.parse_args()
 
     dataroot = Path(str(args.dataroot))
     report: dict[str, Any] = {
         "ok": False,
         "dataroot": str(dataroot),
+        "contract_profile": str(args.contract_profile),
         "checks": {},
     }
 
@@ -220,13 +227,23 @@ def main() -> int:
         }
     )
 
-    ok = True
-    ok = ok and bool(report["checks"]["activity_signal"]["present"])
-    ok = ok and bool(report["checks"]["journal"].get("ok"))
-    ok = ok and bool(report["checks"]["ledger"]["present"])
-    ok = ok and bool(report["checks"]["metadata_db"].get("ok"))
-    ok = ok and bool(report["checks"]["media"].get("ok"))
-    report["ok"] = bool(ok)
+    activity_ok = bool(report["checks"]["activity_signal"]["present"])
+    journal_ok = bool(report["checks"]["journal"].get("ok"))
+    ledger_ok = bool(report["checks"]["ledger"]["present"])
+    metadata_ok = bool(report["checks"]["metadata_db"].get("ok"))
+    media_ok = bool(report["checks"]["media"].get("ok"))
+    strict_ok = bool(activity_ok and journal_ok and ledger_ok and metadata_ok and media_ok)
+    metadata_first_ok = bool(activity_ok and metadata_ok and media_ok)
+    report["profiles"] = {"strict": strict_ok, "metadata_first": metadata_first_ok}
+    if str(args.contract_profile) == "metadata_first":
+        warnings: list[str] = []
+        if not journal_ok:
+            warnings.append("journal_missing_or_invalid")
+        if not ledger_ok:
+            warnings.append("ledger_missing")
+        if warnings:
+            report["warnings"] = warnings
+    report["ok"] = bool(report["profiles"].get(str(args.contract_profile), False))
 
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["ok"] else 2

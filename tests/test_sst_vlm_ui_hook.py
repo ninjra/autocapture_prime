@@ -210,8 +210,41 @@ class SSTVLMUIHookTests(unittest.TestCase):
         self.assertEqual(str(graph.get("source_backend") or ""), "openai_compat_text_recovered")
         self.assertGreaterEqual(len(graph.get("elements", ())), 2)
 
-    def test_ui_parse_hook_uses_cached_vlm_tokens_before_live_extract(self) -> None:
+    def test_ui_parse_hook_infers_frame_bbox_when_missing(self) -> None:
+        payload = {"elements": [{"type": "button", "bbox": [0, 0, 40, 20], "text": "OK"}]}
         config = {"processing": {"sst": {"ui_vlm": {"enabled": True, "max_providers": 1}}}}
+
+        def get_capability(name: str):
+            if name == "vision.extractor":
+                return _VLM(json_dumps(payload), backend="openai_compat_layout")
+            raise KeyError(name)
+
+        ctx = PluginContext(config=config, get_capability=get_capability, logger=lambda _m: None)
+        hook = VLMUIStageHook("ui_vlm", ctx)
+        result = hook.run_stage(
+            "ui.parse",
+            {
+                "frame_bytes": b"img",
+                "tokens": [{"token_id": "tok1", "bbox": (5, 5, 95, 55)}],
+            },
+        )
+        self.assertIsNotNone(result)
+        graph = result["element_graph"]
+        self.assertTrue(graph.get("elements"))
+
+    def test_ui_parse_hook_uses_cached_vlm_tokens_as_fallback(self) -> None:
+        config = {
+            "processing": {
+                "sst": {
+                    "ui_vlm": {
+                        "enabled": True,
+                        "max_providers": 1,
+                        "use_cached_tokens": True,
+                        "prefer_live_vlm": True,
+                    }
+                }
+            }
+        }
 
         class _AlwaysFails:
             def extract(self, _frame_bytes: bytes):

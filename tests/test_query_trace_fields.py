@@ -116,6 +116,142 @@ class QueryTraceFieldsTests(unittest.TestCase):
         self.assertIn("query_eval.ndjson", rel_paths)
         self.assertIn("query_trace.ndjson", rel_paths)
 
+    def test_apply_display_promotes_display_fields_when_hard_only_answer_text(self) -> None:
+        system = _System(
+            config={"runtime": {"run_id": "run_test"}},
+            caps={"storage.metadata": _Meta({})},
+        )
+        base_result = {
+            "answer": {"state": "ok", "claims": [], "errors": []},
+            "processing": {"query_trace": {"winner": "classic", "method": "classic"}},
+        }
+        display = {
+            "schema_version": 1,
+            "summary": "Focused window: Outlook VDI",
+            "bullets": ["evidence_1: Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476"],
+            "fields": {"focus_window": "Outlook VDI", "evidence_count": "2"},
+            "topic": "adv_focus",
+        }
+        with mock.patch.object(query_mod, "_hard_vlm_extract", return_value={"answer_text": "not_json"}), mock.patch.object(
+            query_mod, "_build_answer_display", return_value=display
+        ):
+            out = query_mod._apply_answer_display(
+                system,
+                "Which window has keyboard focus?",
+                base_result,
+                query_intent={"topic": "adv_focus"},
+            )
+        processing = out.get("processing", {}) if isinstance(out.get("processing"), dict) else {}
+        hard = processing.get("hard_vlm", {}) if isinstance(processing.get("hard_vlm"), dict) else {}
+        fields = hard.get("fields", {}) if isinstance(hard.get("fields"), dict) else {}
+        self.assertEqual(str(fields.get("focus_window") or ""), "Outlook VDI")
+        self.assertEqual(str(fields.get("evidence_count") or ""), "2")
+
+    def test_latest_evidence_record_id_falls_back_from_metadata(self) -> None:
+        system = _System(
+            config={},
+            caps={
+                "storage.metadata": _Meta(
+                    {
+                        "run_a/evidence.capture.frame/0": {
+                            "record_type": "evidence.capture.frame",
+                            "ts_utc": "2026-02-16T07:00:00Z",
+                        },
+                        "run_b/evidence.capture.frame/0": {
+                            "record_type": "evidence.capture.frame",
+                            "ts_utc": "2026-02-16T07:05:00Z",
+                        },
+                        "run_c/evidence.capture.segment/0": {
+                            "record_type": "evidence.capture.segment",
+                            "ts_utc": "2026-02-16T07:06:00Z",
+                        },
+                        "run_b/derived.text.ocr/x": {
+                            "record_type": "derived.text.ocr",
+                            "ts_utc": "2026-02-16T07:05:01Z",
+                        },
+                    }
+                )
+            },
+        )
+        rid = query_mod._latest_evidence_record_id(system)
+        self.assertEqual(rid, "run_b/evidence.capture.frame/0")
+
+    def test_apply_display_skips_hard_vlm_when_structured_adv_source_present_in_fallback_mode(self) -> None:
+        system = _System(
+            config={"runtime": {"run_id": "run_test"}, "processing": {"on_query": {"adv_hard_vlm_mode": "fallback"}}},
+            caps={"storage.metadata": _Meta({})},
+        )
+        base_result = {
+            "answer": {"state": "ok", "claims": [], "errors": []},
+            "processing": {"query_trace": {"winner": "classic", "method": "classic"}},
+        }
+        claim_source = {
+            "provider_id": "builtin.observation.graph",
+            "doc_kind": "adv.calendar.schedule",
+            "signal_pairs": {"adv.calendar.item_count": "5", "adv.calendar.month_year": "January 2026"},
+            "meta": {"source_modality": "vlm", "source_state_id": "vlm"},
+        }
+        display = {
+            "schema_version": 1,
+            "summary": "Calendar: January 2026; selected_date=2",
+            "bullets": [],
+            "fields": {"schedule_item_count": "5"},
+            "topic": "adv_calendar",
+        }
+        with (
+            mock.patch.object(query_mod, "_claim_sources", return_value=[claim_source]),
+            mock.patch.object(query_mod, "_claim_texts", return_value=[]),
+            mock.patch.object(query_mod, "_build_answer_display", return_value=display),
+            mock.patch.object(query_mod, "_hard_vlm_extract") as hard_mock,
+        ):
+            out = query_mod._apply_answer_display(
+                system,
+                "In the VDI right-side calendar pane extract month and items.",
+                base_result,
+                query_intent={"topic": "adv_calendar"},
+            )
+        self.assertFalse(hard_mock.called)
+        answer = out.get("answer", {}) if isinstance(out.get("answer"), dict) else {}
+        self.assertEqual(str(answer.get("summary") or ""), "Calendar: January 2026; selected_date=2")
+
+    def test_apply_display_runs_hard_vlm_for_structured_adv_source_in_always_mode(self) -> None:
+        system = _System(
+            config={"runtime": {"run_id": "run_test"}},
+            caps={"storage.metadata": _Meta({})},
+        )
+        base_result = {
+            "answer": {"state": "ok", "claims": [], "errors": []},
+            "processing": {"query_trace": {"winner": "classic", "method": "classic"}},
+        }
+        claim_source = {
+            "provider_id": "builtin.observation.graph",
+            "doc_kind": "adv.calendar.schedule",
+            "signal_pairs": {"adv.calendar.item_count": "5", "adv.calendar.month_year": "January 2026"},
+            "meta": {"source_modality": "vlm", "source_state_id": "vlm"},
+        }
+        display = {
+            "schema_version": 1,
+            "summary": "Calendar: January 2026; selected_date=2",
+            "bullets": [],
+            "fields": {"schedule_item_count": "5"},
+            "topic": "adv_calendar",
+        }
+        with (
+            mock.patch.object(query_mod, "_claim_sources", return_value=[claim_source]),
+            mock.patch.object(query_mod, "_claim_texts", return_value=[]),
+            mock.patch.object(query_mod, "_build_answer_display", return_value=display),
+            mock.patch.object(query_mod, "_hard_vlm_extract", return_value={"month_year": "January 2026"}) as hard_mock,
+        ):
+            out = query_mod._apply_answer_display(
+                system,
+                "In the VDI right-side calendar pane extract month and items.",
+                base_result,
+                query_intent={"topic": "adv_calendar"},
+            )
+        self.assertTrue(hard_mock.called)
+        answer = out.get("answer", {}) if isinstance(out.get("answer"), dict) else {}
+        self.assertEqual(str(answer.get("summary") or ""), "Calendar: January 2026; selected_date=2")
+
 
 if __name__ == "__main__":
     unittest.main()

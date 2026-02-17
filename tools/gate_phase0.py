@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 
 def _run_suite(module: str) -> tuple[str, dict]:
@@ -33,7 +38,6 @@ def main() -> int:
     checks = [
         "tests.test_paths_package_safe",
         "tests.test_packaged_resources",
-        "tests.test_paths_preferred_windows",
         "tests.test_platform_paths",
         "tests.test_directory_hashing",
         "tests.test_hashing_directory_deterministic",
@@ -49,6 +53,8 @@ def main() -> int:
         "tests.test_ids_stable",
         "tests.test_record_id_encoding",
     ]
+    if os.name == "nt":
+        checks.insert(2, "tests.test_paths_preferred_windows")
     summary = {"schema_version": 1, "checks": []}
     failed = False
     for module in checks:

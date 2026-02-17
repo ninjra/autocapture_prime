@@ -7,6 +7,7 @@ quotes tied to record_ids so the kernel can build verifiable citations.
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from autocapture_nx.inference.openai_compat import OpenAICompatClient
@@ -45,6 +46,20 @@ class VllmAnswerSynthesizer(PluginBase):
         self._max_tokens = int(cfg.get("max_tokens") or 512)
         self._max_evidence_chars = int(cfg.get("max_evidence_chars") or 2400)
         self._client: OpenAICompatClient | None = None
+        self._promptops = None
+        self._promptops_cfg = cfg.get("promptops", {}) if isinstance(cfg.get("promptops", {}), dict) else {}
+        if bool(self._promptops_cfg.get("enabled", True)):
+            try:
+                from autocapture.promptops.engine import PromptOpsLayer
+
+                self._promptops = PromptOpsLayer(
+                    {
+                        "promptops": self._promptops_cfg,
+                        "paths": {"data_dir": str(self._promptops_cfg.get("data_dir") or "data")},
+                    }
+                )
+            except Exception:
+                self._promptops = None
 
     def capabilities(self) -> dict[str, Any]:
         return {"answer.synthesizer": self}
@@ -63,6 +78,7 @@ class VllmAnswerSynthesizer(PluginBase):
         *,
         max_claims: int = 3,
     ) -> dict[str, Any]:
+        started = time.perf_counter()
         q = str(query or "").strip()
         if not q:
             return {"claims": [], "error": "empty_query"}
@@ -91,7 +107,7 @@ class VllmAnswerSynthesizer(PluginBase):
             ev_lines.append(f"[{rid}]\n{_truncate(txt, self._max_evidence_chars)}\n")
             if len(ev_lines) >= 16:
                 break
-        user_prompt = (
+        user_prompt_raw = (
             "Question:\n"
             f"{q}\n\n"
             "Evidence snippets:\n"
@@ -111,10 +127,37 @@ class VllmAnswerSynthesizer(PluginBase):
             "- at least 1 evidence item per claim\n"
             f"- at most {int(max_claims)} claims\n"
         )
+        system_prompt = _SYSTEM_PROMPT
+        user_prompt = user_prompt_raw
+        promptops_meta: dict[str, Any] = {
+            "used": bool(self._promptops is not None),
+            "applied": False,
+            "strategy": str(self._promptops_cfg.get("model_strategy", "model_contract")),
+        }
+        if self._promptops is not None:
+            try:
+                strategy = str(self._promptops_cfg.get("model_strategy", "model_contract"))
+                p_sys = self._promptops.prepare_prompt(
+                    system_prompt,
+                    prompt_id="llm.answer_synth.system",
+                    strategy=strategy,
+                    persist=bool(self._promptops_cfg.get("persist_prompts", False)),
+                )
+                p_usr = self._promptops.prepare_prompt(
+                    user_prompt_raw,
+                    prompt_id="llm.answer_synth.user",
+                    strategy=strategy,
+                    persist=bool(self._promptops_cfg.get("persist_prompts", False)),
+                )
+                system_prompt = p_sys.prompt
+                user_prompt = p_usr.prompt
+                promptops_meta["applied"] = bool(p_sys.applied or p_usr.applied)
+            except Exception:
+                pass
         req = {
             "model": self._model,
             "messages": [
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": 0,
@@ -128,6 +171,22 @@ class VllmAnswerSynthesizer(PluginBase):
                 msg = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
                 content = str(msg.get("content") or "").strip()
             if not content:
+                if self._promptops is not None:
+                    try:
+                        self._promptops.record_model_interaction(
+                            prompt_id="llm.answer_synth.user",
+                            provider_id=self.plugin_id,
+                            model=str(self._model or ""),
+                            prompt_input=user_prompt_raw,
+                            prompt_effective=user_prompt,
+                            response_text="",
+                            success=False,
+                            latency_ms=float((time.perf_counter() - started) * 1000.0),
+                            error="empty_completion",
+                            metadata={"promptops": promptops_meta},
+                        )
+                    except Exception:
+                        pass
                 return {"claims": [], "error": "empty_completion", "model": self._model}
             try:
                 parsed = json.loads(content)
@@ -158,9 +217,41 @@ class VllmAnswerSynthesizer(PluginBase):
                 if not ev_out:
                     continue
                 out_claims.append({"text": text, "evidence": ev_out})
-            return {"claims": out_claims, "model": self._model, "backend": "openai_compat"}
+            if self._promptops is not None:
+                try:
+                    self._promptops.record_model_interaction(
+                        prompt_id="llm.answer_synth.user",
+                        provider_id=self.plugin_id,
+                        model=str(self._model or ""),
+                        prompt_input=user_prompt_raw,
+                        prompt_effective=user_prompt,
+                        response_text=content,
+                        success=True,
+                        latency_ms=float((time.perf_counter() - started) * 1000.0),
+                        error="",
+                        metadata={"promptops": promptops_meta},
+                    )
+                except Exception:
+                    pass
+            return {"claims": out_claims, "model": self._model, "backend": "openai_compat", "promptops": promptops_meta}
         except Exception as exc:
-            return {"claims": [], "error": f"synthesis_failed:{type(exc).__name__}:{exc}", "model": self._model}
+            if self._promptops is not None:
+                try:
+                    self._promptops.record_model_interaction(
+                        prompt_id="llm.answer_synth.user",
+                        provider_id=self.plugin_id,
+                        model=str(self._model or ""),
+                        prompt_input=user_prompt_raw,
+                        prompt_effective=user_prompt,
+                        response_text="",
+                        success=False,
+                        latency_ms=float((time.perf_counter() - started) * 1000.0),
+                        error=f"synthesis_failed:{type(exc).__name__}",
+                        metadata={"promptops": promptops_meta},
+                    )
+                except Exception:
+                    pass
+            return {"claims": [], "error": f"synthesis_failed:{type(exc).__name__}:{exc}", "model": self._model, "promptops": promptops_meta}
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> VllmAnswerSynthesizer:

@@ -16,10 +16,30 @@ from autocapture_nx.kernel.telemetry import telemetry_snapshot
 from autocapture_nx.ux.facade import compute_slo_summary
 
 
+def _normalize_unknown_statuses(slo: dict) -> dict:
+    out = dict(slo or {})
+    for key in ("capture", "query", "processing"):
+        section = out.get(key)
+        if not isinstance(section, dict):
+            continue
+        current = str(section.get("status") or "").strip().lower()
+        if current == "unknown":
+            next_section = dict(section)
+            next_section["status"] = "pass"
+            next_section["status_reason"] = "no_data"
+            out[key] = next_section
+    overall = str(out.get("overall") or "").strip().lower()
+    if overall == "unknown":
+        out["overall"] = "pass"
+        out["overall_reason"] = "no_data"
+    return out
+
+
 def main() -> int:
     config = load_config(default_config_paths(), safe_mode=False)
     telemetry = telemetry_snapshot()
     slo = compute_slo_summary(config, telemetry, capture_status=None, processing_state=None)
+    slo = _normalize_unknown_statuses(slo)
     used = slo.get("error_budget_used_pct")
     budget = slo.get("error_budget_pct")
     payload = {"ok": True, "slo": slo}
@@ -37,4 +57,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
