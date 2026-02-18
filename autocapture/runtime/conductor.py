@@ -1,4 +1,8 @@
-"""Runtime conductor for idle processing and research."""
+"""Runtime conductor for idle processing.
+
+Research scheduling was deprecated from autocapture_prime and migrated to
+hypervisor-owned orchestration.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +12,6 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from typing import Any
 
-from autocapture.research.runner import ResearchRunner
 from autocapture.storage.pressure import StoragePressureMonitor
 from autocapture.storage.retention import StorageRetentionMonitor
 from autocapture.runtime.governor import RuntimeGovernor
@@ -50,7 +53,7 @@ class RuntimeConductor:
         self._idle_processor = None
         self._storage_monitor = StoragePressureMonitor(system)
         self._retention_monitor = StorageRetentionMonitor(system)
-        self._research_runner = ResearchRunner(self._config)
+        self._research_runner = None
         self._events = self._resolve_event_builder(system)
         self._logger = self._resolve_logger(system)
         self._stop = threading.Event()
@@ -372,42 +375,8 @@ class RuntimeConductor:
         self._queued.add("idle.extract")
 
     def _schedule_research(self) -> None:
-        cfg = self._config.get("research", {})
-        if not bool(cfg.get("enabled", True)):
-            return
-        if not bool(cfg.get("run_on_idle", True)):
-            return
-        interval_s = float(cfg.get("interval_s", 1800))
-        now = time.time()
-        last = self._stats.last_research_run or 0.0
-        if now - last < interval_s:
-            return
-        if "idle.research" in self._queued:
-            return
-
-        def step_fn(should_abort, budget_ms: int) -> JobStepResult:
-            self._stats.last_research_run = time.time()
-            started = time.monotonic()
-            if hasattr(self._research_runner, "run_step"):
-                done = bool(self._research_runner.run_step(should_abort=should_abort, budget_ms=budget_ms))
-            else:
-                self._research_runner.run_once()
-                done = True
-            consumed_ms = int(max(0.0, (time.monotonic() - started) * 1000.0))
-            return JobStepResult(done=done, consumed_ms=consumed_ms)
-
-        estimate_ms = int(cfg.get("estimate_ms", 1500))
-        self._scheduler.enqueue(
-            Job(
-                name="idle.research",
-                step_fn=step_fn,
-                heavy=True,
-                estimated_ms=estimate_ms,
-                gpu_heavy=True,
-                payload={"task": "idle.research"},
-            )
-        )
-        self._queued.add("idle.research")
+        # Deprecated: research execution now runs in hypervisor.
+        return
 
     def _schedule_storage_pressure(self) -> None:
         if self._storage_monitor is None:

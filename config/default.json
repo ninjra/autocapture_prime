@@ -182,7 +182,10 @@
     },
     "diffusion": {
       "dry_run": true,
-      "k_variants": 1
+      "k_variants": 1,
+      "hypervisor_base_url": "http://127.0.0.1:7411",
+      "hypervisor_diffusion_path": "/v1/autocapture/devtools/diffusion",
+      "hypervisor_timeout_s": 120
     }
   },
   "gateway": {
@@ -379,7 +382,6 @@
       "builtin.processing.sst.pipeline",
       "builtin.processing.sst.ui_vlm",
       "builtin.prompt.bundle.default",
-      "builtin.research.default",
       "builtin.reranker.basic",
       "builtin.retrieval.basic",
       "builtin.runtime.governor",
@@ -800,7 +802,6 @@
       "builtin.screen.answer.v1",
       "builtin.processing.sst.pipeline",
       "builtin.prompt.bundle.default",
-      "builtin.research.default",
       "builtin.reranker.basic",
       "builtin.retrieval.basic",
       "builtin.state.jepa_like",
@@ -862,7 +863,7 @@
       "builtin.screen.answer.v1": true,
       "builtin.processing.sst.pipeline": true,
       "builtin.prompt.bundle.default": true,
-      "builtin.research.default": true,
+      "builtin.research.default": false,
       "builtin.processing.sst.ui_vlm": true,
       "builtin.reranker.basic": true,
       "builtin.retrieval.basic": true,
@@ -1011,7 +1012,7 @@
           "{repo_root}/autocapture_nx"
         ],
         "readwrite": [
-          "{repo_root}/tools/hypervisor/runs"
+          "{repo_root}/artifacts/devtools/diffusion_runs"
         ]
       },
       "builtin.vlm.qwen2_vl_2b": {
@@ -1508,8 +1509,9 @@
   },
   "research": {
     "cache_dir": "data/research/cache",
-    "enabled": true,
+    "enabled": false,
     "interval_s": 1800,
+    "owner": "hypervisor",
     "report_dir": "data/research/reports",
     "run_on_idle": true,
     "source_name": "default",

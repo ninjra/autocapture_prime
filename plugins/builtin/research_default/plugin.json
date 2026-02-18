@@ -6,7 +6,7 @@
     ]
   },
   "depends_on": [],
-  "enabled": true,
+  "enabled": false,
   "entrypoints": [
     {
       "callable": "create_plugin",

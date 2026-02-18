@@ -879,17 +879,16 @@ def cmd_replay(args: argparse.Namespace) -> int:
 
 
 def cmd_research_run(args: argparse.Namespace) -> int:
-    from autocapture.config.defaults import default_config_paths as mx_paths
-    from autocapture.config.load import load_config as mx_load
-    from autocapture.research.runner import ResearchRunner
-
-    config = mx_load(mx_paths(), safe_mode=args.safe_mode)
-    if args.safe_mode:
-        config.setdefault("plugins", {})["safe_mode"] = True
-    runner = ResearchRunner(config)
-    result = runner.run_once()
-    _print_json(result)
-    return 0 if result.get("ok", False) else 1
+    _print_json(
+        {
+            "ok": False,
+            "error": "deprecated_moved_to_hypervisor",
+            "message": "research.run is no longer executed in autocapture_prime.",
+            "owner": "hypervisor",
+            "next_step": "run the research pipeline from the hypervisor repo.",
+        }
+    )
+    return 2
 
 
 def _load_user_config(path: Path) -> dict:

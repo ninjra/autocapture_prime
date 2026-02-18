@@ -79,7 +79,8 @@ class RuntimeConductorTests(unittest.TestCase):
 
         executed = conductor._run_once()
         self.assertIn("idle.extract", executed)
-        self.assertIn("idle.research", executed)
+        self.assertNotIn("idle.research", executed)
+        self.assertEqual(conductor._research_runner.called, 0)
 
         tracker._idle = 0
         executed = conductor._run_once()

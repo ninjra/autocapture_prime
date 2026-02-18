@@ -1,0 +1,29 @@
+Implement migration of research subsystem from autocapture_prime into hypervisor.
+
+Use source files from:
+/mnt/d/projects/autocapture_prime/autocapture/research/
+/mnt/d/projects/autocapture_prime/plugins/builtin/research_default/
+
+Requirements:
+1) Hypervisor becomes sole owner of research runtime.
+2) Research runs only during idle windows.
+3) Preserve report contract:
+   - ok
+   - reports[] containing source_id, items, diff, cache_hit, report_hash
+   - ran_at
+4) Persist to hypervisor data root under research/cache and research/reports.
+5) Add metrics:
+   - runs_total
+   - last_run_utc
+   - changed_items_total
+   - cache_hit_ratio
+6) Add tests:
+   - watchlist filtering
+   - threshold diff behavior
+   - idle-only scheduling
+   - report schema stability
+
+After implementation:
+- print changed files
+- print test command and result
+- print any follow-up required in autocapture_prime (should be none)
