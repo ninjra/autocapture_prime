@@ -12,49 +12,10 @@ from autocapture_prime.config import PrimeConfig, load_prime_config
 from autocapture_prime.eval.metrics import record_qa_metric
 from autocapture_prime.ingest.pipeline import ingest_one_session
 from autocapture_prime.ingest.session_scanner import SessionScanner
-from autocapture_prime.store.index import search_lexical_index
 
 
 def _state_db(storage_root: Path) -> Path:
     return storage_root / "ingest_state.db"
-
-
-def _session_rows(session_root: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for stem in ("ocr_spans", "elements"):
-        parquet = session_root / f"{stem}.parquet"
-        ndjson = session_root / f"{stem}.ndjson"
-        path = parquet if parquet.exists() else ndjson
-        if not path.exists():
-            continue
-        if path.suffix == ".parquet":
-            try:
-                import pyarrow.parquet as pq  # type: ignore
-
-                table = pq.read_table(path)
-                for row in table.to_pylist():
-                    if isinstance(row, dict):
-                        row["_source_table"] = path.name
-                        rows.append(row)
-                continue
-            except Exception:
-                # Fall back to ndjson readers if parquet unavailable.
-                if not ndjson.exists():
-                    continue
-                path = ndjson
-        with path.open("r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    row = json.loads(line)
-                except Exception:
-                    continue
-                if isinstance(row, dict):
-                    row["_source_table"] = path.name
-                    rows.append(row)
-    return rows
 
 
 def create_app(config_path: str | Path | None = None) -> FastAPI:
@@ -105,95 +66,46 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             if isinstance(item, dict) and item.get("role") == "user":
                 query = str(item.get("content") or "")
                 break
-        evidence = _retrieve_evidence(cfg, query, top_k=cfg.top_k_frames)
-        forward_payload = dict(payload)
-        forward_payload.setdefault("model", cfg.vllm_model)
-        if evidence:
-            extra = "\n\nRetrieved evidence:\n" + "\n".join(
-                f"- {item['session_id']}/frame={item['frame_index']}[{item['source_table']}:{item['extractor']}]"
-                f" score={item['score']} rank={item['rank']}: {item['text']}"
-                for item in evidence
+        owner = str(cfg.query_owner or "hypervisor").strip().lower()
+        if owner != "hypervisor":
+            raise HTTPException(
+                status_code=503,
+                detail=f"query_owner_not_supported:{owner}; expected=hypervisor",
             )
-            forward_payload["messages"] = list(messages) + [{"role": "system", "content": extra}]
+        forward_payload = dict(payload)
+        response: dict[str, Any]
         try:
-            response = _call_vllm(cfg, forward_payload)
+            response = _call_hypervisor_query(cfg, forward_payload)
         except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"vllm unavailable: {exc}") from exc
+            base = str(cfg.hypervisor_base_url).strip()
+            path = str(cfg.hypervisor_chat_path).strip()
+            raise HTTPException(
+                status_code=503,
+                detail=f"hypervisor query unavailable: {exc}; endpoint={base.rstrip('/')}/{path.lstrip('/')}",
+            ) from exc
         if isinstance(response, dict):
             usage = response.get("usage")
             if not isinstance(usage, dict):
                 usage = {}
-            usage["chronicle_retrieval_hits"] = len(evidence)
-            usage["chronicle_retrieval"] = evidence
+            usage["chronicle_query_owner"] = owner
+            usage["chronicle_retrieval_hits"] = 0
             response["usage"] = usage
         elapsed_ms = (time.perf_counter() - started) * 1000.0
-        evidence_order_hash = _evidence_hash(evidence)
+        evidence_order_hash = _evidence_hash([])
         record_qa_metric(
             cfg.storage_root,
             query=query,
             model=str(forward_payload.get("model") or cfg.vllm_model),
-            retrieval_hits=len(evidence),
+            retrieval_hits=0,
             latency_ms=elapsed_ms,
-            plugin_path=["chronicle.retrieve.lexical", "chronicle.forward.vllm_localhost"],
-            confidence=_confidence_from_evidence(evidence),
+            plugin_path=["chronicle.forward.hypervisor"],
+            confidence=0.0,
             feedback_state="unreviewed",
             evidence_order_hash=evidence_order_hash,
         )
         return response
 
     return app
-
-
-def _retrieve_evidence(cfg: PrimeConfig, query: str, top_k: int) -> list[dict[str, Any]]:
-    hits: list[dict[str, Any]] = []
-    if not cfg.storage_root.exists():
-        return hits
-    for session_root in sorted([p for p in cfg.storage_root.iterdir() if p.is_dir()], key=lambda p: p.name):
-        rows = _session_rows(session_root)
-        if not rows:
-            continue
-        index_path = session_root / "lexical_index.json"
-        selected = search_lexical_index(index_path, rows, query, top_k=top_k)
-        for row in selected:
-            text = str(row.get("text") or row.get("label") or "").strip()
-            if not text:
-                continue
-            frame_idx = row.get("frame_index")
-            hits.append(
-                {
-                    "session_id": session_root.name,
-                    "frame_index": int(frame_idx or 0),
-                    "source_table": str(row.get("_source_table") or ""),
-                    "extractor": str(row.get("extractor") or ""),
-                    "text": text,
-                    "score": int(row.get("_score") or 0),
-                    "rank": int(row.get("_rank") or 0),
-                    "row_idx": int(row.get("_row_idx") or 0),
-                }
-            )
-    hits.sort(
-        key=lambda item: (
-            -int(item.get("score") or 0),
-            str(item.get("session_id") or ""),
-            int(item.get("frame_index") or 0),
-            int(item.get("row_idx") or 0),
-        )
-    )
-    out: list[dict[str, Any]] = []
-    for rank, item in enumerate(hits[: max(1, top_k)], start=1):
-        row = dict(item)
-        row["rank"] = rank
-        out.append(row)
-    return out
-
-
-def _confidence_from_evidence(evidence: list[dict[str, Any]]) -> float:
-    if not evidence:
-        return 0.0
-    top = int(evidence[0].get("score") or 0)
-    score = min(1.0, max(0.0, float(top) / 8.0))
-    return score
-
 
 def _evidence_hash(evidence: list[dict[str, Any]]) -> str:
     import hashlib
@@ -202,17 +114,24 @@ def _evidence_hash(evidence: list[dict[str, Any]]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _call_vllm(cfg: PrimeConfig, payload: dict[str, Any]) -> dict[str, Any]:
-    base = cfg.vllm_base_url.rstrip("/")
+def _call_hypervisor_query(cfg: PrimeConfig, payload: dict[str, Any]) -> dict[str, Any]:
+    base = cfg.hypervisor_base_url.rstrip("/")
+    path = str(cfg.hypervisor_chat_path or "/v1/chat/completions").strip()
+    if not path.startswith("/"):
+        path = f"/{path}"
     if not base.startswith("http://127.0.0.1"):
-        raise ValueError("vLLM endpoint must be localhost")
-    url = base + "/v1/chat/completions"
-    with httpx.Client(timeout=60.0) as client:
-        resp = client.post(url, json=payload)
+        raise ValueError("hypervisor endpoint must be localhost")
+    url = base + path
+    headers: dict[str, str] = {}
+    api_key = str(cfg.hypervisor_api_key or "").strip()
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    with httpx.Client(timeout=float(cfg.hypervisor_timeout_s)) as client:
+        resp = client.post(url, json=payload, headers=headers)
         resp.raise_for_status()
         out = resp.json()
     if not isinstance(out, dict):
-        raise ValueError("invalid vLLM response")
+        raise ValueError("invalid hypervisor response")
     return out
 
 

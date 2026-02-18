@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -60,6 +61,22 @@ def _env_int(name: str, default: int) -> int:
         return int(raw) if raw else int(default)
     except Exception:
         return int(default)
+
+
+def _emit_preflight_progress(stage: str, **fields: Any) -> None:
+    enabled = str(os.environ.get("AUTOCAPTURE_VLM_PREFLIGHT_PROGRESS") or "").strip().casefold() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return
+    payload: dict[str, Any] = {
+        "event": "vllm_preflight.progress",
+        "stage": str(stage),
+        "ts_unix_ms": int(round(time.time() * 1000.0)),
+    }
+    payload.update(fields)
+    try:
+        print(json.dumps(payload, sort_keys=True), file=sys.stderr, flush=True)
+    except Exception:
+        return
 
 
 def _norm_model_id(value: str) -> str:
@@ -280,6 +297,8 @@ def check_external_vllm_ready(
     completion_timeout_max = max(completion_timeout, completion_timeout_max)
     completion_timeout_scale = _env_float("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_SCALE", 1.5)
     completion_timeout_scale = max(1.0, completion_timeout_scale)
+    total_timeout_s = _env_float("AUTOCAPTURE_VLM_PREFLIGHT_TOTAL_TIMEOUT_S", 180.0)
+    total_timeout_s = max(10.0, total_timeout_s)
     orchestrator_cmd = str(os.environ.get("AUTOCAPTURE_VLM_ORCHESTRATOR_CMD") or "").strip() or EXTERNAL_VLLM_ORCHESTRATOR_CMD
     watch_path = str(os.environ.get("AUTOCAPTURE_VLM_WATCH_STATE_PATH") or "").strip() or EXTERNAL_VLLM_WATCH_STATE_PATH
     out: dict[str, Any] = {
@@ -295,6 +314,16 @@ def check_external_vllm_ready(
         out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
         return out
     out["base_url"] = base_url
+    _emit_preflight_progress(
+        "start",
+        base_url=base_url,
+        expected_model=expected_model,
+        require_completion=bool(require_completion),
+        timeout_models_s=float(models_timeout),
+        timeout_completion_s=float(completion_timeout),
+        retries=int(preflight_retries),
+        total_timeout_s=float(total_timeout_s),
+    )
 
     first = _preflight_once(
         base_url=base_url,
@@ -303,6 +332,7 @@ def check_external_vllm_ready(
         timeout_completion_s=float(completion_timeout),
         require_completion=bool(require_completion),
     )
+    _emit_preflight_progress("attempt", attempt=1, ok=bool(first.get("ok", False)), error=str(first.get("error") or ""))
     if bool(first.get("ok", False)):
         first["attempts"] = 1
         first["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
@@ -324,6 +354,12 @@ def check_external_vllm_ready(
 
     orchestrator = _invoke_orchestrator_once(orchestrator_cmd, timeout_s=_env_float("AUTOCAPTURE_VLM_ORCHESTRATOR_TIMEOUT_S", 120.0))
     out["orchestrator"] = orchestrator
+    _emit_preflight_progress(
+        "orchestrator",
+        ok=bool(orchestrator.get("ok", False)),
+        detached=bool(orchestrator.get("detached", False)),
+        returncode=orchestrator.get("returncode"),
+    )
     orch_exec_error = str(orchestrator.get("error") or "").strip()
     if orch_exec_error.startswith("orchestrator_exec_failed") or orch_exec_error == "orchestrator_cmd_missing":
         out["error"] = f"orchestrator_failed:{orchestrator.get('error') or orchestrator.get('returncode')}"
@@ -345,6 +381,8 @@ def check_external_vllm_ready(
     timeout_s_current = float(completion_timeout)
     deadline = time.perf_counter() + warmup_s
     while True:
+        if (time.perf_counter() - t0) >= float(total_timeout_s):
+            break
         if sleep_s > 0:
             time.sleep(sleep_s)
         last_error = str(last.get("error") or "")
@@ -359,6 +397,13 @@ def check_external_vllm_ready(
         )
         attempts_done += 1
         last = attempt
+        _emit_preflight_progress(
+            "attempt",
+            attempt=int(attempts_done),
+            ok=bool(attempt.get("ok", False)),
+            error=str(attempt.get("error") or ""),
+            timeout_completion_s=float(timeout_s_current),
+        )
         if bool(attempt.get("ok", False)):
             attempt["recovered"] = True
             attempt["attempts"] = attempts_done
@@ -373,6 +418,8 @@ def check_external_vllm_ready(
         sleep_s = poll_s
 
     out["error"] = str(last.get("error") or "preflight_failed_after_retries")
+    if (time.perf_counter() - t0) >= float(total_timeout_s):
+        out["error"] = f"preflight_total_timeout:{round(float(total_timeout_s), 3)}s"
     out["attempts"] = int(attempts_done)
     out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
     out["final"] = last

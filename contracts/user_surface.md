@@ -30,9 +30,10 @@ Commands:
 - `autocapture query "<text>"`
   - Runs deterministic time parsing, retrieval, optional on-demand extraction, and claim-level citations.
 - `autocapture devtools diffusion --axis <name> [-k N] [--dry-run]`
-  - Runs the diffusion harness and writes artifacts under `tools/hypervisor/runs/<run_id>/`.
+  - Delegates diffusion execution to Hypervisor API (`/v1/autocapture/devtools/diffusion`).
+  - In dry-run mode, writes deterministic local stub artifacts under `artifacts/devtools/diffusion_runs/<run_id>/`.
 - `autocapture devtools ast-ir [--scan-root <path>]`
-  - Runs AST/IR analysis and writes artifacts under `tools/hypervisor/runs/<run_id>/`.
+  - Runs AST/IR analysis and writes artifacts under `<data_dir>/runs/<run_id>/devtools_ast_ir/`.
 - `autocapture keys rotate`
   - Rotates root keys, rewraps storage, and writes a ledger + anchor entry.
 - `autocapture keys export --out <path> [--passphrase <pass>] [--data-dir <dir>] [--config-dir <dir>]`

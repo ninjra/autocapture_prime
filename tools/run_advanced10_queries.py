@@ -22,6 +22,19 @@ def _utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
+def _emit_progress(stage: str, **fields: Any) -> None:
+    payload: dict[str, Any] = {
+        "event": "run_advanced10_queries.progress",
+        "ts_utc": datetime.now(timezone.utc).isoformat(),
+        "stage": str(stage),
+    }
+    payload.update(fields)
+    try:
+        print(json.dumps(payload, sort_keys=True), flush=True)
+    except Exception:
+        pass
+
+
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -629,6 +642,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Maximum allowed absolute confidence drift (percentage points) across repro runs.",
     )
     args = parser.parse_args(argv)
+    _emit_progress(
+        "start",
+        strict_all=bool(args.strict_all),
+        metadata_only=bool(args.metadata_only),
+        query_timeout_s=float(args.query_timeout_s),
+        lock_retries=int(args.lock_retries),
+    )
 
     report_path = Path(str(args.report or "").strip()) if str(args.report or "").strip() else _latest_report(root)
     if not report_path.exists():
@@ -721,7 +741,15 @@ def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_MAX_S", "120")
     os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_SCALE", "1.5")
     os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_RETRIES", "6")
+    _emit_progress("vlm.preflight.begin", strict_all=bool(args.strict_all))
+    preflight_t0 = time.monotonic()
     vllm_status = check_external_vllm_ready(require_completion=bool(args.strict_all))
+    _emit_progress(
+        "vlm.preflight.done",
+        ok=bool(vllm_status.get("ok", False)),
+        latency_ms=int((time.monotonic() - preflight_t0) * 1000),
+        selected_model=str(vllm_status.get("selected_model") or ""),
+    )
     if not bool(vllm_status.get("ok", False)):
         if args.allow_vllm_unavailable:
             vllm_status["degraded_mode"] = True
@@ -745,12 +773,15 @@ def main(argv: list[str] | None = None) -> int:
     rows: list[dict[str, Any]] = []
     passed_total = 0
     evaluated_total = 0
+    _emit_progress("cases.loaded", count=int(len(items)), cases_path=str(cases_path))
 
     for item in items:
         case_id = str(item.get("id") or "")
         question = str(item.get("question") or "").strip()
         if not question:
             continue
+        _emit_progress("case.begin", case_id=case_id, question=question)
+        case_t0 = time.monotonic()
         image_path = str(report.get("image_path") or "").strip()
         if image_path and not Path(image_path).is_absolute():
             image_path = str((root / image_path).resolve())
@@ -843,6 +874,7 @@ def main(argv: list[str] | None = None) -> int:
                 "id": case_id,
                 "question": question,
                 "ok": bool(result.get("ok", False)),
+                "passed": bool(eval_result.get("passed", False)) if bool(eval_result.get("evaluated", False)) else False,
                 "error": str(result.get("error") or ""),
                 "answer_state": str(answer.get("state") or ""),
                 "summary": summary,
@@ -857,9 +889,18 @@ def main(argv: list[str] | None = None) -> int:
                 "expected_eval": eval_result,
             }
         )
+        _emit_progress(
+            "case.done",
+            case_id=case_id,
+            ok=bool(result.get("ok", False)),
+            passed=bool(eval_result.get("passed", False)) if bool(eval_result.get("evaluated", False)) else False,
+            latency_ms=int((time.monotonic() - case_t0) * 1000),
+            winner=str(trace.get("winner") or ""),
+        )
 
+    all_rows_passed = int(evaluated_total) == int(len(rows)) and int(passed_total) == int(len(rows))
     out = {
-        "ok": True,
+        "ok": bool(all_rows_passed),
         "generated_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "report": str(report_path),
         "config_dir": cfg,
@@ -884,6 +925,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(out, indent=2, sort_keys=True), encoding="utf-8")
+    _emit_progress(
+        "finish",
+        ok=bool(out["ok"]),
+        rows=int(len(rows)),
+        evaluated_total=int(evaluated_total),
+        evaluated_passed=int(passed_total),
+        output=str(output_path),
+    )
     print(json.dumps({"ok": True, "output": str(output_path), "rows": len(rows)}))
     if bool(args.strict_all):
         if int(evaluated_total) != int(len(rows)) or int(passed_total) != int(len(rows)):

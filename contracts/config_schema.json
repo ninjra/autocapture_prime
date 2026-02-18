@@ -620,6 +620,18 @@
             "dry_run": {
               "type": "boolean"
             },
+            "hypervisor_api_key": {
+              "type": "string"
+            },
+            "hypervisor_base_url": {
+              "type": "string"
+            },
+            "hypervisor_diffusion_path": {
+              "type": "string"
+            },
+            "hypervisor_timeout_s": {
+              "type": "number"
+            },
             "k_variants": {
               "type": "integer"
             }

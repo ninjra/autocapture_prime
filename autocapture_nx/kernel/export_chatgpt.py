@@ -122,7 +122,8 @@ def load_window_index(metadata_store: Any) -> list[dict[str, Any]]:
             continue
         if str(record.get("record_type") or "") != "evidence.window.meta":
             continue
-        window = record.get("window") if isinstance(record.get("window"), dict) else {}
+        window_raw = record.get("window")
+        window: dict[str, Any] = window_raw if isinstance(window_raw, dict) else {}
         title = str(window.get("title") or "")
         process_path = str(window.get("process_path") or "")
         ts_utc = str(record.get("ts_utc") or "")
@@ -184,11 +185,11 @@ def iter_selected_frames(zip_bytes: bytes, frame_count: int) -> Iterator[tuple[s
             if idx not in wanted:
                 wanted.append(idx)
         for idx in wanted:
-            name = by_idx.get(idx)
-            if not name:
+            member_name = by_idx.get(idx)
+            if not member_name:
                 continue
             try:
-                yield (Path(name).name, archive.read(name))
+                yield (Path(member_name).name, archive.read(member_name))
             except Exception:
                 continue
 
@@ -468,4 +469,3 @@ def run_export_pass(
     result["finished_utc"] = _utc_now()
     result["duration_ms"] = int(max(0.0, (time.perf_counter() - started) * 1000.0))
     return result
-

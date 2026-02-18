@@ -31,6 +31,10 @@ vllm:
 chronicle_api:
   host: 127.0.0.1
   port: 7020
+  query_owner: hypervisor
+  hypervisor_base_url: http://127.0.0.1:34221
+  hypervisor_chat_path: /v1/chat/completions
+  hypervisor_timeout_s: 90.0
 
 qa:
   top_k_frames: 4

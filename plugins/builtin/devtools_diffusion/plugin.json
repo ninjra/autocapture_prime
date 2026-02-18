@@ -17,11 +17,10 @@
   ],
   "filesystem_policy": {
     "read": [
-      "{repo_root}/autocapture_nx",
-      "{repo_root}/tools/hypervisor"
+      "{repo_root}/autocapture_nx"
     ],
     "readwrite": [
-      "{repo_root}/tools/hypervisor/runs"
+      "{repo_root}/artifacts/devtools/diffusion_runs"
     ]
   },
   "hash_lock": {

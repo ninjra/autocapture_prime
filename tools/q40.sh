@@ -27,9 +27,28 @@ gen_timeout_s="$(clamp_min "${AUTOCAPTURE_GENERIC20_QUERY_TIMEOUT_S:-120}" "120"
 lock_retries="$(clamp_min "${AUTOCAPTURE_GENERIC20_LOCK_RETRIES:-2}" "2" "1")"
 export AUTOCAPTURE_ADV_QUERY_TIMEOUT_S="$adv_timeout_s"
 
-cycle_json="$(bash "$ROOT/tools/run_golden_qh_cycle.sh" "$IMG")"
-report_path="$($PY -c "import json,sys; print(json.loads(sys.argv[1]).get('report',''))" "$cycle_json")"
-adv_path="$($PY -c "import json,sys; print(json.loads(sys.argv[1]).get('advanced',''))" "$cycle_json")"
+cycle_out="$(bash "$ROOT/tools/run_golden_qh_cycle.sh" "$IMG" 2>&1)"
+cycle_json="$($PY - <<'PY' "$cycle_out"
+import json
+import sys
+
+txt = str(sys.argv[1] if len(sys.argv) > 1 else "")
+last_obj = {}
+for raw in txt.splitlines():
+    line = raw.strip()
+    if not line.startswith("{") or not line.endswith("}"):
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        continue
+    if "ok" in obj:
+        last_obj = obj
+print(json.dumps(last_obj))
+PY
+)"
+report_path="$($PY -c "import json,sys; print((json.loads(sys.argv[1]) if sys.argv[1].strip() else {}).get('report',''))" "$cycle_json")"
+adv_path="$($PY -c "import json,sys; print((json.loads(sys.argv[1]) if sys.argv[1].strip() else {}).get('advanced',''))" "$cycle_json")"
 if [[ -z "$report_path" || ! -f "$report_path" ]]; then
   echo "{\"ok\":false,\"error\":\"missing_report\",\"cycle\":$cycle_json}"
   exit 1

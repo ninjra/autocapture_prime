@@ -30,3 +30,10 @@
   - State selected skill(s) and rationale.
   - If no specialized skill is needed, state that explicitly.
 - If this sequence is not followed, stop, acknowledge, and restart from the skill-list step before continuing.
+
+## Output Formatting (Hard Gate)
+- For Y/N status lists, render `Y` and `N` with raw ANSI escapes (not escaped text, not HTML):
+  - Green `Y`: `[32mY[0m`
+  - Red `N`: `[31mN[0m`
+- Status line format is strict: `<colored Y|N>:<identifier>`
+- Do not output literal `\x1b[...]` sequences; output real ANSI control characters.

@@ -19,7 +19,9 @@ import argparse
 import hashlib
 import json
 import os
+import signal
 import sys
+import time
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,6 +64,19 @@ CORE_WRITER_PLUGINS: tuple[str, ...] = (
 
 def _utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _emit_progress(stage: str, **fields: Any) -> None:
+    payload: dict[str, Any] = {
+        "event": "process_single_screenshot.progress",
+        "ts_utc": datetime.now(timezone.utc).isoformat(),
+        "stage": str(stage),
+    }
+    payload.update(fields)
+    try:
+        print(json.dumps(payload, sort_keys=True), file=sys.stderr, flush=True)
+    except Exception:
+        pass
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -432,6 +447,35 @@ def _resolve_strict_model_selection(*, selected_model: str, served_models: list[
     raise RuntimeError("strict_golden_requires_vllm_models")
 
 
+def _best_effort_finalize_run_state(
+    data_dir: Path,
+    *,
+    error: str | None = None,
+    terminated_signal: int | None = None,
+) -> None:
+    run_state_path = data_dir / "run_state.json"
+    if not run_state_path.exists():
+        return
+    try:
+        raw = json.loads(run_state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(raw, dict):
+        return
+    now_utc = datetime.now(timezone.utc).isoformat()
+    raw["state"] = "stopped"
+    raw["stopped_at"] = now_utc
+    raw["ts_utc"] = now_utc
+    if error:
+        raw["last_error"] = str(error)
+    if terminated_signal is not None:
+        raw["terminated_signal"] = int(terminated_signal)
+    try:
+        run_state_path.write_text(json.dumps(raw, sort_keys=True), encoding="utf-8")
+    except Exception:
+        return
+
+
 def main(argv: list[str] | None = None) -> int:
     args = argv or sys.argv[1:]
     parser = argparse.ArgumentParser()
@@ -461,6 +505,14 @@ def main(argv: list[str] | None = None) -> int:
     parsed = parser.parse_args(args)
 
     image_path = Path(str(parsed.image))
+    _emit_progress(
+        "start",
+        image=str(image_path),
+        profile=str(parsed.profile),
+        budget_ms=int(parsed.budget_ms),
+        max_idle_steps=int(parsed.max_idle_steps),
+        synthetic_hid=str(parsed.synthetic_hid),
+    )
     if not image_path.exists():
         print(f"ERROR: image not found: {image_path}")
         return 2
@@ -821,13 +873,33 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     kernel = None
+    exit_code = 0
+    termination_meta: dict[str, int | None] = {"signal": None}
+    prior_signal_handlers: dict[int, Any] = {}
+
+    def _termination_handler(sig_num: int, _frame: Any) -> None:
+        termination_meta["signal"] = int(sig_num)
+        raise RuntimeError(f"terminated_signal:{int(sig_num)}")
+
+    for sig_name in ("SIGTERM", "SIGINT"):
+        sig_obj = getattr(signal, sig_name, None)
+        if sig_obj is None:
+            continue
+        try:
+            prior_signal_handlers[int(sig_obj)] = signal.getsignal(sig_obj)
+            signal.signal(sig_obj, _termination_handler)
+        except Exception:
+            continue
+
     try:
+        _emit_progress("kernel.boot.begin", data_dir=str(data_dir), config_dir=str(config_dir))
         os.environ["TZ"] = str(report["determinism_contract"]["timezone"])
         os.environ["LANG"] = str(report["determinism_contract"]["lang"])
         os.environ["LC_ALL"] = str(report["determinism_contract"]["lang"])
         os.environ["PYTHONHASHSEED"] = str(report["determinism_contract"]["pythonhashseed"])
         kernel = Kernel(default_config_paths(), safe_mode=False)
         system = kernel.boot(start_conductor=False, fast_boot=False)
+        _emit_progress("kernel.boot.done")
         report["boot_ok"] = True
 
         metadata = system.get("storage.metadata")
@@ -883,6 +955,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"required_plugin_gate_failed: missing=[{missing}] failed=[{failed}]"
             )
         if _should_require_vlm(required_plugins):
+            _emit_progress("vlm.preflight.begin", base_url=EXTERNAL_VLLM_BASE_URL)
             plugin_settings = (base_cfg.get("plugins") or {}).get("settings", {}) if isinstance(base_cfg, dict) else {}
             vllm_cfg = plugin_settings.get("builtin.vlm.vllm_localhost", {}) if isinstance(plugin_settings, dict) else {}
             if not str(os.environ.get("AUTOCAPTURE_VLM_API_KEY") or "").strip():
@@ -891,7 +964,14 @@ def main(argv: list[str] | None = None) -> int:
                     cfg_key = _repo_default_vlm_api_key()
                 if cfg_key:
                     os.environ["AUTOCAPTURE_VLM_API_KEY"] = cfg_key
+            vlm_preflight_t0 = time.monotonic()
             vllm_status = check_external_vllm_ready(require_completion=True)
+            _emit_progress(
+                "vlm.preflight.done",
+                ok=bool(vllm_status.get("ok", False)),
+                latency_ms=int((time.monotonic() - vlm_preflight_t0) * 1000),
+                selected_model=str(vllm_status.get("selected_model") or ""),
+            )
             report["vllm_status"] = vllm_status
             if not bool(vllm_status.get("ok", False)):
                 raise RuntimeError(f"external_vllm_unavailable:{vllm_status}")
@@ -919,6 +999,12 @@ def main(argv: list[str] | None = None) -> int:
             report["providers"] = {"ocr": [], "vlm": []}
 
         frame_record = _build_frame_record(run_id=run_id, record_id=record_id, ts_utc=ts_utc, image_bytes=image_bytes)
+        _emit_progress(
+            "ingest.frame.begin",
+            record_id=str(record_id),
+            image_bytes=int(len(image_bytes)),
+            ts_utc=str(ts_utc),
+        )
 
         # Media first; metadata should only reference an existing blob.
         if hasattr(media, "put_new"):
@@ -931,13 +1017,20 @@ def main(argv: list[str] | None = None) -> int:
 
         _metadata_put(metadata, record_id, frame_record)
         report["ingest_ok"] = True
+        _emit_progress("ingest.frame.done", record_id=str(record_id))
         if str(parsed.synthetic_hid or "").strip() in {"minimal", "rich"}:
+            _emit_progress("ingest.synthetic_hid.begin", mode=str(parsed.synthetic_hid))
             report["synthetic_hid"] = _inject_synthetic_hid(
                 metadata=metadata,
                 journal=journal,
                 run_id=run_id,
                 base_ts_utc=ts_utc,
                 mode=str(parsed.synthetic_hid),
+            )
+            _emit_progress(
+                "ingest.synthetic_hid.done",
+                mode=str(parsed.synthetic_hid),
+                event_count=int((report.get("synthetic_hid") or {}).get("event_count", 0) or 0),
             )
         else:
             report["synthetic_hid"] = {"enabled": False, "mode": "off", "metadata_record_ids": [], "journal_events_written": 0}
@@ -955,7 +1048,15 @@ def main(argv: list[str] | None = None) -> int:
         cumulative_stats: dict[str, int] = {}
         per_step_stats: list[dict[str, Any]] = []
         steps_taken = 0
+        _emit_progress(
+            "idle.loop.begin",
+            max_steps=int(max_steps),
+            need_vlm=bool(need_vlm),
+            need_sst=bool(need_sst),
+            need_state=bool(need_state),
+        )
         for step_idx in range(max_steps):
+            step_t0 = time.monotonic()
             step_done, stats = idle.process_step(
                 should_abort=None,
                 budget_ms=max(0, int(parsed.budget_ms)),
@@ -970,6 +1071,13 @@ def main(argv: list[str] | None = None) -> int:
                 except Exception:
                     continue
             done = bool(step_done)
+            _emit_progress(
+                "idle.step",
+                step=int(steps_taken),
+                step_done=bool(step_done),
+                latency_ms=int((time.monotonic() - step_t0) * 1000),
+                stats=last_stats,
+            )
             # Stop once the processor declares done, or when state-layer has run.
             # Do not exit solely on sst_runs>0; that can leave state spans unbuilt.
             if _should_stop_idle_loop(
@@ -980,6 +1088,12 @@ def main(argv: list[str] | None = None) -> int:
                 need_state=need_state,
             ):
                 break
+        _emit_progress(
+            "idle.loop.done",
+            steps_taken=int(steps_taken),
+            done=bool(done),
+            stats_cumulative=cumulative_stats,
+        )
         report["idle"] = {
             "done": bool(done),
             "steps_taken": int(steps_taken),
@@ -999,6 +1113,7 @@ def main(argv: list[str] | None = None) -> int:
         }
 
         if parsed.query:
+            _emit_progress("query.begin", query=str(parsed.query))
             # Full query path (PromptOps + citations policy + retrieval) against the
             # persisted extracted metadata produced above.
             q = str(parsed.query)
@@ -1007,13 +1122,18 @@ def main(argv: list[str] | None = None) -> int:
             report["query_basic"] = run_query_without_state(system, q, schedule_extract=False)
             report["query_state"] = run_state_query(system, q)
             report["query_arbitrated"] = run_query(system, q, schedule_extract=False)
+            _emit_progress("query.done")
     except Exception as exc:
         report["error"] = f"{type(exc).__name__}: {exc}"
-        _write_json(report_path, report)
-        print(json.dumps({"ok": False, "error": report["error"], "report": str(report_path)}, sort_keys=True))
-        return 1
+        _emit_progress("error", error=str(report["error"]))
+        exit_code = 1
     finally:
-        if kernel is not None:
+        for sig_num, handler in prior_signal_handlers.items():
+            try:
+                signal.signal(sig_num, handler)
+            except Exception:
+                continue
+        if kernel is not None and termination_meta.get("signal") is None:
             try:
                 kernel.shutdown()
             except Exception:
@@ -1046,9 +1166,19 @@ def main(argv: list[str] | None = None) -> int:
             os.environ["PYTHONHASHSEED"] = original_pythonhashseed
         else:
             os.environ.pop("PYTHONHASHSEED", None)
+        _best_effort_finalize_run_state(
+            data_dir,
+            error=str(report.get("error") or ""),
+            terminated_signal=termination_meta.get("signal"),
+        )
 
     report["finished_utc"] = datetime.now(timezone.utc).isoformat()
     _write_json(report_path, report)
+    if exit_code != 0:
+        _emit_progress("finish", ok=False, report=str(report_path))
+        print(json.dumps({"ok": False, "error": report.get("error") or "run_failed", "report": str(report_path)}, sort_keys=True))
+        return int(exit_code)
+    _emit_progress("finish", ok=True, report=str(report_path))
     print(json.dumps({"ok": True, "report": str(report_path)}, sort_keys=True))
     return 0
 
