@@ -9,7 +9,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$Root = (Resolve-Path (Join-Path $PSScriptRoot "..\\..")).Path
+$Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $devDir = Join-Path $Root ".dev"
 $logDir = Join-Path $devDir "logs"
 if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
@@ -40,7 +40,7 @@ function Test-PosixVenv {
   if (Test-Path $CfgPath) {
     try {
       $cfgText = Get-Content $CfgPath -Raw
-      if ($cfgText -match "home\\s*=\\s*/" -or $cfgText -match "executable\\s*=\\s*/" -or $cfgText -match "command\\s*=\\s*/") {
+      if ($cfgText -match "home\s*=\s*/" -or $cfgText -match "executable\s*=\s*/" -or $cfgText -match "command\s*=\s*/") {
         return $true
       }
     } catch { }

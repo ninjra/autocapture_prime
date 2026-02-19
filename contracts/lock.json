@@ -2,6 +2,8 @@
   "files": {
     "contracts/answer_build_input.schema.json": "0d4ff561ba7120b7e4ad737c2ae6f9cbc365f045e691a0df9d12d700b81c5710",
     "contracts/answer_build_output.schema.json": "4607b3b99c6fedfc222d564ff098d818279b6c3fdb60628872b4fe95a899a148",
+    "contracts/chronicle/v0/chronicle.proto": "cc3ea48b074dc0b18b36618e3251f6a00d7feaf61d9323fb0d8c19378e94a8f1",
+    "contracts/chronicle/v0/spool_format.md": "a6bb6ed46de7ab45be8db61795ebdb0a73a3451cdad5639950f0710d13fad043",
     "contracts/citation.schema.json": "fbd7c720a7fb915aea331b59dcad3ac25a042d0d2780717e9a208500e2d8653f",
     "contracts/config_schema.json": "526b211d9fbd3862a65994de959a41e72378fb0a40eb48165c4c563b30789a81",
     "contracts/evidence.schema.json": "34d7f492ae0204ca720ab149758bce1c6181fa18941e27f0ff2796bfbd22c105",
@@ -19,6 +21,6 @@
     "contracts/time_intent.schema.json": "6696c55883e35e0f2eb0689d61b7a05c637959d1d53ba7d8f985bbc2d5e397d8",
     "contracts/user_surface.md": "21f18a2a89dbf9a5c0e73a5bfd8a5642d373d7e48d3413268afa442dd1e925f4"
   },
-  "generated_at": "2026-02-19T03:14:15.795046+00:00",
+  "generated_at": "2026-02-19T14:36:56.804823+00:00",
   "version": 1
 }

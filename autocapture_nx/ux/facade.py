@@ -1503,48 +1503,32 @@ class UXFacade:
     def run_start(self) -> dict[str, Any]:
         with self._pause_lock:
             self._clear_pause_locked()
-        # If capture is not configured, fail fast with a clear message. This repo
-        # treats capture+ingest as an external (Windows sidecar) responsibility by
-        # default.
-        try:
-            capture_cfg = self._config.get("capture") if isinstance(self._config.get("capture"), dict) else {}
-            want_screenshot = bool((capture_cfg.get("screenshot") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
-            want_audio = bool((capture_cfg.get("audio") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
-            want_source = bool((capture_cfg.get("video") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
-            input_cfg = capture_cfg.get("input_tracking", {}) if isinstance(capture_cfg, dict) else {}
-            input_mode = str(input_cfg.get("mode") or "").strip().lower()
-            want_input = bool(input_mode and input_mode not in {"off", "disabled", "none"})
-            want_window_meta = bool((capture_cfg.get("window_metadata") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
-            want_cursor = bool((capture_cfg.get("cursor") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
-            want_clipboard = bool((capture_cfg.get("clipboard") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
-            want_file_activity = bool((capture_cfg.get("file_activity") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
-            if not any((want_source, want_screenshot, want_audio, want_input, want_window_meta, want_cursor, want_clipboard, want_file_activity)):
-                return {
-                    "ok": False,
-                    "error": "capture_disabled",
-                    "running": False,
-                    "hint": "use_windows_sidecar_contract",
-                }
-        except Exception:
-            # If config is malformed, fall through to existing error handling.
-            pass
         # Fail closed: require explicit capture consent if configured.
         try:
             privacy_cfg = self._config.get("privacy", {}) if isinstance(self._config, dict) else {}
-            capture_cfg = privacy_cfg.get("capture", {}) if isinstance(privacy_cfg, dict) else {}
-            require_consent = bool(capture_cfg.get("require_consent", True))
+            capture_privacy_cfg = privacy_cfg.get("capture", {}) if isinstance(privacy_cfg, dict) else {}
+            require_consent = bool(capture_privacy_cfg.get("require_consent", True))
             if require_consent:
                 from autocapture_nx.kernel.consent import load_capture_consent
 
-                data_dir = str(self._config.get("storage", {}).get("data_dir", "data"))
+                storage_cfg = self._config.get("storage", {}) if isinstance(self._config, dict) else {}
+                configured_data_dir = str(storage_cfg.get("data_dir", "data")) if isinstance(storage_cfg, dict) else "data"
+                data_dir = str(os.environ.get("AUTOCAPTURE_DATA_DIR") or configured_data_dir)
                 consent = load_capture_consent(data_dir=data_dir)
                 if not consent.accepted:
                     return {"ok": False, "error": "consent_required", "running": False}
         except Exception:
             return {"ok": False, "error": "consent_check_failed", "running": False}
-
-        start_result = self._start_components()
-        if not bool(start_result.get("ok", False)):
+        start_result_raw = self._start_components()
+        if isinstance(start_result_raw, dict):
+            start_result = start_result_raw
+        else:
+            start_result = {
+                "ok": bool(self._run_active),
+                "started": [],
+                "error": "capture_start_failed",
+            }
+        if not bool(start_result.get("ok", self._run_active)):
             return {"ok": False, "error": str(start_result.get("error") or "capture_start_failed"), "details": start_result, "running": False}
         # Ledger an operator capture start event (append-only).
         with self._kernel_mgr.session() as system:
