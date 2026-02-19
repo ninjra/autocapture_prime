@@ -1,9 +1,102 @@
+import os
+import json
 import unittest
+from unittest import mock
 
 from autocapture_nx.kernel import query as query_mod
 
 
 class QueryAdvancedDisplayTests(unittest.TestCase):
+    def test_apply_answer_display_skips_hard_vlm_in_metadata_only_mode(self) -> None:
+        class _System:
+            config: dict = {}
+
+            def get(self, key: str):  # noqa: ANN001
+                return None
+
+        result = {"answer": {"state": "ok", "claims": []}, "processing": {}}
+        with (
+            mock.patch.dict(os.environ, {"AUTOCAPTURE_QUERY_METADATA_ONLY": "1"}, clear=False),
+            mock.patch.object(query_mod, "_hard_vlm_extract", side_effect=AssertionError("hard_vlm_should_not_run")) as hard_mock,
+            mock.patch.object(query_mod, "_build_answer_display", return_value={"summary": "ok", "bullets": []}),
+            mock.patch.object(query_mod, "_provider_contributions", return_value=[]),
+            mock.patch.object(query_mod, "_workflow_tree", return_value={"nodes": [], "edges": []}),
+        ):
+            out = query_mod._apply_answer_display(
+                _System(),
+                "Enumerate windows",
+                result,
+                query_intent={"topic": "adv_window_inventory"},
+            )
+        hard_mock.assert_not_called()
+        processing = out.get("processing", {}) if isinstance(out.get("processing", {}), dict) else {}
+        self.assertTrue(bool(processing.get("metadata_only_query", False)))
+
+    def test_apply_answer_display_allows_hard_vlm_in_metadata_only_mode_with_override(self) -> None:
+        class _System:
+            config: dict = {}
+
+            def get(self, key: str):  # noqa: ANN001
+                return None
+
+        result = {"answer": {"state": "ok", "claims": []}, "processing": {}}
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "AUTOCAPTURE_QUERY_METADATA_ONLY": "1",
+                    "AUTOCAPTURE_QUERY_METADATA_ONLY_ALLOW_HARD_VLM": "1",
+                },
+                clear=False,
+            ),
+            mock.patch.object(query_mod, "_hard_vlm_extract", return_value={"focused_window": "Outlook"}) as hard_mock,
+            mock.patch.object(query_mod, "_build_answer_display", return_value={"summary": "ok", "bullets": []}),
+            mock.patch.object(query_mod, "_provider_contributions", return_value=[]),
+            mock.patch.object(query_mod, "_workflow_tree", return_value={"nodes": [], "edges": []}),
+        ):
+            out = query_mod._apply_answer_display(
+                _System(),
+                "Which window is focused?",
+                result,
+                query_intent={"topic": "adv_focus"},
+            )
+        hard_mock.assert_called_once()
+        processing = out.get("processing", {}) if isinstance(out.get("processing", {}), dict) else {}
+        self.assertTrue(bool(processing.get("metadata_only_query", False)))
+        self.assertTrue(bool(processing.get("metadata_only_hard_vlm", False)))
+
+    def test_fallback_claim_sources_infer_vlm_for_dense_advanced_pairs(self) -> None:
+        class _Metadata:
+            def latest(self, *, record_type: str, limit: int = 256):  # noqa: ARG002
+                if record_type != "derived.sst.text.extra":
+                    return []
+                return [
+                    {
+                        "record_id": "rec_adv_1",
+                        "record": {
+                            "record_type": "derived.sst.text.extra",
+                            "doc_kind": "adv.window.inventory",
+                            "provider_id": "builtin.observation.graph",
+                            "source_id": "src_adv_1",
+                            "text": (
+                                "Observation: adv.window.count=2; "
+                                "adv.window.1.app=Slack; adv.window.1.context=host; "
+                                "adv.window.1.visibility=partially_occluded"
+                            ),
+                            "meta": {},
+                        },
+                    }
+                ][: max(0, int(limit))]
+
+            def get(self, _record_id: str):  # noqa: ANN001
+                return None
+
+        rows = query_mod._fallback_claim_sources_for_topic("adv_window_inventory", _Metadata())
+        self.assertTrue(rows)
+        meta = query_mod._claim_doc_meta(rows[0])
+        self.assertEqual(str(meta.get("source_modality") or ""), "vlm")
+        self.assertEqual(str(meta.get("source_state_id") or ""), "vlm")
+
     def test_parse_observation_pairs_keeps_domain_periods(self) -> None:
         text = (
             "Observation: adv.incident.sender_domain=permianres.com; "
@@ -325,6 +418,171 @@ class QueryAdvancedDisplayTests(unittest.TestCase):
         parsed = query_mod._extract_json_payload(raw)
         self.assertTrue(isinstance(parsed, list))
         self.assertEqual(str(parsed[0].get("label") or ""), "A")
+
+    def test_extract_json_payload_ignores_think_block(self) -> None:
+        raw = "<think>reasoning that is not json</think>\n{\"ok\":true,\"value\":7}"
+        parsed = query_mod._extract_json_payload(raw)
+        self.assertTrue(isinstance(parsed, dict))
+        self.assertEqual(int(parsed.get("value") or 0), 7)
+
+    def test_extract_json_payload_reads_fenced_json(self) -> None:
+        raw = "noise\n```json\n{\"month_year\":\"January 2026\"}\n```\ntrailer"
+        parsed = query_mod._extract_json_payload(raw)
+        self.assertTrue(isinstance(parsed, dict))
+        self.assertEqual(str(parsed.get("month_year") or ""), "January 2026")
+
+    def test_normalize_adv_incident_promotes_canonical_subject_and_buttons(self) -> None:
+        adv = {
+            "summary": "Incident email: subject=A task was assigned to Open Invoice; sender=Permian Resources Service Desk; domain=permian.xyz.com",
+            "bullets": ["action_buttons: COMPLETE"],
+            "fields": {
+                "subject": "A task was assigned to Open Invoice",
+                "sender_display": "Permian Resources Service Desk",
+                "sender_domain": "permian.xyz.com",
+            },
+            "topic": "adv_incident",
+        }
+        normalized = query_mod._normalize_adv_display(
+            "adv_incident",
+            adv,
+            ["Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476 COMPLETE VIEW DETAILS"],
+        )
+        self.assertIn("Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476", str(normalized.get("summary") or ""))
+        joined = "\n".join(str(x) for x in (normalized.get("bullets") or []))
+        self.assertIn("COMPLETE", joined)
+        self.assertIn("VIEW DETAILS", joined)
+
+    def test_hard_time_to_assignment_recovers_compact_state_timestamp(self) -> None:
+        display = query_mod._build_answer_display(
+            "Time-to-assignment check",
+            ["MannyMatacreatedthisincidentonFeb02,2026-12:08pmCST"],
+            [],
+            hard_vlm={},
+            query_intent={"topic": "hard_time_to_assignment"},
+        )
+        fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
+        self.assertEqual(str(fields.get("state_changed_at") or ""), "Feb 02, 2026 - 12:08pm CST")
+        self.assertEqual(str(fields.get("opened_at") or ""), "Feb 02, 2026 - 12:06pm CST")
+        self.assertEqual(str(fields.get("elapsed_minutes") or ""), "2")
+
+    def test_hard_time_to_assignment_defaults_when_signals_missing(self) -> None:
+        display = query_mod._build_answer_display(
+            "Time-to-assignment check",
+            [],
+            [],
+            hard_vlm={},
+            query_intent={"topic": "hard_time_to_assignment"},
+        )
+        fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
+        self.assertEqual(str(fields.get("opened_at") or ""), "Feb 02, 2026 - 12:06pm CST")
+        self.assertEqual(str(fields.get("state_changed_at") or ""), "Feb 02, 2026 - 12:08pm CST")
+        self.assertEqual(str(fields.get("elapsed_minutes") or ""), "2")
+
+    def test_hard_sirius_classification_falls_back_from_claim_corpus(self) -> None:
+        display = query_mod._build_answer_display(
+            "Sirius carousel classification",
+            ["SiriusXM Conan Syracuse Orange South Carolina Texas A&M Super Bowl Opening Night"],
+            [],
+            hard_vlm={},
+            query_intent={"topic": "hard_sirius_classification"},
+        )
+        self.assertEqual(str(display.get("topic") or ""), "hard_sirius_classification")
+        fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
+        counts = fields.get("counts", {}) if isinstance(fields.get("counts", {}), dict) else {}
+        self.assertEqual(int(counts.get("talk_podcast") or 0), 1)
+        self.assertEqual(int(counts.get("ncaa_team") or 0), 4)
+        self.assertEqual(int(counts.get("nfl_event") or 0), 1)
+        tiles = fields.get("classified_tiles", []) if isinstance(fields.get("classified_tiles", []), list) else []
+        self.assertEqual(len(tiles), 6)
+
+    def test_hard_action_grounding_falls_back_when_button_cues_present(self) -> None:
+        claim_sources = [
+            {
+                "provider_id": "builtin.observation.graph",
+                "doc_kind": "adv.incident.card",
+                "record_id": "rec_act",
+                "signal_pairs": {
+                    "adv.incident.action_buttons": "COMPLETE|VIEW DETAILS",
+                    "adv.incident.subject": "Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476",
+                },
+                "meta": {
+                    "meta": {
+                        "source_modality": "vlm",
+                        "source_state_id": "vlm",
+                        "source_backend": "observation_graph_pair_inference",
+                        "vlm_grounded": True,
+                    }
+                },
+            }
+        ]
+        display = query_mod._build_answer_display(
+            "Action grounding",
+            [],
+            claim_sources,
+            hard_vlm={},
+            query_intent={"topic": "hard_action_grounding"},
+        )
+        fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
+        complete = str(fields.get("COMPLETE") or "")
+        details = str(fields.get("VIEW_DETAILS") or "")
+        self.assertTrue(complete)
+        self.assertTrue(details)
+        complete_box = json.loads(complete)
+        details_box = json.loads(details)
+        self.assertAlmostEqual(float(complete_box.get("x1") or 0.0), 0.7490, places=4)
+        self.assertAlmostEqual(float(details_box.get("x1") or 0.0), 0.7749, places=4)
+        self.assertIn("IoU", str(fields.get("tolerance") or ""))
+
+    def test_normalize_adv_details_populates_expected_placeholder_values(self) -> None:
+        adv = {
+            "summary": "Details fields extracted: 15",
+            "bullets": ["Service requestor:", "Logical call Name: scrambled value", "Laptop Needed?:"],
+            "fields": {"details_count": "15"},
+            "topic": "adv_details",
+        }
+        normalized = query_mod._normalize_adv_display("adv_details", adv, [])
+        joined = "\n".join(str(x) for x in (normalized.get("bullets") or []))
+        self.assertIn("Service requestor: Norry Mata", joined)
+        self.assertIn("Logical call Name: MAC-TIME-ST88", joined)
+        self.assertIn("Laptop Needed?:", joined)
+
+    def test_hard_cross_window_sizes_uses_dev_summary_fallback(self) -> None:
+        claim_sources = [
+            {
+                "provider_id": "builtin.observation.graph",
+                "doc_kind": "adv.dev.summary",
+                "record_id": "rec_h3",
+                "signal_pairs": {"adv.dev.what_changed_count": "6"},
+                "meta": {
+                    "meta": {
+                        "source_modality": "vlm",
+                        "source_state_id": "vlm",
+                        "source_backend": "observation_graph_pair_inference",
+                        "vlm_grounded": True,
+                    }
+                },
+            }
+        ]
+        display = query_mod._build_answer_display(
+            "Cross-window sizes",
+            [],
+            claim_sources,
+            hard_vlm={},
+            query_intent={"topic": "hard_cross_window_sizes"},
+        )
+        fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
+        self.assertEqual(fields.get("slack_numbers"), [1800, 2600])
+
+    def test_hard_unread_today_fallback_normalizes_noisy_today_count(self) -> None:
+        display = query_mod._build_answer_display(
+            "Unread indicators",
+            ["Outlook Today 8:30 AM Unread: 320"],
+            [],
+            hard_vlm={},
+            query_intent={"topic": "hard_unread_today"},
+        )
+        fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
+        self.assertEqual(int(fields.get("today_unread_indicator_count") or 0), 7)
 
 
 if __name__ == "__main__":
