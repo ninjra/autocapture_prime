@@ -2262,6 +2262,9 @@
           ],
           "type": "object"
         },
+        "examples_path": {
+          "type": "string"
+        },
         "github": {
           "additionalProperties": false,
           "properties": {
@@ -2305,6 +2308,12 @@
         "metrics": {
           "additionalProperties": false,
           "properties": {
+            "capture_prompt_text": {
+              "type": "boolean"
+            },
+            "max_prompt_text_chars": {
+              "type": "integer"
+            },
             "enabled": {
               "type": "boolean"
             },
@@ -2340,6 +2349,9 @@
           "type": "boolean"
         },
         "persist_query_prompts": {
+          "type": "boolean"
+        },
+        "require_query_path": {
           "type": "boolean"
         },
         "prompt_dir": {
@@ -2413,6 +2425,73 @@
           ],
           "type": "object"
         },
+        "optimizer": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "interval_s": {
+              "type": "number"
+            },
+            "estimate_ms": {
+              "type": "integer"
+            },
+            "metrics_window_rows": {
+              "type": "integer"
+            },
+            "refresh_examples": {
+              "type": "boolean"
+            },
+            "query_trace_path": {
+              "type": "string"
+            },
+            "min_interactions": {
+              "type": "integer"
+            },
+            "min_success_rate": {
+              "type": "number"
+            },
+            "max_latency_p95_ms": {
+              "type": "number"
+            },
+            "max_prompt_ids": {
+              "type": "integer"
+            },
+            "strategies": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "auto_promote": {
+              "type": "boolean"
+            },
+            "min_pass_rate_delta": {
+              "type": "number"
+            },
+            "output_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "enabled",
+            "interval_s",
+            "estimate_ms",
+            "metrics_window_rows",
+            "refresh_examples",
+            "query_trace_path",
+            "min_interactions",
+            "min_success_rate",
+            "max_latency_p95_ms",
+            "max_prompt_ids",
+            "strategies",
+            "auto_promote",
+            "min_pass_rate_delta",
+            "output_path"
+          ],
+          "type": "object"
+        },
         "require_citations": {
           "type": "boolean"
         },
@@ -2436,6 +2515,7 @@
         "model_strategy",
         "persist_prompts",
         "persist_query_prompts",
+        "require_query_path",
         "sources",
         "examples",
         "eval",
@@ -2457,8 +2537,14 @@
         "enabled": {
           "type": "boolean"
         },
+        "fail_closed_on_plugin_error": {
+          "type": "boolean"
+        },
         "interval_s": {
           "type": "integer"
+        },
+        "owner": {
+          "type": "string"
         },
         "report_dir": {
           "type": "string"
@@ -2931,6 +3017,15 @@
           ],
           "type": "object"
         },
+        "archive": {
+          "additionalProperties": false,
+          "properties": {
+            "safe_extract": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
         "blob_dir": {
           "type": "string"
         },
@@ -3091,6 +3186,15 @@
             "interval_s": {
               "type": "number"
             },
+            "processed_only": {
+              "type": "boolean"
+            },
+            "images_only": {
+              "type": "boolean"
+            },
+            "image_only": {
+              "type": "boolean"
+            },
             "max_delete_per_run": {
               "type": "integer"
             },
@@ -3105,6 +3209,9 @@
         },
         "spool_dir": {
           "type": "string"
+        },
+        "spool_fsync": {
+          "type": "boolean"
         },
         "spool_overflow": {
           "additionalProperties": false,

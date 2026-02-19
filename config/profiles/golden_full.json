@@ -41,6 +41,13 @@
         ],
         "provider_ids": []
       },
+      "processing.stage.hooks": {
+        "fanout": true,
+        "max_providers": 64,
+        "mode": "multi",
+        "preferred": [],
+        "provider_ids": []
+      },
       "state.vector_index": {
         "fanout": false,
         "max_providers": 1,
@@ -138,7 +145,7 @@
           "repro_runs": 3,
           "timezone": "UTC"
         },
-        "enable_synthesizer": true,
+        "enable_synthesizer": false,
         "profile_id": "golden_full_v1",
         "required_plugins": [
           "builtin.anchor.basic",
@@ -218,22 +225,24 @@
         "base_url": "http://127.0.0.1:8000/v1",
         "model": "internvl3_5_8b",
         "n": 1,
-        "max_rois": 9,
-        "grid_sections": 8,
+        "max_rois": 7,
+        "grid_sections": 6,
         "grid_enforced": true,
         "max_tokens": 640,
         "max_retries": 2,
-        "timeout_s": 45.0,
+        "timeout_s": 25.0,
         "roi_max_side": 2048,
-        "roi_max_tokens": 1536,
+        "roi_max_tokens": 1024,
         "seed": 0,
         "temperature": 0.0,
         "top_p": 1.0,
-        "thumb_max_px": 1920,
-        "thumb_max_tokens": 768,
+        "thumb_max_px": 1536,
+        "thumb_max_tokens": 640,
         "factpack_enabled": true,
-        "factpack_max_tokens": 2048,
+        "factpack_max_tokens": 1280,
         "topic_factpack_enabled": true,
+        "topic_factpack_max_tokens": 768,
+        "topic_factpack_min_topics": 2,
         "promptops": {
           "enabled": true,
           "metrics": {
@@ -274,6 +283,20 @@
     }
   },
   "processing": {
+    "idle": {
+      "extractors": {
+        "ocr": false,
+        "vlm": false
+      }
+    },
+    "on_query": {
+      "allow_decode_extract": false,
+      "extractors": {
+        "ocr": false,
+        "vlm": false
+      },
+      "require_idle": true
+    },
     "sst": {
       "ui_parse": {
         "enabled": true,
@@ -295,6 +318,17 @@
         "training_enabled": true,
         "workflow_enabled": true
       }
+    }
+  },
+  "storage": {
+    "no_deletion_mode": false,
+    "retention": {
+      "evidence": "6d",
+      "images_only": true,
+      "interval_s": 86400,
+      "max_delete_per_run": 5000,
+      "processed_only": true,
+      "record_batches": true
     }
   }
 }
