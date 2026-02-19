@@ -1,6 +1,6 @@
 {
   "contract_lock_hash": "7afc9c43a59d069160d4602095dd5a09bcbe8458211fd26a8327c9584e8e584d",
-  "generated_at": "2026-02-19T14:52:49.856554Z",
+  "generated_at": "2026-02-19T19:08:50.498114Z",
   "kernel_api_version": "0.1.0",
   "plugins": {
     "builtin.anchor.basic": {
@@ -318,6 +318,16 @@
       "contract_lock_hash": "7afc9c43a59d069160d4602095dd5a09bcbe8458211fd26a8327c9584e8e584d",
       "kernel_api_version": "0.1.0",
       "manifest_sha256": "76599038ac3c9a8ab493a71484edb03d8b5d3ffc6e9c8d42558713a6445a4e74",
+      "sbom": {
+        "requirements": [],
+        "requirements_sha256": null
+      }
+    },
+    "builtin.processing.sst.uia_context": {
+      "artifact_sha256": "83298b2f2d76cbb1c38b0bbd888593f25a3901227e97e74f9f14d9fe155d14cb",
+      "contract_lock_hash": "7afc9c43a59d069160d4602095dd5a09bcbe8458211fd26a8327c9584e8e584d",
+      "kernel_api_version": "0.1.0",
+      "manifest_sha256": "6dd9a0aadbb2c7e09198b97431ce4859d56394b98d14295a7a253d092a1113c8",
       "sbom": {
         "requirements": [],
         "requirements_sha256": null

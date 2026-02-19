@@ -179,6 +179,18 @@ def _to_utc_z(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _resolve_idle_step_max_seconds(*, budget_ms: int) -> int:
+    raw = str(os.environ.get("AUTOCAPTURE_SINGLE_IDLE_STEP_MAX_SECONDS") or "").strip()
+    try:
+        env_val = int(raw) if raw else 0
+    except Exception:
+        env_val = 0
+    if env_val > 0:
+        return max(15, min(600, env_val))
+    budget_s = max(1, int((int(budget_ms) + 999) // 1000))
+    return max(30, min(120, budget_s))
+
+
 def _metadata_put(metadata: Any, record_id: str, payload: dict[str, Any]) -> None:
     if hasattr(metadata, "put_new"):
         try:
@@ -395,6 +407,27 @@ def _should_require_vlm(required_plugins: list[str]) -> bool:
     return forced in {"1", "true", "yes"}
 
 
+def _disable_vlm_idle_runtime(idle: Any) -> None:
+    cfg = getattr(idle, "_config", None)
+    if not isinstance(cfg, dict):
+        return
+    processing_cfg = cfg.setdefault("processing", {})
+    if not isinstance(processing_cfg, dict):
+        return
+    idle_cfg = processing_cfg.setdefault("idle", {})
+    if isinstance(idle_cfg, dict):
+        extractors_cfg = idle_cfg.setdefault("extractors", {})
+        if isinstance(extractors_cfg, dict):
+            extractors_cfg["vlm"] = False
+        idle_cfg["max_concurrency_gpu"] = 0
+    sst_cfg = processing_cfg.setdefault("sst", {})
+    if isinstance(sst_cfg, dict):
+        sst_cfg["allow_vlm"] = False
+        ui_vlm_cfg = sst_cfg.setdefault("ui_vlm", {})
+        if isinstance(ui_vlm_cfg, dict):
+            ui_vlm_cfg["enabled"] = False
+
+
 def _is_truthy_env(value: str | None) -> bool:
     text = str(value or "").strip().casefold()
     if not text:
@@ -429,6 +462,13 @@ def _coerce_int(raw: Any, default: int) -> int:
         return int(raw)
     except Exception:
         return int(default)
+
+
+def _coerce_float(raw: Any, default: float) -> float:
+    try:
+        return float(raw)
+    except Exception:
+        return float(default)
 
 
 def _resolve_strict_model_selection(*, selected_model: str, served_models: list[str], strict_golden: bool) -> tuple[str, str]:
@@ -502,6 +542,19 @@ def main(argv: list[str] | None = None) -> int:
         default="minimal",
         help="Inject deterministic synthetic HID metadata/journal records before idle processing.",
     )
+    parser.add_argument(
+        "--skip-vllm-unstable",
+        dest="skip_vllm_unstable",
+        action="store_true",
+        default=True,
+        help="Degrade VLM-dependent processing to skipped when VLM preflight fails (default: true).",
+    )
+    parser.add_argument(
+        "--fail-on-vllm-unstable",
+        dest="skip_vllm_unstable",
+        action="store_false",
+        help="Fail closed when VLM preflight fails.",
+    )
     parsed = parser.parse_args(args)
 
     image_path = Path(str(parsed.image))
@@ -512,6 +565,7 @@ def main(argv: list[str] | None = None) -> int:
         budget_ms=int(parsed.budget_ms),
         max_idle_steps=int(parsed.max_idle_steps),
         synthetic_hid=str(parsed.synthetic_hid),
+        skip_vllm_unstable=bool(parsed.skip_vllm_unstable),
     )
     if not image_path.exists():
         print(f"ERROR: image not found: {image_path}")
@@ -568,6 +622,8 @@ def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("AUTOCAPTURE_VLM_ORCHESTRATOR_WARMUP_S", "20")
     os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_RETRY_SLEEP_S", "1")
     os.environ.setdefault("AUTOCAPTURE_VLM_MAX_INFLIGHT", "1")
+    os.environ.setdefault("AUTOCAPTURE_SST_OCR_MIN_FULL_FRAME_TOKENS", "120")
+    os.environ.setdefault("AUTOCAPTURE_SINGLE_IDLE_STEP_MAX_SECONDS", "240")
     os.environ.setdefault(
         "AUTOCAPTURE_VLM_ORCHESTRATOR_CMD",
         "bash /mnt/d/projects/hypervisor/tools/wsl/start_internvl35_8b_with_watch.sh",
@@ -645,6 +701,8 @@ def main(argv: list[str] | None = None) -> int:
                 allowlist.append("builtin.vlm.qwen2_vl_2b")
             if "builtin.processing.sst.ui_vlm" not in allowlist:
                 allowlist.append("builtin.processing.sst.ui_vlm")
+            if "builtin.sst.ui.parse" not in allowlist:
+                allowlist.append("builtin.sst.ui.parse")
             if "builtin.answer.synth_vllm_localhost" not in allowlist:
                 allowlist.append("builtin.answer.synth_vllm_localhost")
             _ensure_core_writer_plugins(allowlist=allowlist)
@@ -667,6 +725,7 @@ def main(argv: list[str] | None = None) -> int:
             enabled["builtin.sst.qa.answers"] = False
             enabled["builtin.observation.graph"] = True
             enabled["builtin.processing.sst.ui_vlm"] = True
+            enabled["builtin.sst.ui.parse"] = True
             enabled["builtin.answer.synth_vllm_localhost"] = True
             enabled["builtin.vlm.vllm_localhost"] = True
             enabled["builtin.vlm.qwen2_vl_2b"] = not remote_vlm_only
@@ -708,12 +767,23 @@ def main(argv: list[str] | None = None) -> int:
                     cooldown_s = 45.0
                 vllm_settings["failure_cooldown_s"] = max(5.0, cooldown_s)
                 vllm_settings["two_pass_enabled"] = True
-                vllm_settings["thumb_max_px"] = _coerce_int(vllm_settings.get("thumb_max_px"), 960)
-                vllm_settings["max_rois"] = _coerce_int(vllm_settings.get("max_rois"), 6)
-                vllm_settings["roi_max_side"] = _coerce_int(vllm_settings.get("roi_max_side"), 896)
-                vllm_settings["thumb_max_tokens"] = _coerce_int(vllm_settings.get("thumb_max_tokens"), 384)
-                vllm_settings["roi_max_tokens"] = _coerce_int(vllm_settings.get("roi_max_tokens"), 512)
-                vllm_settings["max_tokens"] = _coerce_int(vllm_settings.get("max_tokens"), 512)
+                # Option A contract: maximize ingest-time structured metadata
+                # quality while keeping deterministic upper bounds.
+                vllm_settings["timeout_s"] = min(_coerce_float(vllm_settings.get("timeout_s"), 25.0), 25.0)
+                vllm_settings["max_retries"] = min(_coerce_int(vllm_settings.get("max_retries"), 2), 2)
+                vllm_settings["thumb_max_px"] = min(_coerce_int(vllm_settings.get("thumb_max_px"), 1536), 1536)
+                vllm_settings["max_rois"] = min(_coerce_int(vllm_settings.get("max_rois"), 7), 7)
+                vllm_settings["grid_sections"] = min(_coerce_int(vllm_settings.get("grid_sections"), 6), 6)
+                vllm_settings["roi_max_side"] = min(_coerce_int(vllm_settings.get("roi_max_side"), 2048), 2048)
+                vllm_settings["thumb_max_tokens"] = min(_coerce_int(vllm_settings.get("thumb_max_tokens"), 640), 640)
+                vllm_settings["roi_max_tokens"] = min(_coerce_int(vllm_settings.get("roi_max_tokens"), 1024), 1024)
+                vllm_settings["max_tokens"] = min(_coerce_int(vllm_settings.get("max_tokens"), 640), 640)
+                vllm_settings["factpack_enabled"] = bool(vllm_settings.get("factpack_enabled", True))
+                vllm_settings["factpack_max_tokens"] = min(
+                    _coerce_int(vllm_settings.get("factpack_max_tokens"), 1280),
+                    1280,
+                )
+                vllm_settings["topic_factpack_enabled"] = True
                 vllm_settings["temperature"] = 0.0
                 vllm_settings["top_p"] = 1.0
                 vllm_settings["n"] = 1
@@ -753,6 +823,20 @@ def main(argv: list[str] | None = None) -> int:
     if isinstance(plugins_cfg, dict):
         caps_cfg = plugins_cfg.setdefault("capabilities", {})
         if isinstance(caps_cfg, dict):
+            stage_hooks = caps_cfg.setdefault("processing.stage.hooks", {})
+            if isinstance(stage_hooks, dict):
+                stage_hooks["fanout"] = True
+                stage_hooks["mode"] = "multi"
+                stage_hooks["max_providers"] = max(64, int(stage_hooks.get("max_providers", 0) or 0))
+            ocr_cap = caps_cfg.setdefault("ocr.engine", {})
+            if isinstance(ocr_cap, dict):
+                ocr_cap["fanout"] = True
+                ocr_cap["mode"] = "multi"
+                ocr_cap["max_providers"] = max(2, int(ocr_cap.get("max_providers", 0) or 0))
+                preferred_ocr = ["builtin.ocr.nemotron_torch", "builtin.ocr.rapid", "builtin.ocr.basic"]
+                existing_ocr = ocr_cap.get("preferred", [])
+                if isinstance(existing_ocr, list):
+                    ocr_cap["preferred"] = preferred_ocr + [str(x) for x in existing_ocr if str(x) not in preferred_ocr]
             vision = caps_cfg.setdefault("vision.extractor", {})
             if isinstance(vision, dict):
                 preferred = vision.setdefault("preferred", [])
@@ -808,21 +892,22 @@ def main(argv: list[str] | None = None) -> int:
     if isinstance(processing_cfg, dict):
         idle_cfg = processing_cfg.setdefault("idle", {})
         if isinstance(idle_cfg, dict):
-            idle_cfg["max_seconds_per_run"] = int(max(int(idle_cfg.get("max_seconds_per_run", 30) or 30), 240))
+            max_step_seconds = _resolve_idle_step_max_seconds(budget_ms=int(parsed.budget_ms))
+            idle_cfg["max_seconds_per_run"] = int(max_step_seconds)
             idle_cfg["max_concurrency_gpu"] = int(idle_cfg.get("max_concurrency_gpu", 1) or 1)
             extractors_cfg = idle_cfg.setdefault("extractors", {})
             if isinstance(extractors_cfg, dict):
-                # Enable direct VLM extractor by default for single-image eval runs.
-                # This can be disabled explicitly via env for profiling duplicates.
-                idle_vlm_enabled = str(os.environ.get("AUTOCAPTURE_IDLE_VLM_EXTRACT", "1")).strip().casefold() not in {
-                    "0",
-                    "false",
-                    "no",
-                }
-                extractors_cfg["vlm"] = bool(idle_vlm_enabled)
+                # Strict golden single-image mode should use SST as the single
+                # metadata path. Direct idle OCR/VLM extractors duplicate work
+                # and can consume most of the per-step budget before SST runs.
+                extractors_cfg["ocr"] = False
+                extractors_cfg["vlm"] = False
         sst_cfg = processing_cfg.setdefault("sst", {})
         if isinstance(sst_cfg, dict):
             sst_cfg["enabled"] = True
+            # Option A contract: metadata quality must come from ingest-time
+            # extraction, not query-time image calls.
+            sst_cfg["allow_ocr"] = True
             sst_cfg["allow_vlm"] = True
             ui_parse_cfg = sst_cfg.setdefault("ui_parse", {})
             if isinstance(ui_parse_cfg, dict):
@@ -954,6 +1039,8 @@ def main(argv: list[str] | None = None) -> int:
             raise RuntimeError(
                 f"required_plugin_gate_failed: missing=[{missing}] failed=[{failed}]"
             )
+        vlm_degraded = False
+        vlm_degraded_reason = ""
         if _should_require_vlm(required_plugins):
             _emit_progress("vlm.preflight.begin", base_url=EXTERNAL_VLLM_BASE_URL)
             plugin_settings = (base_cfg.get("plugins") or {}).get("settings", {}) if isinstance(base_cfg, dict) else {}
@@ -974,20 +1061,28 @@ def main(argv: list[str] | None = None) -> int:
             )
             report["vllm_status"] = vllm_status
             if not bool(vllm_status.get("ok", False)):
-                raise RuntimeError(f"external_vllm_unavailable:{vllm_status}")
+                if bool(parsed.skip_vllm_unstable):
+                    vlm_degraded = True
+                    vlm_degraded_reason = str(vllm_status.get("error") or "external_vllm_unavailable")
+                    report["vllm_status"]["degraded_mode"] = True
+                    report["vllm_status"]["degraded_reason"] = str(vlm_degraded_reason)
+                    _emit_progress("vlm.preflight.degraded", reason=str(vlm_degraded_reason))
+                else:
+                    raise RuntimeError(f"external_vllm_unavailable:{vllm_status}")
             models = [str(x).strip() for x in (vllm_status.get("models") or []) if str(x).strip()]
             selected_model = str(vllm_cfg.get("model") or "").strip() if isinstance(vllm_cfg, dict) else ""
-            selected_model, model_source = _resolve_strict_model_selection(
-                selected_model=selected_model,
-                served_models=models,
-                strict_golden=bool(strict_golden),
-            )
-            report["vllm_model_selected"] = selected_model
-            report["vllm_model_source"] = model_source
-            if selected_model and models and selected_model not in models:
-                raise RuntimeError(
-                    f"strict_golden_model_not_served:selected={selected_model}:available={','.join(models)}"
+            if not vlm_degraded:
+                selected_model, model_source = _resolve_strict_model_selection(
+                    selected_model=selected_model,
+                    served_models=models,
+                    strict_golden=bool(strict_golden),
                 )
+                report["vllm_model_selected"] = selected_model
+                report["vllm_model_source"] = model_source
+                if selected_model and models and selected_model not in models:
+                    raise RuntimeError(
+                        f"strict_golden_model_not_served:selected={selected_model}:available={','.join(models)}"
+                    )
         try:
             ocr_cap = system.get("ocr.engine") if getattr(system, "has", lambda _n: False)("ocr.engine") else None
             vlm_cap = system.get("vision.extractor") if getattr(system, "has", lambda _n: False)("vision.extractor") else None
@@ -1036,12 +1131,20 @@ def main(argv: list[str] | None = None) -> int:
             report["synthetic_hid"] = {"enabled": False, "mode": "off", "metadata_record_ids": [], "journal_events_written": 0}
 
         need_vlm = _should_require_vlm(required_plugins)
+        if vlm_degraded:
+            need_vlm = False
         need_sst = (
             "builtin.processing.sst.pipeline" in required_plugins
             or "builtin.processing.sst.ui_vlm" in required_plugins
         )
+        if vlm_degraded:
+            need_sst = False
         need_state = any(str(plugin_id).startswith("builtin.state.") for plugin_id in required_plugins)
         idle = IdleProcessor(system)
+        if vlm_degraded:
+            _disable_vlm_idle_runtime(idle)
+            report["vlm_degraded"] = True
+            report["vlm_degraded_reason"] = str(vlm_degraded_reason)
         max_steps = max(1, int(parsed.max_idle_steps))
         done = False
         last_stats: dict[str, Any] = {}

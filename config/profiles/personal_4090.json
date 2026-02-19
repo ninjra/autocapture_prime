@@ -1,0 +1,44 @@
+{
+  "runtime": {
+    "personal_4090": {
+      "enabled": true,
+      "profile_id": "personal_4090_v1",
+      "required_plugins": [
+        "builtin.ocr.basic",
+        "builtin.processing.sst.pipeline",
+        "builtin.processing.sst.ui_vlm",
+        "builtin.vlm.vllm_localhost",
+        "builtin.observation.graph"
+      ]
+    }
+  },
+  "capture": {
+    "video": {
+      "backend": "dxcam",
+      "fps": 12
+    }
+  },
+  "models": {
+    "enable_hard_vlm": true,
+    "hard_vlm_grid_sections": 8,
+    "hard_vlm_max_candidates": 18
+  },
+  "runtime_scheduler": {
+    "enabled": true
+  },
+  "runtime_governor": {
+    "enabled": true,
+    "idle_budget": {
+      "cpu_max_utilization": 0.5,
+      "ram_max_utilization": 0.5
+    }
+  },
+  "plugins": {
+    "enabled": {
+      "builtin.processing.sst.pipeline": true,
+      "builtin.processing.sst.ui_vlm": true,
+      "builtin.vlm.vllm_localhost": true,
+      "builtin.observation.graph": true
+    }
+  }
+}

@@ -14,6 +14,7 @@ from typing import Any, Iterable
 from autocapture.core.hashing import hash_text
 from autocapture_nx.plugin_system.registry import PluginRegistry
 from autocapture.promptops.evaluate import evaluate_prompt
+from autocapture.promptops.examples import load_examples_file
 from autocapture.promptops.github import create_pull_request
 from autocapture.promptops.propose import propose_prompt
 from autocapture.promptops.sources import PromptBundle, snapshot_sources
@@ -239,9 +240,29 @@ class PromptOpsLayer:
         cfg = self._prompt_cfg()
         examples = cfg.get("examples", {})
         if isinstance(examples, dict):
-            return list(examples.get(prompt_id, []))
+            direct = examples.get(prompt_id, [])
+            if isinstance(direct, list) and direct:
+                return list(direct)
+            # Common alias normalization used across query prompt IDs.
+            aliases = []
+            if str(prompt_id) == "query":
+                aliases.append("query.default")
+            elif str(prompt_id) == "query.default":
+                aliases.append("query")
+            for alias in aliases:
+                rows = examples.get(alias, [])
+                if isinstance(rows, list) and rows:
+                    return list(rows)
         if isinstance(examples, list):
             return list(examples)
+        examples_path = str(cfg.get("examples_path") or "").strip()
+        if examples_path:
+            try:
+                rows = load_examples_file(Path(examples_path), prompt_id=str(prompt_id))
+                if rows:
+                    return rows
+            except Exception:
+                return []
         return []
 
     def _record_template_mapping(self, prompt_id: str, snapshot: dict[str, Any]) -> None:
@@ -476,6 +497,19 @@ class PromptOpsLayer:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         cfg = self._prompt_cfg()
+        metrics_cfg = self._metrics_cfg()
+        capture_prompt_text = bool(metrics_cfg.get("capture_prompt_text", True))
+        try:
+            max_prompt_text_chars = max(256, int(metrics_cfg.get("max_prompt_text_chars", 4096) or 4096))
+        except Exception:
+            max_prompt_text_chars = 4096
+
+        def _clip(value: str) -> str:
+            text = str(value or "")
+            if len(text) <= max_prompt_text_chars:
+                return text
+            return text[:max_prompt_text_chars]
+
         payload: dict[str, Any] = {
             "type": "promptops.model_interaction",
             "prompt_id": str(prompt_id),
@@ -489,6 +523,9 @@ class PromptOpsLayer:
             "response_chars": int(len(str(response_text or ""))),
             "response_has_json": bool("{" in str(response_text or "") and "}" in str(response_text or "")),
         }
+        if capture_prompt_text:
+            payload["prompt_input_text"] = _clip(prompt_input)
+            payload["prompt_effective_text"] = _clip(prompt_effective)
         if isinstance(metadata, dict) and metadata:
             payload["meta"] = metadata
         self._append_metric(payload)

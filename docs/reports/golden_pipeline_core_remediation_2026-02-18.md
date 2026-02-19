@@ -109,3 +109,28 @@ Executed consolidated cross-sprint regression suite:
   - `matrix_failed=16`
   - `matrix_skipped=20`
   - strict failure reasons: `matrix_failed_nonzero`, `strict_matrix_skipped_nonzero`, `strict_matrix_evaluated_mismatch`
+
+## Validation snapshot (2026-02-19 strict closure)
+
+Strict closure rerun completed using one shared source report snapshot and strict fail-closed semantics.
+
+- shared source report:
+  - `artifacts/single_image_runs/single_20260219T042145Z/report.json`
+  - `source_report_sha256=cd23ccf53536d49e3432789082f7e5e0fea94cd3d9dc0964b8b12d90cfbdaacd`
+  - `source_report_run_id=23cb5476c21a4c38ae64792395efa1cf`
+- advanced20 strict:
+  - artifact: `artifacts/advanced10/advanced20_strict_latest.json`
+  - `evaluated_total=20`, `evaluated_passed=20`, `evaluated_failed=0`, `rows_skipped=0`, `ok=true`
+- generic20 strict:
+  - artifact: `artifacts/advanced10/generic20_latest.json`
+  - `evaluated_total=20`, `evaluated_passed=20`, `evaluated_failed=0`, `rows_skipped=0`, `ok=true`
+- q40 strict matrix:
+  - artifact: `artifacts/advanced10/q40_matrix_strict_latest.json`
+  - `matrix_total=40`, `matrix_evaluated=40`, `matrix_passed=40`, `matrix_failed=0`, `matrix_skipped=0`
+  - `failure_reasons=[]`, `ok=true`
+
+Commands executed:
+
+- `./shell-lint-ps-wsl .venv/bin/python tools/run_advanced10_queries.py --report artifacts/single_image_runs/single_20260219T042145Z/report.json --cases docs/query_eval_cases_advanced20.json --metadata-only --strict-all --repro-runs 1 --output artifacts/advanced10/advanced20_strict_latest.json`
+- `./shell-lint-ps-wsl .venv/bin/python tools/run_advanced10_queries.py --report artifacts/single_image_runs/single_20260219T042145Z/report.json --cases docs/query_eval_cases_generic20.json --metadata-only --strict-all --repro-runs 1 --output artifacts/advanced10/generic20_latest.json`
+- `./shell-lint-ps-wsl .venv/bin/python tools/eval_q40_matrix.py --advanced-json artifacts/advanced10/advanced20_strict_latest.json --generic-json artifacts/advanced10/generic20_latest.json --strict --expected-total 40 --out artifacts/advanced10/q40_matrix_strict_latest.json`

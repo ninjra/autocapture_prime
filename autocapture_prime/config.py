@@ -6,6 +6,8 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
+from autocapture_nx.runtime.service_ports import HYPERVISOR_GATEWAY_BASE_URL, VLM_ROOT_URL
+
 
 @dataclass(frozen=True)
 class PrimeConfig:
@@ -31,7 +33,7 @@ class PrimeConfig:
 
     @property
     def vllm_base_url(self) -> str:
-        return str(self.raw.get("vllm", {}).get("base_url", "http://127.0.0.1:8000"))
+        return str(self.raw.get("vllm", {}).get("base_url", VLM_ROOT_URL))
 
     @property
     def vllm_model(self) -> str:
@@ -57,7 +59,7 @@ class PrimeConfig:
 
     @property
     def hypervisor_base_url(self) -> str:
-        return str(self.raw.get("chronicle_api", {}).get("hypervisor_base_url", "http://127.0.0.1:7411"))
+        return str(self.raw.get("chronicle_api", {}).get("hypervisor_base_url", HYPERVISOR_GATEWAY_BASE_URL))
 
     @property
     def hypervisor_chat_path(self) -> str:

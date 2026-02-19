@@ -684,6 +684,144 @@ def _merge_rows(primary: list[dict[str, Any]], fallback: list[dict[str, Any]]) -
     return out
 
 
+def _append_clean_part(parts: list[str], value: Any) -> None:
+    text = _clean_token(str(value or ""))
+    if text:
+        parts.append(text)
+
+
+def _state_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    state = payload.get("state")
+    if isinstance(state, dict):
+        return state
+    screen_state = payload.get("screen_state")
+    if isinstance(screen_state, dict):
+        return screen_state
+    return {}
+
+
+def _payload_text_fragments(payload: dict[str, Any], ui_state: dict[str, Any]) -> list[str]:
+    parts: list[str] = []
+    state = _state_payload(payload)
+    scopes: list[dict[str, Any]] = [payload]
+    if state:
+        scopes.append(state)
+
+    for scope in scopes:
+        for key in ("text_lines", "text_blocks"):
+            rows = scope.get(key)
+            if not isinstance(rows, (list, tuple)):
+                continue
+            for item in rows:
+                if not isinstance(item, dict):
+                    continue
+                _append_clean_part(parts, item.get("text"))
+
+    for scope in scopes:
+        tables = scope.get("tables")
+        if not isinstance(tables, (list, tuple)):
+            continue
+        for table in tables:
+            if not isinstance(table, dict):
+                continue
+            _append_clean_part(parts, table.get("csv"))
+            _append_clean_part(parts, table.get("tsv"))
+            cells = table.get("cells")
+            if not isinstance(cells, (list, tuple)):
+                continue
+            for cell in cells[:512]:
+                if not isinstance(cell, dict):
+                    continue
+                _append_clean_part(parts, cell.get("text"))
+                _append_clean_part(parts, cell.get("norm_text"))
+
+    for scope in scopes:
+        sheets = scope.get("spreadsheets")
+        if not isinstance(sheets, (list, tuple)):
+            continue
+        for sheet in sheets:
+            if not isinstance(sheet, dict):
+                continue
+            _append_clean_part(parts, sheet.get("csv"))
+            _append_clean_part(parts, sheet.get("tsv"))
+            _append_clean_part(parts, sheet.get("formula_bar"))
+            top_cells = sheet.get("top_row_cells")
+            if isinstance(top_cells, (list, tuple)):
+                for cell in top_cells[:64]:
+                    if not isinstance(cell, dict):
+                        continue
+                    _append_clean_part(parts, cell.get("text"))
+                    _append_clean_part(parts, cell.get("norm_text"))
+
+    for scope in scopes:
+        code_blocks = scope.get("code_blocks")
+        if not isinstance(code_blocks, (list, tuple)):
+            continue
+        for code in code_blocks:
+            if not isinstance(code, dict):
+                continue
+            _append_clean_part(parts, code.get("text"))
+            lines = code.get("lines")
+            if isinstance(lines, (list, tuple)):
+                for line in lines[:128]:
+                    _append_clean_part(parts, line)
+
+    for scope in scopes:
+        charts = scope.get("charts")
+        if not isinstance(charts, (list, tuple)):
+            continue
+        for chart in charts:
+            if not isinstance(chart, dict):
+                continue
+            labels = chart.get("labels")
+            if isinstance(labels, (list, tuple)):
+                for label in labels[:64]:
+                    _append_clean_part(parts, label)
+            ticks_x = chart.get("ticks_x")
+            if isinstance(ticks_x, (list, tuple)):
+                for tick in ticks_x[:64]:
+                    _append_clean_part(parts, tick)
+            ticks_y = chart.get("ticks_y")
+            if isinstance(ticks_y, (list, tuple)):
+                for tick in ticks_y[:64]:
+                    _append_clean_part(parts, tick)
+
+    for scope in scopes:
+        element_graph = scope.get("element_graph")
+        if not isinstance(element_graph, dict):
+            continue
+        elements = element_graph.get("elements")
+        if not isinstance(elements, (list, tuple)):
+            continue
+        for element in elements[:512]:
+            if not isinstance(element, dict):
+                continue
+            _append_clean_part(parts, element.get("label"))
+            _append_clean_part(parts, element.get("text"))
+
+    if isinstance(ui_state, dict):
+        windows = ui_state.get("windows")
+        if isinstance(windows, (list, tuple)):
+            for item in windows[:64]:
+                if not isinstance(item, dict):
+                    continue
+                _append_clean_part(parts, item.get("label"))
+                _append_clean_part(parts, item.get("app"))
+                _append_clean_part(parts, item.get("context"))
+
+    uniq: list[str] = []
+    seen: set[str] = set()
+    for item in parts:
+        key = item.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(item)
+        if len(uniq) >= 1200:
+            break
+    return uniq
+
+
 def _vlm_graph_low_quality(*, rows: list[dict[str, Any]], source_backend: str, element_count: int) -> bool:
     backend = str(source_backend or "").strip().casefold()
     if element_count <= 4:
@@ -1868,6 +2006,9 @@ class ObservationGraphPlugin(PluginBase):
             t = _clean_token(str(doc.get("text") or ""))
             if t:
                 grounding_parts.append(t)
+        payload_parts = _payload_text_fragments(payload, ui_state)
+        if payload_parts:
+            grounding_parts.extend(payload_parts)
         for label in element_labels:
             t = _clean_token(label)
             if t:
@@ -1904,6 +2045,8 @@ class ObservationGraphPlugin(PluginBase):
                     t = _clean_token(str(doc.get("text") or ""))
                     if t:
                         corpus_parts.append(t)
+                if payload_parts:
+                    corpus_parts.extend(payload_parts)
         else:
             for line in text_lines:
                 if not isinstance(line, dict):
@@ -1917,9 +2060,11 @@ class ObservationGraphPlugin(PluginBase):
             for doc in extra_docs:
                 if not isinstance(doc, dict):
                     continue
-                    t = _clean_token(str(doc.get("text") or ""))
-                    if t:
-                        corpus_parts.append(t)
+                t = _clean_token(str(doc.get("text") or ""))
+                if t:
+                    corpus_parts.append(t)
+            if payload_parts:
+                corpus_parts.extend(payload_parts)
         corpus_text = " ".join(corpus_parts)
         grounding_corpus_text = " ".join(grounding_parts)
         analysis_corpus_text = grounding_corpus_text or corpus_text

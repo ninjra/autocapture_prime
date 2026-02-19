@@ -29,11 +29,61 @@ def _resolve_command(command: Iterable[str]) -> list[str]:
     return cmd
 
 
-def _run_command(command: Iterable[str]) -> subprocess.CompletedProcess:
+def _bounded_text(value: str | None, *, max_chars: int) -> str:
+    text = str(value or "")
+    if len(text) <= max_chars:
+        return text
+    return text[: max(0, int(max_chars))]
+
+
+def _validator_timeout(spec: ValidatorSpec, *, default_s: float = 60.0) -> float:
+    raw = spec.config.get("timeout_s", default_s)
+    try:
+        value = float(raw)
+    except Exception:
+        value = float(default_s)
+    return max(0.1, value)
+
+
+def _validator_output_cap(spec: ValidatorSpec, *, default_chars: int = 20000) -> int:
+    raw = spec.config.get("max_output_chars", default_chars)
+    try:
+        value = int(raw)
+    except Exception:
+        value = int(default_chars)
+    return max(256, value)
+
+
+def _run_command(
+    command: Iterable[str],
+    *,
+    timeout_s: float = 60.0,
+    max_output_chars: int = 20000,
+) -> subprocess.CompletedProcess:
     cmd = _resolve_command(command)
     env = os.environ.copy()
     env.setdefault("PYTHONPATH", ".")
-    return subprocess.run(cmd, env=env, capture_output=True, text=True)
+    try:
+        result = subprocess.run(
+            cmd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=float(timeout_s),
+        )
+        return subprocess.CompletedProcess(
+            args=result.args,
+            returncode=result.returncode,
+            stdout=_bounded_text(result.stdout, max_chars=max_output_chars),
+            stderr=_bounded_text(result.stderr, max_chars=max_output_chars),
+        )
+    except subprocess.TimeoutExpired as exc:
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=124,
+            stdout=_bounded_text(exc.stdout if isinstance(exc.stdout, str) else "", max_chars=max_output_chars),
+            stderr=_bounded_text((exc.stderr if isinstance(exc.stderr, str) else "") or "timeout", max_chars=max_output_chars),
+        )
 
 
 def _validator_python_import(spec: ValidatorSpec) -> ValidatorReport:
@@ -51,14 +101,16 @@ def _validator_python_import(spec: ValidatorSpec) -> ValidatorReport:
 
 def _validator_unit_test(spec: ValidatorSpec) -> ValidatorReport:
     target = spec.config.get("target", "")
-    result = subprocess.run(
+    result = _run_command(
         [sys.executable, "-m", "unittest", target, "-q"],
-        env={**os.environ, "PYTHONPATH": "."},
-        capture_output=True,
-        text=True,
+        timeout_s=_validator_timeout(spec),
+        max_output_chars=_validator_output_cap(spec),
     )
     ok = result.returncode == 0
-    detail = "ok" if ok else (result.stdout + result.stderr).strip()
+    if result.returncode == 124:
+        detail = "timeout"
+    else:
+        detail = "ok" if ok else (result.stdout + result.stderr).strip()
     return ValidatorReport(type=spec.type, ok=ok, detail=detail or "ok", data={"target": target})
 
 
@@ -72,16 +124,26 @@ def _validator_cli_exit(spec: ValidatorSpec) -> ValidatorReport:
     if _is_self_codex_validate(command) and os.getenv("AUTOCAPTURE_CODEX_SKIP_SELF_VALIDATE") == "1":
         return ValidatorReport(type=spec.type, ok=True, detail="self_skip", data={"command": list(command)})
     expected = int(spec.config.get("expected_exit_code", 0))
-    result = _run_command(command)
+    result = _run_command(
+        command,
+        timeout_s=_validator_timeout(spec),
+        max_output_chars=_validator_output_cap(spec),
+    )
     ok = result.returncode == expected
-    detail = "ok" if ok else f"exit={result.returncode}"
+    detail = "timeout" if result.returncode == 124 else ("ok" if ok else f"exit={result.returncode}")
     return ValidatorReport(type=spec.type, ok=ok, detail=detail, data={"command": list(command)})
 
 
 def _validator_cli_output_regex_absent(spec: ValidatorSpec) -> ValidatorReport:
     command = spec.config.get("command", [])
     patterns = spec.config.get("patterns", [])
-    result = _run_command(command)
+    result = _run_command(
+        command,
+        timeout_s=_validator_timeout(spec),
+        max_output_chars=_validator_output_cap(spec),
+    )
+    if result.returncode == 124:
+        return ValidatorReport(type=spec.type, ok=False, detail="timeout", data={"command": list(command)})
     haystack = (result.stdout or "") + "\n" + (result.stderr or "")
     violations = [pat for pat in patterns if re.search(pat, haystack)]
     ok = len(violations) == 0
@@ -92,7 +154,13 @@ def _validator_cli_output_regex_absent(spec: ValidatorSpec) -> ValidatorReport:
 def _validator_cli_json(spec: ValidatorSpec) -> ValidatorReport:
     command = spec.config.get("command", [])
     must_keys = spec.config.get("must_contain_json_keys", [])
-    result = _run_command(command)
+    result = _run_command(
+        command,
+        timeout_s=_validator_timeout(spec),
+        max_output_chars=_validator_output_cap(spec),
+    )
+    if result.returncode == 124:
+        return ValidatorReport(type=spec.type, ok=False, detail="timeout", data={"command": list(command)})
     if result.returncode != 0:
         return ValidatorReport(type=spec.type, ok=False, detail=f"exit={result.returncode}", data={"stdout": result.stdout, "stderr": result.stderr})
     try:

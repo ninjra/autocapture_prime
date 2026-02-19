@@ -114,6 +114,240 @@ class RunAdvanced10ExpectedEvalTests(unittest.TestCase):
         self.assertTrue(eval_out["evaluated"])
         self.assertTrue(eval_out["passed"])
 
+    def test_strict_contains_all_ignores_support_only_lines(self) -> None:
+        mod = _load_module()
+        case = {
+            "id": "Q4",
+            "expected_contains_all": ["Your record was updated on Feb 02, 2026 - 12:08pm CST"],
+        }
+        result = {
+            "answer": {
+                "state": "ok",
+                "display": {
+                    "summary": "Record Activity entries: 2",
+                    "bullets": [
+                        "1. 12:08PMCST | garbled",
+                        "support: Your record was updated on Feb 02, 2026 - 12:08pm CST",
+                    ],
+                    "fields": {"activity_count": "2"},
+                },
+            },
+            "processing": {"metadata_only_query": True, "promptops_used": True, "hard_vlm": {"fields": {}}},
+        }
+        eval_out = mod._evaluate_expected(case, result, "Record Activity entries: 2", result["answer"]["display"]["bullets"], strict_expected_answer=True)
+        self.assertTrue(eval_out["evaluated"])
+        self.assertFalse(eval_out["passed"])
+
+    def test_strict_numeric_token_does_not_match_larger_number(self) -> None:
+        mod = _load_module()
+        case = {"id": "Q9", "expected_contains_all": ["16"]}
+        result = {
+            "answer": {
+                "state": "ok",
+                "display": {
+                    "summary": "Console line colors: count_red=12, count_green=9, count_other=19",
+                    "bullets": ["red_1: line", "support: line 163 has text"],
+                    "fields": {"red_count": "12", "green_count": "9", "other_count": "19"},
+                },
+            },
+            "processing": {"metadata_only_query": True, "promptops_used": True, "hard_vlm": {"fields": {}}},
+        }
+        eval_out = mod._evaluate_expected(
+            case,
+            result,
+            result["answer"]["display"]["summary"],
+            result["answer"]["display"]["bullets"],
+            strict_expected_answer=True,
+        )
+        self.assertTrue(eval_out["evaluated"])
+        self.assertFalse(eval_out["passed"])
+
+    def test_strict_q1_fails_on_partial_visibility_language(self) -> None:
+        mod = _load_module()
+        case = {"id": "Q1"}
+        result = {
+            "answer": {
+                "state": "ok",
+                "display": {
+                    "summary": "Visible top-level windows: 7",
+                    "bullets": ["1. Outlook VDI (vdi; partially_occluded)"],
+                    "fields": {"window_count": "7"},
+                },
+            },
+            "processing": {
+                "metadata_only_query": True,
+                "promptops_used": True,
+                "hard_vlm": {"fields": {}},
+                "attribution": {
+                    "providers": [
+                        {"provider_id": "builtin.observation.graph", "contribution_bp": 10000},
+                    ]
+                },
+            },
+        }
+        eval_out = mod._evaluate_expected(
+            case,
+            result,
+            result["answer"]["display"]["summary"],
+            result["answer"]["display"]["bullets"],
+            strict_expected_answer=True,
+            enforce_true_strict=True,
+        )
+        self.assertTrue(eval_out["evaluated"])
+        self.assertFalse(eval_out["passed"])
+        checks = eval_out.get("checks", [])
+        self.assertTrue(
+            any(
+                isinstance(c, dict)
+                and c.get("key") == "no_partial_or_truncated_surface"
+                and "partial_visibility_language" in list(c.get("markers") or [])
+                for c in checks
+            )
+        )
+
+    def test_strict_provider_gate_flags_disallowed_answer_provider_activity(self) -> None:
+        mod = _load_module()
+        case = {"id": "Q2"}
+        result = {
+            "answer": {
+                "state": "ok",
+                "display": {"summary": "Focused window: Outlook VDI", "bullets": [], "fields": {"focused_window": "Outlook VDI"}},
+            },
+            "processing": {
+                "metadata_only_query": True,
+                "promptops_used": True,
+                "hard_vlm": {"fields": {}},
+                "attribution": {
+                    "providers": [
+                        {"provider_id": "builtin.observation.graph", "contribution_bp": 10000},
+                        {"provider_id": "hard_vlm.direct", "claim_count": 1, "citation_count": 1, "contribution_bp": 0},
+                    ]
+                },
+            },
+        }
+        eval_out = mod._evaluate_expected(
+            case,
+            result,
+            result["answer"]["display"]["summary"],
+            [],
+            strict_expected_answer=True,
+            enforce_true_strict=True,
+        )
+        self.assertTrue(eval_out["evaluated"])
+        self.assertFalse(eval_out["passed"])
+        checks = eval_out.get("checks", [])
+        self.assertTrue(
+            any(
+                isinstance(c, dict)
+                and c.get("key") == "disallowed_answer_provider_activity"
+                and not bool(c.get("present"))
+                for c in checks
+            )
+        )
+
+    def test_strict_provider_gate_requires_positive_non_disallowed_contribution(self) -> None:
+        mod = _load_module()
+        case = {"id": "H8", "expected_answer": {"today_unread_indicator_count": 7}}
+        result = {
+            "answer": {
+                "state": "ok",
+                "display": {"summary": "Today unread-indicator rows: 7", "bullets": [], "fields": {"today_unread_indicator_count": 7}},
+            },
+            "processing": {
+                "hard_vlm": {"fields": {"today_unread_indicator_count": 7}},
+                "attribution": {
+                    "providers": [
+                        {"provider_id": "builtin.answer.synth_vllm_localhost", "contribution_bp": 0},
+                        {"provider_id": "hard_vlm.direct", "claim_count": 1, "citation_count": 1, "contribution_bp": 0},
+                    ]
+                },
+            },
+        }
+        eval_out = mod._evaluate_expected(
+            case,
+            result,
+            result["answer"]["display"]["summary"],
+            [],
+            strict_expected_answer=True,
+            enforce_true_strict=True,
+        )
+        self.assertTrue(eval_out["evaluated"])
+        self.assertFalse(eval_out["passed"])
+        checks = eval_out.get("checks", [])
+        self.assertTrue(
+            any(
+                isinstance(c, dict)
+                and c.get("key") == "non_disallowed_positive_provider_contribution"
+                and not bool(c.get("present"))
+                for c in checks
+            )
+        )
+
+    def test_true_strict_enforcement_is_opt_in(self) -> None:
+        mod = _load_module()
+        case = {"id": "Q1"}
+        result = {
+            "answer": {
+                "state": "ok",
+                "display": {
+                    "summary": "Visible top-level windows: 7",
+                    "bullets": ["1. Outlook VDI (vdi; partially_occluded)"],
+                    "fields": {"window_count": "7"},
+                },
+            },
+            "processing": {
+                "metadata_only_query": True,
+                "promptops_used": True,
+                "hard_vlm": {"fields": {}},
+            },
+        }
+        eval_out = mod._evaluate_expected(
+            case,
+            result,
+            result["answer"]["display"]["summary"],
+            result["answer"]["display"]["bullets"],
+            strict_expected_answer=True,
+            enforce_true_strict=False,
+        )
+        self.assertTrue(eval_out["evaluated"])
+        self.assertTrue(eval_out["passed"])
+
+    def test_q_series_metadata_only_enforcement_uses_structured_display(self) -> None:
+        mod = _load_module()
+        case = {"id": "Q1"}
+        result = {
+            "answer": {
+                "state": "ok",
+                "display": {"summary": "Visible top-level windows: 4", "bullets": [], "fields": {"window_count": "4"}},
+            },
+            "processing": {
+                "metadata_only_query": True,
+                "promptops_used": True,
+            },
+        }
+        eval_out = mod._evaluate_expected(case, result, result["answer"]["display"]["summary"], [])
+        self.assertTrue(eval_out["evaluated"])
+        self.assertTrue(eval_out["passed"])
+        checks = eval_out.get("checks", [])
+        self.assertTrue(any(isinstance(c, dict) and c.get("key") == "metadata_structured_display" and c.get("present") for c in checks))
+
+    def test_q_series_metadata_only_enforcement_fails_without_structured_display(self) -> None:
+        mod = _load_module()
+        case = {"id": "Q1"}
+        result = {
+            "answer": {
+                "state": "ok",
+                "display": {"summary": "indeterminate", "bullets": [], "fields": {}},
+            },
+            "processing": {
+                "metadata_only_query": True,
+                "promptops_used": True,
+            },
+        }
+        eval_out = mod._evaluate_expected(case, result, result["answer"]["display"]["summary"], [])
+        self.assertTrue(eval_out["evaluated"])
+        self.assertFalse(eval_out["passed"])
+
     def test_no_checks_is_not_evaluated(self) -> None:
         mod = _load_module()
         eval_out = mod._evaluate_expected({"id": "Q0"}, {"answer": {}}, "", [])
@@ -407,6 +641,37 @@ class RunAdvanced10ExpectedEvalTests(unittest.TestCase):
                 mock.patch.object(mod, "_repo_root", return_value=root),
                 mock.patch.object(mod, "check_external_vllm_ready", return_value={"ok": False, "error": "down"}),
             ):
+                rc = mod.main(["--report", str(report), "--cases", str(cases), "--strict-all", "--output", str(output)])
+            self.assertEqual(rc, 2)
+            self.assertFalse(output.exists())
+
+    def test_main_strict_requires_metadata_only(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "config" / "profiles").mkdir(parents=True, exist_ok=True)
+            profile = root / "config" / "profiles" / "golden_full.json"
+            profile.write_text(json.dumps({"profile": "golden"}), encoding="utf-8")
+            profile_sha = hashlib.sha256(profile.read_bytes()).hexdigest()
+            report = root / "report.json"
+            report.write_text(
+                json.dumps(
+                    {
+                        "config_dir": "/tmp/cfg",
+                        "data_dir": "/tmp/data",
+                        "profile_sha256": profile_sha,
+                        "plugins": {
+                            "load_report": {"loaded": ["builtin.a"]},
+                            "required_gate": {"ok": True, "missing_required": [], "failed_required": []},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            cases = root / "cases.json"
+            cases.write_text("[]", encoding="utf-8")
+            output = root / "out.json"
+            with mock.patch.object(mod, "_repo_root", return_value=root):
                 rc = mod.main(["--report", str(report), "--cases", str(cases), "--strict-all", "--output", str(output)])
             self.assertEqual(rc, 2)
             self.assertFalse(output.exists())

@@ -17,10 +17,7 @@ from autocapture_nx.inference.vllm_endpoint import (
 def test_enforce_external_vllm_base_url_accepts_default_and_canonical() -> None:
     assert enforce_external_vllm_base_url(None) == EXTERNAL_VLLM_BASE_URL
     assert enforce_external_vllm_base_url("") == EXTERNAL_VLLM_BASE_URL
-    assert enforce_external_vllm_base_url("http://127.0.0.1:34221") == "http://127.0.0.1:34221/v1"
-    assert enforce_external_vllm_base_url("http://127.0.0.1:34221/v1") == "http://127.0.0.1:34221/v1"
     assert enforce_external_vllm_base_url("http://127.0.0.1:8000") == "http://127.0.0.1:8000/v1"
-    assert enforce_external_vllm_base_url("http://127.0.0.1:8001") == "http://127.0.0.1:8001/v1"
 
 
 @pytest.mark.parametrize(
@@ -28,8 +25,9 @@ def test_enforce_external_vllm_base_url_accepts_default_and_canonical() -> None:
     [
         "http://localhost:8000",
         "http://127.0.0.1:9000",
+        "http://127.0.0.1:8001",
+        "http://127.0.0.1:34221",
         "https://127.0.0.1:8000",
-        "https://127.0.0.1:34221",
         "http://0.0.0.0:8000",
         "http://192.168.1.10:8000",
     ],

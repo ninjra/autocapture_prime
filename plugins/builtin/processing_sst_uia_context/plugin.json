@@ -1,0 +1,79 @@
+{
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [],
+  "enabled": false,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "processing.stage.hooks",
+      "path": "plugin.py"
+    }
+  ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "permissions": {
+    "filesystem": "read",
+    "gpu": false,
+    "network": false,
+    "raw_input": false
+  },
+  "plugin_id": "builtin.processing.sst.uia_context",
+  "provides": [
+    "processing.stage.hooks"
+  ],
+  "required_capabilities": [
+    "storage.metadata"
+  ],
+  "default_settings": {
+    "dataroot": "/mnt/d/autocapture",
+    "allow_latest_snapshot_fallback": true,
+    "require_hash_match": true,
+    "max_focus_nodes": 64,
+    "max_context_nodes": 96,
+    "max_operable_nodes": 128,
+    "drop_offscreen": true
+  },
+  "settings_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "dataroot": {
+        "type": "string",
+        "minLength": 1
+      },
+      "allow_latest_snapshot_fallback": {
+        "type": "boolean"
+      },
+      "require_hash_match": {
+        "type": "boolean"
+      },
+      "max_focus_nodes": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 8192
+      },
+      "max_context_nodes": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 8192
+      },
+      "max_operable_nodes": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 8192
+      },
+      "drop_offscreen": {
+        "type": "boolean"
+      }
+    }
+  },
+  "version": "0.1.0"
+}

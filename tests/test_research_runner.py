@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from autocapture.research.runner import ResearchRunner
 
@@ -38,6 +39,34 @@ class ResearchRunnerTests(unittest.TestCase):
             self.assertTrue(reports)
             report_dir = Path(config["research"]["report_dir"])
             self.assertTrue(any(report_dir.iterdir()))
+
+    def test_invalid_threshold_pct_is_clamped_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _base_config(tmp)
+            config["research"]["threshold_pct"] = "abc"
+            runner = ResearchRunner(config)
+            result = runner.run_once()
+            self.assertTrue(result.get("ok", False))
+            self.assertAlmostEqual(float(result.get("threshold", 0.0)), 0.1, places=6)
+
+    def test_plugin_error_is_surfaced_when_not_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _base_config(tmp)
+            with mock.patch("autocapture.research.runner.PluginRegistry.load_plugins", side_effect=RuntimeError("boom")):
+                runner = ResearchRunner(config)
+                result = runner.run_once()
+            self.assertTrue(result.get("ok", False))
+            self.assertIn("plugin_error", result)
+
+    def test_plugin_error_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _base_config(tmp)
+            config["research"]["fail_closed_on_plugin_error"] = True
+            with mock.patch("autocapture.research.runner.PluginRegistry.load_plugins", side_effect=RuntimeError("boom")):
+                runner = ResearchRunner(config)
+                result = runner.run_once()
+            self.assertFalse(result.get("ok", True))
+            self.assertEqual(result.get("reason"), "plugin_error")
 
 
 if __name__ == "__main__":

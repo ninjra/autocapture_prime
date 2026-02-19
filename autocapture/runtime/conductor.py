@@ -35,6 +35,7 @@ class ConductorStats:
     last_idle_stats: dict[str, Any] | None = None
     last_watchdog: dict[str, Any] | None = None
     last_research_run: float | None = None
+    last_promptops_optimize: float | None = None
     last_storage_sample: float | None = None
     last_retention_run: float | None = None
     last_telemetry_emit: float | None = None
@@ -54,6 +55,7 @@ class RuntimeConductor:
         self._storage_monitor = StoragePressureMonitor(system)
         self._retention_monitor = StorageRetentionMonitor(system)
         self._research_runner = None
+        self._promptops_optimizer = None
         self._events = self._resolve_event_builder(system)
         self._logger = self._resolve_logger(system)
         self._stop = threading.Event()
@@ -148,6 +150,21 @@ class RuntimeConductor:
             return None
         self._idle_processor = IdleProcessor(self._system)
         return self._idle_processor
+
+    def _resolve_promptops_optimizer(self):
+        if self._promptops_optimizer is not None:
+            return self._promptops_optimizer
+        try:
+            from autocapture.promptops.optimizer import PromptOpsOptimizer
+        except Exception:
+            PromptOpsOptimizer = None  # type: ignore
+        if PromptOpsOptimizer is None:
+            return None
+        try:
+            self._promptops_optimizer = PromptOpsOptimizer(self._config)
+        except Exception:
+            self._promptops_optimizer = None
+        return self._promptops_optimizer
 
     def _signals(self, *, query_intent: bool | None = None) -> dict[str, Any]:
         runtime_cfg = self._config.get("runtime", {}) if isinstance(self._config, dict) else {}
@@ -377,6 +394,54 @@ class RuntimeConductor:
     def _schedule_research(self) -> None:
         # Deprecated: research execution now runs in hypervisor.
         return
+
+    def _schedule_promptops_optimizer(self, signals: dict[str, Any]) -> None:
+        optimizer_cfg = self._config.get("promptops", {}).get("optimizer", {})
+        if not bool(optimizer_cfg.get("enabled", False)):
+            return
+        if bool(signals.get("user_active", False)):
+            return
+        optimizer = self._resolve_promptops_optimizer()
+        if optimizer is None:
+            return
+        if hasattr(optimizer, "due") and not bool(optimizer.due()):
+            return
+        if "promptops.optimize" in self._queued:
+            return
+
+        estimate_ms = int(optimizer_cfg.get("estimate_ms", 1500) or 1500)
+        idle_seconds = float(signals.get("idle_seconds", 0.0) or 0.0)
+
+        def job_fn():
+            report = optimizer.run_once(
+                user_active=False,
+                idle_seconds=idle_seconds,
+                force=False,
+            )
+            self._stats.last_promptops_optimize = time.time()
+            record_telemetry("promptops.optimizer", report if isinstance(report, dict) else {"ok": False})
+            if self._events is not None:
+                try:
+                    self._events.journal_event("promptops.optimizer", report if isinstance(report, dict) else {})
+                except Exception:
+                    pass
+            if self._logger is not None:
+                try:
+                    self._logger.log("promptops.optimizer", report if isinstance(report, dict) else {})
+                except Exception:
+                    pass
+
+        self._scheduler.enqueue(
+            Job(
+                name="promptops.optimize",
+                fn=job_fn,
+                heavy=True,
+                estimated_ms=estimate_ms,
+                gpu_heavy=False,
+                payload={"task": "promptops.optimize"},
+            )
+        )
+        self._queued.add("promptops.optimize")
 
     def _schedule_storage_pressure(self) -> None:
         if self._storage_monitor is None:
@@ -738,6 +803,7 @@ class RuntimeConductor:
         if not fullscreen_active:
             self._schedule_idle()
             self._schedule_research()
+            self._schedule_promptops_optimizer(signals)
             self._schedule_storage_pressure()
             self._schedule_storage_retention()
         executed = self._scheduler.run_pending(signals)

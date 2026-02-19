@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 from getpass import getpass
@@ -20,9 +21,31 @@ from autocapture_nx.kernel.loader import Kernel, default_config_paths
 from autocapture_nx.ux.facade import create_facade
 
 from autocapture_nx.kernel.backup_bundle import create_backup_bundle, restore_backup_bundle
+from autocapture_nx.kernel.paths import repo_root
 
 def _print_json(data: object) -> None:
     print(json.dumps(data, indent=2, sort_keys=True))
+
+
+def _run_repo_command(cmd: list[str]) -> dict[str, Any]:
+    root = repo_root()
+    env = os.environ.copy()
+    env.setdefault("PYTHONPATH", str(root))
+    proc = subprocess.run(
+        cmd,
+        cwd=str(root),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return {
+        "cmd": cmd,
+        "returncode": int(proc.returncode),
+        "ok": int(proc.returncode) == 0,
+        "stdout_tail": str(proc.stdout or "")[-4000:],
+        "stderr_tail": str(proc.stderr or "")[-4000:],
+    }
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -395,6 +418,136 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_setup(args: argparse.Namespace) -> int:
+    profile = str(getattr(args, "profile", "") or "").strip()
+    supported_profiles = {"personal_4090", "personal_windows_4090"}
+    if profile not in supported_profiles:
+        _print_json(
+            {
+                "ok": False,
+                "error": "unsupported_profile",
+                "profile": profile,
+                "supported_profiles": sorted(supported_profiles),
+            }
+        )
+        return 2
+
+    root = repo_root()
+    py = str(Path(sys.executable).resolve())
+    steps: list[dict[str, Any]] = []
+
+    profile_path = root / "config" / "profiles" / "personal_4090.json"
+    steps.append(
+        {
+            "name": "profile_exists",
+            "path": str(profile_path),
+            "ok": profile_path.exists(),
+        }
+    )
+
+    preflight_cmd = [
+        py,
+        "tools/preflight_live_stack.py",
+        "--output",
+        "artifacts/live_stack/preflight_latest.json",
+    ]
+    steps.append({"name": "preflight_live_stack", **_run_repo_command(preflight_cmd)})
+
+    facade = create_facade(safe_mode=args.safe_mode)
+    try:
+        status_payload = facade.status()
+        steps.append(
+            {
+                "name": "status_snapshot",
+                "ok": True,
+                "safe_mode": bool(status_payload.get("safe_mode", False)),
+                "plugins_loaded": int(status_payload.get("plugins_loaded", 0) or 0),
+            }
+        )
+        batch_result = facade.batch_run(
+            max_loops=int(getattr(args, "batch_loops", 1) or 1),
+            sleep_ms=int(getattr(args, "batch_sleep_ms", 50) or 50),
+            require_idle=False,
+        )
+        steps.append(
+            {
+                "name": "batch_prime",
+                "ok": bool(batch_result.get("ok", True)),
+                "result": batch_result,
+            }
+        )
+    except Exception as exc:
+        steps.append({"name": "facade_bootstrap", "ok": False, "error": f"{type(exc).__name__}:{exc}"})
+
+    sample_query = str(getattr(args, "sample_query", "") or "").strip()
+    if sample_query:
+        try:
+            query_result = facade.query(sample_query)
+            query_ok = "error" not in query_result and bool(query_result.get("answer") or query_result.get("claims"))
+            steps.append({"name": "sample_query", "ok": query_ok, "query": sample_query, "result": query_result})
+        except Exception as exc:
+            steps.append(
+                {
+                    "name": "sample_query",
+                    "ok": False,
+                    "query": sample_query,
+                    "error": f"{type(exc).__name__}:{exc}",
+                }
+            )
+
+    required = {"profile_exists", "preflight_live_stack", "status_snapshot", "batch_prime"}
+    failed_required = [step["name"] for step in steps if step.get("name") in required and not bool(step.get("ok"))]
+    payload = {
+        "ok": len(failed_required) == 0,
+        "profile": profile,
+        "failed_required_steps": failed_required,
+        "steps": steps,
+    }
+    _print_json(payload)
+    return 0 if payload["ok"] else 2
+
+
+def cmd_gate(args: argparse.Namespace) -> int:
+    profile = str(getattr(args, "profile", "") or "").strip()
+    if profile != "golden_qh":
+        _print_json(
+            {
+                "ok": False,
+                "error": "unsupported_profile",
+                "profile": profile,
+                "supported_profiles": ["golden_qh"],
+            }
+        )
+        return 2
+
+    root = repo_root()
+    py = str(Path(sys.executable).resolve())
+    steps: list[dict[str, Any]] = []
+
+    release_cmd = [py, "tools/release_gate.py", "--output", "artifacts/release/release_gate_latest.json"]
+    steps.append({"name": "release_gate", **_run_repo_command(release_cmd)})
+
+    q40_cmd = ["bash", "tools/q40.sh"]
+    image_path = str(getattr(args, "image", "") or "").strip()
+    if image_path:
+        q40_cmd.append(image_path)
+    if not bool(getattr(args, "skip_q40", False)):
+        steps.append({"name": "q40_eval", **_run_repo_command(q40_cmd)})
+
+    matrix_cmd = ["bash", "tools/ivm.sh"]
+    steps.append({"name": "impl_matrix_verify", **_run_repo_command(matrix_cmd)})
+
+    failed = [step["name"] for step in steps if not bool(step.get("ok"))]
+    payload = {
+        "ok": len(failed) == 0,
+        "profile": profile,
+        "failed_steps": failed,
+        "steps": steps,
+    }
+    _print_json(payload)
+    return 0 if payload["ok"] else 2
+
+
 def cmd_devtools_diffusion(args: argparse.Namespace) -> int:
     facade = create_facade(safe_mode=args.safe_mode)
     result = facade.devtools_diffusion(axis=args.axis, k_variants=args.k, dry_run=args.dry_run)
@@ -410,6 +563,8 @@ def cmd_devtools_ast_ir(args: argparse.Namespace) -> int:
 
 
 def cmd_query(args: argparse.Namespace) -> int:
+    os.environ.setdefault("AUTOCAPTURE_QUERY_METADATA_ONLY", "1")
+    os.environ.setdefault("AUTOCAPTURE_ADV_HARD_VLM_MODE", "off")
     facade = create_facade(safe_mode=args.safe_mode)
     result = facade.query(args.text)
     _print_json(result)
@@ -1111,6 +1266,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print doctor status every N seconds (0=disabled)",
     )
     run_cmd.set_defaults(func=cmd_run)
+
+    setup_cmd = sub.add_parser("setup")
+    setup_cmd.add_argument("--profile", required=True)
+    setup_cmd.add_argument("--batch-loops", type=int, default=1)
+    setup_cmd.add_argument("--batch-sleep-ms", type=int, default=50)
+    setup_cmd.add_argument("--sample-query", default="")
+    setup_cmd.set_defaults(func=cmd_setup)
+
+    gate_cmd = sub.add_parser("gate")
+    gate_cmd.add_argument("--profile", required=True)
+    gate_cmd.add_argument("--skip-q40", action=argparse.BooleanOptionalAction, default=False)
+    gate_cmd.add_argument("--image", default="")
+    gate_cmd.set_defaults(func=cmd_gate)
 
     status_cmd = sub.add_parser("status")
     status_cmd.set_defaults(func=cmd_status)

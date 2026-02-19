@@ -10,6 +10,8 @@ import subprocess
 import wave
 import hashlib
 import shutil
+import math
+import struct
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -154,6 +156,26 @@ class AudioCaptureWindows(PluginBase):
                     storage_meta.put_new(record_id, payload)
                 else:
                     storage_meta.put(record_id, payload)
+                fp_id, fp_payload = _build_audio_fingerprint_record(
+                    record_id=record_id,
+                    ts_utc=ts_utc,
+                    run_id=run_id,
+                    encoded_bytes=encoded_bytes,
+                    encoding=encoding_used,
+                    sample_rate=samplerate,
+                    channels=channels,
+                    producer_plugin_id=str(self.plugin_id),
+                    source=mode,
+                    parent_hash=str(payload.get("content_hash") or ""),
+                )
+                if fp_id and fp_payload:
+                    if hasattr(storage_meta, "put_new"):
+                        try:
+                            storage_meta.put_new(fp_id, fp_payload)
+                        except Exception:
+                            storage_meta.put(fp_id, fp_payload)
+                    else:
+                        storage_meta.put(fp_id, fp_payload)
                 if event_builder is not None:
                     event_builder.journal_event("capture.audio", payload, event_id=record_id, ts_utc=ts_utc)
                     event_builder.ledger_entry(
@@ -164,6 +186,16 @@ class AudioCaptureWindows(PluginBase):
                         entry_id=record_id,
                         ts_utc=ts_utc,
                     )
+                    if fp_id and fp_payload:
+                        event_builder.journal_event("derived.audio.fingerprint", fp_payload, event_id=fp_id, ts_utc=ts_utc)
+                        event_builder.ledger_entry(
+                            "derived.audio.fingerprint",
+                            inputs=[record_id],
+                            outputs=[fp_id],
+                            payload=fp_payload,
+                            entry_id=fp_id,
+                            ts_utc=ts_utc,
+                        )
             except Exception as exc:
                 if event_builder is not None:
                     event_builder.failure_event(
@@ -347,3 +379,141 @@ def _encode_with_ffmpeg(raw: bytes, samplerate: int, channels: int, encoding: st
         message = stderr.decode(errors="ignore") if stderr else ""
         raise RuntimeError(f"ffmpeg audio encoding failed: {message[:200]}")
     return stdout
+
+
+def _build_audio_fingerprint_record(
+    *,
+    record_id: str,
+    ts_utc: str,
+    run_id: str,
+    encoded_bytes: bytes,
+    encoding: str,
+    sample_rate: int,
+    channels: int,
+    producer_plugin_id: str,
+    source: str,
+    parent_hash: str,
+) -> tuple[str, dict[str, Any] | None]:
+    features = _audio_fingerprint_features(
+        encoded_bytes=encoded_bytes,
+        encoding=encoding,
+        sample_rate=sample_rate,
+        channels=channels,
+    )
+    if not features:
+        return "", None
+    feature_hash = sha256_canonical(features)
+    fp_id = f"{record_id}/derived.audio.fingerprint/{feature_hash[:16]}"
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "record_type": "derived.audio.fingerprint",
+        "run_id": str(run_id or ""),
+        "ts_utc": str(ts_utc or ""),
+        "source_id": str(record_id or ""),
+        "parent_evidence_id": str(record_id or ""),
+        "producer_plugin_id": str(producer_plugin_id or ""),
+        "source_provider_id": str(producer_plugin_id or ""),
+        "source_modality": "audio",
+        "source_state_id": "audio",
+        "source_backend": "audio_windows",
+        "doc_kind": "audio.fingerprint.v1",
+        "method": "audio.fingerprint.v1",
+        "encoding": str(encoding or ""),
+        "sample_rate": int(sample_rate or 0),
+        "channels": int(channels or 0),
+        "source": str(source or ""),
+        "content_hash": str(feature_hash),
+        "features": features,
+        "provenance": {
+            "plugin_id": str(producer_plugin_id or ""),
+            "producer_plugin_id": str(producer_plugin_id or ""),
+            "stage_id": "audio.fingerprint",
+            "input_artifact_ids": [str(record_id or "")] if record_id else [],
+            "input_hashes": [str(parent_hash or "")] if parent_hash else [],
+            "plugin_chain": [str(producer_plugin_id or "")] if producer_plugin_id else [],
+        },
+    }
+    payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
+    return fp_id, payload
+
+
+def _audio_fingerprint_features(
+    *,
+    encoded_bytes: bytes,
+    encoding: str,
+    sample_rate: int,
+    channels: int,
+) -> dict[str, Any]:
+    samples = _decode_pcm16_mono(encoded_bytes, encoding=encoding, channels=channels)
+    if not samples:
+        return {}
+    n = len(samples)
+    duration_ms = int(round((float(n) / float(max(1, int(sample_rate)))) * 1000.0))
+    inv = 1.0 / float(max(1, n))
+    mean_abs = sum(abs(x) for x in samples) * inv
+    rms = math.sqrt(sum(float(x) * float(x) for x in samples) * inv)
+    zcr = 0
+    prev = samples[0]
+    for cur in samples[1:]:
+        if (prev < 0 and cur >= 0) or (prev >= 0 and cur < 0):
+            zcr += 1
+        prev = cur
+    zcr_ratio = float(zcr) / float(max(1, n - 1))
+    bucket_count = 8
+    step = max(1, n // bucket_count)
+    envelope: list[int] = []
+    for i in range(0, n, step):
+        chunk = samples[i : i + step]
+        if not chunk:
+            continue
+        env = int(round(sum(abs(x) for x in chunk) / float(len(chunk))))
+        envelope.append(env)
+        if len(envelope) >= bucket_count:
+            break
+    while len(envelope) < bucket_count:
+        envelope.append(0)
+    return {
+        "schema_version": 1,
+        "sample_count": int(n),
+        "duration_ms": int(duration_ms),
+        "mean_abs_bp": int(round((mean_abs / 32768.0) * 10000.0)),
+        "rms_bp": int(round((rms / 32768.0) * 10000.0)),
+        "zcr_bp": int(round(zcr_ratio * 10000.0)),
+        "envelope": [int(x) for x in envelope[:bucket_count]],
+    }
+
+
+def _decode_pcm16_mono(encoded_bytes: bytes, *, encoding: str, channels: int) -> list[int]:
+    raw = b""
+    enc = str(encoding or "").strip().casefold()
+    if enc in {"pcm16", "raw"}:
+        raw = bytes(encoded_bytes or b"")
+    elif enc == "wav":
+        try:
+            with wave.open(io.BytesIO(encoded_bytes), "rb") as handle:
+                if int(handle.getsampwidth()) != 2:
+                    return []
+                ch = int(handle.getnchannels() or 1)
+                frame_count = int(handle.getnframes() or 0)
+                raw = handle.readframes(frame_count)
+                channels = max(1, ch)
+        except Exception:
+            return []
+    else:
+        return []
+    if not raw:
+        return []
+    sample_count = len(raw) // 2
+    if sample_count <= 0:
+        return []
+    unpacked = struct.unpack("<" + ("h" * sample_count), raw[: sample_count * 2])
+    ch = max(1, int(channels or 1))
+    if ch <= 1:
+        return [int(x) for x in unpacked]
+    mono: list[int] = []
+    for idx in range(0, len(unpacked), ch):
+        frame = unpacked[idx : idx + ch]
+        if not frame:
+            continue
+        mono.append(int(round(sum(frame) / float(len(frame)))))
+    return mono

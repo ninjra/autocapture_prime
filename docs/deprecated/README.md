@@ -66,3 +66,18 @@ This directory contains planning and report snapshots that are retained for hist
 - Remaining-work matrix: `docs/reports/implementation_matrix_remaining_2026-02-12.md`
 - Full miss inventory: `docs/reports/full_repo_miss_inventory_2026-02-12.md`
 - Current adversarial gap snapshot: `docs/reports/adversarial-redesign-gap-2026-02-15.md`
+
+## Archived on 2026-02-18
+
+### Additional superseded plan docs
+
+- `docs/deprecated/plans/codex-work-order-autocapture-prime-memory-plan.md`
+- `docs/deprecated/plans/core-hardening-recommendations-plan.md`
+- `docs/deprecated/plans/golden-soak-closure-plan.md`
+- `docs/deprecated/plans/promptops-autonomous-self-optimization-plan.md`
+- `docs/deprecated/plans/repo-4-pillars-pure-function-optimization-plan.md`
+
+### Additional superseded report text artifacts
+
+- `docs/deprecated/reports/baseline_repo_state.txt`
+- `docs/deprecated/reports/grep_*.txt` (21 historical grep snapshots moved from `docs/reports/`)

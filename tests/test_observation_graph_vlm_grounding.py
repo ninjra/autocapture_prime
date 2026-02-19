@@ -298,6 +298,40 @@ class ObservationGraphVLMGroundingTests(unittest.TestCase):
         meta = media[0].get("meta", {}) if isinstance(media[0].get("meta"), dict) else {}
         self.assertEqual(str(meta.get("source_modality") or ""), "vlm")
 
+    def test_calendar_extraction_uses_table_payload_text(self) -> None:
+        plugin = self._plugin()
+        payload = {
+            "text_lines": [{"text": "Unrelated OCR text only", "bbox": [10, 10, 260, 28]}],
+            "tables": [
+                {
+                    "cells": [
+                        {"text": "January 2026"},
+                        {"text": "3:00 PM CC Daily Standup"},
+                    ]
+                }
+            ],
+            "extra_docs": [],
+            "tokens_raw": [],
+            "frame_bytes": b"",
+            "element_graph": {
+                "state_id": "vlm",
+                "source_backend": "openai_compat_two_pass",
+                "source_provider_id": "builtin.vlm.vllm_localhost",
+                "elements": [
+                    {"label": "placeholder", "bbox": [0, 0, 100, 100]},
+                    {"label": "placeholder2", "bbox": [100, 100, 200, 200]},
+                ],
+            },
+        }
+        result = plugin.run_stage("persist.bundle", payload)
+        docs = result.get("extra_docs", []) if isinstance(result, dict) else []
+        calendar = [d for d in docs if isinstance(d, dict) and str(d.get("doc_kind") or "") == "adv.calendar.schedule"]
+        self.assertTrue(calendar)
+        text = str(calendar[0].get("text") or "")
+        self.assertIn("adv.calendar.month_year=January 2026", text)
+        self.assertIn("adv.calendar.item.1.start=3:00 PM", text)
+        self.assertIn("adv.calendar.item.1.title=CC Daily Standup", text)
+
 
 if __name__ == "__main__":
     unittest.main()

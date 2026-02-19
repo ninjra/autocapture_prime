@@ -38,6 +38,7 @@ def validate_promptops_policy(
     enabled = plugins.get("enabled", {}) if isinstance(plugins, dict) else {}
     locks_map = lock_payload.get("plugins", {}) if isinstance(lock_payload, dict) else {}
     review = promptops.get("review", {}) if isinstance(promptops, dict) else {}
+    optimizer = promptops.get("optimizer", {}) if isinstance(promptops, dict) else {}
     review_base = str(review.get("base_url") or "").strip()
     parsed = urlparse(review_base) if review_base else None
     is_local_review = False
@@ -47,6 +48,71 @@ def validate_promptops_policy(
     checks.append({"name": "allowlist_non_empty", "ok": isinstance(allowlist, list) and len(allowlist) > 0})
     checks.append({"name": "promptops_enabled", "ok": bool(promptops.get("enabled", False))})
     checks.append({"name": "promptops_require_citations", "ok": bool(promptops.get("require_citations", False))})
+    checks.append(
+        {
+            "name": "promptops_examples_path_set",
+            "ok": bool(str(promptops.get("examples_path") or "").strip()),
+        }
+    )
+    query_strategy = str(promptops.get("query_strategy") or "").strip().lower()
+    model_strategy = str(promptops.get("model_strategy") or "").strip().lower()
+    checks.append(
+        {
+            "name": "promptops_query_strategy_non_none",
+            "ok": query_strategy not in {"", "none", "off", "disabled"},
+            "value": query_strategy,
+        }
+    )
+    checks.append(
+        {
+            "name": "promptops_model_strategy_non_none",
+            "ok": model_strategy not in {"", "none", "off", "disabled"},
+            "value": model_strategy,
+        }
+    )
+    checks.append(
+        {
+            "name": "promptops_persist_query_prompts",
+            "ok": bool(promptops.get("persist_query_prompts", False)),
+        }
+    )
+    checks.append(
+        {
+            "name": "promptops_require_query_path",
+            "ok": bool(promptops.get("require_query_path", False)),
+        }
+    )
+    checks.append(
+        {
+            "name": "promptops_review_require_preflight",
+            "ok": bool(review.get("require_preflight", False)),
+        }
+    )
+    optimizer_strategies = optimizer.get("strategies", []) if isinstance(optimizer, dict) else []
+    checks.append(
+        {
+            "name": "promptops_optimizer_enabled",
+            "ok": bool(optimizer.get("enabled", False)),
+        }
+    )
+    checks.append(
+        {
+            "name": "promptops_optimizer_has_strategies",
+            "ok": isinstance(optimizer_strategies, list) and len(optimizer_strategies) > 0,
+        }
+    )
+    checks.append(
+        {
+            "name": "promptops_optimizer_interval_positive",
+            "ok": float(optimizer.get("interval_s", 0) or 0) > 0,
+        }
+    )
+    checks.append(
+        {
+            "name": "promptops_optimizer_refresh_examples",
+            "ok": bool(optimizer.get("refresh_examples", False)),
+        }
+    )
     checks.append({"name": "review_base_url_localhost", "ok": bool(is_local_review), "value": review_base})
 
     for plugin_id in REQUIRED_PLUGIN_IDS:
@@ -105,4 +171,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

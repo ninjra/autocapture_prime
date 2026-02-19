@@ -9,21 +9,20 @@ import shlex
 import subprocess
 import sys
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from typing import Any
 
-EXTERNAL_VLLM_ROOT_URL = (
-    str(os.environ.get("AUTOCAPTURE_VLM_ROOT_URL") or "").strip() or "http://127.0.0.1:8000"
-)
-EXTERNAL_VLLM_BASE_URL = f"{EXTERNAL_VLLM_ROOT_URL}/v1"
-EXTERNAL_VLLM_EXPECTED_MODEL = "internvl3_5_8b"
+from autocapture_nx.runtime.http_localhost import request_json
+from autocapture_nx.runtime.service_ports import VLM_BASE_URL, VLM_MODEL_ID, VLM_ROOT_URL
+
+EXTERNAL_VLLM_ROOT_URL = VLM_ROOT_URL
+EXTERNAL_VLLM_BASE_URL = VLM_BASE_URL
+EXTERNAL_VLLM_EXPECTED_MODEL = VLM_MODEL_ID
 EXTERNAL_VLLM_ORCHESTRATOR_CMD = "bash /mnt/d/projects/hypervisor/tools/wsl/start_internvl35_8b_with_watch.sh"
 EXTERNAL_VLLM_WATCH_STATE_PATH = "/tmp/hypervisor-thermal-brain/vllm_watch_state.json"
 _ALLOWED_SCHEME = "http"
 _ALLOWED_HOST = "127.0.0.1"
-_ALLOWED_PORTS = {8000, 8001, 34221}
+_ALLOWED_PORTS = {8000}
 
 
 def enforce_external_vllm_base_url(candidate: str | None) -> str:
@@ -186,19 +185,25 @@ def _preflight_once(
     t0 = time.perf_counter()
     models_url = f"{base_url}/models"
     completion_url = f"{base_url}/chat/completions"
-    try:
-        req = urllib.request.Request(models_url, method="GET", headers=auth_headers)
-        with urllib.request.urlopen(req, timeout=float(timeout_models_s)) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-            out["models_status"] = int(getattr(resp, "status", 0))
-    except urllib.error.HTTPError as exc:
-        out["error"] = f"models_http_{int(getattr(exc, 'code', 0) or 0)}"
+    models_out = request_json(
+        method="GET",
+        url=models_url,
+        timeout_s=float(timeout_models_s),
+        headers=auth_headers,
+    )
+    if not bool(models_out.get("ok", False)):
+        models_status = int(models_out.get("status", 0) or 0)
+        if models_status >= 400:
+            out["error"] = f"models_http_{models_status}"
+        else:
+            m_err = str(models_out.get("error") or "").strip()
+            out["error"] = f"models_unreachable:{m_err or 'UnknownError'}"
         out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
         return out
-    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-        out["error"] = f"models_unreachable:{type(exc).__name__}"
-        out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
-        return out
+    payload = models_out.get("payload", {})
+    if not isinstance(payload, dict):
+        payload = {}
+    out["models_status"] = int(models_out.get("status", 0) or 0)
 
     models: list[str] = []
     data = payload.get("data", []) if isinstance(payload, dict) else []
@@ -227,33 +232,32 @@ def _preflight_once(
     out["selected_model"] = selected
 
     if bool(require_completion):
-        req_payload = json.dumps(
-            {
+        completion_out = request_json(
+            method="POST",
+            url=completion_url,
+            timeout_s=float(timeout_completion_s),
+            payload={
                 "model": selected,
                 "messages": [{"role": "user", "content": "ping"}],
                 "temperature": 0,
                 "max_completion_tokens": 8,
                 "max_tokens": 8,
-            }
-        ).encode("utf-8")
-        req = urllib.request.Request(
-            completion_url,
-            data=req_payload,
-            method="POST",
-            headers={"Content-Type": "application/json", **auth_headers},
+            },
+            headers=auth_headers,
         )
-        try:
-            with urllib.request.urlopen(req, timeout=float(timeout_completion_s)) as resp:
-                completion_payload = json.loads(resp.read().decode("utf-8"))
-                out["completion_status"] = int(getattr(resp, "status", 0))
-        except urllib.error.HTTPError as exc:
-            out["error"] = f"completion_http_{int(getattr(exc, 'code', 0) or 0)}"
+        if not bool(completion_out.get("ok", False)):
+            completion_status = int(completion_out.get("status", 0) or 0)
+            if completion_status >= 400:
+                out["error"] = f"completion_http_{completion_status}"
+            else:
+                c_err = str(completion_out.get("error") or "").strip()
+                out["error"] = f"completion_unreachable:{c_err or 'UnknownError'}"
             out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
             return out
-        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-            out["error"] = f"completion_unreachable:{type(exc).__name__}"
-            out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
-            return out
+        completion_payload = completion_out.get("payload", {})
+        if not isinstance(completion_payload, dict):
+            completion_payload = {}
+        out["completion_status"] = int(completion_out.get("status", 0) or 0)
         choices = completion_payload.get("choices", []) if isinstance(completion_payload, dict) else []
         completion_ok = isinstance(choices, list) and len(choices) > 0
         out["completion_ok"] = bool(completion_ok)

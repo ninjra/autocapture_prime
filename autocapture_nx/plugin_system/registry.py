@@ -345,7 +345,13 @@ class CapabilityProxy:
         return self._invoke("__call__", self._target, args, kwargs)
 
     def __getattr__(self, name: str) -> Any:
-        attr = getattr(self._target, name)
+        # Nested capability usage can access attributes that lazily initialize
+        # underlying resources (for example, storage adapters). Resolve the
+        # attribute under the callee capability's guards so we do not leak the
+        # caller plugin's stricter filesystem/network policy into the callee.
+        with network_guard(self._network_allowed):
+            with filesystem_guard(self._filesystem_policy):
+                attr = getattr(self._target, name)
         if callable(attr):
             def wrapped(*args, **kwargs):
                 return self._invoke(name, attr, args, kwargs)

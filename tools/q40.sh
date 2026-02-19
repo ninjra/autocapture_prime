@@ -26,6 +26,14 @@ adv_timeout_s="$(clamp_min "${AUTOCAPTURE_ADV_QUERY_TIMEOUT_S:-180}" "180" "60")
 gen_timeout_s="$(clamp_min "${AUTOCAPTURE_GENERIC20_QUERY_TIMEOUT_S:-120}" "120" "60")"
 lock_retries="$(clamp_min "${AUTOCAPTURE_GENERIC20_LOCK_RETRIES:-2}" "2" "1")"
 export AUTOCAPTURE_ADV_QUERY_TIMEOUT_S="$adv_timeout_s"
+golden_strict="${AUTOCAPTURE_GOLDEN_STRICT:-1}"
+case "${golden_strict,,}" in
+  1|true|yes|on) golden_strict="1" ;;
+  *) golden_strict="0" ;;
+esac
+if [[ "${golden_strict}" == "1" ]]; then
+  export AUTOCAPTURE_SKIP_VLM_UNSTABLE=0
+fi
 
 cycle_out="$(bash "$ROOT/tools/run_golden_qh_cycle.sh" "$IMG" 2>&1)"
 cycle_json="$($PY - <<'PY' "$cycle_out"
@@ -68,9 +76,58 @@ gen_path="$ROOT/artifacts/advanced10/generic20_${STAMP}.json"
   --output "$gen_path" >/tmp/autocapture_prime_q40_generic.out
 
 matrix_path="$ROOT/artifacts/advanced10/q40_matrix_${STAMP}.json"
-"$PY" "$ROOT/tools/eval_q40_matrix.py" \
-  --advanced-json "$adv_path" \
-  --generic-json "$gen_path" \
-  --out "$matrix_path" >/tmp/autocapture_prime_q40_matrix.out
+matrix_log="/tmp/autocapture_prime_q40_matrix.out"
+set +e
+if [[ "${golden_strict}" == "1" ]]; then
+  "$PY" "$ROOT/tools/eval_q40_matrix.py" \
+    --advanced-json "$adv_path" \
+    --generic-json "$gen_path" \
+    --strict \
+    --expected-total 40 \
+    --out "$matrix_path" >"$matrix_log"
+else
+  "$PY" "$ROOT/tools/eval_q40_matrix.py" \
+    --advanced-json "$adv_path" \
+    --generic-json "$gen_path" \
+    --out "$matrix_path" >"$matrix_log"
+fi
+matrix_rc=$?
+set -e
+if [[ $matrix_rc -ne 0 ]]; then
+  matrix_detail="$($PY - <<'PY' "$matrix_log"
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+if not path.exists():
+    print(json.dumps({"raw_tail": ""}))
+    raise SystemExit(0)
+last = {}
+tail = ""
+for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    line = str(raw or "").strip()
+    if not line:
+        continue
+    tail = line
+    if line.startswith("{") and line.endswith("}"):
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(obj, dict):
+            last = obj
+if last:
+    print(json.dumps(last, sort_keys=True))
+else:
+    print(json.dumps({"raw_tail": tail}, sort_keys=True))
+PY
+)"
+  echo "{\"ok\":false,\"error\":\"strict_matrix_gate_failed\",\"matrix\":\"$matrix_path\",\"strict\":${golden_strict},\"detail\":$matrix_detail}"
+  exit 1
+fi
+cp "$matrix_path" "$ROOT/artifacts/advanced10/q40_matrix_latest.json"
+cp "$adv_path" "$ROOT/artifacts/advanced10/advanced20_latest.json"
+cp "$gen_path" "$ROOT/artifacts/advanced10/generic20_latest.json"
 
 echo "{\"ok\":true,\"advanced\":\"$adv_path\",\"generic\":\"$gen_path\",\"matrix\":\"$matrix_path\"}"

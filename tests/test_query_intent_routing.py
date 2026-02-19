@@ -28,7 +28,16 @@ class QueryIntentRoutingTests(unittest.TestCase):
         self.assertEqual(intent.get("topic"), "generic")
         self.assertEqual(intent.get("family"), "generic")
 
+    def test_intent_is_stable_for_paraphrases(self) -> None:
+        a = query_mod._query_intent(  # type: ignore[attr-defined]
+            "List all visible top-level windows and their occlusion order."
+        )
+        b = query_mod._query_intent(  # type: ignore[attr-defined]
+            "Enumerate distinct windows front-to-back with overlap status."
+        )
+        self.assertEqual(a.get("topic"), "adv_window_inventory")
+        self.assertEqual(b.get("topic"), "adv_window_inventory")
+
 
 if __name__ == "__main__":
     unittest.main()
-

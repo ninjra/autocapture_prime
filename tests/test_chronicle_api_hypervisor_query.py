@@ -47,7 +47,7 @@ class ChronicleApiHypervisorQueryTests(unittest.TestCase):
                     [
                         "chronicle_api:",
                         "  query_owner: hypervisor",
-                        "  hypervisor_base_url: http://10.1.2.3:7411",
+                        "  hypervisor_base_url: http://10.1.2.3:34221",
                         "  hypervisor_chat_path: /v1/chat/completions",
                     ]
                 ),
@@ -65,7 +65,7 @@ class ChronicleApiHypervisorQueryTests(unittest.TestCase):
                     [
                         "chronicle_api:",
                         "  query_owner: hypervisor",
-                        "  hypervisor_base_url: http://127.0.0.1:7411",
+                        "  hypervisor_base_url: http://127.0.0.1:34221",
                         "  hypervisor_chat_path: /v1/chat/completions",
                         "  hypervisor_api_key: secret123",
                     ]
@@ -82,7 +82,7 @@ class ChronicleApiHypervisorQueryTests(unittest.TestCase):
                 out = _call_hypervisor_query(cfg, {"messages": [{"role": "user", "content": "hi"}]})
 
             self.assertTrue(bool(out.get("ok")))
-            self.assertEqual(sink.get("url"), "http://127.0.0.1:7411/v1/chat/completions")
+            self.assertEqual(sink.get("url"), "http://127.0.0.1:34221/v1/chat/completions")
             self.assertIn("messages", sink.get("json", {}))
             headers = sink.get("headers", {})
             self.assertEqual(headers.get("Authorization"), "Bearer secret123")

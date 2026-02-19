@@ -3,12 +3,49 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+import os
 import threading
 from typing import Any
 
 
 def _copy_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return dict(payload)
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def normalize_telemetry_payload(category: str, payload: dict[str, Any]) -> dict[str, Any]:
+    base = _copy_payload(payload)
+    stage = str(base.get("stage") or category).strip() or category
+    run_id = str(base.get("run_id") or os.getenv("AUTOCAPTURE_RUN_ID") or "").strip()
+    error_code = str(base.get("error_code") or "").strip()
+    outcome = str(base.get("outcome") or "").strip().lower()
+    if not outcome:
+        outcome = "error" if error_code else "ok"
+    duration_raw = base.get("duration_ms")
+    try:
+        duration_ms = float(duration_raw) if duration_raw is not None else 0.0
+    except Exception:
+        duration_ms = 0.0
+    if duration_ms < 0:
+        duration_ms = 0.0
+    normalized = dict(base)
+    normalized.update(
+        {
+        "schema_version": 1,
+        "category": str(category),
+        "ts_utc": str(base.get("ts_utc") or _utc_now()),
+        "run_id": run_id,
+        "stage": stage,
+        "duration_ms": duration_ms,
+        "outcome": outcome,
+        "error_code": error_code,
+        }
+    )
+    return normalized
 
 
 def percentile(values: list[float], pct: float) -> float | None:
@@ -35,7 +72,7 @@ class TelemetryStore:
     def record(self, category: str, payload: dict[str, Any]) -> None:
         if not category:
             return
-        entry = _copy_payload(payload)
+        entry = normalize_telemetry_payload(category, payload)
         with self._lock:
             self._latest[category] = entry
             history = self._history.setdefault(category, [])

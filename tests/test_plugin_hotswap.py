@@ -84,6 +84,41 @@ class PluginHotSwapTests(unittest.TestCase):
             finally:
                 sys.path.remove(str(root))
 
+    def test_factory_load_error_includes_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest_path = root / "mx.bad.yaml"
+            manifest_path.write_text(
+                textwrap.dedent(
+                    """
+                    schema_version: 1
+                    plugin_id: mx.bad
+                    version: 0.1.0
+                    display_name: Bad
+                    description: Bad factory
+                    extensions:
+                      - kind: bad.kind
+                        factory: mx_missing:create
+                        name: default
+                        version: 0.1.0
+                        caps: []
+                        pillars: {}
+                    """
+                ).strip(),
+                encoding="utf-8",
+            )
+            config = {
+                "plugins": {
+                    "search_paths": [str(root)],
+                    "allowlist": ["mx.bad"],
+                    "enabled": {"mx.bad": True},
+                    "default_pack": ["mx.bad"],
+                }
+            }
+            manager = PluginManager(config, safe_mode=False)
+            with self.assertRaisesRegex(RuntimeError, "plugin_factory_load_failed:plugin_id=mx.bad"):
+                manager.get_extension("bad.kind")
+
 
 if __name__ == "__main__":
     unittest.main()

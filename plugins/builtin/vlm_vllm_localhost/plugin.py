@@ -555,7 +555,8 @@ class VllmVLM(PluginBase):
                 promptops_meta["applied"] = bool(p.applied)
             except Exception:
                 pass
-        for _attempt in range(int(self._max_retries)):
+        max_retries = int(self._max_retries)
+        for attempt_idx in range(max_retries):
             req: dict[str, Any] = {
                 "model": self._model,
                 "messages": [
@@ -578,20 +579,16 @@ class VllmVLM(PluginBase):
                 resp = client.chat_completions(req)
             except Exception as exc:
                 msg = str(exc or "").casefold()
-                if "http_error:500" in msg or "internal server error" in msg:
-                    self._last_chat_error = str(exc or "chat_exception").strip()[:240]
-                    self._mark_chat_failure(self._last_chat_error)
-                    self._record_promptops_interaction(
-                        prompt_id=prompt_id,
-                        prompt_input=prompt,
-                        prompt_effective=prompt_effective,
-                        response_text="",
-                        success=False,
-                        latency_ms=float((time.perf_counter() - started) * 1000.0),
-                        error=str(self._last_chat_error or "chat_exception"),
-                        metadata=self._merge_promptops_meta(metadata, promptops_meta),
-                    )
-                    return ""
+                timeout_error = _is_timeout_error(msg)
+                retryable_server_error = (
+                    "http_error:500" in msg
+                    or "internal server error" in msg
+                    or "http_error:502" in msg
+                    or "http_error:503" in msg
+                    or "http_error:504" in msg
+                    or "http_error:429" in msg
+                    or "rate limit" in msg
+                )
                 if _is_model_not_found_error(msg):
                     previous = str(self._model or "").strip()
                     self._model_validated = False
@@ -599,7 +596,22 @@ class VllmVLM(PluginBase):
                     if self._model and str(self._model).strip() and str(self._model).strip() != previous:
                         self._last_chat_error = f"model_fallback:{previous}->{self._model}"
                         continue
-                if _is_context_limit_error(msg):
+                if _is_context_limit_error(msg) or timeout_error:
+                    downsized = _downscale_png_bytes(current)
+                    if downsized and len(downsized) < len(current):
+                        current = downsized
+                        self._last_chat_error = (
+                            "timeout_downscaled_retry" if timeout_error else "context_limit_downscaled_retry"
+                        )
+                        continue
+                if (retryable_server_error or timeout_error) and (attempt_idx + 1 < max_retries):
+                    self._last_chat_error = str(exc or "chat_exception").strip()[:240]
+                    if not self._last_chat_error:
+                        self._last_chat_error = "chat_retryable_error"
+                    # Retry transient HTTP/timeout failures before opening the circuit.
+                    # Image payload may already have been downscaled above.
+                    continue
+                if _is_context_limit_error(msg) and (attempt_idx + 1 < max_retries):
                     downsized = _downscale_png_bytes(current)
                     if downsized and len(downsized) < len(current):
                         current = downsized
@@ -947,6 +959,16 @@ def _is_context_limit_error(message: str) -> bool:
         or "max model length" in text
         or "context length" in text
         or "too many tokens" in text
+    )
+
+
+def _is_timeout_error(message: str) -> bool:
+    text = str(message or "").casefold()
+    return (
+        "timed out" in text
+        or "timeout" in text
+        or "read timed out" in text
+        or "deadline exceeded" in text
     )
 
 

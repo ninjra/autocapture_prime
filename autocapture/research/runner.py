@@ -117,6 +117,7 @@ class ResearchRunner:
         self._plugin_ids: tuple[str, ...] = tuple()
         self._checkpoint_loaded = False
         self._cursor_index = 0
+        self._last_plugin_error: str | None = None
 
     def _cfg(self) -> dict[str, Any]:
         return self._config.get("research", {}) if isinstance(self._config, dict) else {}
@@ -142,6 +143,7 @@ class ResearchRunner:
         self._plugins = []
         self._capabilities = None
         if not plugin_ids:
+            self._last_plugin_error = None
             return
         try:
             scoped = _scoped_plugin_config(self._config, list(plugin_ids))
@@ -149,9 +151,26 @@ class ResearchRunner:
             plugins, caps = registry.load_plugins()
             self._plugins = plugins
             self._capabilities = caps
-        except Exception:
+            self._last_plugin_error = None
+        except Exception as exc:
             self._plugins = []
             self._capabilities = None
+            self._last_plugin_error = f"{type(exc).__name__}:{exc}"
+
+    def _threshold(self) -> float:
+        cfg = self._cfg()
+        raw = cfg.get("threshold")
+        if raw is not None:
+            try:
+                return max(0.0, min(1.0, float(raw)))
+            except Exception:
+                return 0.1
+        try:
+            pct = int(cfg.get("threshold_pct", 10))
+        except Exception:
+            pct = 10
+        pct = max(0, min(100, pct))
+        return pct / 100.0
 
     def _plugin_capability(self, plugin_id: str, capability: str) -> Any | None:
         for plugin in self._plugins:
@@ -245,18 +264,17 @@ class ResearchRunner:
         cfg = self._cfg()
         if not bool(cfg.get("enabled", True)):
             return {"ok": False, "reason": "disabled"}
+        self._ensure_plugins()
+        plugin_error = self._last_plugin_error
+        if plugin_error and bool(cfg.get("fail_closed_on_plugin_error", False)):
+            return {"ok": False, "reason": "plugin_error", "plugin_error": plugin_error}
         watchlist = self._watchlist()
         sources = self._sources()
         root = _data_root(self._config)
         cache_dir = Path(cfg.get("cache_dir") or root / "research" / "cache")
         report_dir = Path(cfg.get("report_dir") or root / "research" / "reports")
         cache = ResearchCache(cache_dir)
-        threshold = cfg.get("threshold")
-        if threshold is None:
-            pct = int(cfg.get("threshold_pct", 10))
-            threshold = max(0.0, min(1.0, pct / 100.0))
-        else:
-            threshold = float(threshold)
+        threshold = self._threshold()
 
         reports: list[dict[str, Any]] = []
         for source in sources:
@@ -267,7 +285,10 @@ class ResearchRunner:
             "ok": True,
             "reports": reports,
             "ran_at": datetime.now(timezone.utc).isoformat(),
+            "threshold": threshold,
         }
+        if plugin_error:
+            payload["plugin_error"] = plugin_error
         if report_dir:
             report_dir.mkdir(parents=True, exist_ok=True)
             name = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ.json")
@@ -277,6 +298,9 @@ class ResearchRunner:
     def run_step(self, *, should_abort=None, budget_ms: int = 0) -> bool:
         cfg = self._cfg()
         if not bool(cfg.get("enabled", True)):
+            return True
+        self._ensure_plugins()
+        if self._last_plugin_error and bool(cfg.get("fail_closed_on_plugin_error", False)):
             return True
         self._load_checkpoint()
         sources = self._sources()
@@ -297,12 +321,7 @@ class ResearchRunner:
         cache_dir = Path(cfg.get("cache_dir") or root / "research" / "cache")
         report_dir = Path(cfg.get("report_dir") or root / "research" / "reports")
         cache = ResearchCache(cache_dir)
-        threshold = cfg.get("threshold")
-        if threshold is None:
-            pct = int(cfg.get("threshold_pct", 10))
-            threshold = max(0.0, min(1.0, pct / 100.0))
-        else:
-            threshold = float(threshold)
+        threshold = self._threshold()
 
         source = sources[self._cursor_index]
         scout = ResearchScout(source, watchlist, cache)
@@ -311,7 +330,10 @@ class ResearchRunner:
             "ok": True,
             "reports": [report],
             "ran_at": datetime.now(timezone.utc).isoformat(),
+            "threshold": threshold,
         }
+        if self._last_plugin_error:
+            payload["plugin_error"] = self._last_plugin_error
         if report_dir:
             report_dir.mkdir(parents=True, exist_ok=True)
             name = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ.step.json")

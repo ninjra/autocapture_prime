@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from autocapture.storage.retention import apply_evidence_retention
+from autocapture.storage.retention import apply_evidence_retention, mark_evidence_retention_eligible, retention_eligibility_record_id
 from autocapture_nx.kernel.metadata_store import ImmutableMetadataStore
 from plugins.builtin.storage_memory.plugin import InMemoryStore
 
@@ -58,6 +58,48 @@ class StorageRetentionTests(unittest.TestCase):
         config = {"storage": {"retention": {"evidence": "infinite"}}}
         result = apply_evidence_retention(metadata, media, config, dry_run=False)
         self.assertIsNone(result)
+
+    def test_retention_processed_only_requires_eligibility_marker(self) -> None:
+        metadata = ImmutableMetadataStore(InMemoryStore())
+        media = InMemoryStore()
+        now = datetime.now(timezone.utc)
+        old_ts = (now - timedelta(days=3)).isoformat()
+        record_id = "run1/frame/0"
+        record = {
+            "schema_version": 1,
+            "record_type": "evidence.capture.frame",
+            "run_id": "run1",
+            "ts_utc": old_ts,
+            "content_hash": "abc",
+            "content_type": "image/png",
+        }
+        metadata.put_new(record_id, dict(record))
+        media.put_new(record_id, b"old", ts_utc=old_ts)
+        config = {
+            "storage": {
+                "no_deletion_mode": False,
+                "retention": {
+                    "evidence": "1d",
+                    "max_delete_per_run": 10,
+                    "processed_only": True,
+                    "images_only": True,
+                },
+            }
+        }
+
+        result_blocked = apply_evidence_retention(metadata, media, config, dry_run=False)
+        self.assertIsNotNone(result_blocked)
+        self.assertEqual(int(result_blocked.deleted), 0)
+        self.assertEqual(media.get(record_id), b"old")
+
+        marker_id = mark_evidence_retention_eligible(metadata, record_id, record, reason="test")
+        self.assertEqual(marker_id, retention_eligibility_record_id(record_id))
+        self.assertIsNotNone(metadata.get(marker_id))
+
+        result_allowed = apply_evidence_retention(metadata, media, config, dry_run=False)
+        self.assertIsNotNone(result_allowed)
+        self.assertEqual(int(result_allowed.deleted), 1)
+        self.assertIsNone(media.get(record_id))
 
 
 if __name__ == "__main__":

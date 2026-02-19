@@ -30,6 +30,10 @@ class DerivedRecordTests(unittest.TestCase):
         self.assertIn("content_hash", record)
         self.assertIn("payload_hash", record)
         self.assertEqual(record["text_normalized"], normalize_text(raw_text))
+        self.assertEqual(record.get("producer_plugin_id"), "builtin.ocr")
+        provenance = record.get("provenance", {})
+        self.assertEqual(provenance.get("stage_id"), "derived.text.ocr")
+        self.assertIn("run1/segment/0", provenance.get("input_artifact_ids", []))
 
     def test_derivation_edge_ids(self) -> None:
         edge_id = derivation_edge_id("run1", "run1/segment/0", "run1/derived/0")
@@ -44,6 +48,8 @@ class DerivedRecordTests(unittest.TestCase):
         )
         self.assertEqual(edge["record_type"], "derived.graph.edge")
         self.assertIn("content_hash", edge)
+        self.assertIn("producer_plugin_id", edge)
+        self.assertIn("provenance", edge)
 
 
 if __name__ == "__main__":

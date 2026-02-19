@@ -6,6 +6,7 @@ import zipfile
 from autocapture.core.hashing import hash_text, normalize_text
 from autocapture_nx.kernel.derived_records import derived_text_record_id
 from autocapture_nx.processing.idle import IdleProcessor
+from autocapture.storage.retention import retention_eligibility_record_id
 
 
 class _MetadataStore:
@@ -131,6 +132,9 @@ class IdleProcessorTests(unittest.TestCase):
             self.assertIn(vlm_id, metadata.data)
             self.assertEqual(metadata.data[ocr_id]["content_hash"], hash_text(normalize_text("ocr text")))
             self.assertEqual(metadata.data[vlm_id]["content_hash"], hash_text(normalize_text("vlm text")))
+            marker_id = retention_eligibility_record_id(record_id)
+            self.assertIn(marker_id, metadata.data)
+            self.assertEqual(metadata.data[marker_id].get("record_type"), "retention.eligible")
 
 
 if __name__ == "__main__":

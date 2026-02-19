@@ -2,8 +2,14 @@
 
 Source: `docs/blueprints/autocapture_nx_blueprint.md`
 
+Deterministic refresh/verify command:
+- `tools/ivm.sh` (fails non-zero if misses remain)
+
 Additional codex implementation matrix:
 - `docs/reports/autocapture_prime_codex_implementation_matrix.md`
+- `docs/reports/docs_md_txt_status_matrix.md` (docs md/txt status + deprecation matrix)
+- `docs/reports/autocapture_prime_4pillars_optimization_matrix.md` (QRY/EVAL/SEC/CAP backlog closure status)
+- `docs/reports/golden_pipeline_core_remediation_2026-02-18.md` (Sprint 0-5 remediation execution + validation log)
 
 | ItemID | Phase | Title | Status | Evidence | Planned change summary | Test / gate |
 | --- | --- | --- | --- | --- | --- | --- |

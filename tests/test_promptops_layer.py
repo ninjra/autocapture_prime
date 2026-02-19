@@ -85,6 +85,33 @@ class PromptOpsLayerTests(unittest.TestCase):
             result = layer.prepare_query("pls help w/ new ask", prompt_id="query")
             self.assertEqual(result.prompt, "please help with new ask?")
 
+    def test_examples_loaded_from_examples_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _base_config(tmp)
+            examples_path = Path(tmp) / "promptops_examples.json"
+            examples_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "promptops_examples": {
+                            "query.default": [
+                                {
+                                    "required_tokens": ["inboxes"],
+                                    "requires_citation": False,
+                                }
+                            ]
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config["promptops"]["examples"] = {}
+            config["promptops"]["examples_path"] = str(examples_path)
+            layer = PromptOpsLayer(config)
+            rows = layer._examples_for("query")  # noqa: SLF001
+            self.assertTrue(rows)
+            self.assertEqual(rows[0].get("required_tokens"), ["inboxes"])
+
     def test_record_model_interaction_writes_metrics_row(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             metrics_path = Path(tmp) / "metrics.jsonl"
@@ -111,6 +138,8 @@ class PromptOpsLayerTests(unittest.TestCase):
             self.assertEqual(row.get("prompt_id"), "query")
             self.assertEqual(row.get("provider_id"), "query.classic")
             self.assertFalse(row.get("success"))
+            self.assertEqual(row.get("prompt_input_text"), "what song is playing")
+            self.assertEqual(row.get("prompt_effective_text"), "what song is playing?")
 
     def test_prepare_prompt_metrics_include_trace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

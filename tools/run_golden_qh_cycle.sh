@@ -83,6 +83,26 @@ export AUTOCAPTURE_VLM_PREFLIGHT_TOTAL_TIMEOUT_S="${AUTOCAPTURE_VLM_PREFLIGHT_TO
 export AUTOCAPTURE_VLM_PREFLIGHT_PROGRESS="${AUTOCAPTURE_VLM_PREFLIGHT_PROGRESS:-1}"
 export AUTOCAPTURE_VLM_MAX_INFLIGHT="${AUTOCAPTURE_VLM_MAX_INFLIGHT:-1}"
 export AUTOCAPTURE_VLM_ORCHESTRATOR_CMD="${AUTOCAPTURE_VLM_ORCHESTRATOR_CMD:-bash /mnt/d/projects/hypervisor/tools/wsl/start_internvl35_8b_with_watch.sh}"
+skip_vlm_unstable="${AUTOCAPTURE_SKIP_VLM_UNSTABLE:-1}"
+case "${skip_vlm_unstable,,}" in
+  1|true|yes|on) skip_vlm_unstable="1" ;;
+  *) skip_vlm_unstable="0" ;;
+esac
+golden_strict="${AUTOCAPTURE_GOLDEN_STRICT:-1}"
+case "${golden_strict,,}" in
+  1|true|yes|on) golden_strict="1" ;;
+  *) golden_strict="0" ;;
+esac
+if [[ "${golden_strict}" == "1" && "${skip_vlm_unstable}" == "1" ]]; then
+  skip_vlm_unstable="0"
+  emit_progress "strict_override" "forcing_skip_vlm_unstable=0"
+fi
+if [[ "${skip_vlm_unstable}" == "1" ]]; then
+  export AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S="${AUTOCAPTURE_VLM_DEGRADED_PREFLIGHT_COMPLETION_TIMEOUT_S:-12}"
+  export AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_MAX_S="${AUTOCAPTURE_VLM_DEGRADED_PREFLIGHT_COMPLETION_TIMEOUT_MAX_S:-20}"
+  export AUTOCAPTURE_VLM_PREFLIGHT_RETRIES="${AUTOCAPTURE_VLM_DEGRADED_PREFLIGHT_RETRIES:-1}"
+  export AUTOCAPTURE_VLM_PREFLIGHT_TOTAL_TIMEOUT_S="${AUTOCAPTURE_VLM_DEGRADED_PREFLIGHT_TOTAL_TIMEOUT_S:-30}"
+fi
 
 write_status "preflight" "checking_vllm"
 emit_progress "preflight" "checking_vllm"
@@ -115,9 +135,16 @@ payload = check_external_vllm_ready(
 print(json.dumps(payload, sort_keys=True))
 PY
 )"
+vlm_degraded="0"
 if [[ -z "${preflight_json}" ]]; then
-  echo "{\"ok\":false,\"error\":\"vllm_preflight_failed\",\"base_url\":\"${AUTOCAPTURE_VLM_BASE_URL}\"}"
-  exit 2
+  if [[ "${skip_vlm_unstable}" == "1" ]]; then
+    write_status "preflight_degraded" "vllm_status_missing"
+    emit_progress "preflight_degraded" "vllm_status_missing"
+    vlm_degraded="1"
+  else
+    echo "{\"ok\":false,\"error\":\"vllm_preflight_failed\",\"base_url\":\"${AUTOCAPTURE_VLM_BASE_URL}\"}"
+    exit 2
+  fi
 fi
 preflight_ok="$("$ROOT/.venv/bin/python" - <<'PY' "$preflight_json"
 import json,sys
@@ -130,14 +157,27 @@ print("1" if bool(payload.get("ok", False)) else "0")
 PY
 )"
 if [[ "$preflight_ok" != "1" ]]; then
-  write_status "preflight_failed" "vllm_not_ready"
-  emit_progress "preflight_failed" "vllm_not_ready"
-  echo "{\"ok\":false,\"error\":\"vllm_preflight_failed\",\"base_url\":\"${AUTOCAPTURE_VLM_BASE_URL}\",\"preflight\":${preflight_json}}"
-  exit 2
+  if [[ "${skip_vlm_unstable}" == "1" ]]; then
+    write_status "preflight_degraded" "vllm_not_ready"
+    emit_progress "preflight_degraded" "vllm_not_ready"
+    vlm_degraded="1"
+  else
+    write_status "preflight_failed" "vllm_not_ready"
+    emit_progress "preflight_failed" "vllm_not_ready"
+    echo "{\"ok\":false,\"error\":\"vllm_preflight_failed\",\"base_url\":\"${AUTOCAPTURE_VLM_BASE_URL}\",\"preflight\":${preflight_json}}"
+    exit 2
+  fi
+fi
+if [[ "${vlm_degraded}" == "1" ]]; then
+  export AUTOCAPTURE_SKIP_VLM_UNSTABLE=1
 fi
 
 before_latest="$(ls -1t "$ROOT/artifacts/single_image_runs" 2>/dev/null | head -n 1 || true)"
 ingest_timeout_s="${AUTOCAPTURE_GOLDEN_INGEST_TIMEOUT_S:-900}"
+ingest_vlm_flag="--skip-vllm-unstable"
+if [[ "${skip_vlm_unstable}" != "1" ]]; then
+  ingest_vlm_flag="--fail-on-vllm-unstable"
+fi
 mkdir -p "$ROOT/artifacts/logs"
 log_ts="$(date -u +%Y%m%dT%H%M%SZ)"
 ingest_log_path="$ROOT/artifacts/logs/golden_qh_ingest_${log_ts}.log"
@@ -151,8 +191,9 @@ ingest_timeout_s="$1"
 runner="$2"
 image="$3"
 log_path="$4"
-env PYTHONUNBUFFERED=1 timeout "${ingest_timeout_s}s" "$runner" "$image" > >(tee "$log_path") 2>&1
-' _ "$ingest_timeout_s" "$ROOT/tools/run_single_image_golden.sh" "$IMAGE_PATH" "$ingest_log_path" &
+vlm_flag="$5"
+env PYTHONUNBUFFERED=1 timeout "${ingest_timeout_s}s" "$runner" "$image" "$vlm_flag" > >(tee "$log_path") 2>&1
+' _ "$ingest_timeout_s" "$ROOT/tools/run_single_image_golden.sh" "$IMAGE_PATH" "$ingest_log_path" "$ingest_vlm_flag" &
 ingest_pid=$!
 GOLDEN_CHILD_PID="$ingest_pid"
 ingest_started_s="$(date +%s)"
@@ -245,6 +286,11 @@ lock_retries="${AUTOCAPTURE_ADV_LOCK_RETRIES:-2}"
 eval_preflight_completion_s="${AUTOCAPTURE_EVAL_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S:-120}"
 eval_preflight_retries="${AUTOCAPTURE_EVAL_VLM_PREFLIGHT_RETRIES:-1}"
 eval_preflight_total_s="${AUTOCAPTURE_EVAL_VLM_PREFLIGHT_TOTAL_TIMEOUT_S:-180}"
+if [[ "${skip_vlm_unstable}" == "1" ]]; then
+  eval_preflight_completion_s="${AUTOCAPTURE_EVAL_VLM_DEGRADED_PREFLIGHT_COMPLETION_TIMEOUT_S:-12}"
+  eval_preflight_retries="${AUTOCAPTURE_EVAL_VLM_DEGRADED_PREFLIGHT_RETRIES:-1}"
+  eval_preflight_total_s="${AUTOCAPTURE_EVAL_VLM_DEGRADED_PREFLIGHT_TOTAL_TIMEOUT_S:-30}"
+fi
 
 write_status "eval" "running_advanced20"
 emit_progress "eval" "running_advanced20"
@@ -310,18 +356,75 @@ summary_json="$("$ROOT/.venv/bin/python" - <<'PY' "$adv_json_path"
 import json, pathlib, sys
 p = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1] else pathlib.Path("")
 if not p.exists():
-    print(json.dumps({"evaluated_total": 0, "evaluated_passed": 0, "evaluated_failed": 0}))
+    print(json.dumps({"evaluated_total": 0, "evaluated_passed": 0, "evaluated_failed": 0, "rows_total": 0, "rows_skipped": 0}))
     raise SystemExit(0)
 d = json.loads(p.read_text(encoding="utf-8"))
+rows = d.get("rows", []) if isinstance(d.get("rows", []), list) else []
+rows_skipped = int(d.get("rows_skipped", 0) or 0)
+if rows_skipped <= 0:
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        ev = row.get("expected_eval", {}) if isinstance(row.get("expected_eval", {}), dict) else {}
+        if bool(row.get("skipped", False)) or bool(ev.get("skipped", False)):
+            rows_skipped += 1
 print(json.dumps({
     "evaluated_total": int(d.get("evaluated_total", 0) or 0),
     "evaluated_passed": int(d.get("evaluated_passed", 0) or 0),
     "evaluated_failed": int(d.get("evaluated_failed", 0) or 0),
+    "rows_total": int(len(rows)),
+    "rows_skipped": int(rows_skipped),
 }))
 PY
 )"
 
+if [[ "${golden_strict}" == "1" ]]; then
+  strict_check="$("$ROOT/.venv/bin/python" - <<'PY' "$summary_json"
+import json
+import sys
+
+try:
+    summary = json.loads(sys.argv[1])
+except Exception:
+    summary = {}
+evaluated_total = int(summary.get("evaluated_total", 0) or 0)
+evaluated_failed = int(summary.get("evaluated_failed", 0) or 0)
+rows_total = int(summary.get("rows_total", 0) or 0)
+rows_skipped = int(summary.get("rows_skipped", 0) or 0)
+reasons: list[str] = []
+if evaluated_total <= 0:
+    reasons.append("advanced_matrix_evaluated_zero")
+if evaluated_failed > 0:
+    reasons.append("advanced_matrix_failed_nonzero")
+if rows_skipped > 0:
+    reasons.append("advanced_matrix_skipped_nonzero")
+if rows_total > 0 and evaluated_total != rows_total:
+    reasons.append("advanced_matrix_not_fully_evaluated")
+print(
+    json.dumps(
+        {
+            "ok": len(reasons) == 0,
+            "failure_reasons": reasons,
+            "evaluated_total": evaluated_total,
+            "evaluated_failed": evaluated_failed,
+            "rows_total": rows_total,
+            "rows_skipped": rows_skipped,
+        },
+        sort_keys=True,
+    )
+)
+PY
+)"
+  strict_ok="$("$ROOT/.venv/bin/python" -c "import json,sys; d=json.loads(sys.argv[1]); print('1' if bool(d.get('ok', False)) else '0')" "$strict_check" 2>/dev/null || echo "0")"
+  if [[ "${strict_ok}" != "1" ]]; then
+    write_status "strict_failed" "advanced_strict_gate_failed"
+    emit_progress "strict_failed" "advanced_strict_gate_failed"
+    echo "{\"ok\":false,\"error\":\"advanced_strict_gate_failed\",\"strict\":1,\"summary\":$summary_json,\"strict_check\":$strict_check,\"report\":\"$report_path\",\"advanced\":\"$adv_json_path\"}"
+    exit 1
+  fi
+fi
+
 write_status "done" "completed"
 emit_progress "done" "completed"
-echo "{\"ok\":true,\"report\":\"$report_path\",\"advanced\":\"$adv_json_path\",\"advanced_rc\":$adv_rc,\"summary\":$summary_json,\"trace\":\"$TRACE_OUT\",\"ingest_log\":\"$ingest_log_path\",\"eval_log\":\"$eval_log_path\"}"
+echo "{\"ok\":true,\"strict\":${golden_strict},\"report\":\"$report_path\",\"advanced\":\"$adv_json_path\",\"advanced_rc\":$adv_rc,\"vlm_degraded\":${vlm_degraded},\"summary\":$summary_json,\"trace\":\"$TRACE_OUT\",\"ingest_log\":\"$ingest_log_path\",\"eval_log\":\"$eval_log_path\"}"
 exit "$adv_rc"

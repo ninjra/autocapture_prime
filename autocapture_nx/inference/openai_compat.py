@@ -12,11 +12,11 @@ import json
 import os
 import socket
 import threading
-import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from typing import Any
+
+from autocapture_nx.runtime.http_localhost import request_json
 
 
 class LocalhostOnlyError(RuntimeError):
@@ -136,37 +136,28 @@ def _request_json(
     headers: dict[str, str] | None = None,
     max_response_bytes: int = 10_000_000,
 ) -> dict[str, Any]:
-    body = None
-    if payload is not None:
-        body = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    req = urllib.request.Request(
-        url=url,
-        method=str(method or "POST").upper(),
-        data=body,
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            **(headers or {}),
-        },
-    )
-    try:
-        with _maybe_managed_vlm_gate(url=url, timeout_s=float(timeout_s)):
-            with urllib.request.urlopen(req, timeout=float(timeout_s)) as resp:
-                data = resp.read(int(max_response_bytes) + 1)
-    except urllib.error.HTTPError as exc:
-        try:
-            blob = exc.read(4096)
-        except Exception:
-            blob = b""
-        raise RuntimeError(f"http_error:{exc.code}:{blob[:256]!r}") from exc
-    except Exception as exc:
-        raise RuntimeError(f"http_failed:{type(exc).__name__}:{exc}") from exc
-    if len(data) > int(max_response_bytes):
+    request_headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        **(headers or {}),
+    }
+    with _maybe_managed_vlm_gate(url=url, timeout_s=float(timeout_s)):
+        out = request_json(
+            method=str(method or "POST").upper(),
+            url=str(url),
+            payload=payload,
+            timeout_s=float(timeout_s),
+            headers=request_headers,
+        )
+    if not bool(out.get("ok", False)):
+        status = int(out.get("status", 0) or 0)
+        if status >= 400:
+            raise RuntimeError(f"http_error:{status}:{out.get('payload')!r}")
+        raise RuntimeError(f"http_failed:{out.get('error')}")
+    parsed = out.get("payload", {})
+    blob = json.dumps(parsed, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    if len(blob) > int(max_response_bytes):
         raise RuntimeError("response_too_large")
-    try:
-        parsed = json.loads(data.decode("utf-8", errors="replace"))
-    except Exception as exc:
-        raise RuntimeError(f"invalid_json:{exc}") from exc
     return parsed if isinstance(parsed, dict) else {"data": parsed}
 
 

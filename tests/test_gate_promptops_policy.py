@@ -14,7 +14,18 @@ def _sample_config() -> dict:
         "promptops": {
             "enabled": True,
             "require_citations": True,
-            "review": {"base_url": "http://127.0.0.1:8000"},
+            "examples_path": "data/promptops/examples.json",
+            "query_strategy": "normalize_query",
+            "model_strategy": "model_contract",
+            "persist_query_prompts": True,
+            "require_query_path": True,
+            "optimizer": {
+                "enabled": True,
+                "interval_s": 300,
+                "strategies": ["normalize_query"],
+                "refresh_examples": True,
+            },
+            "review": {"base_url": "http://127.0.0.1:8000", "require_preflight": True},
         },
     }
 
@@ -39,4 +50,3 @@ class GatePromptOpsPolicyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

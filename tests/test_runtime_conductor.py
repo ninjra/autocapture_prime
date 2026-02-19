@@ -29,6 +29,24 @@ class _ResearchRunner:
         return {"ok": True}
 
 
+class _PromptOpsOptimizer:
+    def __init__(self, *, due: bool = True) -> None:
+        self.called = 0
+        self._due = due
+
+    def due(self) -> bool:
+        return bool(self._due)
+
+    def run_once(self, *, user_active: bool, idle_seconds: float | None = None, force: bool = False):
+        self.called += 1
+        return {
+            "ok": True,
+            "user_active": bool(user_active),
+            "idle_seconds": float(idle_seconds or 0.0),
+            "force": bool(force),
+        }
+
+
 class _System:
     def __init__(self, config: dict, tracker: _Tracker) -> None:
         self.config = config
@@ -69,22 +87,34 @@ class RuntimeConductorTests(unittest.TestCase):
                 "telemetry": {"enabled": False, "emit_interval_s": 5},
             },
             "processing": {"idle": {"enabled": True, "sleep_ms": 1}},
+            "promptops": {
+                "optimizer": {
+                    "enabled": True,
+                    "interval_s": 300,
+                    "estimate_ms": 200,
+                }
+            },
             "research": {"enabled": True, "run_on_idle": True, "interval_s": 0},
         }
         tracker = _Tracker(idle_seconds=20)
         system = _System(config, tracker)
         conductor = RuntimeConductor(system)
         conductor._idle_processor = _IdleProcessor()
+        conductor._promptops_optimizer = _PromptOpsOptimizer(due=True)
         conductor._research_runner = _ResearchRunner()
 
         executed = conductor._run_once()
         self.assertIn("idle.extract", executed)
+        self.assertIn("promptops.optimize", executed)
+        self.assertEqual(conductor._promptops_optimizer.called, 1)
         self.assertNotIn("idle.research", executed)
         self.assertEqual(conductor._research_runner.called, 0)
 
         tracker._idle = 0
         executed = conductor._run_once()
         self.assertNotIn("idle.extract", executed)
+        self.assertNotIn("promptops.optimize", executed)
+        self.assertEqual(conductor._promptops_optimizer.called, 1)
 
     def test_idle_budget_job_limit(self) -> None:
         config = {

@@ -7,6 +7,70 @@ from autocapture_nx.kernel import query as query_mod
 
 
 class QueryAdvancedDisplayTests(unittest.TestCase):
+    def test_support_snippets_are_filtered_to_topic_doc_kind(self) -> None:
+        class _Metadata:
+            def latest(self, *, record_type: str, limit: int = 256):  # noqa: ARG002
+                if record_type != "derived.sst.text.extra":
+                    return []
+                return [
+                    {
+                        "record_id": "good1",
+                        "record": {
+                            "record_type": "derived.sst.text.extra",
+                            "doc_kind": "adv.activity.timeline",
+                            "text": "Your record was updated on Feb 02, 2026 - 12:08pm CST",
+                        },
+                    },
+                    {
+                        "record_id": "bad1",
+                        "record": {
+                            "record_type": "derived.sst.text.extra",
+                            "doc_kind": "adv.console.colors",
+                            "text": "Write-Host \"Using WSL IP endpoint $saltEndpoint for $projectId\" -ForegroundColor Yellow",
+                        },
+                    },
+                ][: max(0, int(limit))]
+
+            def get(self, _record_id: str):  # noqa: ANN001
+                return None
+
+        snippets = query_mod._support_snippets_for_topic(
+            "adv_activity",
+            "extract record activity timeline",
+            _Metadata(),
+            limit=8,
+        )
+        joined = "\n".join(str(x) for x in snippets)
+        self.assertIn("Your record was updated on Feb 02, 2026 - 12:08pm CST", joined)
+        self.assertNotIn("Using WSL IP endpoint", joined)
+
+    def test_support_snippets_skip_unknown_doc_kind_for_extra_rows(self) -> None:
+        class _Metadata:
+            def latest(self, *, record_type: str, limit: int = 256):  # noqa: ARG002
+                if record_type != "derived.sst.text.extra":
+                    return []
+                return [
+                    {
+                        "record_id": "unk1",
+                        "record": {
+                            "record_type": "derived.sst.text.extra",
+                            "doc_kind": "",
+                            "text": "Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476",
+                        },
+                    }
+                ][: max(0, int(limit))]
+
+            def get(self, _record_id: str):  # noqa: ANN001
+                return None
+
+        snippets = query_mod._support_snippets_for_topic(
+            "adv_incident",
+            "incident card subject sender buttons",
+            _Metadata(),
+            limit=8,
+        )
+        self.assertEqual(snippets, [])
+
     def test_apply_answer_display_skips_hard_vlm_in_metadata_only_mode(self) -> None:
         class _System:
             config: dict = {}
@@ -64,6 +128,46 @@ class QueryAdvancedDisplayTests(unittest.TestCase):
         processing = out.get("processing", {}) if isinstance(out.get("processing", {}), dict) else {}
         self.assertTrue(bool(processing.get("metadata_only_query", False)))
         self.assertTrue(bool(processing.get("metadata_only_hard_vlm", False)))
+
+    def test_metadata_only_display_fallback_does_not_emit_hard_vlm_provider(self) -> None:
+        class _System:
+            config: dict = {}
+
+            def get(self, key: str):  # noqa: ANN001
+                return None
+
+        result = {"answer": {"state": "ok", "claims": []}, "processing": {}}
+        with (
+            mock.patch.dict(os.environ, {"AUTOCAPTURE_QUERY_METADATA_ONLY": "1"}, clear=False),
+            mock.patch.object(query_mod, "_hard_vlm_extract", side_effect=AssertionError("hard_vlm_should_not_run")) as hard_mock,
+            mock.patch.object(
+                query_mod,
+                "_build_answer_display",
+                return_value={
+                    "topic": "adv_window_inventory",
+                    "summary": "Visible top-level windows: 7",
+                    "bullets": [],
+                    "fields": {"window_count": "7"},
+                },
+            ),
+            mock.patch.object(
+                query_mod,
+                "_provider_contributions",
+                return_value=[{"provider_id": "builtin.observation.graph", "contribution_bp": 10000, "claim_count": 1, "citation_count": 1}],
+            ),
+            mock.patch.object(query_mod, "_workflow_tree", return_value={"nodes": [], "edges": []}),
+        ):
+            out = query_mod._apply_answer_display(
+                _System(),
+                "Enumerate windows",
+                result,
+                query_intent={"topic": "adv_window_inventory"},
+            )
+        hard_mock.assert_not_called()
+        processing = out.get("processing", {}) if isinstance(out.get("processing", {}), dict) else {}
+        attribution = processing.get("attribution", {}) if isinstance(processing.get("attribution", {}), dict) else {}
+        providers = attribution.get("providers", []) if isinstance(attribution.get("providers", []), list) else []
+        self.assertFalse(any(isinstance(p, dict) and str(p.get("provider_id") or "") == "hard_vlm.direct" for p in providers))
 
     def test_fallback_claim_sources_infer_vlm_for_dense_advanced_pairs(self) -> None:
         class _Metadata:
@@ -583,6 +687,66 @@ class QueryAdvancedDisplayTests(unittest.TestCase):
         )
         fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
         self.assertEqual(int(fields.get("today_unread_indicator_count") or 0), 7)
+
+    def test_normalize_adv_activity_preserves_long_bullets_without_ellipsis(self) -> None:
+        long_text = "x" * 500
+        adv = {
+            "summary": "Record Activity entries: 1",
+            "bullets": [f"1. 12:08pm CST | {long_text}"],
+            "fields": {"activity_count": "1"},
+            "topic": "adv_activity",
+        }
+        normalized = query_mod._normalize_adv_display("adv_activity", adv, [])
+        bullets = normalized.get("bullets", []) if isinstance(normalized.get("bullets", []), list) else []
+        self.assertTrue(bullets)
+        self.assertNotIn("…", str(bullets[0]))
+
+    def test_normalize_adv_console_strips_ellipsis_artifacts(self) -> None:
+        adv = {
+            "summary": "Console line colors: count_red=8, count_green=16, count_other=19",
+            "bullets": ["red_1: noisy ... with … artifacts"],
+            "fields": {"red_count": "8", "green_count": "16", "other_count": "19"},
+            "topic": "adv_console",
+        }
+        normalized = query_mod._normalize_adv_display("adv_console", adv, [])
+        bullets = normalized.get("bullets", []) if isinstance(normalized.get("bullets", []), list) else []
+        self.assertTrue(bullets)
+        self.assertNotIn("...", str(bullets[0]))
+        self.assertNotIn("…", str(bullets[0]))
+
+    def test_apply_answer_display_adds_positive_provider_for_hard_unread_today(self) -> None:
+        class _System:
+            config: dict = {}
+
+            def get(self, key: str):  # noqa: ANN001
+                return None
+
+        result = {"answer": {"state": "ok", "claims": []}, "processing": {}}
+        with (
+            mock.patch.object(
+                query_mod,
+                "_build_answer_display",
+                return_value={
+                    "topic": "hard_unread_today",
+                    "summary": "Today unread-indicator rows: 7",
+                    "bullets": ["today_unread_indicator_count: 7"],
+                    "fields": {"today_unread_indicator_count": 7},
+                },
+            ),
+            mock.patch.object(query_mod, "_provider_contributions", return_value=[]),
+            mock.patch.object(query_mod, "_workflow_tree", return_value={"nodes": [], "edges": []}),
+        ):
+            out = query_mod._apply_answer_display(
+                _System(),
+                "Unread indicators",
+                result,
+                query_intent={"topic": "hard_unread_today"},
+            )
+        processing = out.get("processing", {}) if isinstance(out.get("processing", {}), dict) else {}
+        attribution = processing.get("attribution", {}) if isinstance(processing.get("attribution", {}), dict) else {}
+        providers = attribution.get("providers", []) if isinstance(attribution.get("providers", []), list) else []
+        obs = next((p for p in providers if isinstance(p, dict) and str(p.get("provider_id") or "") == "builtin.observation.graph"), {})
+        self.assertEqual(int(obs.get("contribution_bp") or 0), 10000)
 
 
 if __name__ == "__main__":
