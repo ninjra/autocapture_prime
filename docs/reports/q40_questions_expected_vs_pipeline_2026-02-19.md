@@ -51,3 +51,18 @@ Generated UTC: 2026-02-19T15:04:57.718774+00:00
 | GQ18 | pass | In a message list region, count rows marked with an unread visual indicator for the currently selected date bucket only, excluding other buckets. | N/A (no explicit expected-answer payload in case file) | Indeterminate: unread-indicator count missing from hard-VLM extraction. \|\| required: today_unread_indicator_count |
 | GQ19 | pass | Classify visible carousel/content tiles into three semantic classes and return per-class counts plus the entity title used for each classification. | N/A (no explicit expected-answer payload in case file) | SiriusXM classes: talk_podcast=1, ncaa_team=4, nfl_event=1 \|\| counts: talk_podcast=1, ncaa_team=4, nfl_event=1 \| tile: Conan O'Brien Needs A Friend [talk_podcast] |
 | GQ20 | pass | Return screenshot-normalized bounding boxes for two named actionable controls visible in the active detail card, with coordinates in [0,1] and deterministic ordering. | N/A (no explicit expected-answer payload in case file) | Indeterminate: action-button bounding boxes are not present in extracted metadata. \|\| required: COMPLETE and VIEW DETAILS normalized boxes |
+
+## Latest Strict Synthetic UIA Run (2026-02-19T19:41Z)
+
+- Run command: `bash tools/run_q40_uia_synthetic.sh`
+- Advanced artifact: `artifacts/advanced10/advanced20_strict_uia_synthetic_20260219T194111Z.json`
+- Generic artifact: `artifacts/advanced10/generic20_uia_synthetic_20260219T194111Z.json`
+- Matrix artifact: `artifacts/advanced10/q40_matrix_strict_uia_synthetic_20260219T194111Z.json`
+- Strict matrix summary:
+  - `ok=true`
+  - `strict_mode=true`
+  - `matrix_total=40`
+  - `matrix_evaluated=40`
+  - `matrix_failed=0`
+  - `matrix_skipped=0`
+- Mismatch report: `docs/reports/q40_uia_mismatch_latest.md` (`total_failures=0`)

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import signal
@@ -138,7 +139,14 @@ def _guess_content_type(blob: bytes) -> str:
     return "application/octet-stream"
 
 
-def _build_frame_record(*, run_id: str, record_id: str, ts_utc: str, image_bytes: bytes) -> dict[str, Any]:
+def _build_frame_record(
+    *,
+    run_id: str,
+    record_id: str,
+    ts_utc: str,
+    image_bytes: bytes,
+    uia_ref: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     width, height = _image_size(image_bytes)
     content_hash = hashlib.sha256(image_bytes).hexdigest()
     payload: dict[str, Any] = {
@@ -155,6 +163,12 @@ def _build_frame_record(*, run_id: str, record_id: str, ts_utc: str, image_bytes
         "frame_index": 0,
         "source": "tools.process_single_screenshot",
     }
+    if isinstance(uia_ref, dict) and uia_ref:
+        payload["uia_ref"] = {
+            "record_id": str(uia_ref.get("record_id") or ""),
+            "ts_utc": str(uia_ref.get("ts_utc") or ts_utc),
+            "content_hash": str(uia_ref.get("content_hash") or ""),
+        }
     payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
     return payload
 
@@ -199,6 +213,141 @@ def _metadata_put(metadata: Any, record_id: str, payload: dict[str, Any]) -> Non
         except Exception:
             pass
     _safe_call(metadata, "put", record_id, payload)
+
+
+def _load_synthetic_uia_module() -> Any:
+    path = resolve_repo_path("tools/synthetic_uia_contract_pack.py")
+    spec = importlib.util.spec_from_file_location("synthetic_uia_contract_pack_tool", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("synthetic_uia_contract_pack_load_failed")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _prepare_synthetic_uia_pack(
+    *,
+    run_dir: Path,
+    run_id: str,
+    ts_utc: str,
+    mode: str,
+    hash_mode: str,
+    dataroot: str,
+    pack_json: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if mode not in {"metadata", "fallback"}:
+        return {}, {"enabled": False, "source": "off"}
+    if pack_json:
+        pack_path = resolve_repo_path(pack_json)
+        payload = _load_json(pack_path)
+        return payload, {
+            "enabled": True,
+            "source": mode,
+            "pack_path": str(pack_path),
+            "dataroot": str(dataroot),
+        }
+    module = _load_synthetic_uia_module()
+    out_dir = Path(str(dataroot or "")).expanduser()
+    if not out_dir.is_absolute():
+        out_dir = (run_dir / out_dir).resolve()
+    result = module.write_contract_pack(
+        out_dir=out_dir,
+        run_id=run_id,
+        uia_record_id=f"{run_id}/uia/0",
+        ts_utc=ts_utc,
+        hash_mode=hash_mode,
+        focus_nodes=3,
+        context_nodes=6,
+        operable_nodes=8,
+        write_hash_file=True,
+    )
+    pack = _load_json(Path(str(result.get("pack_path") or "")))
+    return pack, {
+        "enabled": True,
+        "source": mode,
+        "pack_path": str(result.get("pack_path") or ""),
+        "dataroot": str(out_dir),
+        "hash_mode": str(hash_mode),
+    }
+
+
+def _inject_synthetic_uia(
+    *,
+    metadata: Any,
+    run_dir: Path,
+    run_id: str,
+    ts_utc: str,
+    mode: str,
+    hash_mode: str,
+    dataroot: str,
+    pack_json: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    pack, summary = _prepare_synthetic_uia_pack(
+        run_dir=run_dir,
+        run_id=run_id,
+        ts_utc=ts_utc,
+        mode=mode,
+        hash_mode=hash_mode,
+        dataroot=dataroot,
+        pack_json=pack_json,
+    )
+    if not pack:
+        return None, {"enabled": False, "source": "off"}
+    uia_ref = pack.get("uia_ref") if isinstance(pack.get("uia_ref"), dict) else None
+    metadata_record = pack.get("metadata_record") if isinstance(pack.get("metadata_record"), dict) else {}
+    metadata_written = False
+    if mode == "metadata" and isinstance(uia_ref, dict):
+        record_id = str(metadata_record.get("record_id") or uia_ref.get("record_id") or "").strip()
+        payload = metadata_record.get("payload") if isinstance(metadata_record.get("payload"), dict) else {}
+        if record_id and payload:
+            _metadata_put(metadata, record_id, dict(payload))
+            metadata_written = True
+    fallback = pack.get("fallback") if isinstance(pack.get("fallback"), dict) else {}
+    summary.update(
+        {
+            "enabled": True,
+            "uia_record_id": str((uia_ref or {}).get("record_id") or ""),
+            "metadata_record_written": bool(metadata_written),
+            "fallback_latest_snap_json": str(fallback.get("latest_snap_json") or ""),
+            "fallback_latest_snap_sha256": str(fallback.get("latest_snap_sha256") or ""),
+        }
+    )
+    return (dict(uia_ref) if isinstance(uia_ref, dict) else None), summary
+
+
+def _metadata_keys(metadata: Any) -> list[str]:
+    keys_fn = getattr(metadata, "keys", None)
+    if callable(keys_fn):
+        try:
+            return [str(x) for x in keys_fn()]
+        except Exception:
+            return []
+    return []
+
+
+def _collect_uia_docs(metadata: Any, *, run_id: str) -> dict[str, Any]:
+    prefix = f"{run_id}/derived.sst.text/extra/"
+    doc_ids: list[str] = []
+    counts: dict[str, int] = {"obs.uia.focus": 0, "obs.uia.context": 0, "obs.uia.operable": 0}
+    for record_id in _metadata_keys(metadata):
+        if not str(record_id).startswith(prefix):
+            continue
+        try:
+            payload = _safe_call(metadata, "get", str(record_id), None)
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        kind = str(payload.get("doc_kind") or "").strip()
+        if kind not in counts:
+            continue
+        counts[kind] = int(counts.get(kind, 0)) + 1
+        doc_ids.append(str(record_id))
+    return {
+        "count_by_kind": counts,
+        "doc_ids": sorted(doc_ids),
+        "total": int(sum(int(v) for v in counts.values())),
+    }
 
 
 def _append_journal_event(journal: Any | None, *, event_type: str, payload: dict[str, Any], ts_utc: str) -> bool:
@@ -543,6 +692,28 @@ def main(argv: list[str] | None = None) -> int:
         help="Inject deterministic synthetic HID metadata/journal records before idle processing.",
     )
     parser.add_argument(
+        "--uia-synthetic",
+        choices=("off", "metadata", "fallback"),
+        default="off",
+        help="Inject synthetic UIA sidecar contract data via metadata or fallback.",
+    )
+    parser.add_argument(
+        "--uia-synthetic-pack-json",
+        default="",
+        help="Optional path to a prebuilt synthetic_uia_contract_pack.json fixture.",
+    )
+    parser.add_argument(
+        "--uia-synthetic-dataroot",
+        default="",
+        help="Synthetic dataroot used for fallback mode (defaults to run_dir/synthetic_uia).",
+    )
+    parser.add_argument(
+        "--uia-synthetic-hash-mode",
+        choices=("match", "mismatch"),
+        default="match",
+        help="Synthetic hash mode for generated UIA fixtures.",
+    )
+    parser.add_argument(
         "--skip-vllm-unstable",
         dest="skip_vllm_unstable",
         action="store_true",
@@ -565,6 +736,7 @@ def main(argv: list[str] | None = None) -> int:
         budget_ms=int(parsed.budget_ms),
         max_idle_steps=int(parsed.max_idle_steps),
         synthetic_hid=str(parsed.synthetic_hid),
+        uia_synthetic=str(parsed.uia_synthetic),
         skip_vllm_unstable=bool(parsed.skip_vllm_unstable),
     )
     if not image_path.exists():
@@ -579,6 +751,13 @@ def main(argv: list[str] | None = None) -> int:
     config_dir = run_dir / "config"
     data_dir = run_dir / "data"
     report_path = run_dir / "report.json"
+    synthetic_uia_dataroot = (
+        Path(str(parsed.uia_synthetic_dataroot)).expanduser()
+        if str(parsed.uia_synthetic_dataroot or "").strip()
+        else (run_dir / "synthetic_uia")
+    )
+    if not synthetic_uia_dataroot.is_absolute():
+        synthetic_uia_dataroot = (run_dir / synthetic_uia_dataroot).resolve()
 
     strict_golden = _strict_golden_enabled()
     base_cfg = _load_json(resolve_repo_path(parsed.config_base))
@@ -701,6 +880,8 @@ def main(argv: list[str] | None = None) -> int:
                 allowlist.append("builtin.vlm.qwen2_vl_2b")
             if "builtin.processing.sst.ui_vlm" not in allowlist:
                 allowlist.append("builtin.processing.sst.ui_vlm")
+            if "builtin.processing.sst.uia_context" not in allowlist:
+                allowlist.append("builtin.processing.sst.uia_context")
             if "builtin.sst.ui.parse" not in allowlist:
                 allowlist.append("builtin.sst.ui.parse")
             if "builtin.answer.synth_vllm_localhost" not in allowlist:
@@ -725,6 +906,7 @@ def main(argv: list[str] | None = None) -> int:
             enabled["builtin.sst.qa.answers"] = False
             enabled["builtin.observation.graph"] = True
             enabled["builtin.processing.sst.ui_vlm"] = True
+            enabled["builtin.processing.sst.uia_context"] = True
             enabled["builtin.sst.ui.parse"] = True
             enabled["builtin.answer.synth_vllm_localhost"] = True
             enabled["builtin.vlm.vllm_localhost"] = True
@@ -779,6 +961,12 @@ def main(argv: list[str] | None = None) -> int:
                 vllm_settings["roi_max_tokens"] = min(_coerce_int(vllm_settings.get("roi_max_tokens"), 1024), 1024)
                 vllm_settings["max_tokens"] = min(_coerce_int(vllm_settings.get("max_tokens"), 640), 640)
                 vllm_settings["factpack_enabled"] = bool(vllm_settings.get("factpack_enabled", True))
+            if str(parsed.uia_synthetic) in {"metadata", "fallback"}:
+                uia_settings = settings.setdefault("builtin.processing.sst.uia_context", {})
+                if isinstance(uia_settings, dict):
+                    uia_settings["dataroot"] = str(synthetic_uia_dataroot)
+                    uia_settings["allow_latest_snapshot_fallback"] = True
+                    uia_settings["require_hash_match"] = True
                 vllm_settings["factpack_max_tokens"] = min(
                     _coerce_int(vllm_settings.get("factpack_max_tokens"), 1280),
                     1280,
@@ -946,6 +1134,14 @@ def main(argv: list[str] | None = None) -> int:
         "force_idle": bool(parsed.force_idle),
         "profile_path": str(profile_path),
         "strict_golden": bool(strict_golden),
+        "uia_injection": {
+            "enabled": bool(str(parsed.uia_synthetic) in {"metadata", "fallback"}),
+            "source": str(parsed.uia_synthetic),
+            "pack_json": str(parsed.uia_synthetic_pack_json or ""),
+            "dataroot": str(synthetic_uia_dataroot),
+            "hash_mode": str(parsed.uia_synthetic_hash_mode),
+        },
+        "uia_docs": {"count_by_kind": {}, "doc_ids": [], "total": 0},
     }
     if profile_path.exists():
         report["profile_sha256"] = hashlib.sha256(profile_path.read_bytes()).hexdigest()
@@ -1093,7 +1289,33 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             report["providers"] = {"ocr": [], "vlm": []}
 
-        frame_record = _build_frame_record(run_id=run_id, record_id=record_id, ts_utc=ts_utc, image_bytes=image_bytes)
+        uia_ref: dict[str, Any] | None = None
+        if str(parsed.uia_synthetic) in {"metadata", "fallback"}:
+            _emit_progress("ingest.synthetic_uia.begin", mode=str(parsed.uia_synthetic))
+            uia_ref, uia_summary = _inject_synthetic_uia(
+                metadata=metadata,
+                run_dir=run_dir,
+                run_id=run_id,
+                ts_utc=ts_utc,
+                mode=str(parsed.uia_synthetic),
+                hash_mode=str(parsed.uia_synthetic_hash_mode),
+                dataroot=str(synthetic_uia_dataroot),
+                pack_json=str(parsed.uia_synthetic_pack_json or ""),
+            )
+            report["uia_injection"] = dict(uia_summary)
+            _emit_progress(
+                "ingest.synthetic_uia.done",
+                mode=str(parsed.uia_synthetic),
+                record_id=str((uia_ref or {}).get("record_id") or ""),
+            )
+
+        frame_record = _build_frame_record(
+            run_id=run_id,
+            record_id=record_id,
+            ts_utc=ts_utc,
+            image_bytes=image_bytes,
+            uia_ref=uia_ref,
+        )
         _emit_progress(
             "ingest.frame.begin",
             record_id=str(record_id),
@@ -1131,6 +1353,10 @@ def main(argv: list[str] | None = None) -> int:
             report["synthetic_hid"] = {"enabled": False, "mode": "off", "metadata_record_ids": [], "journal_events_written": 0}
 
         need_vlm = _should_require_vlm(required_plugins)
+        if str(parsed.uia_synthetic) in {"metadata", "fallback"}:
+            # Synthetic UIA gauntlet mode validates metadata-driven answering paths;
+            # do not block idle completion on VLM extractor counters.
+            need_vlm = False
         if vlm_degraded:
             need_vlm = False
         need_sst = (
@@ -1214,6 +1440,7 @@ def main(argv: list[str] | None = None) -> int:
                 "state_ok": bool(int(cumulative_stats.get("state_runs", 0) or 0) > 0),
             },
         }
+        report["uia_docs"] = _collect_uia_docs(metadata, run_id=run_id)
 
         if parsed.query:
             _emit_progress("query.begin", query=str(parsed.query))

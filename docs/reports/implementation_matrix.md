@@ -145,3 +145,22 @@ Additional codex implementation matrix:
 | I114 | Phase 8: Optional expansion plugins | Clipboard capture plugin (local-only, append-only) | complete | plugins/builtin/clipboard_windows | Clipboard capture plugin records append-only evidence entries. | tests/test_clipboard_capture.py; tests/test_optional_plugins_disabled.py |
 | I115 | Phase 8: Optional expansion plugins | File activity capture plugin (USN journal / watcher) | complete | plugins/builtin/file_activity_windows | File activity plugin records append-only timeline events (polling implementation). | tests/test_file_activity_capture.py; tests/test_optional_plugins_disabled.py |
 | I122 | Phase 8: Optional expansion plugins | Plugin hot-reload with hash verification and safe swap | complete | autocapture_nx/plugin_system/registry.py; autocapture_nx/kernel/loader.py | Hot reload swaps non-core plugins only when lockfile hashes verify; old instances are closed. | tests/test_plugin_hot_reload_nx.py |
+
+## UIA Synthetic Q40 Gauntlet (2026-02-19)
+
+- Plan: `docs/plans/uia-ingestion-40-question-gauntlet-plan.md`
+- Strict synthetic run artifacts:
+  - `artifacts/advanced10/advanced20_strict_uia_synthetic_20260219T194111Z.json`
+  - `artifacts/advanced10/generic20_uia_synthetic_20260219T194111Z.json`
+  - `artifacts/advanced10/q40_matrix_strict_uia_synthetic_20260219T194111Z.json`
+- Strict matrix result: `matrix_evaluated=40`, `matrix_failed=0`, `matrix_skipped=0`, `strict_mode=true`, `ok=true`
+- Mismatch taxonomy: `docs/reports/q40_uia_mismatch_latest.md` (`total_failures=0`)
+- Determinism gate (`N=5`, artifact mode): `artifacts/advanced10/q40_determinism_gate_latest.json` (`ok=true`, `unique_signature_count=1`)
+- Perf/budget gate: `artifacts/advanced10/q40_perf_budget_gate_latest.json` (`ok=true`)
+- New tooling:
+  - `tools/synthetic_uia_contract_pack.py`
+  - `tools/validate_synthetic_uia_contract.py`
+  - `tools/run_q40_uia_synthetic.sh`
+  - `tools/report_q40_uia_mismatches.py`
+  - `tools/gate_q40_determinism.py`
+  - `tools/gate_q40_perf_budget.py`
