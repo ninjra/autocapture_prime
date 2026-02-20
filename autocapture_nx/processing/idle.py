@@ -32,6 +32,11 @@ from autocapture_nx.kernel.model_output_records import (
     model_output_record_id,
 )
 from autocapture_nx.kernel.providers import capability_providers
+from autocapture_nx.ingest.uia_obs_docs import (
+    _ensure_frame_uia_docs,
+    _frame_uia_expected_ids,
+    _uia_extract_snapshot_dict,
+)
 from autocapture_nx.storage.facts_ndjson import append_fact_line
 from autocapture.storage.retention import retention_eligibility_record_id
 from autocapture.storage.stage1 import mark_stage1_and_retention, stage1_complete_record_id
@@ -64,6 +69,8 @@ class IdleProcessStats:
     stage1_missing_retention_marker_count: int = 0
     stage1_backfill_scanned_records: int = 0
     stage1_backfill_marked_records: int = 0
+    stage1_uia_docs_inserted: int = 0
+    stage1_uia_frames_missing_count: int = 0
 
 
 @dataclass
@@ -576,7 +583,61 @@ class IdleProcessor:
                 else:
                     stats.stage1_retention_marked_records += 1
         except Exception:
+            pass
+        try:
+            self._ensure_stage1_uia_docs(record_id, record, stats=stats)
+        except Exception:
             return
+
+    def _ensure_stage1_uia_docs(self, record_id: str, record: dict[str, Any], *, stats: IdleProcessStats) -> None:
+        if self._metadata is None:
+            return
+        if not isinstance(record, dict):
+            return
+        if str(record.get("record_type") or "") != "evidence.capture.frame":
+            return
+        storage_cfg = self._config.get("storage", {}) if isinstance(self._config, dict) else {}
+        dataroot = str(storage_cfg.get("data_dir") or "").strip()
+        if not dataroot:
+            dataroot = str(os.environ.get("AUTOCAPTURE_DATA_DIR") or "").strip()
+        if not dataroot:
+            dataroot = "data"
+        status = _ensure_frame_uia_docs(
+            self._metadata,
+            source_record_id=str(record_id),
+            record=record,
+            dataroot=str(dataroot),
+        )
+        stats.stage1_uia_docs_inserted += int(status.get("inserted", 0) or 0)
+        if bool(status.get("required", False)) and not bool(status.get("ok", False)):
+            stats.stage1_uia_frames_missing_count += 1
+
+    def _has_stage1_uia_docs(self, record: dict[str, Any]) -> bool:
+        if self._metadata is None:
+            return True
+        if not isinstance(record, dict):
+            return True
+        if str(record.get("record_type") or "") != "evidence.capture.frame":
+            return True
+        uia_ref = record.get("uia_ref") if isinstance(record.get("uia_ref"), dict) else {}
+        uia_record_id = str(uia_ref.get("record_id") or "").strip()
+        if not uia_record_id:
+            return True
+        expected_ids = _frame_uia_expected_ids(uia_record_id)
+        missing = False
+        for kind, doc_id in expected_ids.items():
+            row = self._metadata.get(doc_id, None)
+            if not (isinstance(row, dict) and str(row.get("record_type") or "") == kind):
+                missing = True
+                break
+        if not missing:
+            return True
+        # Fail-open: if snapshot is unavailable we do not block stage1 completeness.
+        snapshot_value = self._metadata.get(uia_record_id, None)
+        snapshot = _uia_extract_snapshot_dict(snapshot_value)
+        if not isinstance(snapshot, dict):
+            return True
+        return False
 
     def _has_stage1_and_retention_markers(self, record_id: str) -> bool:
         if self._metadata is None:
@@ -594,6 +655,8 @@ class IdleProcessor:
                 return False
             if bool(retention_marker.get("quarantine_pending", False)):
                 return False
+        if not self._has_stage1_uia_docs(record):
+            return False
         return True
 
     def _backfill_stage1_markers(

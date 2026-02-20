@@ -9,8 +9,8 @@ from typing import Any
 
 from autocapture_nx.ingest.handoff_ingest import _SqliteMetadataAdapter
 from autocapture_nx.ingest.handoff_ingest import _choose_source_table
-from autocapture_nx.ingest.handoff_ingest import _ensure_frame_uia_docs
 from autocapture_nx.ingest.handoff_ingest import _table_columns
+from autocapture_nx.ingest.uia_obs_docs import _ensure_frame_uia_docs
 
 
 def _decode_payload(payload_text: str | None) -> dict[str, Any] | None:

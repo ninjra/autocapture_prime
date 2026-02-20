@@ -84,6 +84,20 @@ class RunAdvanced10ExpectedEvalTests(unittest.TestCase):
         result = {"ok": False, "error": "boot_failed", "stderr": "ConfigError: instance_lock_held"}
         self.assertTrue(mod._is_instance_lock_error(result))
 
+    def test_contractize_query_failure_emits_deterministic_no_evidence_contract(self) -> None:
+        mod = _load_module()
+        raw = {"ok": False, "error": "query_timeout:30.0s", "answer": {}, "processing": {}}
+        out1 = mod._contractize_query_failure(raw, query="what changed", case_id="GQ9")
+        out2 = mod._contractize_query_failure(raw, query="what changed", case_id="GQ9")
+        self.assertTrue(bool(out1.get("ok", False)))
+        answer = out1.get("answer", {}) if isinstance(out1.get("answer", {}), dict) else {}
+        processing = out1.get("processing", {}) if isinstance(out1.get("processing", {}), dict) else {}
+        trace = processing.get("query_trace", {}) if isinstance(processing.get("query_trace", {}), dict) else {}
+        self.assertEqual(str(answer.get("state") or ""), "no_evidence")
+        self.assertTrue(str(answer.get("summary") or "").strip())
+        self.assertTrue(str(trace.get("query_run_id") or "").strip())
+        self.assertEqual(out1, out2)
+
     def test_expected_contains_all_and_path_checks_pass(self) -> None:
         mod = _load_module()
         case = {
