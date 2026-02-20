@@ -92,7 +92,20 @@ class StorageRetentionTests(unittest.TestCase):
         self.assertEqual(int(result_blocked.deleted), 0)
         self.assertEqual(media.get(record_id), b"old")
 
-        marker_id = mark_evidence_retention_eligible(metadata, record_id, record, reason="test")
+        legacy_marker_id = mark_evidence_retention_eligible(metadata, record_id, record, reason="legacy_test")
+        self.assertEqual(legacy_marker_id, retention_eligibility_record_id(record_id))
+        result_legacy_blocked = apply_evidence_retention(metadata, media, config, dry_run=False)
+        self.assertIsNotNone(result_legacy_blocked)
+        self.assertEqual(int(result_legacy_blocked.deleted), 0)
+        self.assertEqual(media.get(record_id), b"old")
+
+        marker_id = mark_evidence_retention_eligible(
+            metadata,
+            record_id,
+            record,
+            reason="test",
+            stage1_contract_validated=True,
+        )
         self.assertEqual(marker_id, retention_eligibility_record_id(record_id))
         self.assertIsNotNone(metadata.get(marker_id))
 

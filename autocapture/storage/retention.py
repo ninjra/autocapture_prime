@@ -110,6 +110,8 @@ def mark_evidence_retention_eligible(
     record: dict[str, Any],
     *,
     reason: str = "processed",
+    stage1_contract_validated: bool = False,
+    quarantine_pending: bool = False,
     ts_utc: str | None = None,
     event_builder: Any | None = None,
     logger: Any | None = None,
@@ -118,10 +120,33 @@ def mark_evidence_retention_eligible(
         return None
     rid = retention_eligibility_record_id(record_id)
     existing = metadata.get(rid, None) if hasattr(metadata, "get") else None
-    if isinstance(existing, dict):
-        return rid
     run_id = str(record.get("run_id") or (record_id.split("/", 1)[0] if "/" in record_id else "run"))
     ts_val = str(ts_utc or datetime.now(timezone.utc).isoformat())
+    validated = bool(stage1_contract_validated)
+    pending = bool(quarantine_pending and not validated)
+    if isinstance(existing, dict):
+        if str(existing.get("record_type") or "") != "retention.eligible":
+            return rid
+        needs_upgrade = bool(validated and not bool(existing.get("stage1_contract_validated", False)))
+        if not needs_upgrade:
+            return rid
+        upgraded = dict(existing)
+        upgraded["stage1_contract_validated"] = True
+        upgraded["quarantine_pending"] = False
+        upgraded["schema_version"] = 1
+        upgraded["eligible"] = True
+        upgraded["ts_utc"] = ts_val
+        upgraded["reason"] = str(reason or existing.get("reason") or "processed")
+        try:
+            if hasattr(metadata, "put_replace"):
+                metadata.put_replace(rid, upgraded)
+            elif hasattr(metadata, "put"):
+                metadata.put(rid, upgraded)
+            else:
+                return None
+        except Exception:
+            return None
+        return rid
     payload: dict[str, Any] = {
         "schema_version": 1,
         "record_type": "retention.eligible",
@@ -131,6 +156,8 @@ def mark_evidence_retention_eligible(
         "source_record_type": str(record.get("record_type") or ""),
         "reason": str(reason or "processed"),
         "eligible": True,
+        "stage1_contract_validated": validated,
+        "quarantine_pending": pending,
     }
     try:
         if hasattr(metadata, "put_new"):
@@ -166,6 +193,12 @@ def _retention_ready(metadata: Any, record_id: str) -> bool:
     if not isinstance(marker, dict):
         return False
     if str(marker.get("record_type") or "") != "retention.eligible":
+        return False
+    if bool(marker.get("quarantine_pending", False)):
+        return False
+    source_record_type = str(marker.get("source_record_type") or "")
+    is_frame = source_record_type == "evidence.capture.frame" or record_id.endswith("/evidence.capture.frame")
+    if is_frame and not bool(marker.get("stage1_contract_validated", False)):
         return False
     return bool(marker.get("eligible", True))
 

@@ -125,6 +125,8 @@ def mark_stage1_and_retention(
     event_builder: Any | None = None,
     logger: Any | None = None,
 ) -> dict[str, Any]:
+    record_type = str(record.get("record_type") or "") if isinstance(record, dict) else ""
+    is_frame = record_type == "evidence.capture.frame"
     stage1_id, stage1_inserted = mark_stage1_complete(
         metadata,
         record_id,
@@ -134,20 +136,28 @@ def mark_stage1_and_retention(
         event_builder=event_builder,
         logger=logger,
     )
+    retention_id: str | None = None
     retention_reason = "stage1_complete" if stage1_id else str(reason or "idle_processed")
-    retention_id = mark_evidence_retention_eligible(
-        metadata,
-        record_id,
-        record,
-        reason=retention_reason,
-        ts_utc=ts_utc,
-        event_builder=event_builder,
-        logger=logger,
-    )
+    # Fail closed for frame evidence: no retention marker unless Stage1 contract is complete.
+    if (not is_frame) or bool(stage1_id):
+        retention_id = mark_evidence_retention_eligible(
+            metadata,
+            record_id,
+            record,
+            reason=retention_reason,
+            stage1_contract_validated=bool(stage1_id),
+            quarantine_pending=bool(is_frame and not stage1_id),
+            ts_utc=ts_utc,
+            event_builder=event_builder,
+            logger=logger,
+        )
     if retention_id is None:
         # Existing marker may already be present.
         fallback = retention_eligibility_record_id(record_id)
         existing = metadata.get(fallback, None) if hasattr(metadata, "get") else None
+        if isinstance(existing, dict):
+            if is_frame and not bool(existing.get("stage1_contract_validated", False)):
+                existing = None
         if isinstance(existing, dict):
             retention_id = fallback
     return {

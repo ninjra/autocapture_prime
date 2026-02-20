@@ -587,6 +587,13 @@ class IdleProcessor:
             return False
         if _is_missing_metadata_record(retention_marker):
             return False
+        record_raw = self._metadata.get(record_id, {})
+        record = record_raw if isinstance(record_raw, dict) else {}
+        if str(record.get("record_type") or "") == "evidence.capture.frame":
+            if not bool(retention_marker.get("stage1_contract_validated", False)):
+                return False
+            if bool(retention_marker.get("quarantine_pending", False)):
+                return False
         return True
 
     def _backfill_stage1_markers(
@@ -630,10 +637,20 @@ class IdleProcessor:
             if self._needs_processing(record_id, record, allow_ocr, allow_vlm, pipeline_enabled):
                 continue
             had_stage1 = not _is_missing_metadata_record(self._metadata.get(stage1_complete_record_id(record_id), None))
-            had_retention = not _is_missing_metadata_record(self._metadata.get(retention_eligibility_record_id(record_id), None))
+            retention_marker = self._metadata.get(retention_eligibility_record_id(record_id), None)
+            had_retention = not _is_missing_metadata_record(retention_marker)
+            if str(record.get("record_type") or "") == "evidence.capture.frame" and isinstance(retention_marker, dict):
+                had_retention = had_retention and bool(retention_marker.get("stage1_contract_validated", False)) and not bool(
+                    retention_marker.get("quarantine_pending", False)
+                )
             self._mark_stage1_retention(record_id, record, reason="stage1_backfill", stats=stats)
             has_stage1 = not _is_missing_metadata_record(self._metadata.get(stage1_complete_record_id(record_id), None))
-            has_retention = not _is_missing_metadata_record(self._metadata.get(retention_eligibility_record_id(record_id), None))
+            retention_after = self._metadata.get(retention_eligibility_record_id(record_id), None)
+            has_retention = not _is_missing_metadata_record(retention_after)
+            if str(record.get("record_type") or "") == "evidence.capture.frame" and isinstance(retention_after, dict):
+                has_retention = has_retention and bool(retention_after.get("stage1_contract_validated", False)) and not bool(
+                    retention_after.get("quarantine_pending", False)
+                )
             if (has_stage1 and not had_stage1) or (has_retention and not had_retention):
                 marked += 1
         stats.stage1_backfill_scanned_records += scanned

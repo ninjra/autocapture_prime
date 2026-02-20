@@ -54,6 +54,22 @@ class Stage1RetentionMarkerTests(unittest.TestCase):
         self.assertIsNone(result["stage1_record_id"])
         self.assertEqual(result["retention_record_id"], retention_eligibility_record_id(record_id))
 
+    def test_incomplete_frame_does_not_mark_retention(self) -> None:
+        metadata = _MetadataStore()
+        record_id = "run_test/evidence.capture.frame/2"
+        payload = {
+            "record_type": "evidence.capture.frame",
+            "run_id": "run_test",
+            "ts_utc": "2026-02-20T00:00:00Z",
+            # Missing content_hash/uia_ref/input_ref => incomplete Stage1.
+            "blob_path": "media/rid_frame_2.blob",
+        }
+        result = mark_stage1_and_retention(metadata, record_id, payload, reason="idle_processed")
+        self.assertFalse(result["stage1_complete"])
+        self.assertIsNone(result["retention_record_id"])
+        marker_id = retention_eligibility_record_id(record_id)
+        self.assertIsNone(metadata.get(marker_id))
+
 
 if __name__ == "__main__":
     unittest.main()

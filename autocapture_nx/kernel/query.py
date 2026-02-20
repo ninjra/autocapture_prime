@@ -219,6 +219,15 @@ def _citation_locator(
     return payload
 
 
+def _query_raw_off_enabled(system: Any) -> bool:
+    query_cfg = getattr(system, "config", {}) if hasattr(system, "config") else {}
+    runtime_cfg = query_cfg.get("runtime", {}) if isinstance(query_cfg, dict) else {}
+    raw_off_cfg = runtime_cfg.get("raw_off", {}) if isinstance(runtime_cfg, dict) else {}
+    if isinstance(raw_off_cfg, dict):
+        return bool(raw_off_cfg.get("enabled", True))
+    return True
+
+
 def _run_screen_pipeline_custom_claims(
     system: Any,
     *,
@@ -239,6 +248,9 @@ def _run_screen_pipeline_custom_claims(
         return [], debug, None
 
     query_cfg = getattr(system, "config", {}) if hasattr(system, "config") else {}
+    if _query_raw_off_enabled(system):
+        debug["reason"] = "raw_off_enforced"
+        return [], debug, None
     screen_cfg = query_cfg.get("query", {}).get("screen_pipeline", {}) if isinstance(query_cfg, dict) else {}
     enabled = True
     if isinstance(screen_cfg, dict):
@@ -2651,6 +2663,8 @@ def _first_evidence_record_id(result: dict[str, Any]) -> str:
 
 def _load_evidence_image_bytes(system: Any, evidence_id: str) -> bytes:
     if not evidence_id or not hasattr(system, "get"):
+        return b""
+    if _query_raw_off_enabled(system):
         return b""
     try:
         media = system.get("storage.media")
