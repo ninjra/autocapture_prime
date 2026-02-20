@@ -13,6 +13,7 @@ from typing import Any
 from dataclasses import dataclass
 
 from autocapture_nx.kernel.crypto import EncryptedBlob, decrypt_bytes, encrypt_bytes
+from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.kernel.keyring import KeyRing
 from autocapture_nx.kernel.metadata_store import ImmutableMetadataStore
 from autocapture_nx.kernel.telemetry import record_telemetry
@@ -857,26 +858,48 @@ class PlainBlobStore:
             if os.path.exists(cached):
                 return [cached]
             self._index.pop(record_id, None)
-        encoded = _encode_record_id(record_id)
+        encoded_candidates: list[str] = [_encode_record_id(record_id)]
+        legacy_component = ""
+        try:
+            legacy_component = str(encode_record_id_component(record_id) or "")
+        except Exception:
+            legacy_component = ""
+        if legacy_component and legacy_component not in encoded_candidates:
+            encoded_candidates.append(legacy_component)
         run_dir = os.path.join(self._root, _encode_record_id(self._run_id))
         if os.path.isdir(run_dir):
             for current, _dirs, files in os.walk(run_dir):
                 for ext in (BLOB_EXT, STREAM_EXT):
-                    name = f"{encoded}{ext}"
-                    if name in files:
-                        path = os.path.join(current, name)
-                        self._index[record_id] = path
-                        return [path]
+                    for encoded in encoded_candidates:
+                        if "/" in encoded:
+                            path = os.path.join(current, f"{encoded}{ext}")
+                            if os.path.exists(path):
+                                self._index[record_id] = path
+                                return [path]
+                            continue
+                        name = f"{encoded}{ext}"
+                        if name in files:
+                            path = os.path.join(current, name)
+                            self._index[record_id] = path
+                            return [path]
         if os.path.isdir(self._root):
             for current, _dirs, files in os.walk(self._root):
                 for ext in (BLOB_EXT, STREAM_EXT):
-                    name = f"{encoded}{ext}"
-                    if name in files:
-                        path = os.path.join(current, name)
-                        self._index[record_id] = path
-                        return [path]
-        paths.append(os.path.join(self._root, f"{encoded}{BLOB_EXT}"))
-        paths.append(os.path.join(self._root, f"{encoded}{STREAM_EXT}"))
+                    for encoded in encoded_candidates:
+                        if "/" in encoded:
+                            path = os.path.join(current, f"{encoded}{ext}")
+                            if os.path.exists(path):
+                                self._index[record_id] = path
+                                return [path]
+                            continue
+                        name = f"{encoded}{ext}"
+                        if name in files:
+                            path = os.path.join(current, name)
+                            self._index[record_id] = path
+                            return [path]
+        for encoded in encoded_candidates:
+            paths.append(os.path.join(self._root, f"{encoded}{BLOB_EXT}"))
+            paths.append(os.path.join(self._root, f"{encoded}{STREAM_EXT}"))
         legacy = _legacy_safe_id(record_id)
         paths.append(os.path.join(self._root, f"{legacy}.bin"))
         return paths
