@@ -9,7 +9,7 @@
     "contracts/chronicle/v0/generated/chronicle_codegen_stamp.json": "88dfa61fb3e53a0e72e4bdf30e9f562a6dfdff9f51235c6fd367cba9ebbff05e",
     "contracts/chronicle/v0/spool_format.md": "a6bb6ed46de7ab45be8db61795ebdb0a73a3451cdad5639950f0710d13fad043",
     "contracts/citation.schema.json": "fbd7c720a7fb915aea331b59dcad3ac25a042d0d2780717e9a208500e2d8653f",
-    "contracts/config_schema.json": "deb4f5fd0593d88f088f0a8b503f04c19c59ebf60b6020fe0d1890a009a54def",
+    "contracts/config_schema.json": "97ea9bcfeb0f1674d767d13b92fe1472c7b1472ee780dfbe4235c328c3b57b03",
     "contracts/diagnostics_bundle.schema.json": "ed67b1509cdc3f67042966003b1771c7b2f627b12d2ab4bd5a625a4462c1d4c4",
     "contracts/evaluation.schema.json": "1d44fbc2ebacaa85c6e77c35a2e4e338e93e215905e7f7e50f08895be96a84b9",
     "contracts/evidence.schema.json": "2f00a1abc0670030308ab77f347ab9d7f7d4e2f017d65d76fcbc8b946389bd29",
@@ -30,6 +30,6 @@
     "contracts/time_intent.schema.json": "6696c55883e35e0f2eb0689d61b7a05c637959d1d53ba7d8f985bbc2d5e397d8",
     "contracts/user_surface.md": "21f18a2a89dbf9a5c0e73a5bfd8a5642d373d7e48d3413268afa442dd1e925f4"
   },
-  "generated_at": "2026-02-20T04:09:42.281890+00:00",
+  "generated_at": "2026-02-20T21:44:38.304768+00:00",
   "version": 1
 }

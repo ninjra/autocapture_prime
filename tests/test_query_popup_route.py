@@ -2,30 +2,20 @@ import os
 import tempfile
 import unittest
 
-try:
-    from fastapi.testclient import TestClient  # type: ignore
-    from autocapture.web.api import get_app
-    from autocapture_nx.kernel.auth import load_or_create_token
-    from tests._fastapi_support import fastapi_testclient_usable
-except Exception:  # pragma: no cover - optional dependency in some environments
-    TestClient = None  # type: ignore[assignment]
-    get_app = None  # type: ignore[assignment]
-    load_or_create_token = None  # type: ignore[assignment]
-    fastapi_testclient_usable = None  # type: ignore[assignment]
-
-
-_FASTAPI_OK = bool(
-    TestClient is not None
-    and get_app is not None
-    and load_or_create_token is not None
-    and fastapi_testclient_usable is not None
-    and fastapi_testclient_usable()
-)
-
-
-@unittest.skipUnless(_FASTAPI_OK, "fastapi TestClient unavailable or unusable")
 class QueryPopupRouteTests(unittest.TestCase):
+    def _require_fastapi_stack(self):
+        try:
+            from fastapi.testclient import TestClient  # type: ignore
+            from autocapture.web.api import get_app
+            from autocapture_nx.kernel.auth import load_or_create_token
+            from tests._fastapi_support import fastapi_testclient_usable
+        except Exception as exc:  # pragma: no cover - deterministic fail signal
+            self.fail(f"fastapi stack import failed: {type(exc).__name__}: {exc}")
+        self.assertTrue(bool(fastapi_testclient_usable()), "fastapi TestClient unavailable or unusable")
+        return TestClient, get_app, load_or_create_token
+
     def test_popup_route_requires_auth_token(self) -> None:
+        TestClient, get_app, _load_or_create_token = self._require_fastapi_stack()
         with tempfile.TemporaryDirectory() as tmp:
             original_config = os.environ.get("AUTOCAPTURE_CONFIG_DIR")
             original_data = os.environ.get("AUTOCAPTURE_DATA_DIR")
@@ -53,6 +43,7 @@ class QueryPopupRouteTests(unittest.TestCase):
                     os.environ["AUTOCAPTURE_DATA_DIR"] = original_data
 
     def test_popup_route_returns_compact_contract(self) -> None:
+        TestClient, get_app, load_or_create_token = self._require_fastapi_stack()
         with tempfile.TemporaryDirectory() as tmp:
             original_config = os.environ.get("AUTOCAPTURE_CONFIG_DIR")
             original_data = os.environ.get("AUTOCAPTURE_DATA_DIR")
@@ -136,6 +127,7 @@ class QueryPopupRouteTests(unittest.TestCase):
                     os.environ["AUTOCAPTURE_DATA_DIR"] = original_data
 
     def test_popup_route_reports_processing_blocked_state(self) -> None:
+        TestClient, get_app, load_or_create_token = self._require_fastapi_stack()
         with tempfile.TemporaryDirectory() as tmp:
             original_config = os.environ.get("AUTOCAPTURE_CONFIG_DIR")
             original_data = os.environ.get("AUTOCAPTURE_DATA_DIR")

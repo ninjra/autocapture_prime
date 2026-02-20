@@ -1,6 +1,5 @@
 {
   "plugins": {
-    "allowlist": [],
     "capabilities": {
       "answer.synthesizer": {
         "fanout": false,
