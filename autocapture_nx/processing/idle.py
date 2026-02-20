@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import zipfile
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -32,7 +33,7 @@ from autocapture_nx.kernel.model_output_records import (
 )
 from autocapture_nx.kernel.providers import capability_providers
 from autocapture_nx.storage.facts_ndjson import append_fact_line
-from autocapture.storage.retention import mark_evidence_retention_eligible
+from autocapture.storage.stage1 import mark_stage1_and_retention
 
 
 @dataclass
@@ -51,6 +52,15 @@ class IdleProcessStats:
     state_edges: int = 0
     state_evidence: int = 0
     state_errors: int = 0
+    records_planned: int = 0
+    records_completed: int = 0
+    pending_records: int = 0
+    vlm_deferred: int = 0
+    vlm_throttled: int = 0
+    pipeline_deferred: int = 0
+    stage1_complete_records: int = 0
+    stage1_retention_marked_records: int = 0
+    stage1_missing_retention_marker_count: int = 0
 
 
 @dataclass
@@ -71,7 +81,11 @@ class _IdleWorkItem:
     encoded_source: str
     parent_hash: str | None
     missing_count: int
+    needs_ocr: bool
+    needs_vlm: bool
     needs_pipeline: bool
+    allow_pipeline_vlm: bool
+    deferred_vlm_from: str | None
 
 
 def _is_missing_metadata_record(value: Any) -> bool:
@@ -352,8 +366,23 @@ class IdleProcessor:
         return None
 
     def _checkpoint_id(self) -> str:
-        run_id = str(self._config.get("runtime", {}).get("run_id", "run"))
-        return f"{run_id}/derived.idle.checkpoint"
+        return "system/derived.idle.checkpoint"
+
+    def _checkpoint_candidates(self) -> list[str]:
+        candidates = [self._checkpoint_id()]
+        runtime_run_id = str(self._config.get("runtime", {}).get("run_id", "") or "").strip()
+        if runtime_run_id:
+            candidates.append(f"{runtime_run_id}/derived.idle.checkpoint")
+        candidates.append("run/derived.idle.checkpoint")
+        # Preserve order while deduping.
+        out: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            out.append(candidate)
+        return out
 
     def _load_checkpoint(self) -> IdleCheckpoint | None:
         if self._checkpoint_loaded:
@@ -361,20 +390,23 @@ class IdleProcessor:
         self._checkpoint_loaded = True
         if self._metadata is None:
             return None
-        record = self._metadata.get(self._checkpoint_id(), None)
-        if isinstance(record, dict) and record.get("record_type") == "derived.idle.checkpoint":
+        for checkpoint_id in self._checkpoint_candidates():
+            record = self._metadata.get(checkpoint_id, None)
+            if not (isinstance(record, dict) and record.get("record_type") == "derived.idle.checkpoint"):
+                continue
             last_record_id = record.get("last_record_id")
             processed_total = int(record.get("processed_total", 0) or 0)
             updated = str(record.get("ts_utc") or "")
             if updated:
                 self._checkpoint = IdleCheckpoint(last_record_id=str(last_record_id) if last_record_id else None, processed_total=processed_total, updated_utc=updated)
+                break
         return self._checkpoint
 
     def _store_checkpoint(self, last_record_id: str, processed_total: int) -> None:
         if self._metadata is None:
             return
         ts_utc = datetime.now(timezone.utc).isoformat()
-        run_id = str(self._config.get("runtime", {}).get("run_id", "run"))
+        run_id = str(self._config.get("runtime", {}).get("run_id", "") or "").strip() or "run"
         payload = {
             "record_type": "derived.idle.checkpoint",
             "run_id": run_id,
@@ -382,13 +414,18 @@ class IdleProcessor:
             "last_record_id": last_record_id,
             "processed_total": int(processed_total),
         }
-        if hasattr(self._metadata, "put_replace"):
-            try:
-                self._metadata.put_replace(self._checkpoint_id(), payload)
-            except Exception:
+        try:
+            if hasattr(self._metadata, "put_replace"):
+                try:
+                    self._metadata.put_replace(self._checkpoint_id(), payload)
+                except Exception:
+                    self._metadata.put(self._checkpoint_id(), payload)
+            else:
                 self._metadata.put(self._checkpoint_id(), payload)
-        else:
-            self._metadata.put(self._checkpoint_id(), payload)
+        except Exception as exc:
+            if self._logger is not None:
+                self._logger.log("idle.checkpoint_error", {"error": str(exc)})
+            return
         self._checkpoint = IdleCheckpoint(last_record_id=last_record_id, processed_total=int(processed_total), updated_utc=ts_utc)
         if self._events is not None:
             try:
@@ -414,18 +451,39 @@ class IdleProcessor:
     def _ordered_evidence_ids(self, order_by: str) -> list[str]:
         if self._metadata is None:
             return []
+        record_ids = self._record_ids()
+        canonical_ids = [record_id for record_id in record_ids if "/evidence.capture." in str(record_id)]
+        if order_by != "ts_utc":
+            # Canonical IDs are authoritative and avoid an expensive metadata.get()
+            # call over every record in large DBs.
+            if canonical_ids:
+                canonical_ids.sort()
+                return canonical_ids
+            # Legacy compatibility fallback for datasets that predate canonical IDs.
+            evidence_ids: list[str] = []
+            for record_id in record_ids:
+                record = self._metadata.get(record_id, {})
+                record_type = str(record.get("record_type", ""))
+                if record_type.startswith("evidence.capture."):
+                    evidence_ids.append(record_id)
+            evidence_ids.sort()
+            return evidence_ids
+
         evidence: list[tuple[str, str | None]] = []
-        for record_id in self._record_ids():
-            record = self._metadata.get(record_id, {})
-            record_type = str(record.get("record_type", ""))
-            if not record_type.startswith("evidence.capture."):
-                continue
-            ts = record.get("ts_start_utc") or record.get("ts_utc")
-            evidence.append((record_id, ts))
-        if order_by == "ts_utc":
-            evidence.sort(key=lambda item: (_ts_key(item[1]), item[0]))
+        if canonical_ids:
+            for record_id in canonical_ids:
+                record = self._metadata.get(record_id, {})
+                ts = record.get("ts_start_utc") or record.get("ts_utc")
+                evidence.append((record_id, ts))
         else:
-            evidence.sort(key=lambda item: item[0])
+            for record_id in record_ids:
+                record = self._metadata.get(record_id, {})
+                record_type = str(record.get("record_type", ""))
+                if not record_type.startswith("evidence.capture."):
+                    continue
+                ts = record.get("ts_start_utc") or record.get("ts_utc")
+                evidence.append((record_id, ts))
+        evidence.sort(key=lambda item: (_ts_key(item[1]), item[0]))
         return [record_id for record_id, _ts in evidence]
 
     def _needs_processing(
@@ -496,11 +554,11 @@ class IdleProcessor:
         self._state_processor = StateTapeProcessor(self._system)
         return self._state_processor
 
-    def _mark_retention_eligible(self, record_id: str, record: dict[str, Any], *, reason: str) -> None:
+    def _mark_stage1_retention(self, record_id: str, record: dict[str, Any], *, reason: str, stats: IdleProcessStats) -> None:
         if self._metadata is None:
             return
         try:
-            mark_evidence_retention_eligible(
+            result = mark_stage1_and_retention(
                 self._metadata,
                 record_id,
                 record if isinstance(record, dict) else {},
@@ -508,6 +566,12 @@ class IdleProcessor:
                 event_builder=self._events,
                 logger=self._logger,
             )
+            if bool(result.get("stage1_complete", False)):
+                stats.stage1_complete_records += 1
+                if bool(result.get("retention_missing", False)):
+                    stats.stage1_missing_retention_marker_count += 1
+                else:
+                    stats.stage1_retention_marked_records += 1
         except Exception:
             return
 
@@ -681,6 +745,9 @@ class IdleProcessor:
         ocr_providers: list[tuple[str, Any]],
         vlm_providers: list[tuple[str, Any]],
         max_items: int,
+        intelligent_enabled: bool,
+        defer_vlm_on_hash_repeat: bool,
+        hash_repeat_window: int,
         should_abort: Callable[[], bool] | None,
         expired: Callable[[], bool],
         pipeline_enabled: bool,
@@ -690,6 +757,9 @@ class IdleProcessor:
         if metadata is None:
             return [], None, False, 0
         items: list[_IdleWorkItem] = []
+        recent_hashes: deque[str] = deque(maxlen=max(1, int(hash_repeat_window)))
+        recent_hash_set: set[str] = set()
+        hash_vlm_anchor: dict[str, str] = {}
         last_record_id: str | None = None
         aborted = False
         planned = 0
@@ -739,7 +809,8 @@ class IdleProcessor:
                 event_builder=self._events,
                 logger=self._logger,
             )
-            missing_count = 0
+            ocr_missing_count = 0
+            vlm_missing_count = 0
             if allow_ocr:
                 for provider_id, _extractor in ocr_providers:
                     missing, _derived_id = _missing_derived_text(
@@ -751,7 +822,7 @@ class IdleProcessor:
                         config=self._config,
                     )
                     if missing:
-                        missing_count += 1
+                        ocr_missing_count += 1
             if allow_vlm:
                 for provider_id, _extractor in vlm_providers:
                     missing, _derived_id = _missing_derived_text(
@@ -763,7 +834,34 @@ class IdleProcessor:
                         config=self._config,
                     )
                     if missing:
-                        missing_count += 1
+                        vlm_missing_count += 1
+            content_hash = str(record.get("content_hash") or "").strip().lower()
+            if (
+                intelligent_enabled
+                and defer_vlm_on_hash_repeat
+                and vlm_missing_count > 0
+                and content_hash
+                and content_hash in recent_hash_set
+            ):
+                stats.vlm_deferred += 1
+                deferred_vlm_from = hash_vlm_anchor.get(content_hash)
+                vlm_missing_count = 0
+            else:
+                deferred_vlm_from = None
+                if content_hash and vlm_missing_count > 0 and content_hash not in hash_vlm_anchor:
+                    hash_vlm_anchor[content_hash] = record_id
+            if content_hash:
+                if len(recent_hashes) == recent_hashes.maxlen and recent_hashes:
+                    evicted = recent_hashes[0]
+                else:
+                    evicted = ""
+                recent_hashes.append(content_hash)
+                recent_hash_set.add(content_hash)
+                if evicted and evicted not in recent_hashes:
+                    recent_hash_set.discard(evicted)
+            needs_ocr = ocr_missing_count > 0
+            needs_vlm = vlm_missing_count > 0
+            missing_count = int(ocr_missing_count + vlm_missing_count)
             needs_pipeline = False
             if pipeline_enabled:
                 run_id = _derive_run_id(self._config, record_id)
@@ -772,7 +870,7 @@ class IdleProcessor:
                 if _is_missing_metadata_record(metadata.get(frame_id)):
                     needs_pipeline = True
             if missing_count == 0 and not needs_pipeline:
-                self._mark_retention_eligible(record_id, record, reason="already_processed")
+                self._mark_stage1_retention(record_id, record, reason="already_processed", stats=stats)
                 last_record_id = source_record_id
                 continue
             run_id = _derive_run_id(self._config, record_id)
@@ -791,7 +889,11 @@ class IdleProcessor:
                     encoded_source=encoded_source,
                     parent_hash=parent_hash,
                     missing_count=missing_count,
+                    needs_ocr=needs_ocr,
+                    needs_vlm=needs_vlm,
                     needs_pipeline=needs_pipeline,
+                    allow_pipeline_vlm=needs_vlm,
+                    deferred_vlm_from=deferred_vlm_from,
                 )
             )
             last_record_id = source_record_id
@@ -812,10 +914,12 @@ class IdleProcessor:
         expired: Callable[[], bool],
         stats: IdleProcessStats,
         max_items: int,
+        max_records: int = 0,
     ) -> int:
         if not items or not allow or self._metadata is None:
             return 0
         processed = 0
+        scheduled_records: set[str] = set()
         for provider_id, extractor in providers:
             if should_abort and should_abort():
                 break
@@ -823,6 +927,14 @@ class IdleProcessor:
                 break
             tasks: list[tuple[_IdleWorkItem, str]] = []
             for item in items:
+                if kind == "ocr" and not bool(item.needs_ocr):
+                    continue
+                if kind == "vlm" and not bool(item.needs_vlm):
+                    continue
+                if max_records > 0 and item.record_id not in scheduled_records and len(scheduled_records) >= max_records:
+                    if kind == "vlm":
+                        stats.vlm_throttled += 1
+                    continue
                 missing, derived_id = _missing_derived_text(
                     self._metadata,
                     kind=kind,
@@ -833,6 +945,8 @@ class IdleProcessor:
                 )
                 if missing:
                     tasks.append((item, derived_id))
+                    if max_records > 0:
+                        scheduled_records.add(item.record_id)
             if not tasks:
                 continue
             size = max(1, int(batch_size or 1))
@@ -926,6 +1040,73 @@ class IdleProcessor:
                             pass
         return processed
 
+    def _materialize_deferred_vlm(
+        self,
+        *,
+        items: list[_IdleWorkItem],
+        providers: list[tuple[str, Any]],
+        stats: IdleProcessStats,
+        max_items: int,
+    ) -> int:
+        if self._metadata is None or not items or not providers:
+            return 0
+        copied = 0
+        for item in items:
+            source_id = str(item.deferred_vlm_from or "").strip()
+            if not source_id:
+                continue
+            for provider_id, _extractor in providers:
+                if max_items > 0 and stats.processed >= max_items:
+                    return copied
+                missing_target, target_derived_id = _missing_derived_text(
+                    self._metadata,
+                    kind="vlm",
+                    run_id=item.run_id,
+                    provider_id=str(provider_id),
+                    source_id=item.record_id,
+                    config=self._config,
+                )
+                if not missing_target:
+                    continue
+                missing_source, source_derived_id = _missing_derived_text(
+                    self._metadata,
+                    kind="vlm",
+                    run_id=_derive_run_id(self._config, source_id),
+                    provider_id=str(provider_id),
+                    source_id=source_id,
+                    config=self._config,
+                )
+                if missing_source:
+                    continue
+                source_payload = self._metadata.get(source_derived_id, {})
+                if not isinstance(source_payload, dict):
+                    continue
+                text = str(source_payload.get("text") or "").strip()
+                if not text:
+                    continue
+                payload = build_text_record(
+                    kind="vlm",
+                    text=text,
+                    source_id=item.record_id,
+                    source_record=item.record,
+                    provider_id=str(provider_id),
+                    config=self._config,
+                    ts_utc=item.ts_utc,
+                )
+                if not payload:
+                    continue
+                stored = self._store_derived_text(
+                    derived_id=target_derived_id,
+                    payload=payload,
+                    record_id=item.record_id,
+                    record=item.record,
+                    kind="vlm",
+                    stats=stats,
+                )
+                if stored:
+                    copied += 1
+        return copied
+
     def process(self, *, should_abort: Callable[[], bool] | None = None) -> IdleProcessStats:
         done, stats = self.process_step(should_abort=should_abort, budget_ms=0, persist_checkpoint=False)
         _ = done
@@ -956,6 +1137,12 @@ class IdleProcessor:
         backfill_out_of_order = bool(idle_cfg.get("backfill_out_of_order", order_by == "ts_utc"))
         max_gpu = int(idle_cfg.get("max_concurrency_gpu", 1) or 0)
         batch_size = int(idle_cfg.get("batch_size", 4) or 1)
+        intelligent_cfg = idle_cfg.get("intelligent_batch", {}) if isinstance(idle_cfg.get("intelligent_batch", {}), dict) else {}
+        intelligent_enabled = bool(intelligent_cfg.get("enabled", False))
+        defer_vlm_on_hash_repeat = bool(intelligent_cfg.get("defer_vlm_on_hash_repeat", True))
+        hash_repeat_window = max(1, int(intelligent_cfg.get("hash_repeat_window", 8) or 8))
+        max_vlm_records_per_run = max(0, int(intelligent_cfg.get("max_vlm_records_per_run", 0) or 0))
+        max_pipeline_records_per_run = max(0, int(intelligent_cfg.get("max_pipeline_records_per_run", 0) or 0))
         if max_gpu <= 0:
             allow_vlm = False
         sst_cfg = self._config.get("processing", {}).get("sst", {})
@@ -1005,6 +1192,7 @@ class IdleProcessor:
                     backlog.append(record_id)
             if backlog:
                 pending_ids = list(dict.fromkeys(backlog + pending_ids))
+        stats.pending_records = int(len(pending_ids))
 
         processed_total = checkpoint.processed_total if checkpoint else 0
         last_record_id: str | None = None
@@ -1018,11 +1206,15 @@ class IdleProcessor:
             ocr_providers=ocr_providers,
             vlm_providers=vlm_providers,
             max_items=max_items,
+            intelligent_enabled=intelligent_enabled,
+            defer_vlm_on_hash_repeat=defer_vlm_on_hash_repeat,
+            hash_repeat_window=hash_repeat_window,
             should_abort=should_abort,
             expired=_expired,
             pipeline_enabled=pipeline_enabled,
             stats=stats,
         )
+        stats.records_planned = int(len(items))
         if items and not aborted and not _expired():
             max_cpu = int(idle_cfg.get("max_concurrency_cpu", 1) or 1)
             processed_total += self._batch_extract(
@@ -1048,11 +1240,22 @@ class IdleProcessor:
                 expired=_expired,
                 stats=stats,
                 max_items=max_items,
+                max_records=max_vlm_records_per_run,
+            )
+            processed_total += self._materialize_deferred_vlm(
+                items=items,
+                providers=vlm_providers,
+                stats=stats,
+                max_items=max_items,
             )
             pipeline = self._pipeline
             if pipeline_enabled and pipeline is not None and hasattr(pipeline, "process_record"):
+                pipeline_processed = 0
                 for item in items:
                     if not item.needs_pipeline:
+                        continue
+                    if max_pipeline_records_per_run > 0 and pipeline_processed >= max_pipeline_records_per_run:
+                        stats.pipeline_deferred += 1
                         continue
                     if should_abort and should_abort():
                         aborted = True
@@ -1067,7 +1270,7 @@ class IdleProcessor:
                             record=item.record,
                             frame_bytes=item.frame_bytes,
                             allow_ocr=pipeline_allow_ocr,
-                            allow_vlm=pipeline_allow_vlm,
+                            allow_vlm=bool(pipeline_allow_vlm and item.allow_pipeline_vlm),
                             should_abort=should_abort,
                             # Enforce both the per-run max_seconds_per_run deadline and any
                             # governor lease budget deadline, whichever is sooner.
@@ -1111,6 +1314,7 @@ class IdleProcessor:
                     stats.sst_tokens += int(result.ocr_tokens)
                     stats.processed += int(result.derived_records)
                     processed_total += int(result.derived_records)
+                    pipeline_processed += 1
             for item in items:
                 if self._needs_processing(
                     item.record_id,
@@ -1120,7 +1324,8 @@ class IdleProcessor:
                     pipeline_enabled,
                 ):
                     continue
-                self._mark_retention_eligible(item.record_id, item.record, reason="idle_processed")
+                self._mark_stage1_retention(item.record_id, item.record, reason="idle_processed", stats=stats)
+                stats.records_completed += 1
             last_record_id = last_record_id or (items[-1].source_id if items else None)
 
         state_done = True
