@@ -4,6 +4,8 @@ import importlib.util
 import json
 import sqlite3
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -151,6 +153,50 @@ class BackfillUIAObsDocsMigrationTests(unittest.TestCase):
             self.assertEqual(_count(db_path, "obs.uia.focus"), 0)
             self.assertEqual(_count(db_path, "obs.uia.context"), 0)
             self.assertEqual(_count(db_path, "obs.uia.operable"), 0)
+
+    def test_wait_for_db_stability_succeeds_for_static_file(self) -> None:
+        mod = _load_module("tools/migrations/backfill_uia_obs_docs.py", "backfill_uia_obs_docs_wait_ok")
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "metadata.db"
+            db_path.write_bytes(b"seed")
+            result = mod.wait_for_db_stability(
+                db_path=db_path,
+                stable_seconds=0.06,
+                timeout_seconds=0.5,
+                poll_interval_seconds=0.02,
+            )
+            self.assertTrue(bool(result.get("stable")))
+            self.assertEqual(str(result.get("reason")), "stable")
+            self.assertGreaterEqual(float(result.get("waited_seconds") or 0.0), 0.0)
+
+    def test_wait_for_db_stability_times_out_for_churning_file(self) -> None:
+        mod = _load_module("tools/migrations/backfill_uia_obs_docs.py", "backfill_uia_obs_docs_wait_timeout")
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "metadata.db"
+            db_path.write_bytes(b"seed")
+            stop = threading.Event()
+
+            def churn_file() -> None:
+                i = 0
+                while not stop.is_set():
+                    i += 1
+                    db_path.write_bytes(f"seed-{i}".encode("utf-8"))
+                    time.sleep(0.01)
+
+            t = threading.Thread(target=churn_file, daemon=True)
+            t.start()
+            try:
+                result = mod.wait_for_db_stability(
+                    db_path=db_path,
+                    stable_seconds=0.10,
+                    timeout_seconds=0.20,
+                    poll_interval_seconds=0.02,
+                )
+            finally:
+                stop.set()
+                t.join(timeout=0.5)
+            self.assertFalse(bool(result.get("stable")))
+            self.assertEqual(str(result.get("reason")), "timeout")
 
 
 if __name__ == "__main__":

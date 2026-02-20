@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +31,7 @@ def backfill_uia_obs_docs(
     dataroot: str,
     dry_run: bool = False,
     limit: int | None = None,
-) -> dict[str, int]:
+) -> dict[str, Any]:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     summary = {
@@ -42,6 +44,7 @@ def backfill_uia_obs_docs(
     }
     try:
         table = _choose_source_table(conn)
+        summary["source_table"] = str(table)
         cols = set(_table_columns(conn, table))
         metadata = _SqliteMetadataAdapter(conn, table, cols)
         payload_col = "payload" if "payload" in cols else ("payload_json" if "payload_json" in cols else "")
@@ -87,12 +90,81 @@ def backfill_uia_obs_docs(
     return summary
 
 
+def wait_for_db_stability(
+    db_path: Path,
+    *,
+    stable_seconds: float,
+    timeout_seconds: float,
+    poll_interval_seconds: float = 1.0,
+) -> dict[str, Any]:
+    stable_seconds = float(max(0.0, stable_seconds))
+    timeout_seconds = float(max(0.0, timeout_seconds))
+    poll_interval_seconds = float(max(0.01, poll_interval_seconds))
+    start = time.monotonic()
+    last_sig: tuple[int, int, int] | None = None
+    unchanged_for = 0.0
+    samples = 0
+    while True:
+        if not db_path.exists():
+            return {
+                "stable": False,
+                "reason": "db_not_found",
+                "samples": int(samples),
+                "waited_seconds": round(time.monotonic() - start, 3),
+            }
+        try:
+            st = os.stat(str(db_path))
+            sig = (int(st.st_ino), int(st.st_size), int(st.st_mtime_ns))
+        except Exception as exc:
+            return {
+                "stable": False,
+                "reason": f"stat_failed:{type(exc).__name__}",
+                "samples": int(samples),
+                "waited_seconds": round(time.monotonic() - start, 3),
+            }
+        samples += 1
+        if last_sig is not None and sig == last_sig:
+            unchanged_for += poll_interval_seconds
+        else:
+            unchanged_for = 0.0
+            last_sig = sig
+        elapsed = time.monotonic() - start
+        if stable_seconds <= 0.0 or unchanged_for >= stable_seconds:
+            return {
+                "stable": True,
+                "reason": "stable",
+                "samples": int(samples),
+                "waited_seconds": round(elapsed, 3),
+                "signature": {
+                    "inode": int(sig[0]),
+                    "size": int(sig[1]),
+                    "mtime_ns": int(sig[2]),
+                },
+            }
+        if timeout_seconds > 0.0 and elapsed >= timeout_seconds:
+            return {
+                "stable": False,
+                "reason": "timeout",
+                "samples": int(samples),
+                "waited_seconds": round(elapsed, 3),
+                "signature": {
+                    "inode": int(sig[0]),
+                    "size": int(sig[1]),
+                    "mtime_ns": int(sig[2]),
+                },
+            }
+        time.sleep(poll_interval_seconds)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Backfill obs.uia.* docs from frame uia_ref + evidence.uia.snapshot.")
     parser.add_argument("--db", default="/mnt/d/autocapture/metadata.db", help="Path to metadata.db")
     parser.add_argument("--dataroot", default="/mnt/d/autocapture", help="Autocapture data root")
     parser.add_argument("--dry-run", action="store_true", help="Analyze and rollback without writing")
     parser.add_argument("--limit", type=int, default=0, help="Optional max frame rows to scan (0 = all)")
+    parser.add_argument("--wait-stable-seconds", type=float, default=0.0, help="Wait until metadata.db is unchanged for this duration.")
+    parser.add_argument("--wait-timeout-seconds", type=float, default=0.0, help="Max wait budget for --wait-stable-seconds (0 = no timeout).")
+    parser.add_argument("--poll-interval-ms", type=int, default=250, help="Polling interval for stability wait.")
     return parser
 
 
@@ -103,6 +175,27 @@ def main() -> int:
     if not db_path.exists():
         print(json.dumps({"ok": False, "error": "db_not_found", "db": str(db_path)}))
         return 2
+    wait_summary: dict[str, Any] | None = None
+    if float(args.wait_stable_seconds) > 0.0:
+        wait_summary = wait_for_db_stability(
+            db_path=db_path,
+            stable_seconds=float(args.wait_stable_seconds),
+            timeout_seconds=float(args.wait_timeout_seconds),
+            poll_interval_seconds=max(0.01, float(args.poll_interval_ms) / 1000.0),
+        )
+        if not bool(wait_summary.get("stable", False)):
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": "metadata_db_unstable",
+                        "db": str(db_path),
+                        "wait": wait_summary,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 3
     try:
         summary = backfill_uia_obs_docs(
             db_path=db_path,
@@ -113,7 +206,10 @@ def main() -> int:
     except Exception as exc:
         print(json.dumps({"ok": False, "error": f"{type(exc).__name__}:{exc}", "db": str(db_path)}))
         return 1
-    print(json.dumps({"ok": True, "db": str(db_path), "dry_run": bool(args.dry_run), **summary}, sort_keys=True))
+    out: dict[str, Any] = {"ok": True, "db": str(db_path), "dry_run": bool(args.dry_run), **summary}
+    if isinstance(wait_summary, dict):
+        out["wait"] = wait_summary
+    print(json.dumps(out, sort_keys=True))
     return 0
 
 
