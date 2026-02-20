@@ -15,6 +15,7 @@ from autocapture.runtime.budgets import resolve_idle_budgets
 from autocapture.runtime.conductor import create_conductor
 from autocapture.runtime.governor import RuntimeGovernor
 from autocapture_nx.ingest.handoff_ingest import auto_drain_handoff_spool
+from autocapture_nx.kernel.db_status import metadata_db_stability_snapshot
 from autocapture_nx.kernel.hashing import sha256_canonical, sha256_file
 from autocapture_nx.kernel.loader import _canonicalize_config_for_hash
 from autocapture_nx.processing.idle import IdleProcessor
@@ -57,6 +58,7 @@ def _build_landscape_manifest(
     done: bool,
     blocked_reason: str | None,
     loops: int,
+    metadata_db_guard: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     config_hash = sha256_canonical(_canonicalize_config_for_hash(config if isinstance(config, dict) else {}))
     contracts_hash = None
@@ -88,6 +90,8 @@ def _build_landscape_manifest(
     }
     if isinstance(sla, dict):
         payload["sla"] = dict(sla)
+    if isinstance(metadata_db_guard, dict):
+        payload["metadata_db_guard"] = dict(metadata_db_guard)
     payload = _canonical_safe(payload)
     payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
     return payload
@@ -361,6 +365,36 @@ def _apply_retention_sla_pressure(config: dict[str, Any], *, previous_sla: dict[
     }
 
 
+def _metadata_db_guard(config: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(config, dict):
+        return None
+    processing_cfg = config.get("processing", {}) if isinstance(config.get("processing"), dict) else {}
+    idle_cfg = processing_cfg.get("idle", {}) if isinstance(processing_cfg.get("idle"), dict) else {}
+    guard_cfg = idle_cfg.get("metadata_db_guard", {})
+    if guard_cfg is None:
+        guard_cfg = {}
+    if not isinstance(guard_cfg, dict):
+        return None
+    enabled = bool(guard_cfg.get("enabled", True))
+    if not enabled:
+        return {"enabled": False, "ok": True, "reason": "disabled"}
+    sample_count = _clamp_int(guard_cfg.get("sample_count", 3), minimum=1, maximum=32, fallback=3)
+    poll_interval_ms = _clamp_int(guard_cfg.get("poll_interval_ms", 150), minimum=0, maximum=2000, fallback=150)
+    fail_closed = bool(guard_cfg.get("fail_closed", True))
+    snapshot = metadata_db_stability_snapshot(config, sample_count=sample_count, poll_interval_ms=poll_interval_ms)
+    stable = snapshot.get("stable")
+    exists = bool(snapshot.get("exists", False))
+    ok = bool(exists and stable is not False)
+    reason = str(snapshot.get("reason") or ("ok" if ok else "metadata_db_unstable_or_missing"))
+    return {
+        "enabled": True,
+        "ok": ok,
+        "fail_closed": fail_closed,
+        "reason": reason,
+        "snapshot": snapshot,
+    }
+
+
 def run_processing_batch(
     system: Any,
     *,
@@ -382,8 +416,18 @@ def run_processing_batch(
     done = False
     blocked_reason: str | None = None
     previous_sla: dict[str, Any] | None = None
+    metadata_db_guard = _metadata_db_guard(config)
+    guard_blocked = bool(
+        isinstance(metadata_db_guard, dict)
+        and not bool(metadata_db_guard.get("ok", True))
+        and bool(metadata_db_guard.get("fail_closed", True))
+    )
+    if guard_blocked:
+        blocked_reason = str(metadata_db_guard.get("reason") or "metadata_db_unstable")
 
     for loop_idx in range(max(1, int(max_loops))):
+        if guard_blocked:
+            break
         signals = conductor._signals()  # pylint: disable=protected-access
         sla_pressure = _apply_retention_sla_pressure(config, previous_sla=previous_sla)
         adaptive_idle = _apply_adaptive_idle_parallelism(config, signals=signals)
@@ -462,6 +506,7 @@ def run_processing_batch(
         done=done,
         blocked_reason=blocked_reason,
         loops=len(loop_stats),
+        metadata_db_guard=metadata_db_guard,
     )
 
     # Persist manifest best-effort (append-only).
@@ -491,6 +536,7 @@ def run_processing_batch(
         "ok": bool(done),
         "done": bool(done),
         "blocked_reason": blocked_reason,
+        "metadata_db_guard": metadata_db_guard,
         "loops": len(loop_stats),
         "sla": sla_snapshot,
         "manifest": manifest,

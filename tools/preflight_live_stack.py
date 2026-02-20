@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from autocapture_nx.inference.vllm_endpoint import check_external_vllm_ready, enforce_external_vllm_base_url
+from autocapture_nx.kernel.db_status import metadata_db_stability_snapshot
 from autocapture_nx.runtime.http_localhost import request_json
 from autocapture_nx.runtime.service_ports import (
     EMBEDDER_BASE_URL,
@@ -63,6 +64,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dataroot", default="/mnt/d/autocapture")
     parser.add_argument("--vllm-base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--timeout-s", type=float, default=3.0)
+    parser.add_argument("--db-stability-samples", type=int, default=3)
+    parser.add_argument("--db-stability-interval-ms", type=int, default=250)
     parser.add_argument("--output", default="artifacts/live_stack/preflight_latest.json")
     args = parser.parse_args(argv)
 
@@ -109,6 +112,11 @@ def main(argv: list[str] | None = None) -> int:
         auto_recover=True,
     )
     service_contract = _probe_service_contracts(float(args.timeout_s))
+    db_stability = metadata_db_stability_snapshot(
+        {"storage": {"metadata_path": str(metadata_db)}},
+        sample_count=int(args.db_stability_samples),
+        poll_interval_ms=int(args.db_stability_interval_ms),
+    )
 
     checks = [
         _check_row(
@@ -138,6 +146,13 @@ def main(argv: list[str] | None = None) -> int:
             required=True,
             detail=str(metadata_db),
             failure_code="metadata_db_missing",
+        ),
+        _check_row(
+            name="metadata_db_stable",
+            ok=bool(db_stability.get("ok", False)),
+            required=True,
+            detail=db_stability,
+            failure_code="metadata_db_unstable",
         ),
         _check_row(
             name="media_dir_exists",
@@ -208,6 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         "dataroot": str(dataroot),
         "vllm_base_url": str(preflight_base),
         "service_contract": service_contract,
+        "db_stability": db_stability,
         "ready": bool(ready),
         "failure_codes": sorted(set(required_failed)),
         "checks": checks,

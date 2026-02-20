@@ -1,10 +1,12 @@
 import unittest
+from unittest import mock
 
 from autocapture_nx.runtime.batch import (
     _apply_adaptive_idle_parallelism,
     _apply_retention_sla_pressure,
     _build_landscape_manifest,
     _estimate_sla_snapshot,
+    _metadata_db_guard,
 )
 
 
@@ -153,6 +155,41 @@ class RuntimeBatchAdaptiveParallelismTests(unittest.TestCase):
         sla = manifest.get("sla", {}) if isinstance(manifest.get("sla"), dict) else {}
         self.assertEqual(sla.get("throughput_records_per_s"), "1.250000")
         self.assertEqual(sla.get("projected_lag_hours"), "inf")
+
+    def test_metadata_db_guard_fail_closed_blocks_on_churn(self) -> None:
+        config = self._base_config()
+        config["processing"]["idle"]["metadata_db_guard"] = {
+            "enabled": True,
+            "fail_closed": True,
+            "sample_count": 3,
+            "poll_interval_ms": 50,
+        }
+        with mock.patch(
+            "autocapture_nx.runtime.batch.metadata_db_stability_snapshot",
+            return_value={"ok": False, "exists": True, "stable": False, "reason": "metadata_db_churn_detected"},
+        ):
+            guard = _metadata_db_guard(config)
+        self.assertIsInstance(guard, dict)
+        self.assertFalse(bool(guard.get("ok", True)))
+        self.assertTrue(bool(guard.get("fail_closed", False)))
+        self.assertEqual(str(guard.get("reason")), "metadata_db_churn_detected")
+
+    def test_metadata_db_guard_warn_only_when_fail_closed_disabled(self) -> None:
+        config = self._base_config()
+        config["processing"]["idle"]["metadata_db_guard"] = {
+            "enabled": True,
+            "fail_closed": False,
+            "sample_count": 3,
+            "poll_interval_ms": 50,
+        }
+        with mock.patch(
+            "autocapture_nx.runtime.batch.metadata_db_stability_snapshot",
+            return_value={"ok": False, "exists": True, "stable": False, "reason": "metadata_db_churn_detected"},
+        ):
+            guard = _metadata_db_guard(config)
+        self.assertIsInstance(guard, dict)
+        self.assertFalse(bool(guard.get("ok", True)))
+        self.assertFalse(bool(guard.get("fail_closed", True)))
 
 
 if __name__ == "__main__":

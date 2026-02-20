@@ -25,6 +25,11 @@ class PreflightLiveStackTests(unittest.TestCase):
                 mock.patch.object(preflight_live_stack, "check_external_vllm_ready", return_value={"ok": True, "selected_model": "internvl3_5_8b"}),
                 mock.patch.object(
                     preflight_live_stack,
+                    "metadata_db_stability_snapshot",
+                    return_value={"ok": True, "exists": True, "stable": True, "reason": "ok"},
+                ),
+                mock.patch.object(
+                    preflight_live_stack,
                     "_probe_service_contracts",
                     return_value={
                         "vllm_models": {"ok": True},
@@ -60,6 +65,11 @@ class PreflightLiveStackTests(unittest.TestCase):
                 mock.patch.object(preflight_live_stack, "check_external_vllm_ready", return_value={"ok": False, "error": "down"}),
                 mock.patch.object(
                     preflight_live_stack,
+                    "metadata_db_stability_snapshot",
+                    return_value={"ok": False, "exists": True, "stable": False, "reason": "metadata_db_churn_detected"},
+                ),
+                mock.patch.object(
+                    preflight_live_stack,
                     "_probe_service_contracts",
                     return_value={
                         "vllm_models": {"ok": False},
@@ -84,6 +94,7 @@ class PreflightLiveStackTests(unittest.TestCase):
             self.assertEqual(rc, 1)
             self.assertIn("dataroot_missing", codes)
             self.assertIn("metadata_db_missing", codes)
+            self.assertIn("metadata_db_unstable", codes)
             self.assertIn("media_dir_missing", codes)
             self.assertIn("media_empty", codes)
             self.assertIn("vllm_preflight_failed", codes)

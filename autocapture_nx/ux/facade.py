@@ -313,11 +313,20 @@ class UXFacade:
             logger = None
         # OPS-06: always include DB schema/version snapshot without requiring heavy work.
         try:
-            from autocapture_nx.kernel.db_status import db_status_snapshot
+            from autocapture_nx.kernel.db_status import db_status_snapshot, metadata_db_stability_snapshot
 
-            db_status = db_status_snapshot(self._config)
+            db_status = db_status_snapshot(
+                self._config,
+                include_hash=True,
+                include_pragmas=True,
+                include_stability=True,
+                stability_samples=2,
+                stability_poll_interval_ms=50,
+            )
+            db_stability = metadata_db_stability_snapshot(self._config, sample_count=3, poll_interval_ms=100)
         except Exception:
             db_status = None
+            db_stability = None
         kernel = self._kernel_mgr.kernel()
         if kernel is None:
             kernel = Kernel(self._paths, safe_mode=self._safe_mode)
@@ -358,6 +367,8 @@ class UXFacade:
                 pass
         if db_status is not None:
             report["db_status"] = db_status
+        if db_stability is not None:
+            report["db_stability"] = db_stability
         return report
 
     def diagnostics_bundle_create(self) -> dict[str, Any]:
@@ -1133,6 +1144,13 @@ class UXFacade:
                     }
                 except Exception:
                     governor = None
+        db_stability = None
+        try:
+            from autocapture_nx.kernel.db_status import metadata_db_stability_snapshot
+
+            db_stability = metadata_db_stability_snapshot(self._config, sample_count=2, poll_interval_ms=25)
+        except Exception:
+            db_stability = None
         return {
             "run_id": run_id,
             "ledger_head": ledger_head,
@@ -1149,6 +1167,7 @@ class UXFacade:
             "slo": slo,
             "resources": resources,
             "governor": governor,
+            "db_stability": db_stability,
             "kernel_ready": system is not None,
             "kernel_error": kernel_error,
         }
