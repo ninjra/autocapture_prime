@@ -239,6 +239,45 @@ class UIAContextPluginUnitTests(unittest.TestCase):
         out = plugin.run_stage("index.text", {"run_id": "run1", "record_id": "run1/segment/0", "record": {}})
         self.assertIsNone(out)
 
+    def test_emits_all_obs_docs_when_some_sections_have_no_nodes(self) -> None:
+        metadata = _MetadataStore()
+        snapshot_id = "run1/uia/empty-sections"
+        content_hash = "hash-empty-sections"
+        snapshot = _sample_snapshot(snapshot_id, content_hash)
+        snapshot["context_peers"] = []
+        snapshot["operables"] = []
+        metadata.put(snapshot_id, snapshot)
+        ctx = PluginContext(
+            config={
+                "dataroot": "/mnt/d/autocapture",
+                "allow_latest_snapshot_fallback": True,
+                "require_hash_match": True,
+                "max_focus_nodes": 8,
+                "max_context_nodes": 8,
+                "max_operable_nodes": 8,
+                "drop_offscreen": True,
+            },
+            get_capability=lambda name: metadata if name == "storage.metadata" else None,
+            logger=lambda _msg: None,
+        )
+        plugin = UIAContextStageHook("builtin.processing.sst.uia_context", ctx)
+        payload = {
+            "run_id": "run1",
+            "record_id": "run1/segment/0",
+            "frame_width": 320,
+            "frame_height": 180,
+            "record": {"uia_ref": {"record_id": snapshot_id, "content_hash": content_hash}},
+        }
+        out = plugin.run_stage("index.text", payload)
+        self.assertIsInstance(out, dict)
+        docs = out.get("extra_docs", []) if isinstance(out, dict) else []
+        self.assertEqual(len(docs), 3)
+        by_kind = {str(doc.get("doc_kind") or ""): doc for doc in docs if isinstance(doc, dict)}
+        for kind in ("obs.uia.focus", "obs.uia.context", "obs.uia.operable"):
+            self.assertIn(kind, by_kind)
+            boxes = by_kind[kind].get("bboxes", [])
+            self.assertTrue(boxes)
+
     def test_bad_hash_rejects_fallback_when_required(self) -> None:
         metadata = _MetadataStore()
         with tempfile.TemporaryDirectory() as tmpdir:

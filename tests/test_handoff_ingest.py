@@ -50,6 +50,35 @@ def _count_dest_records(db_path: Path, record_type: str) -> int:
         conn.close()
 
 
+def _uia_snapshot_payload(record_id: str, content_hash: str) -> dict:
+    return {
+        "schema_version": 1,
+        "record_type": "evidence.uia.snapshot",
+        "record_id": record_id,
+        "run_id": "run_test",
+        "ts_utc": "2026-02-20T00:00:00Z",
+        "unix_ms_utc": 1771603200000,
+        "hwnd": "0x123",
+        "window": {"title": "Inbox", "process_path": "C:\\Program Files\\Outlook.exe", "pid": 4242},
+        "focus_path": [
+            {
+                "eid": "focus-1",
+                "role": "Edit",
+                "name": "Search",
+                "aid": "SearchBox",
+                "class": "Edit",
+                "rect": [10, 10, 220, 40],
+                "enabled": True,
+                "offscreen": False,
+            }
+        ],
+        "context_peers": [],
+        "operables": [],
+        "stats": {"walk_ms": 12, "nodes_emitted": 3, "failures": 0},
+        "content_hash": content_hash,
+    }
+
+
 class HandoffIngestTests(unittest.TestCase):
     def test_handoff_ingest_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -70,12 +99,15 @@ class HandoffIngestTests(unittest.TestCase):
             }
             _write_handoff_metadata(
                 handoff / "metadata.db",
-                [("run_test/evidence.capture.frame/1", payload)],
+                [
+                    ("run_test/evidence.capture.frame/1", payload),
+                    ("run_test/evidence.uia.snapshot/1", _uia_snapshot_payload("run_test/evidence.uia.snapshot/1", "uia_hash_1")),
+                ],
             )
             ingestor = HandoffIngestor(dest, mode="copy", strict=True)
 
             first = ingestor.ingest_handoff_dir(handoff)
-            self.assertEqual(first.metadata_rows_copied, 1)
+            self.assertEqual(first.metadata_rows_copied, 2)
             self.assertEqual(first.media_files_copied, 1)
             self.assertEqual(first.stage1_complete_records, 1)
             self.assertEqual(first.stage1_retention_marked_records, 1)
@@ -87,6 +119,9 @@ class HandoffIngestTests(unittest.TestCase):
             self.assertEqual(_count_dest_records(dest / "metadata.db", "evidence.capture.frame"), 1)
             self.assertEqual(_count_dest_records(dest / "metadata.db", "derived.ingest.stage1.complete"), 1)
             self.assertEqual(_count_dest_records(dest / "metadata.db", "retention.eligible"), 1)
+            self.assertEqual(_count_dest_records(dest / "metadata.db", "obs.uia.focus"), 1)
+            self.assertEqual(_count_dest_records(dest / "metadata.db", "obs.uia.context"), 1)
+            self.assertEqual(_count_dest_records(dest / "metadata.db", "obs.uia.operable"), 1)
             self.assertEqual(_count_dest_records(dest / "metadata.db", "system.ingest.handoff.completed"), 1)
 
             second = ingestor.ingest_handoff_dir(handoff)
@@ -97,6 +132,9 @@ class HandoffIngestTests(unittest.TestCase):
             self.assertEqual(_count_dest_records(dest / "metadata.db", "evidence.capture.frame"), 1)
             self.assertEqual(_count_dest_records(dest / "metadata.db", "derived.ingest.stage1.complete"), 1)
             self.assertEqual(_count_dest_records(dest / "metadata.db", "retention.eligible"), 1)
+            self.assertEqual(_count_dest_records(dest / "metadata.db", "obs.uia.focus"), 1)
+            self.assertEqual(_count_dest_records(dest / "metadata.db", "obs.uia.context"), 1)
+            self.assertEqual(_count_dest_records(dest / "metadata.db", "obs.uia.operable"), 1)
             self.assertEqual(_count_dest_records(dest / "metadata.db", "system.ingest.handoff.completed"), 1)
 
     def test_handoff_ingest_missing_media_fails_no_marker(self) -> None:
@@ -114,7 +152,10 @@ class HandoffIngestTests(unittest.TestCase):
             }
             _write_handoff_metadata(
                 handoff / "metadata.db",
-                [("run_test/evidence.capture.frame/1", payload)],
+                [
+                    ("run_test/evidence.capture.frame/1", payload),
+                    ("run_test/evidence.uia.snapshot/1", _uia_snapshot_payload("run_test/evidence.uia.snapshot/1", "uia_hash_1")),
+                ],
             )
             ingestor = HandoffIngestor(dest, mode="copy", strict=True)
             with self.assertRaises(FileNotFoundError):
@@ -142,13 +183,17 @@ class HandoffIngestTests(unittest.TestCase):
             }
             _write_handoff_metadata(
                 handoff / "metadata.db",
-                [("run_test/evidence.capture.frame/1", payload)],
+                [
+                    ("run_test/evidence.capture.frame/1", payload),
+                    ("run_test/evidence.uia.snapshot/1", _uia_snapshot_payload("run_test/evidence.uia.snapshot/1", "uia_hash_1")),
+                ],
             )
             ingestor = HandoffIngestor(dest, mode="hardlink", strict=True)
             with patch("autocapture_nx.ingest.handoff_ingest.os.link", side_effect=OSError("xdev")):
                 result = ingestor.ingest_handoff_dir(handoff)
             self.assertEqual(result.media_files_linked, 0)
             self.assertEqual(result.media_files_copied, 1)
+            self.assertEqual(result.metadata_rows_copied, 2)
             self.assertEqual(result.stage1_complete_records, 1)
             self.assertEqual(result.stage1_retention_marked_records, 1)
             self.assertTrue((dest / "media" / "rid_frame_1.blob").exists())
@@ -171,7 +216,13 @@ class HandoffIngestTests(unittest.TestCase):
                 "uia_ref": {"record_id": "run_test/evidence.uia.snapshot/1", "content_hash": "uia_hash_1"},
                 "input_ref": {"record_id": "run_test/evidence.input.batch/1"},
             }
-            _write_handoff_metadata(handoff / "metadata.db", [("run_test/evidence.capture.frame/1", payload)])
+            _write_handoff_metadata(
+                handoff / "metadata.db",
+                [
+                    ("run_test/evidence.capture.frame/1", payload),
+                    ("run_test/evidence.uia.snapshot/1", _uia_snapshot_payload("run_test/evidence.uia.snapshot/1", "uia_hash_1")),
+                ],
+            )
             cfg = {
                 "storage": {"data_dir": str(dest), "spool_dir": str(spool)},
                 "processing": {"idle": {"handoff_ingest": {"enabled": True, "mode": "copy", "strict": True}}},
@@ -184,11 +235,45 @@ class HandoffIngestTests(unittest.TestCase):
             self.assertEqual(int(first.get("stage1_retention_marked_records", 0)), 1)
             self.assertEqual(_count_dest_records(dest / "metadata.db", "derived.ingest.stage1.complete"), 1)
             self.assertEqual(_count_dest_records(dest / "metadata.db", "retention.eligible"), 1)
+            self.assertEqual(_count_dest_records(dest / "metadata.db", "obs.uia.focus"), 1)
+            self.assertEqual(_count_dest_records(dest / "metadata.db", "obs.uia.context"), 1)
+            self.assertEqual(_count_dest_records(dest / "metadata.db", "obs.uia.operable"), 1)
 
             second = auto_drain_handoff_spool(cfg)
             self.assertTrue(bool(second.get("ok", False)))
             self.assertEqual(int(second.get("processed", 0)), 0)
             self.assertGreaterEqual(int(second.get("skipped_marked", 0)), 1)
+
+    def test_handoff_ingest_missing_uia_snapshot_blocks_stage1_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            handoff = root / "handoff-4"
+            dest = root / "dest"
+            (handoff / "media").mkdir(parents=True, exist_ok=True)
+            (handoff / "media" / "rid_frame_1.blob").write_bytes(b"frame-bytes")
+            payload = {
+                "schema_version": 1,
+                "record_type": "evidence.capture.frame",
+                "run_id": "run_test",
+                "ts_utc": "2026-02-20T00:00:00Z",
+                "blob_path": "media/rid_frame_1.blob",
+                "content_hash": "frame_hash_1",
+                "uia_ref": {"record_id": "run_test/evidence.uia.snapshot/missing", "content_hash": "uia_hash_miss"},
+                "input_ref": {"record_id": "run_test/evidence.input.batch/1"},
+            }
+            _write_handoff_metadata(
+                handoff / "metadata.db",
+                [("run_test/evidence.capture.frame/1", payload)],
+            )
+            ingestor = HandoffIngestor(dest, mode="copy", strict=True)
+
+            result = ingestor.ingest_handoff_dir(handoff)
+            self.assertEqual(result.stage1_complete_records, 0)
+            self.assertEqual(result.stage1_retention_marked_records, 0)
+            self.assertEqual(result.stage1_missing_retention_marker_count, 1)
+            self.assertEqual(result.stage1_uia_frames_missing_count, 1)
+            self.assertEqual(_count_dest_records(dest / "metadata.db", "derived.ingest.stage1.complete"), 0)
+            self.assertEqual(_count_dest_records(dest / "metadata.db", "retention.eligible"), 0)
 
 
 if __name__ == "__main__":

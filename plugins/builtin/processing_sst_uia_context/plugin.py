@@ -205,6 +205,7 @@ def _snapshot_to_docs(
     }
 
     docs: list[dict[str, Any]] = []
+    fallback_bbox = [0, 0, max(1, int(frame_width)), max(1, int(frame_height))]
     for section_key, doc_kind, section_label in _SECTIONS:
         raw_nodes = snapshot.get(section_key) if isinstance(snapshot.get(section_key), list) else []
         max_nodes = {
@@ -219,8 +220,6 @@ def _snapshot_to_docs(
             max_nodes=max_nodes,
             drop_offscreen=cfg.drop_offscreen,
         )
-        if not nodes:
-            continue
         doc_id = _uia_doc_id(uia_record_id, section_label, 0)
         doc_text = json.dumps(
             {
@@ -259,6 +258,8 @@ def _snapshot_to_docs(
             "window_pid": window_pid,
         }
         doc["bboxes"] = [node.get("bbox") for node in nodes if isinstance(node.get("bbox"), list)]
+        if not doc["bboxes"]:
+            doc["bboxes"] = [list(fallback_bbox)]
         docs.append(doc)
     return docs
 

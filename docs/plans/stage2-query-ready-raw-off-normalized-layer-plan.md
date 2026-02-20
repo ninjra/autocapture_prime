@@ -13,6 +13,9 @@ Implement a hard split:
 - Completed: Sprint 0 Task 0.1 (`mark_stage1_and_retention` fail-closed for frames; legacy markers quarantined until validated).
 - Completed: Sprint 0 Task 0.2 (`query.py` raw-off hard-stop now covers screen pipeline and `_load_evidence_image_bytes`).
 - Completed: Sprint 3 Task 3.4 migration scaffolding (`tools/migrations/revalidate_stage1_markers.py`) + tests + live run report at `docs/reports/stage1_marker_revalidation_latest.json`.
+- Completed: Stage1 UIA delta for handoff path (`autocapture_nx/ingest/handoff_ingest.py`) now emits deterministic `obs.uia.focus/context/operable` and blocks frame retention markering when UIA linkage is missing.
+- Completed: Historical UIA backfill tool (`tools/migrations/backfill_uia_obs_docs.py`) + tests; latest attempt report at `docs/reports/stage1_uia_backfill_attempt_latest.json`.
+- Blocker: local projection DB appears to be rewritten by an external writer, so historical backfill must run in the authoritative runtime writer path.
 - Remaining high-impact gap: contract-complete Stage1 still needs explicit normalized-coverage auditor from Sprint 1/Task 1.2 to prove no missing artifact classes.
 
 This plan optimizes the 4 pillars:
