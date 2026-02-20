@@ -7,6 +7,7 @@ from autocapture.core.hashing import hash_text, normalize_text
 from autocapture_nx.kernel.derived_records import derived_text_record_id
 from autocapture_nx.processing.idle import IdleProcessor
 from autocapture.storage.retention import retention_eligibility_record_id
+from autocapture.storage.stage1 import stage1_complete_record_id
 
 
 class _MetadataStore:
@@ -352,6 +353,79 @@ class IdleProcessorTests(unittest.TestCase):
             stats = processor.process()
             self.assertEqual(vlm.calls, 1)
             self.assertGreaterEqual(stats.vlm_throttled, 1)
+
+    def test_stage1_backfill_marks_checkpointed_complete_frame_without_reextract(self) -> None:
+        config = {
+            "runtime": {"run_id": "run1"},
+            "processing": {
+                "idle": {
+                    "enabled": True,
+                    "auto_start": False,
+                    "max_items_per_run": 10,
+                    "max_seconds_per_run": 5,
+                    "max_concurrency_cpu": 1,
+                    "max_concurrency_gpu": 0,
+                    "extractors": {"ocr": True, "vlm": False},
+                    "stage1_marker_backfill": {"enabled": True, "max_records_per_run": 10},
+                },
+                "sst": {"enabled": False},
+            },
+        }
+        metadata = _MetadataStore()
+        frame_id = "run1/evidence.capture.frame/0"
+        metadata.put(
+            frame_id,
+            {
+                "record_type": "evidence.capture.frame",
+                "run_id": "run1",
+                "ts_utc": "2024-01-01T00:00:00+00:00",
+                "blob_path": "media/frame0.png",
+                "content_hash": "hash_frame_0",
+                "uia_ref": {"record_id": "run1/evidence.uia.snapshot/0", "content_hash": "uia_hash_0"},
+                "input_ref": {"record_id": "run1/evidence.input.batch/0"},
+                "content_type": "image/png",
+            },
+        )
+        checkpoint_id = "system/derived.idle.checkpoint"
+        metadata.put(
+            checkpoint_id,
+            {
+                "record_type": "derived.idle.checkpoint",
+                "run_id": "run1",
+                "ts_utc": "2024-01-01T00:00:01+00:00",
+                "last_record_id": frame_id,
+                "processed_total": 1,
+            },
+        )
+        ocr_id = derived_text_record_id(
+            kind="ocr",
+            run_id="run1",
+            provider_id="ocr.engine",
+            source_id=frame_id,
+            config=config,
+        )
+        metadata.put(
+            ocr_id,
+            {
+                "record_type": "derived.text.ocr",
+                "run_id": "run1",
+                "source_record_id": frame_id,
+                "text": "already complete",
+            },
+        )
+        media = _MediaStore({frame_id: b"\x89PNG\r\n\x1a\nframe"})
+        ocr = _Extractor("should not run")
+        events = _EventBuilder()
+        system = _System(config, metadata, media, ocr, None, events)
+
+        processor = IdleProcessor(system)
+        done, stats = processor.process_step(budget_ms=0)
+
+        self.assertTrue(done)
+        self.assertEqual(ocr.calls, 0)
+        self.assertGreaterEqual(stats.stage1_backfill_marked_records, 1)
+        self.assertIn(stage1_complete_record_id(frame_id), metadata.data)
+        self.assertIn(retention_eligibility_record_id(frame_id), metadata.data)
 
 
 if __name__ == "__main__":

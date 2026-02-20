@@ -33,7 +33,8 @@ from autocapture_nx.kernel.model_output_records import (
 )
 from autocapture_nx.kernel.providers import capability_providers
 from autocapture_nx.storage.facts_ndjson import append_fact_line
-from autocapture.storage.stage1 import mark_stage1_and_retention
+from autocapture.storage.retention import retention_eligibility_record_id
+from autocapture.storage.stage1 import mark_stage1_and_retention, stage1_complete_record_id
 
 
 @dataclass
@@ -61,6 +62,8 @@ class IdleProcessStats:
     stage1_complete_records: int = 0
     stage1_retention_marked_records: int = 0
     stage1_missing_retention_marker_count: int = 0
+    stage1_backfill_scanned_records: int = 0
+    stage1_backfill_marked_records: int = 0
 
 
 @dataclass
@@ -574,6 +577,68 @@ class IdleProcessor:
                     stats.stage1_retention_marked_records += 1
         except Exception:
             return
+
+    def _has_stage1_and_retention_markers(self, record_id: str) -> bool:
+        if self._metadata is None:
+            return False
+        stage1_marker = self._metadata.get(stage1_complete_record_id(record_id), None)
+        retention_marker = self._metadata.get(retention_eligibility_record_id(record_id), None)
+        if _is_missing_metadata_record(stage1_marker):
+            return False
+        if _is_missing_metadata_record(retention_marker):
+            return False
+        return True
+
+    def _backfill_stage1_markers(
+        self,
+        *,
+        evidence_ids: list[str],
+        start_index: int,
+        allow_ocr: bool,
+        allow_vlm: bool,
+        pipeline_enabled: bool,
+        max_records: int,
+        should_abort: Callable[[], bool] | None,
+        expired: Callable[[], bool],
+        stats: IdleProcessStats,
+    ) -> int:
+        if self._metadata is None:
+            return 0
+        if max_records <= 0 or start_index <= 0:
+            return 0
+        capped_start = min(start_index, len(evidence_ids))
+        if capped_start <= 0:
+            return 0
+        marked = 0
+        scanned = 0
+        # Work newest-first in the checkpointed prefix so recent unmarked frames converge first.
+        for record_id in reversed(evidence_ids[:capped_start]):
+            if should_abort and should_abort():
+                break
+            if expired():
+                break
+            if marked >= max_records:
+                break
+            record_raw = self._metadata.get(record_id, {})
+            record = record_raw if isinstance(record_raw, dict) else {}
+            record_type = str(record.get("record_type", ""))
+            if not record_type.startswith("evidence.capture."):
+                continue
+            scanned += 1
+            if self._has_stage1_and_retention_markers(record_id):
+                continue
+            if self._needs_processing(record_id, record, allow_ocr, allow_vlm, pipeline_enabled):
+                continue
+            had_stage1 = not _is_missing_metadata_record(self._metadata.get(stage1_complete_record_id(record_id), None))
+            had_retention = not _is_missing_metadata_record(self._metadata.get(retention_eligibility_record_id(record_id), None))
+            self._mark_stage1_retention(record_id, record, reason="stage1_backfill", stats=stats)
+            has_stage1 = not _is_missing_metadata_record(self._metadata.get(stage1_complete_record_id(record_id), None))
+            has_retention = not _is_missing_metadata_record(self._metadata.get(retention_eligibility_record_id(record_id), None))
+            if (has_stage1 and not had_stage1) or (has_retention and not had_retention):
+                marked += 1
+        stats.stage1_backfill_scanned_records += scanned
+        stats.stage1_backfill_marked_records += marked
+        return marked
 
     def _index_text(self, doc_id: str, text: str) -> None:
         if not text:
@@ -1143,6 +1208,10 @@ class IdleProcessor:
         hash_repeat_window = max(1, int(intelligent_cfg.get("hash_repeat_window", 8) or 8))
         max_vlm_records_per_run = max(0, int(intelligent_cfg.get("max_vlm_records_per_run", 0) or 0))
         max_pipeline_records_per_run = max(0, int(intelligent_cfg.get("max_pipeline_records_per_run", 0) or 0))
+        stage1_backfill_cfg = idle_cfg.get("stage1_marker_backfill", {}) if isinstance(idle_cfg.get("stage1_marker_backfill", {}), dict) else {}
+        stage1_backfill_enabled = bool(stage1_backfill_cfg.get("enabled", True))
+        default_stage1_backfill_max = max(32, int(max_items * 2) if max_items > 0 else 64)
+        stage1_backfill_max_records = max(0, int(stage1_backfill_cfg.get("max_records_per_run", default_stage1_backfill_max) or 0))
         if max_gpu <= 0:
             allow_vlm = False
         sst_cfg = self._config.get("processing", {}).get("sst", {})
@@ -1197,6 +1266,18 @@ class IdleProcessor:
         processed_total = checkpoint.processed_total if checkpoint else 0
         last_record_id: str | None = None
         aborted = False
+        if stage1_backfill_enabled and start_index > 0 and stage1_backfill_max_records > 0 and not _expired():
+            self._backfill_stage1_markers(
+                evidence_ids=evidence_ids,
+                start_index=start_index,
+                allow_ocr=allow_ocr,
+                allow_vlm=allow_vlm,
+                pipeline_enabled=pipeline_enabled,
+                max_records=stage1_backfill_max_records,
+                should_abort=should_abort,
+                expired=_expired,
+                stats=stats,
+            )
         ocr_providers = _capability_providers(self._ocr, "ocr.engine") if (allow_ocr and self._ocr is not None) else []
         vlm_providers = _capability_providers(self._vlm, "vision.extractor") if (allow_vlm and self._vlm is not None) else []
         items, last_record_id, aborted, _planned = self._collect_work_items(
