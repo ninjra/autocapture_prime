@@ -91,12 +91,14 @@ def _popup_payload(query: str, result: dict[str, Any], max_citations: int) -> di
 
 @router.post("/api/query")
 def query(req: QueryRequest, request: Request):
-    return request.app.state.facade.query(req.query, schedule_extract=bool(req.schedule_extract))
+    _ = req.schedule_extract
+    return request.app.state.facade.query(req.query, schedule_extract=False)
 
 
 @router.post("/api/query/popup")
 def query_popup(req: PopupQueryRequest, request: Request):
-    result = request.app.state.facade.query(req.query, schedule_extract=bool(req.schedule_extract))
+    _ = req.schedule_extract
+    result = request.app.state.facade.query(req.query, schedule_extract=False)
     if not isinstance(result, dict):
         return {
             "ok": False,

@@ -11,4 +11,4 @@ It must not trigger heavy processing (OCR/VLM/embeddings); those occur in idle j
 from __future__ import annotations
 
 from .file_ingest import ingest_file  # noqa: F401
-
+from .handoff_ingest import DrainResult, HandoffIngestor, IngestResult  # noqa: F401

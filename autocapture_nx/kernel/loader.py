@@ -591,32 +591,46 @@ class Kernel:
         if self.system is None:
             return
         try:
+            run_id = str(self.config.get("runtime", {}).get("run_id", "run"))
+            stop_hash = None
+            ts_utc = utc_now_z()
+            duration_ms = self._run_duration_ms(ts_utc)
             if self._conductor is not None:
                 try:
                     self._conductor.stop()
                 except Exception:
                     pass
-            builder = self.system.get("event.builder")
-            ts_utc = utc_now_z()
-            duration_ms = self._run_duration_ms(ts_utc)
-            summary = self._summarize_journal(builder.run_id)
-            self._record_storage_manifest_final(builder, summary, duration_ms, ts_utc)
-            payload = {
-                "event": "system.stop",
-                "run_id": builder.run_id,
-                "duration_ms": int(duration_ms),
-                "summary": summary,
-                "previous_ledger_head": builder.ledger_head(),
-            }
-            stop_hash = builder.ledger_entry(
-                "system",
-                inputs=[],
-                outputs=[],
-                payload=payload,
-                ts_utc=ts_utc,
-            )
+            builder = None
+            try:
+                builder = self.system.get("event.builder")
+            except Exception:
+                builder = None
+            if builder is not None:
+                run_id = str(getattr(builder, "run_id", run_id) or run_id)
+                summary = self._summarize_journal(run_id)
+                try:
+                    self._record_storage_manifest_final(builder, summary, duration_ms, ts_utc)
+                except Exception:
+                    pass
+                payload = {
+                    "event": "system.stop",
+                    "run_id": run_id,
+                    "duration_ms": int(duration_ms),
+                    "summary": summary,
+                    "previous_ledger_head": builder.ledger_head(),
+                }
+                try:
+                    stop_hash = builder.ledger_entry(
+                        "system",
+                        inputs=[],
+                        outputs=[],
+                        payload=payload,
+                        ts_utc=ts_utc,
+                    )
+                except Exception:
+                    stop_hash = None
             self._write_run_state(
-                builder.run_id,
+                run_id,
                 "stopped",
                 started_at=self._run_started_at,
                 stopped_at=ts_utc,

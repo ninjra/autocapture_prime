@@ -324,8 +324,14 @@
       }
     },
     "builtin.processing.sst.uia_context": {
-      "artifact_sha256": "e93258bdefae2a949f9a851322530c30ba9fc4d0a5cb17f53c3f1567c3d3789a",
-      "manifest_sha256": "3b3d9efe475d033a972772da59b94f294bfa3b4e0bfc009eaad9669205798022"
+      "artifact_sha256": "432f03593a6d6f80be910006d1ecd4ac3d0f5f961411e1a6332fa3182e1a79f4",
+      "contract_lock_hash": "1be6f4fd2c95ad383c8006af04049d9c33176cefae4fab1a7feae8ab498f2a64",
+      "kernel_api_version": "0.1.0",
+      "manifest_sha256": "3b3d9efe475d033a972772da59b94f294bfa3b4e0bfc009eaad9669205798022",
+      "sbom": {
+        "requirements": [],
+        "requirements_sha256": null
+      }
     },
     "builtin.prompt.bundle.default": {
       "artifact_sha256": "5390b19018627644b04134f356c1f0dad93f95aa1afc32a01585e0dbb71e459d",

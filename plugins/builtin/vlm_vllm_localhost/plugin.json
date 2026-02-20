@@ -5,6 +5,52 @@
       1
     ]
   },
+  "default_settings": {
+    "api_key": "",
+    "base_url": "http://127.0.0.1:8000/v1",
+    "factpack_enabled": true,
+    "factpack_max_tokens": 1536,
+    "factpack_prompt": "",
+    "fail_open_after_errors": 2,
+    "failure_cooldown_s": 45.0,
+    "grid_enforced": true,
+    "grid_sections": 8,
+    "max_retries": 3,
+    "max_rois": 8,
+    "max_tokens": 256,
+    "model": "internvl3_5_8b",
+    "n": 1,
+    "prompt": "",
+    "promptops": {
+      "enabled": true,
+      "metrics": {
+        "enabled": true
+      },
+      "mode": "auto_apply",
+      "model_strategy": "model_contract",
+      "persist_prompts": false,
+      "review": {
+        "enabled": true,
+        "on_failure_only": true,
+        "persist_prompts": true
+      }
+    },
+    "roi_max_side": 2048,
+    "roi_max_tokens": 1536,
+    "roi_prompt": "",
+    "seed": 0,
+    "temperature": 0.0,
+    "thumb_max_px": 960,
+    "thumb_max_tokens": 768,
+    "thumb_prompt": "",
+    "timeout_s": 30.0,
+    "top_p": 1.0,
+    "topic_factpack_enabled": true,
+    "topic_factpack_max_tokens": 1024,
+    "topic_factpack_min_topics": 6,
+    "topic_factpack_topics": [],
+    "two_pass_enabled": true
+  },
   "depends_on": [],
   "enabled": false,
   "entrypoints": [
@@ -33,143 +79,23 @@
     "vision.extractor"
   ],
   "required_capabilities": [],
-  "default_settings": {
-    "base_url": "http://127.0.0.1:8000/v1",
-    "api_key": "",
-    "model": "internvl3_5_8b",
-    "timeout_s": 30.0,
-    "prompt": "",
-    "temperature": 0.0,
-    "top_p": 1.0,
-    "n": 1,
-    "seed": 0,
-    "max_tokens": 256,
-    "two_pass_enabled": true,
-    "thumb_prompt": "",
-    "roi_prompt": "",
-    "thumb_max_px": 960,
-    "max_rois": 8,
-    "grid_sections": 8,
-    "grid_enforced": true,
-    "roi_max_side": 2048,
-    "thumb_max_tokens": 768,
-    "roi_max_tokens": 1536,
-    "factpack_enabled": true,
-    "factpack_prompt": "",
-    "factpack_max_tokens": 1536,
-    "topic_factpack_enabled": true,
-    "topic_factpack_topics": [],
-    "topic_factpack_max_tokens": 1024,
-    "topic_factpack_min_topics": 6,
-    "max_retries": 3,
-    "fail_open_after_errors": 2,
-    "failure_cooldown_s": 45.0,
-    "promptops": {
-      "enabled": true,
-      "mode": "auto_apply",
-      "model_strategy": "model_contract",
-      "persist_prompts": false,
-      "metrics": {
-        "enabled": true
-      },
-      "review": {
-        "enabled": true,
-        "on_failure_only": true,
-        "persist_prompts": true
-      }
-    }
-  },
   "settings_schema": {
-    "type": "object",
     "additionalProperties": false,
     "properties": {
-      "base_url": {
-        "type": "string"
-      },
       "api_key": {
         "type": "string"
       },
-      "model": {
+      "base_url": {
         "type": "string"
-      },
-      "timeout_s": {
-        "type": "number"
-      },
-      "prompt": {
-        "type": "string"
-      },
-      "temperature": {
-        "type": "number"
-      },
-      "top_p": {
-        "type": "number"
-      },
-      "n": {
-        "type": "integer"
-      },
-      "seed": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "max_tokens": {
-        "type": "integer"
-      },
-      "two_pass_enabled": {
-        "type": "boolean"
-      },
-      "thumb_prompt": {
-        "type": "string"
-      },
-      "roi_prompt": {
-        "type": "string"
-      },
-      "thumb_max_px": {
-        "type": "integer"
-      },
-      "max_rois": {
-        "type": "integer"
-      },
-      "grid_sections": {
-        "type": "integer"
-      },
-      "grid_enforced": {
-        "type": "boolean"
-      },
-      "roi_max_side": {
-        "type": "integer"
-      },
-      "thumb_max_tokens": {
-        "type": "integer"
-      },
-      "roi_max_tokens": {
-        "type": "integer"
       },
       "factpack_enabled": {
         "type": "boolean"
       },
-      "factpack_prompt": {
-        "type": "string"
-      },
       "factpack_max_tokens": {
         "type": "integer"
       },
-      "topic_factpack_enabled": {
-        "type": "boolean"
-      },
-      "topic_factpack_topics": {
-        "type": "array",
-        "items": { "type": "string" }
-      },
-      "topic_factpack_max_tokens": {
-        "type": "integer"
-      },
-      "topic_factpack_min_topics": {
-        "type": "integer"
-      },
-      "max_retries": {
-        "type": "integer"
+      "factpack_prompt": {
+        "type": "string"
       },
       "fail_open_after_errors": {
         "type": "integer"
@@ -177,20 +103,112 @@
       "failure_cooldown_s": {
         "type": "number"
       },
+      "grid_enforced": {
+        "type": "boolean"
+      },
+      "grid_sections": {
+        "type": "integer"
+      },
+      "max_retries": {
+        "type": "integer"
+      },
+      "max_rois": {
+        "type": "integer"
+      },
+      "max_tokens": {
+        "type": "integer"
+      },
+      "model": {
+        "type": "string"
+      },
+      "n": {
+        "type": "integer"
+      },
+      "prompt": {
+        "type": "string"
+      },
       "promptops": {
-        "type": "object",
         "additionalProperties": true,
         "properties": {
-          "enabled": { "type": "boolean" },
-          "mode": { "type": "string" },
-          "model_strategy": { "type": "string" },
-          "persist_prompts": { "type": "boolean" },
-          "data_dir": { "type": "string" },
-          "metrics": { "type": "object", "additionalProperties": true },
-          "review": { "type": "object", "additionalProperties": true }
-        }
+          "data_dir": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "metrics": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "model_strategy": {
+            "type": "string"
+          },
+          "persist_prompts": {
+            "type": "boolean"
+          },
+          "review": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "roi_max_side": {
+        "type": "integer"
+      },
+      "roi_max_tokens": {
+        "type": "integer"
+      },
+      "roi_prompt": {
+        "type": "string"
+      },
+      "seed": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "temperature": {
+        "type": "number"
+      },
+      "thumb_max_px": {
+        "type": "integer"
+      },
+      "thumb_max_tokens": {
+        "type": "integer"
+      },
+      "thumb_prompt": {
+        "type": "string"
+      },
+      "timeout_s": {
+        "type": "number"
+      },
+      "top_p": {
+        "type": "number"
+      },
+      "topic_factpack_enabled": {
+        "type": "boolean"
+      },
+      "topic_factpack_max_tokens": {
+        "type": "integer"
+      },
+      "topic_factpack_min_topics": {
+        "type": "integer"
+      },
+      "topic_factpack_topics": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "two_pass_enabled": {
+        "type": "boolean"
       }
-    }
+    },
+    "type": "object"
   },
   "version": "0.1.0"
 }

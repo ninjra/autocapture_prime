@@ -8,6 +8,7 @@ duration_s="${1:-86400}"
 interval_s="${2:-60}"
 image_path="${3:-$ROOT/docs/test sample/Screenshot 2026-02-02 113519.png}"
 cases_path="${4:-$ROOT/docs/query_eval_cases_advanced20.json}"
+parallel_workers="${5:-${AUTOCAPTURE_SOAK_PARALLEL_WORKERS:-1}}"
 skip_admission="${AUTOCAPTURE_SOAK_SKIP_ADMISSION:-0}"
 
 mkdir -p "$ROOT/artifacts/soak/golden_qh"
@@ -38,6 +39,7 @@ PY
   fi
 fi
 
+AUTOCAPTURE_SOAK_PARALLEL_WORKERS="$parallel_workers" \
 nohup "$ROOT/tools/soak/run_golden_qh_soak.sh" "$duration_s" "$interval_s" "$image_path" "$cases_path" >>"$log_file" 2>&1 &
 pid="$!"
 echo "$pid" >"$pid_file"

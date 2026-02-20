@@ -15,30 +15,6 @@
       "path": "plugin.py"
     }
   ],
-  "hash_lock": {
-    "artifact_sha256": "",
-    "manifest_sha256": ""
-  },
-  "permissions": {
-    "filesystem": "readwrite",
-    "gpu": false,
-    "network": false,
-    "raw_input": false
-  },
-  "provides": [
-    "storage.metadata",
-    "storage.media",
-    "storage.entity_map",
-    "storage.state_tape",
-    "storage.keyring"
-  ],
-  "plugin_id": "builtin.storage.encrypted",
-  "required_capabilities": [],
-  "settings_paths": [
-    "storage",
-    "runtime"
-  ],
-  "version": "0.1.0",
   "filesystem_policy": {
     "readwrite": [
       "{data_dir}",
@@ -53,5 +29,29 @@
       "{keyring_dir}",
       "{root_key_dir}"
     ]
-  }
+  },
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "permissions": {
+    "filesystem": "readwrite",
+    "gpu": false,
+    "network": false,
+    "raw_input": false
+  },
+  "plugin_id": "builtin.storage.encrypted",
+  "provides": [
+    "storage.metadata",
+    "storage.media",
+    "storage.entity_map",
+    "storage.state_tape",
+    "storage.keyring"
+  ],
+  "required_capabilities": [],
+  "settings_paths": [
+    "storage",
+    "runtime"
+  ],
+  "version": "0.1.0"
 }

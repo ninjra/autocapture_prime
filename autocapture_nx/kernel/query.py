@@ -1135,7 +1135,9 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
         stale_map = dict(stale_cap)
     results = retrieval.search(query_text, time_window=time_window)
     on_query = system.config.get("processing", {}).get("on_query", {})
-    allow_extract = bool(on_query.get("allow_decode_extract", False))
+    allow_extract_cfg = bool(on_query.get("allow_decode_extract", False))
+    # Query path is read-only over precomputed artifacts. Never run decode/extract on demand.
+    allow_extract = False
     require_idle = bool(on_query.get("require_idle", True))
     allow_ocr = bool(on_query.get("extractors", {}).get("ocr", True))
     allow_vlm = bool(on_query.get("extractors", {}).get("vlm", False))
@@ -1202,23 +1204,12 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
                 extraction_blocked_reason = "idle_required"
     else:
         extraction_blocked = True
-        extraction_blocked_reason = "disabled"
+        extraction_blocked_reason = "query_read_only" if allow_extract_cfg else "disabled"
 
     scheduled_job_id: str | None = None
-    if schedule_extract and extraction_blocked and candidate_ids and metadata is not None:
-        try:
-            scheduled_job_id = _schedule_extraction_job(
-                metadata,
-                run_id=_source_run_id(results, candidate_ids),
-                candidate_ids=[str(cid) for cid in candidate_ids if cid],
-                time_window=time_window,
-                allow_ocr=bool(allow_ocr),
-                allow_vlm=bool(allow_vlm),
-                blocked_reason=str(extraction_blocked_reason or ""),
-                query=str(query_text or query),
-            )
-        except Exception:
-            scheduled_job_id = None
+    if bool(schedule_extract):
+        extraction_blocked = True
+        extraction_blocked_reason = "query_read_only"
 
     # META-08: minimal evaluation fields to make missing extraction measurable.
     # Keep this deterministic: compute only from returned results/candidates.
@@ -2176,10 +2167,12 @@ def _query_tokens(query: str) -> set[str]:
     return expanded
 
 
-def _compact_line(text: str, *, limit: int = 180) -> str:
+def _compact_line(text: str, *, limit: int = 180, with_ellipsis: bool = True) -> str:
     normalized = re.sub(r"\s+", " ", str(text or "")).strip()
     if len(normalized) <= int(limit):
         return normalized
+    if not bool(with_ellipsis):
+        return normalized[: max(0, int(limit))].rstrip()
     return normalized[: max(0, int(limit) - 1)].rstrip() + "…"
 
 
@@ -6225,12 +6218,12 @@ def _build_adv_display_from_hard(topic: str, hard_fields: dict[str, Any]) -> dic
                 bullets.append(f"{idx}. host={host}; active_tab={title}; tabs={int(tabs or 0)}")
 
     if not summary and answer_text:
-        compact = _compact_line(answer_text, limit=240)
+        compact = _compact_line(answer_text, limit=240, with_ellipsis=False)
         summary = compact
         fields["answer_text"] = answer_text
         lines = [str(x).strip() for x in re.split(r"[\n\r]+", answer_text) if str(x).strip()]
         for line in lines[:6]:
-            bullets.append(_compact_line(line, limit=220))
+            bullets.append(_compact_line(line, limit=220, with_ellipsis=False))
 
     if not summary:
         return None
@@ -7362,12 +7355,16 @@ def _build_answer_display(
             topic = "background_color"
         if not summary:
             for text in claim_texts:
-                compact = _compact_line(text, limit=220)
+                compact = _compact_line(text, limit=220, with_ellipsis=False)
                 if compact:
                     summary = compact
                     break
     if not signal_bullets:
-        compact_claims = [_compact_line(t, limit=140) for t in claim_texts if str(t or "").strip()]
+        compact_claims = [
+            _compact_line(t, limit=140, with_ellipsis=False)
+            for t in claim_texts
+            if str(t or "").strip()
+        ]
         for text in compact_claims[:3]:
             if text and text != summary:
                 signal_bullets.append(text)
@@ -7675,9 +7672,13 @@ def _apply_answer_display(
         if not isinstance(answer_claims, list):
             answer_claims = []
         if not answer_claims:
-            claim_text = _compact_line(str(display.get("summary") or ""), limit=320)
+            claim_text = _compact_line(str(display.get("summary") or ""), limit=320, with_ellipsis=False)
             if not claim_text:
-                claim_text = _compact_line(json.dumps(hard_fields, ensure_ascii=True, sort_keys=True), limit=320)
+                claim_text = _compact_line(
+                    json.dumps(hard_fields, ensure_ascii=True, sort_keys=True),
+                    limit=320,
+                    with_ellipsis=False,
+                )
             evidence_id = _first_evidence_record_id(result) or _latest_evidence_record_id(system) or f"hard_vlm.{query_topic}"
             locator_hash = hash_text(normalize_text(f"{claim_text}|{evidence_id}"))
             citation = {

@@ -1,4 +1,5 @@
 import io
+import hashlib
 import json
 import tempfile
 import time
@@ -7,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from autocapture_nx.kernel.canonical_json import dumps as canonical_dumps
+from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.plugin_system.api import PluginContext
 from autocapture_nx.plugin_system.registry import CapabilityProxy, MultiCapabilityProxy
 from autocapture_nx.processing.sst.pipeline import SSTPipeline
@@ -194,11 +196,18 @@ class UIAContextPluginUnitTests(unittest.TestCase):
             [str(doc.get("doc_id") or "") for doc in docs_one],
             [str(doc.get("doc_id") or "") for doc in docs_two],
         )
+        expected_doc_ids = [
+            f"run1/derived.sst.text/extra/{encode_record_id_component(f'uia-{snapshot_id}-focus-0')}",
+            f"run1/derived.sst.text/extra/{encode_record_id_component(f'uia-{snapshot_id}-context-0')}",
+            f"run1/derived.sst.text/extra/{encode_record_id_component(f'uia-{snapshot_id}-operable-0')}",
+        ]
+        self.assertEqual([str(doc.get("doc_id") or "") for doc in docs_one], expected_doc_ids)
         kinds = {str(doc.get("doc_kind") or "") for doc in docs_one if isinstance(doc, dict)}
         self.assertEqual(kinds, {"obs.uia.focus", "obs.uia.context", "obs.uia.operable"})
 
         for doc in docs_one:
             self.assertIsInstance(doc, dict)
+            self.assertEqual(str(doc.get("record_type") or ""), str(doc.get("doc_kind") or ""))
             boxes = doc.get("bboxes", [])
             self.assertTrue(boxes)
             for box in boxes:
@@ -207,6 +216,11 @@ class UIAContextPluginUnitTests(unittest.TestCase):
                 self.assertLessEqual(int(box[0]), int(box[2]))
                 self.assertLessEqual(int(box[1]), int(box[3]))
             meta = doc.get("meta", {})
+            self.assertEqual(str(meta.get("uia_record_id") or ""), snapshot_id)
+            self.assertEqual(str(meta.get("uia_content_hash") or ""), content_hash)
+            self.assertEqual(str(meta.get("hwnd") or ""), "0x000111")
+            self.assertEqual(str(meta.get("window_title") or ""), "Outlook - Inbox")
+            self.assertEqual(int(meta.get("window_pid") or 0), 4242)
             nodes = meta.get("uia_nodes", []) if isinstance(meta, dict) else []
             for node in nodes:
                 norm = node.get("bbox_norm_bp", []) if isinstance(node, dict) else []
@@ -241,6 +255,193 @@ class UIAContextPluginUnitTests(unittest.TestCase):
                     "dataroot": str(tmpdir),
                     "allow_latest_snapshot_fallback": True,
                     "require_hash_match": True,
+                    "max_focus_nodes": 8,
+                    "max_context_nodes": 8,
+                    "max_operable_nodes": 8,
+                    "drop_offscreen": True,
+                },
+                get_capability=lambda name: metadata if name == "storage.metadata" else None,
+                logger=lambda _msg: None,
+            )
+            plugin = UIAContextStageHook("builtin.processing.sst.uia_context", ctx)
+            payload = {
+                "run_id": "run1",
+                "record_id": "run1/segment/0",
+                "frame_width": 320,
+                "frame_height": 180,
+                "record": {"uia_ref": {"record_id": snapshot_id}},
+            }
+            self.assertIsNone(plugin.run_stage("index.text", payload))
+
+    def test_metadata_first_lookup_wins_over_latest_snapshot(self) -> None:
+        metadata = _MetadataStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_id = "run1/uia/metadata-priority"
+            metadata_snapshot = _sample_snapshot(snapshot_id, "hash-meta")
+            metadata_snapshot["window"] = {
+                "title": "Metadata Window",
+                "process_path": "C:\\Metadata\\app.exe",
+                "pid": 7001,
+            }
+            metadata.put(snapshot_id, metadata_snapshot)
+
+            uia_dir = Path(tmpdir) / "uia"
+            uia_dir.mkdir(parents=True, exist_ok=True)
+            fallback_snapshot = _sample_snapshot(snapshot_id, "hash-fallback")
+            fallback_snapshot["window"] = {
+                "title": "Fallback Window",
+                "process_path": "C:\\Fallback\\app.exe",
+                "pid": 7002,
+            }
+            raw = json.dumps(fallback_snapshot, sort_keys=True).encode("utf-8")
+            (uia_dir / "latest.snap.json").write_bytes(raw)
+            file_hash = hashlib.sha256(raw).hexdigest()
+            (uia_dir / "latest.snap.sha256").write_text(f"{file_hash}  latest.snap.json\n", encoding="utf-8")
+
+            ctx = PluginContext(
+                config={
+                    "dataroot": str(tmpdir),
+                    "allow_latest_snapshot_fallback": True,
+                    "require_hash_match": True,
+                    "max_focus_nodes": 8,
+                    "max_context_nodes": 8,
+                    "max_operable_nodes": 8,
+                    "drop_offscreen": True,
+                },
+                get_capability=lambda name: metadata if name == "storage.metadata" else None,
+                logger=lambda _msg: None,
+            )
+            plugin = UIAContextStageHook("builtin.processing.sst.uia_context", ctx)
+            payload = {
+                "run_id": "run1",
+                "record_id": "run1/segment/0",
+                "frame_width": 320,
+                "frame_height": 180,
+                "record": {
+                    "uia_ref": {
+                        "record_id": snapshot_id,
+                        "content_hash": "hash-meta",
+                    }
+                },
+            }
+            out = plugin.run_stage("index.text", payload)
+            self.assertIsInstance(out, dict)
+            docs = out.get("extra_docs", []) if isinstance(out, dict) else []
+            self.assertEqual(len(docs), 3)
+            for doc in docs:
+                meta = doc.get("meta", {}) if isinstance(doc, dict) else {}
+                self.assertEqual(meta.get("window_title"), "Metadata Window")
+            diagnostics = out.get("diagnostics", []) if isinstance(out, dict) else []
+            self.assertTrue(diagnostics)
+            self.assertEqual(str(diagnostics[0].get("source") or ""), "metadata")
+
+    def test_metadata_invalid_does_not_fallback(self) -> None:
+        metadata = _MetadataStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_id = "run1/uia/metadata-invalid"
+            metadata.put(
+                snapshot_id,
+                {
+                    "record_type": "invalid.record.type",
+                    "record_id": snapshot_id,
+                    "content_hash": "hash-meta",
+                },
+            )
+            uia_dir = Path(tmpdir) / "uia"
+            uia_dir.mkdir(parents=True, exist_ok=True)
+            fallback_snapshot = _sample_snapshot(snapshot_id, "hash-meta")
+            raw = json.dumps(fallback_snapshot, sort_keys=True).encode("utf-8")
+            (uia_dir / "latest.snap.json").write_bytes(raw)
+            file_hash = hashlib.sha256(raw).hexdigest()
+            (uia_dir / "latest.snap.sha256").write_text(f"{file_hash}  latest.snap.json\n", encoding="utf-8")
+
+            ctx = PluginContext(
+                config={
+                    "dataroot": str(tmpdir),
+                    "allow_latest_snapshot_fallback": True,
+                    "require_hash_match": True,
+                    "max_focus_nodes": 8,
+                    "max_context_nodes": 8,
+                    "max_operable_nodes": 8,
+                    "drop_offscreen": True,
+                },
+                get_capability=lambda name: metadata if name == "storage.metadata" else None,
+                logger=lambda _msg: None,
+            )
+            plugin = UIAContextStageHook("builtin.processing.sst.uia_context", ctx)
+            payload = {
+                "run_id": "run1",
+                "record_id": "run1/segment/0",
+                "frame_width": 320,
+                "frame_height": 180,
+                "record": {
+                    "uia_ref": {
+                        "record_id": snapshot_id,
+                        "content_hash": "hash-meta",
+                    }
+                },
+            }
+            self.assertIsNone(plugin.run_stage("index.text", payload))
+
+    def test_doc_id_stability_uses_uia_record_id_not_frame_run_id(self) -> None:
+        metadata = _MetadataStore()
+        snapshot_id = "run_uia/uia/record-7"
+        content_hash = "hash-uia-7"
+        metadata.put(snapshot_id, _sample_snapshot(snapshot_id, content_hash))
+
+        ctx = PluginContext(
+            config={
+                "dataroot": "/mnt/d/autocapture",
+                "allow_latest_snapshot_fallback": True,
+                "require_hash_match": True,
+                "max_focus_nodes": 8,
+                "max_context_nodes": 8,
+                "max_operable_nodes": 8,
+                "drop_offscreen": True,
+            },
+            get_capability=lambda name: metadata if name == "storage.metadata" else None,
+            logger=lambda _msg: None,
+        )
+        plugin = UIAContextStageHook("builtin.processing.sst.uia_context", ctx)
+        payload_a = {
+            "run_id": "runA",
+            "record_id": "runA/frame/1",
+            "frame_width": 320,
+            "frame_height": 180,
+            "record": {"uia_ref": {"record_id": snapshot_id, "content_hash": content_hash}},
+        }
+        payload_b = {
+            "run_id": "runB",
+            "record_id": "runB/frame/1",
+            "frame_width": 320,
+            "frame_height": 180,
+            "record": {"uia_ref": {"record_id": snapshot_id, "content_hash": content_hash}},
+        }
+        out_a = plugin.run_stage("index.text", payload_a)
+        out_b = plugin.run_stage("index.text", payload_b)
+        docs_a = out_a.get("extra_docs", []) if isinstance(out_a, dict) else []
+        docs_b = out_b.get("extra_docs", []) if isinstance(out_b, dict) else []
+        self.assertEqual(
+            [str(doc.get("doc_id") or "") for doc in docs_a],
+            [str(doc.get("doc_id") or "") for doc in docs_b],
+        )
+
+    def test_fallback_requires_sha_file_even_when_hash_match_disabled(self) -> None:
+        metadata = _MetadataStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            uia_dir = Path(tmpdir) / "uia"
+            uia_dir.mkdir(parents=True, exist_ok=True)
+            snapshot_id = "run1/uia/fallback-hash-file-required"
+            snapshot = _sample_snapshot(snapshot_id, "fallback-hash")
+            raw = json.dumps(snapshot, sort_keys=True).encode("utf-8")
+            (uia_dir / "latest.snap.json").write_bytes(raw)
+            # Intentionally omit latest.snap.sha256.
+
+            ctx = PluginContext(
+                config={
+                    "dataroot": str(tmpdir),
+                    "allow_latest_snapshot_fallback": True,
+                    "require_hash_match": False,
                     "max_focus_nodes": 8,
                     "max_context_nodes": 8,
                     "max_operable_nodes": 8,
@@ -351,7 +552,16 @@ class UIAContextPluginIntegrationTests(unittest.TestCase):
             kinds = {str(doc.get("doc_kind") or "") for doc in docs}
             self.assertEqual(kinds, {"obs.uia.focus", "obs.uia.context", "obs.uia.operable"})
             for doc in docs:
+                self.assertEqual(str(doc.get("record_type") or ""), str(doc.get("doc_kind") or ""))
                 provenance = doc.get("provenance", {}) if isinstance(doc.get("provenance"), dict) else {}
+                meta = doc.get("meta", {}) if isinstance(doc.get("meta"), dict) else {}
+                if not meta and isinstance(provenance.get("meta"), dict):
+                    meta = provenance.get("meta", {})
+                self.assertEqual(str(meta.get("uia_record_id") or doc.get("uia_record_id") or ""), snapshot_id)
+                self.assertEqual(str(meta.get("uia_content_hash") or doc.get("uia_content_hash") or ""), content_hash)
+                self.assertEqual(str(meta.get("hwnd") or doc.get("hwnd") or ""), "0x000111")
+                self.assertEqual(str(meta.get("window_title") or doc.get("window_title") or ""), "Outlook - Inbox")
+                self.assertEqual(int(meta.get("window_pid") or doc.get("window_pid") or 0), 4242)
                 raw_boxes = provenance.get("bboxes")
                 if isinstance(raw_boxes, tuple):
                     boxes = list(raw_boxes)

@@ -164,7 +164,17 @@ def _temporary_tempdir_env(temp_dir: str | None):
             yield
             return
         with _TEMP_ENV_LOCK:
-            Path(td).mkdir(parents=True, exist_ok=True)
+            td_path = Path(td)
+            try:
+                td_path.mkdir(parents=True, exist_ok=True)
+            except FileExistsError:
+                # Race/file-collision guard: if a file occupies the configured
+                # temp path, fall back to a sibling directory instead of
+                # crashing the processing loop (fail-open runtime stability).
+                if not td_path.is_dir():
+                    td_path = td_path.parent / f"{td_path.name}.dir"
+                    td_path.mkdir(parents=True, exist_ok=True)
+            td = str(td_path)
             prev = {k: os.environ.get(k) for k in ("TMPDIR", "TMP", "TEMP")}
             try:
                 os.environ["TMPDIR"] = td

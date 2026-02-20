@@ -147,12 +147,13 @@ class QueryPopupRouteTests(unittest.TestCase):
                 token = load_or_create_token(app.state.facade.config).token
 
                 def _fake_query(_text: str, *, schedule_extract: bool = False):
+                    self.assertFalse(schedule_extract)
                     return {
                         "ok": True,
-                        "scheduled_extract_job_id": "job_123",
+                        "scheduled_extract_job_id": "",
                         "answer": {"state": "no_evidence", "display": {"summary": "Indeterminate", "bullets": []}, "claims": []},
                         "processing": {
-                            "extraction": {"blocked": True, "blocked_reason": "idle_required", "scheduled_extract_job_id": "job_123"},
+                            "extraction": {"blocked": True, "blocked_reason": "query_read_only", "scheduled_extract_job_id": ""},
                             "query_trace": {"query_run_id": "qry_popup_2", "stage_ms": {"total": 11.0}},
                         },
                     }
@@ -168,8 +169,8 @@ class QueryPopupRouteTests(unittest.TestCase):
                 payload = resp.json()
                 self.assertTrue(payload.get("ok"))
                 self.assertEqual(payload.get("needs_processing"), True)
-                self.assertEqual(payload.get("processing_blocked_reason"), "idle_required")
-                self.assertEqual(payload.get("scheduled_extract_job_id"), "job_123")
+                self.assertEqual(payload.get("processing_blocked_reason"), "query_read_only")
+                self.assertEqual(payload.get("scheduled_extract_job_id"), "")
             finally:
                 try:
                     if app is not None:

@@ -5,6 +5,13 @@
       1
     ]
   },
+  "default_settings": {
+    "db_path": "",
+    "device": "cuda",
+    "dim": 32,
+    "model_id": "",
+    "weight": 1.0
+  },
   "depends_on": [],
   "enabled": false,
   "entrypoints": [
@@ -35,24 +42,27 @@
     "retrieval.reranker"
   ],
   "required_capabilities": [],
-  "default_settings": {
-    "model_id": "",
-    "device": "cuda",
-    "dim": 32,
-    "weight": 1.0,
-    "db_path": ""
-  },
   "settings_schema": {
-    "type": "object",
     "additionalProperties": false,
     "properties": {
-      "model_id": { "type": "string" },
-      "device": { "type": "string" },
-      "dim": { "type": "integer", "minimum": 8 },
-      "weight": { "type": "number" },
-      "db_path": { "type": "string" }
-    }
+      "db_path": {
+        "type": "string"
+      },
+      "device": {
+        "type": "string"
+      },
+      "dim": {
+        "minimum": 8,
+        "type": "integer"
+      },
+      "model_id": {
+        "type": "string"
+      },
+      "weight": {
+        "type": "number"
+      }
+    },
+    "type": "object"
   },
   "version": "0.1.0"
 }
-

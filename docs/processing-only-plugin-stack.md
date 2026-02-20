@@ -22,9 +22,9 @@
   - `contracts/chronicle/v0/chronicle.proto`
   - `contracts/chronicle/v0/spool_format.md`
 - Processing entrypoint:
-  - `autocapture-prime ingest --once --config config/autocapture_prime.yaml`
+  - `autocapture handoff drain --spool-root <SPOOL_ROOT> --data-dir <DATA_ROOT> --mode hardlink --strict`
 - Chronicle API entrypoint:
-  - `autocapture-prime serve --config config/autocapture_prime.yaml`
+  - `autocapture status`
 - Contract drift gate:
   - `.venv/bin/python tools/gate_chronicle_contract_drift.py`
 

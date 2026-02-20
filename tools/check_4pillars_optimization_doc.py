@@ -4,7 +4,6 @@ import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-import re
 import subprocess
 from typing import Any
 

@@ -1140,6 +1140,34 @@
     "idle": {
       "auto_start": true,
       "enabled": true,
+      "adaptive_parallelism": {
+        "enabled": true,
+        "cpu_min": 1,
+        "cpu_max": 4,
+        "cpu_step_up": 1,
+        "cpu_step_down": 1,
+        "batch_per_worker": 3,
+        "items_per_worker": 20,
+        "batch_min": 3,
+        "batch_max": 18,
+        "items_min": 20,
+        "items_max": 120,
+        "low_watermark": 0.65,
+        "high_watermark": 0.9
+      },
+      "intelligent_batch": {
+        "enabled": true,
+        "defer_vlm_on_hash_repeat": true,
+        "hash_repeat_window": 8,
+        "max_vlm_records_per_run": 0,
+        "max_pipeline_records_per_run": 0
+      },
+      "sla_control": {
+        "enabled": true,
+        "retention_horizon_hours": 144,
+        "lag_warn_ratio": 0.8,
+        "cpu_step_up_on_risk": 1
+      },
       "extractors": {
         "ocr": true,
         "vlm": true

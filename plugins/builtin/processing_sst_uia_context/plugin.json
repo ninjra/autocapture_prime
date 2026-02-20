@@ -5,6 +5,15 @@
       1
     ]
   },
+  "default_settings": {
+    "allow_latest_snapshot_fallback": true,
+    "dataroot": "/mnt/d/autocapture",
+    "drop_offscreen": true,
+    "max_context_nodes": 96,
+    "max_focus_nodes": 64,
+    "max_operable_nodes": 128,
+    "require_hash_match": true
+  },
   "depends_on": [],
   "enabled": false,
   "entrypoints": [
@@ -32,48 +41,39 @@
   "required_capabilities": [
     "storage.metadata"
   ],
-  "default_settings": {
-    "dataroot": "/mnt/d/autocapture",
-    "allow_latest_snapshot_fallback": true,
-    "require_hash_match": true,
-    "max_focus_nodes": 64,
-    "max_context_nodes": 96,
-    "max_operable_nodes": 128,
-    "drop_offscreen": true
-  },
   "settings_schema": {
-    "type": "object",
     "additionalProperties": false,
     "properties": {
-      "dataroot": {
-        "type": "string",
-        "minLength": 1
-      },
       "allow_latest_snapshot_fallback": {
         "type": "boolean"
       },
-      "require_hash_match": {
-        "type": "boolean"
-      },
-      "max_focus_nodes": {
-        "type": "integer",
-        "minimum": 1,
-        "maximum": 8192
-      },
-      "max_context_nodes": {
-        "type": "integer",
-        "minimum": 1,
-        "maximum": 8192
-      },
-      "max_operable_nodes": {
-        "type": "integer",
-        "minimum": 1,
-        "maximum": 8192
+      "dataroot": {
+        "minLength": 1,
+        "type": "string"
       },
       "drop_offscreen": {
         "type": "boolean"
+      },
+      "max_context_nodes": {
+        "maximum": 8192,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "max_focus_nodes": {
+        "maximum": 8192,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "max_operable_nodes": {
+        "maximum": 8192,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "require_hash_match": {
+        "type": "boolean"
       }
-    }
+    },
+    "type": "object"
   },
   "version": "0.1.0"
 }

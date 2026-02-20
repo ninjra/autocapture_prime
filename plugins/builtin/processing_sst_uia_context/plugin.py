@@ -60,7 +60,6 @@ class UIAContextStageHook(PluginBase):
                 return None
             docs = _snapshot_to_docs(
                 plugin_id=self.plugin_id,
-                run_id=str(payload.get("run_id") or "run"),
                 frame_width=_to_int(payload.get("frame_width"), default=0),
                 frame_height=_to_int(payload.get("frame_height"), default=0),
                 uia_ref=uia_ref,
@@ -90,9 +89,13 @@ class UIAContextStageHook(PluginBase):
         if not uia_record_id:
             return None, "none"
 
-        snapshot = self._load_snapshot_from_metadata(uia_ref)
+        snapshot, metadata_status = self._load_snapshot_from_metadata(uia_ref)
         if snapshot is not None:
             return snapshot, "metadata"
+        # Metadata-first contract: only use fallback when the metadata lookup
+        # itself fails (missing/unavailable), not when metadata exists but is invalid.
+        if metadata_status not in {"lookup_failed"}:
+            return None, "none"
 
         if not self._cfg.allow_latest_snapshot_fallback:
             return None, "none"
@@ -101,31 +104,34 @@ class UIAContextStageHook(PluginBase):
             return snapshot, "fallback"
         return None, "none"
 
-    def _load_snapshot_from_metadata(self, uia_ref: dict[str, Any]) -> dict[str, Any] | None:
+    def _load_snapshot_from_metadata(self, uia_ref: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
         store = self._metadata
         uia_record_id = str(uia_ref.get("record_id") or "").strip()
         if store is None or not hasattr(store, "get"):
-            return None
+            return None, "lookup_failed"
         try:
             value = store.get(uia_record_id, None)
         except Exception as exc:
             self._warn("metadata_lookup_failed", {"record_id": uia_record_id, "error": type(exc).__name__})
-            return None
+            return None, "lookup_failed"
+        if value is None:
+            self._warn("metadata_snapshot_missing", {"record_id": uia_record_id})
+            return None, "lookup_failed"
         snapshot = _extract_snapshot_dict(value)
         if snapshot is None:
             self._warn("metadata_snapshot_missing", {"record_id": uia_record_id})
-            return None
+            return None, "invalid"
         record_type = str(snapshot.get("record_type") or "").strip()
         if record_type and record_type != _UIA_RECORD_TYPE:
             self._warn(
                 "metadata_record_type_mismatch",
                 {"record_id": uia_record_id, "record_type": record_type},
             )
-            return None
+            return None, "invalid"
         if not _matches_uia_ref(snapshot, uia_ref, require_hash=self._cfg.require_hash_match):
             self._warn("metadata_hash_mismatch", {"record_id": uia_record_id})
-            return None
-        return snapshot
+            return None, "invalid"
+        return snapshot, "ok"
 
     def _load_snapshot_from_fallback(self, uia_ref: dict[str, Any]) -> dict[str, Any] | None:
         latest_path = Path(self._cfg.dataroot) / "uia" / "latest.snap.json"
@@ -179,7 +185,6 @@ def create_plugin(plugin_id: str, context: PluginContext) -> UIAContextStageHook
 def _snapshot_to_docs(
     *,
     plugin_id: str,
-    run_id: str,
     frame_width: int,
     frame_height: int,
     uia_ref: dict[str, Any],
@@ -214,7 +219,9 @@ def _snapshot_to_docs(
             max_nodes=max_nodes,
             drop_offscreen=cfg.drop_offscreen,
         )
-        doc_id = _uia_doc_id(run_id, uia_record_id, section_label, 0)
+        if not nodes:
+            continue
+        doc_id = _uia_doc_id(uia_record_id, section_label, 0)
         doc_text = json.dumps(
             {
                 "kind": doc_kind,
@@ -229,6 +236,7 @@ def _snapshot_to_docs(
         doc: dict[str, Any] = {
             "doc_id": doc_id,
             "text": doc_text,
+            "record_type": doc_kind,
             "doc_kind": doc_kind,
             "meta": {
                 "uia_record_id": uia_record_id,
@@ -244,9 +252,13 @@ def _snapshot_to_docs(
             "provider_id": plugin_id,
             "stage": "index.text",
             "confidence_bp": 8500,
+            "uia_record_id": uia_record_id,
+            "uia_content_hash": uia_content_hash,
+            "hwnd": hwnd,
+            "window_title": window_title,
+            "window_pid": window_pid,
         }
-        if nodes:
-            doc["bboxes"] = [node.get("bbox") for node in nodes if isinstance(node.get("bbox"), list)]
+        doc["bboxes"] = [node.get("bbox") for node in nodes if isinstance(node.get("bbox"), list)]
         docs.append(doc)
     return docs
 
@@ -291,7 +303,7 @@ def _to_bbox(value: Any, *, frame_width: int, frame_height: int) -> tuple[int, i
     if not isinstance(value, (list, tuple)) or len(value) != 4:
         return None
     try:
-        l = int(round(float(value[0])))
+        left = int(round(float(value[0])))
         t = int(round(float(value[1])))
         r = int(round(float(value[2])))
         b = int(round(float(value[3])))
@@ -299,7 +311,7 @@ def _to_bbox(value: Any, *, frame_width: int, frame_height: int) -> tuple[int, i
         return None
     width = max(1, int(frame_width))
     height = max(1, int(frame_height))
-    return clamp_bbox((l, t, r, b), width=width, height=height)
+    return clamp_bbox((left, t, r, b), width=width, height=height)
 
 
 def _bbox_norm_bp(
@@ -308,11 +320,11 @@ def _bbox_norm_bp(
     frame_width: int,
     frame_height: int,
 ) -> tuple[int, int, int, int]:
-    l, t, r, b = bbox
+    left, t, r, b = bbox
     width = max(1, int(frame_width))
     height = max(1, int(frame_height))
     return (
-        _clamp_bp((l * 10000) // width),
+        _clamp_bp((left * 10000) // width),
         _clamp_bp((t * 10000) // height),
         _clamp_bp((r * 10000) // width),
         _clamp_bp((b * 10000) // height),
@@ -327,9 +339,10 @@ def _clamp_bp(value: int) -> int:
     return int(value)
 
 
-def _uia_doc_id(run_id: str, uia_record_id: str, section: str, index: int) -> str:
+def _uia_doc_id(uia_record_id: str, section: str, index: int) -> str:
     seed = f"uia-{uia_record_id}-{section}-{int(index)}"
     component = encode_record_id_component(seed)
+    run_id = str(uia_record_id).split("/", 1)[0] if "/" in str(uia_record_id) else "run"
     return f"{run_id}/derived.sst.text/extra/{component}"
 
 
@@ -372,21 +385,22 @@ def _fallback_hash_ok(
     file_hash: str,
     hash_file_path: Path,
 ) -> bool:
-    if not _matches_uia_ref(snapshot, uia_ref, require_hash=require_hash):
+    if not _matches_uia_ref(snapshot, uia_ref, require_hash=False):
         return False
     ref_hash = str(uia_ref.get("content_hash") or "").strip().lower()
     snap_hash = str(snapshot.get("content_hash") or "").strip().lower()
     hash_file_value = _read_hash_file(hash_file_path)
 
+    # Fallback integrity gate: strict mode requires valid sidecar hash file
+    # and exact match with latest.snap.json content hash.
+    if not hash_file_value:
+        return False
+    if hash_file_value and hash_file_value != file_hash:
+        return False
     if not require_hash:
         if ref_hash and snap_hash and ref_hash != snap_hash:
             return False
         return True
-
-    if hash_file_path.exists() and not hash_file_value:
-        return False
-    if hash_file_value and hash_file_value != file_hash:
-        return False
     if ref_hash and snap_hash:
         if ref_hash != snap_hash:
             return False

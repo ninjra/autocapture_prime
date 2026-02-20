@@ -1,4 +1,8 @@
+import json
+import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from autocapture.runtime.conductor import RuntimeConductor
 from autocapture.runtime.governor import RuntimeGovernor
@@ -59,6 +63,20 @@ class _System:
     def get(self, name: str):
         if name == "tracking.input":
             return self._tracker
+        if name == "runtime.governor":
+            return self._governor
+        raise KeyError(name)
+
+
+class _SystemNoTracker:
+    def __init__(self, config: dict) -> None:
+        self.config = config
+        self._governor = RuntimeGovernor(idle_window_s=int(config["runtime"]["idle_window_s"]))
+
+    def has(self, name: str) -> bool:
+        return name in ("runtime.governor",)
+
+    def get(self, name: str):
         if name == "runtime.governor":
             return self._governor
         raise KeyError(name)
@@ -150,6 +168,58 @@ class RuntimeConductorTests(unittest.TestCase):
         self.assertEqual(idle.called, 1)
         conductor._run_once()
         self.assertEqual(idle.called, 1)
+
+    def test_missing_sidecar_activity_signal_is_fail_closed_active(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            signal_path = Path(tmp) / "activity" / "activity_signal.json"
+            config = {
+                "runtime": {
+                    "idle_window_s": 10,
+                    "active_window_s": 2,
+                    "activity": {
+                        "assume_idle_when_missing": True,
+                        "sidecar_signal_path": str(signal_path),
+                    },
+                    "mode_enforcement": {"suspend_workers": True},
+                    "budgets": {"min_idle_seconds": 10, "cpu_max_utilization": 1.0, "ram_max_utilization": 1.0},
+                },
+            }
+            conductor = RuntimeConductor(_SystemNoTracker(config))
+            signals = conductor._signals()
+            self.assertTrue(bool(signals.get("user_active")))
+            self.assertEqual(float(signals.get("idle_seconds", 1.0)), 0.0)
+
+    def test_stale_sidecar_activity_signal_is_fail_closed_active(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            signal_path = Path(tmp) / "activity" / "activity_signal.json"
+            signal_path.parent.mkdir(parents=True, exist_ok=True)
+            signal_path.write_text(
+                json.dumps(
+                    {
+                        "ts_utc": (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat(),
+                        "idle_seconds": 999.0,
+                        "user_active": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = {
+                "runtime": {
+                    "idle_window_s": 10,
+                    "active_window_s": 2,
+                    "activity": {
+                        "assume_idle_when_missing": False,
+                        "sidecar_signal_path": str(signal_path),
+                        "max_signal_age_s": 5,
+                    },
+                    "mode_enforcement": {"suspend_workers": True},
+                    "budgets": {"min_idle_seconds": 10, "cpu_max_utilization": 1.0, "ram_max_utilization": 1.0},
+                },
+            }
+            conductor = RuntimeConductor(_SystemNoTracker(config))
+            signals = conductor._signals()
+            self.assertTrue(bool(signals.get("user_active")))
+            self.assertEqual(float(signals.get("idle_seconds", 1.0)), 0.0)
 
 
 if __name__ == "__main__":

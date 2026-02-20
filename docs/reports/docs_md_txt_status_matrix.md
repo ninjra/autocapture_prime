@@ -1,6 +1,6 @@
 # Docs MD/TXT Status Matrix
 
-Generated: 2026-02-19T05:59:36Z
+Generated: 2026-02-19T23:25:05Z
 
 Scope: every `docs/**/*.md` and `docs/**/*.txt` file.
 
@@ -8,9 +8,9 @@ Scope: every `docs/**/*.md` and `docs/**/*.txt` file.
 
 - `active-authoritative`: 8
 - `active-handoff`: 2
-- `active-plan`: 2
-- `active-reference`: 47
-- `active-report`: 23
+- `active-plan`: 5
+- `active-reference`: 48
+- `active-report`: 25
 - `active-runbook`: 4
 - `active-spec`: 35
 - `deprecated`: 75
@@ -56,6 +56,7 @@ Scope: every `docs/**/*.md` and `docs/**/*.txt` file.
 | `docs/chatgpt_export.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/codex_autocapture_prime_blueprint.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/codex_work_order_autocapture_prime_memory.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
+| `docs/contracts/advanced20_strict_rubric.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/deprecated/README.md` | `deprecated` | `N` | `archived` | Previously completed or superseded artifact. |
 | `docs/deprecated/plans/adaptive-screenshot-capture-plan.md` | `deprecated` | `N` | `archived` | Previously completed or superseded artifact. |
 | `docs/deprecated/plans/advanced20-verified-correct-plan.md` | `deprecated` | `N` | `archived` | Previously completed or superseded artifact. |
@@ -168,8 +169,11 @@ Scope: every `docs/**/*.md` and `docs/**/*.txt` file.
 | `docs/implemented-ignore/windows_setup.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/migrations.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/plans/README.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
+| `docs/plans/advanced20-true-strict-correctness-plan.md` | `active-plan` | `Y` | `keep_active` | Active outstanding planning document. |
 | `docs/plans/golden-pipeline-6day-sla-hardening-plan.md` | `active-plan` | `Y` | `keep_active` | Active outstanding planning document. |
 | `docs/plans/golden-pipeline-core-remediation-plan.md` | `active-plan` | `Y` | `keep_active` | Active outstanding planning document. |
+| `docs/plans/promptops-four-pillars-improvement-plan.md` | `active-plan` | `Y` | `keep_active` | Active outstanding planning document. |
+| `docs/plans/uia-ingestion-40-question-gauntlet-plan.md` | `active-plan` | `Y` | `keep_active` | Active outstanding planning document. |
 | `docs/processing-only-plugin-stack.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/promptops_contract.md` | `active-authoritative` | `N` | `keep_active` | Authoritative contract or specification source. |
 | `docs/reports/advanced20_answers_latest.txt` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
@@ -192,6 +196,8 @@ Scope: every `docs/**/*.md` and `docs/**/*.txt` file.
 | `docs/reports/implementation_matrix.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
 | `docs/reports/implementation_matrix_remaining_2026-02-12.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
 | `docs/reports/module_map.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
+| `docs/reports/q40_questions_expected_vs_pipeline_2026-02-19.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
+| `docs/reports/q40_uia_mismatch_latest.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
 | `docs/reports/question-validation-plugin-trace-2026-02-13.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
 | `docs/reports/repo_tooling_summary.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
 | `docs/reports/risk_register.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 
-def test_query_can_schedule_extract_job_when_blocked():
+def test_query_never_schedules_extract_job_when_blocked():
     from autocapture_nx.kernel.query import run_query_without_state
 
     class Store:
@@ -79,10 +79,9 @@ def test_query_can_schedule_extract_job_when_blocked():
 
     system = System()
     out = run_query_without_state(system, "extract please", schedule_extract=True)
-    scheduled = out.get("scheduled_extract_job_id")
-    assert scheduled
-    job = metadata.get(scheduled)
-    assert isinstance(job, dict)
-    assert job.get("record_type") == "derived.job.extract"
-    assert job.get("state") == "pending"
-
+    assert out.get("scheduled_extract_job_id") in (None, "")
+    processing = out.get("processing", {}) if isinstance(out.get("processing"), dict) else {}
+    extraction = processing.get("extraction", {}) if isinstance(processing.get("extraction"), dict) else {}
+    assert extraction.get("blocked") is True
+    assert extraction.get("blocked_reason") == "query_read_only"
+    assert len([k for k in metadata.keys() if "/derived.job.extract/" in str(k)]) == 0

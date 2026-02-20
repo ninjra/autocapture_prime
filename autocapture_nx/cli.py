@@ -520,7 +520,6 @@ def cmd_gate(args: argparse.Namespace) -> int:
         )
         return 2
 
-    root = repo_root()
     py = str(Path(sys.executable).resolve())
     steps: list[dict[str, Any]] = []
 
@@ -710,6 +709,51 @@ def cmd_batch_run(args: argparse.Namespace) -> int:
     )
     _print_json(result)
     return 0
+
+
+def cmd_handoff_ingest(args: argparse.Namespace) -> int:
+    from autocapture_nx.ingest.handoff_ingest import HandoffIngestor
+
+    ingestor = HandoffIngestor(
+        Path(str(args.data_dir)),
+        mode=str(args.mode),
+        strict=bool(args.strict),
+    )
+    try:
+        result = ingestor.ingest_handoff_dir(Path(str(args.handoff_root)))
+    except Exception as exc:
+        _print_json(
+            {
+                "ok": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "handoff_root": str(args.handoff_root),
+                "data_dir": str(args.data_dir),
+            }
+        )
+        return 2
+    payload = result.as_dict()
+    payload["ok"] = True
+    _print_json(payload)
+    return 0
+
+
+def cmd_handoff_drain(args: argparse.Namespace) -> int:
+    from autocapture_nx.ingest.handoff_ingest import HandoffIngestor
+
+    ingestor = HandoffIngestor(
+        Path(str(args.data_dir)),
+        mode=str(args.mode),
+        strict=bool(args.strict),
+    )
+    result = ingestor.drain_spool(
+        Path(str(args.spool_root)),
+        include_marked=bool(args.include_marked),
+        fail_fast=bool(args.fail_fast),
+    )
+    payload = result.as_dict()
+    payload["ok"] = len(result.errors) == 0
+    _print_json(payload)
+    return 0 if payload["ok"] else 2
 
 
 def cmd_keys_rotate(args: argparse.Namespace) -> int:
@@ -1332,6 +1376,23 @@ def build_parser() -> argparse.ArgumentParser:
     batch_run.add_argument("--sleep-ms", type=int, default=200)
     batch_run.add_argument("--require-idle", action=argparse.BooleanOptionalAction, default=True)
     batch_run.set_defaults(func=cmd_batch_run)
+
+    handoff_cmd = sub.add_parser("handoff")
+    handoff_sub = handoff_cmd.add_subparsers(dest="handoff_cmd", required=True)
+    handoff_ingest = handoff_sub.add_parser("ingest")
+    handoff_ingest.add_argument("--handoff-root", required=True)
+    handoff_ingest.add_argument("--data-dir", required=True)
+    handoff_ingest.add_argument("--mode", choices=["copy", "hardlink"], default="hardlink")
+    handoff_ingest.add_argument("--strict", action=argparse.BooleanOptionalAction, default=True)
+    handoff_ingest.set_defaults(func=cmd_handoff_ingest)
+    handoff_drain = handoff_sub.add_parser("drain")
+    handoff_drain.add_argument("--spool-root", required=True)
+    handoff_drain.add_argument("--data-dir", required=True)
+    handoff_drain.add_argument("--mode", choices=["copy", "hardlink"], default="hardlink")
+    handoff_drain.add_argument("--strict", action=argparse.BooleanOptionalAction, default=True)
+    handoff_drain.add_argument("--fail-fast", action=argparse.BooleanOptionalAction, default=False)
+    handoff_drain.add_argument("--include-marked", action=argparse.BooleanOptionalAction, default=False)
+    handoff_drain.set_defaults(func=cmd_handoff_drain)
 
     devtools = sub.add_parser("devtools")
     devtools_sub = devtools.add_subparsers(dest="devtools_cmd", required=True)

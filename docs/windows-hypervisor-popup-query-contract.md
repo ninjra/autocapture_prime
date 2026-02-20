@@ -11,8 +11,8 @@ Use a native Windows popup/command bar in Hypervisor and send natural-language q
   - `Content-Type: application/json`
 - Body:
   - `query` (string, required)
-  - `schedule_extract` (bool, optional, default `false`)
   - `max_citations` (int, optional, default `8`, max `32`)
+  - `schedule_extract` is not supported in interactive mode and is ignored/rejected.
 
 ## Token Bootstrapping
 1. Read token once from localhost:
@@ -59,7 +59,7 @@ Use a native Windows popup/command bar in Hypervisor and send natural-language q
 - Show confidence chip from `confidence_pct`.
 - If `needs_processing=true`:
   - Show non-blocking hint: `processing_blocked_reason`.
-  - Optionally call again with `schedule_extract=true`.
+  - Do not request extraction from popup query path.
 - Keep query bar non-modal and fast; do not block UI thread.
 
 ## Retry/Failure Policy
@@ -74,6 +74,7 @@ Use a native Windows popup/command bar in Hypervisor and send natural-language q
 - Popup can submit query and render `summary/bullets/citations`.
 - 401 flow auto-recovers by token refresh.
 - `needs_processing` state is rendered and schedule-retry path works.
+- `needs_processing` state is rendered without scheduling extraction.
 - No direct database access from Hypervisor; API only.
 
 ## One-Line Smoke

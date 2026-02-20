@@ -8,10 +8,15 @@ duration_s="${1:-86400}"
 interval_s="${2:-60}"
 image_path="${3:-$ROOT/docs/test sample/Screenshot 2026-02-02 113519.png}"
 cases_path="${4:-$ROOT/docs/query_eval_cases_advanced20.json}"
+parallel_workers="${AUTOCAPTURE_SOAK_PARALLEL_WORKERS:-1}"
+images_file="${AUTOCAPTURE_SOAK_IMAGES_FILE:-}"
 
-if [[ ! "$duration_s" =~ ^[0-9]+$ ]] || [[ ! "$interval_s" =~ ^[0-9]+$ ]]; then
+if [[ ! "$duration_s" =~ ^[0-9]+$ ]] || [[ ! "$interval_s" =~ ^[0-9]+$ ]] || [[ ! "$parallel_workers" =~ ^[0-9]+$ ]]; then
   echo "usage: $0 [duration_s] [interval_s] [image_path] [cases_path]" >&2
   exit 2
+fi
+if [[ "$parallel_workers" -le 0 ]]; then
+  parallel_workers=1
 fi
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -31,6 +36,22 @@ fail_count=0
 blocked_vllm_count=0
 live_json="$run_dir/live.json"
 
+declare -a image_pool=()
+if [[ -n "$images_file" && -f "$images_file" ]]; then
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    clean="${line#"${line%%[![:space:]]*}"}"
+    clean="${clean%"${clean##*[![:space:]]}"}"
+    if [[ -z "$clean" || "${clean:0:1}" == "#" ]]; then
+      continue
+    fi
+    image_pool+=("$clean")
+  done < "$images_file"
+fi
+if [[ "${#image_pool[@]}" -eq 0 ]]; then
+  image_pool=("$image_path")
+fi
+pool_cursor=0
+
 while true; do
   now_epoch="$(date +%s)"
   elapsed="$((now_epoch - start_epoch))"
@@ -40,20 +61,47 @@ while true; do
 
   attempt="$((attempt + 1))"
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  trace_out="$run_dir/question-validation-plugin-trace-attempt-${attempt}.md"
+  workers="$parallel_workers"
+  if [[ "$workers" -gt "${#image_pool[@]}" ]]; then
+    workers="${#image_pool[@]}"
+  fi
+  attempt_rows="$run_dir/attempt_${attempt}_rows.ndjson"
+  : >"$attempt_rows"
+  declare -a pids=()
+  declare -a out_files=()
+  declare -a slot_images=()
+  for ((slot=0; slot<workers; slot++)); do
+    img="${image_pool[$pool_cursor]}"
+    pool_cursor=$(( (pool_cursor + 1) % ${#image_pool[@]} ))
+    slot_images+=("$img")
+    trace_out="$run_dir/question-validation-plugin-trace-attempt-${attempt}-slot-${slot}.md"
+    out_file="$run_dir/attempt_${attempt}_slot_${slot}.out"
+    out_files+=("$out_file")
+    lockfile="/tmp/autocapture_prime_golden_qh.${stamp}.${attempt}.${slot}.lock"
+    statusfile="/tmp/autocapture_prime_golden_qh.${stamp}.${attempt}.${slot}.status.json"
+    (
+      AUTOCAPTURE_GOLDEN_LOCKFILE="$lockfile" \
+      AUTOCAPTURE_GOLDEN_STATUSFILE="$statusfile" \
+      "$ROOT/tools/run_golden_qh_cycle.sh" "$img" "$cases_path" "$trace_out"
+    ) >"$out_file" 2>&1 &
+    pids+=("$!")
+  done
 
-  set +e
-  cycle_out="$("$ROOT/tools/run_golden_qh_cycle.sh" "$image_path" "$cases_path" "$trace_out" 2>&1)"
-  cycle_rc=$?
-  set -e
-
-  parsed="$("$ROOT/.venv/bin/python" - <<'PY' "$cycle_out" "$cycle_rc"
+  for ((slot=0; slot<workers; slot++)); do
+    set +e
+    wait "${pids[$slot]}"
+    cycle_rc=$?
+    set -e
+    cycle_out="$(cat "${out_files[$slot]}" 2>/dev/null || true)"
+    parsed_row="$("$ROOT/.venv/bin/python" - <<'PY' "$cycle_out" "$cycle_rc" "$slot" "${slot_images[$slot]}"
 import json
 import re
 import sys
 
 raw = str(sys.argv[1] or "")
 rc = int(sys.argv[2] or 1)
+slot = int(sys.argv[3] or 0)
+image = str(sys.argv[4] or "")
 m = re.search(r"\{.*\}\s*$", raw, re.S)
 payload = {}
 if m:
@@ -65,10 +113,51 @@ summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
 failed = int(summary.get("evaluated_failed", 0) or 0)
 passed = bool(rc == 0 and failed == 0 and bool(payload.get("ok", False)))
 print(json.dumps({
+    "slot": slot,
+    "image": image,
     "passed": passed,
     "cycle_rc": rc,
+    "blocked_vllm": int(str(payload.get("error") or "") == "vllm_preflight_failed"),
     "payload": payload,
     "raw_tail": raw[-2000:],
+}, sort_keys=True))
+PY
+)"
+    echo "$parsed_row" >> "$attempt_rows"
+  done
+
+  parsed="$("$ROOT/.venv/bin/python" - <<'PY' "$attempt_rows"
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+rows = []
+if path.exists():
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except Exception:
+            pass
+passed = bool(rows) and all(bool(r.get("passed", False)) for r in rows)
+max_rc = 0
+blocked = 0
+tails = []
+for row in rows:
+    max_rc = max(max_rc, int(row.get("cycle_rc", 1) or 1))
+    blocked += int(row.get("blocked_vllm", 0) or 0)
+    tail = str(row.get("raw_tail") or "")
+    if tail:
+        tails.append(tail)
+print(json.dumps({
+    "passed": passed,
+    "cycle_rc": int(max_rc),
+    "blocked_vllm": int(blocked),
+    "payload": {"rows": rows, "workers": len(rows)},
+    "raw_tail": ("\n".join(tails))[-2000:],
 }, sort_keys=True))
 PY
 )"
@@ -84,6 +173,10 @@ PY
 import json
 import sys
 obj = json.loads(sys.argv[1])
+blocked = int(obj.get("blocked_vllm", 0) or 0)
+if blocked > 0:
+    print("1")
+    raise SystemExit(0)
 payload = obj.get("payload", {}) if isinstance(obj, dict) else {}
 err = str(payload.get("error") or "")
 print("1" if err == "vllm_preflight_failed" else "0")

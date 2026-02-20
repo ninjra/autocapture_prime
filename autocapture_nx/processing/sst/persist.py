@@ -255,6 +255,7 @@ class SSTPersistence:
                 doc_component = encode_record_id_component(f"extra-{state_id}-{digest}")
                 doc_id = f"{run_id}/derived.sst.text/extra/{doc_component}"
             doc_kind = str(doc.get("doc_kind", "extra") or "extra").strip() or "extra"
+            record_type_override = _allowed_extra_record_type(str(doc.get("record_type", "")).strip(), doc_kind=doc_kind)
             meta = doc.get("meta", {})
             if not isinstance(meta, dict):
                 meta = {}
@@ -263,7 +264,7 @@ class SSTPersistence:
             confidence_bp = _bp_int(doc.get("confidence_bp", 8000))
             bboxes = _extra_doc_bboxes(doc, default_bbox=frame_bbox)
             payload: dict[str, Any] = {
-                "record_type": "derived.sst.text.extra",
+                "record_type": record_type_override or "derived.sst.text.extra",
                 "state_id": state_id,
                 "doc_kind": doc_kind,
                 "text": text,
@@ -577,6 +578,16 @@ def _extra_doc_bboxes(doc: dict[str, Any], *, default_bbox: tuple[int, int, int,
             )
         )
     return tuple(boxes)
+
+
+def _allowed_extra_record_type(record_type: str, *, doc_kind: str) -> str:
+    value = str(record_type or "").strip()
+    if not value:
+        return ""
+    allowed = {"obs.uia.focus", "obs.uia.context", "obs.uia.operable"}
+    if value in allowed and value == str(doc_kind or "").strip():
+        return value
+    return ""
 
 
 def config_hash(config: dict[str, Any]) -> str:

@@ -688,6 +688,13 @@ class QueryAdvancedDisplayTests(unittest.TestCase):
         fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
         self.assertEqual(int(fields.get("today_unread_indicator_count") or 0), 7)
 
+    def test_compact_line_can_truncate_without_ellipsis_marker(self) -> None:
+        text = "A" * 300
+        compact = query_mod._compact_line(text, limit=64, with_ellipsis=False)
+        self.assertEqual(len(compact), 64)
+        self.assertNotIn("…", compact)
+        self.assertNotIn("...", compact)
+
     def test_normalize_adv_activity_preserves_long_bullets_without_ellipsis(self) -> None:
         long_text = "x" * 500
         adv = {

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,58 @@ class ActivitySignal:
             "source": self.source,
             "seq": self.seq,
         }
+
+
+def _parse_ts_utc(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _freshness_max_age_s(config: dict[str, Any]) -> float:
+    runtime = config.get("runtime", {}) if isinstance(config, dict) else {}
+    activity = runtime.get("activity", {}) if isinstance(runtime, dict) else {}
+    if not isinstance(activity, dict):
+        return 5.0
+    for key in ("fresh_signal_max_age_s", "max_signal_age_s", "signal_max_age_s"):
+        raw = activity.get(key)
+        if raw is None:
+            continue
+        try:
+            val = float(raw)
+        except Exception:
+            continue
+        if val > 0.0:
+            return val
+    return 5.0
+
+
+def is_activity_signal_fresh(
+    signal: ActivitySignal | None,
+    config: dict[str, Any],
+    *,
+    now_utc: datetime | None = None,
+) -> bool:
+    if signal is None:
+        return False
+    parsed = _parse_ts_utc(signal.ts_utc)
+    if parsed is None:
+        return False
+    now = now_utc if now_utc is not None else datetime.now(timezone.utc)
+    max_age_s = _freshness_max_age_s(config)
+    age_s = (now - parsed).total_seconds()
+    if age_s < 0:
+        age_s = 0.0
+    return age_s <= max_age_s
 
 
 def _candidate_paths(config: dict[str, Any]) -> list[Path]:

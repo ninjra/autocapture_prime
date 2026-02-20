@@ -6,6 +6,8 @@ import zipfile
 from contextlib import contextmanager
 
 from autocapture.core.hashing import hash_bytes
+from autocapture.storage.retention import retention_eligibility_record_id
+from autocapture.storage.stage1 import stage1_complete_record_id
 from autocapture_nx.kernel.derived_records import build_text_record
 from autocapture_nx.kernel.event_builder import EventBuilder
 from autocapture_nx.kernel.ids import encode_record_id_component
@@ -112,6 +114,29 @@ def _segment_record(record_id, payload_bytes):
     }
 
 
+def _frame_record(record_id, payload_bytes):
+    return {
+        "schema_version": 1,
+        "record_type": "evidence.capture.frame",
+        "run_id": "run1",
+        "ts_utc": "2026-01-01T00:00:00+00:00",
+        "content_type": "image/png",
+        "content_size": len(payload_bytes),
+        "content_hash": hash_bytes(payload_bytes),
+        "blob_path": "media/frame_1.png",
+        "uia_ref": {
+            "record_id": "run1/uia/1",
+            "ts_utc": "2026-01-01T00:00:00+00:00",
+            "content_hash": "uia-hash-1",
+        },
+        "input_batch_ref": {
+            "record_id": "run1/input/1",
+            "ts_utc": "2026-01-01T00:00:00+00:00",
+            "content_hash": "hid-hash-1",
+        },
+    }
+
+
 class TraceFacadeTests(unittest.TestCase):
     def test_trace_latest_and_record(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -173,6 +198,27 @@ class TraceFacadeTests(unittest.TestCase):
             self.assertTrue(derived_ids)
             derived_record = metadata.get(derived_ids[0])
             self.assertEqual(derived_record.get("record_type"), "derived.text.ocr")
+
+    def test_trace_process_marks_stage1_and_retention_for_complete_frame(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            facade, caps, _config = _make_facade(tmp, idle_seconds=999)
+            metadata = caps["storage.metadata"]
+            media = caps["storage.media"]
+            payload = base64.b64decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQImWNgYGD4DwABBAEAqD9G3QAAAABJRU5ErkJggg=="
+            )
+            record_id = "run1/frame/1"
+            record = _frame_record(record_id, payload)
+            metadata.put(record_id, record)
+            media.put(record_id, payload)
+
+            result = facade.trace_process(record_id, allow_ocr=True, allow_vlm=False, force=True)
+            self.assertTrue(result.get("ok"))
+
+            stage1_id = stage1_complete_record_id(record_id)
+            retention_id = retention_eligibility_record_id(record_id)
+            self.assertIsInstance(metadata.get(stage1_id), dict)
+            self.assertIsInstance(metadata.get(retention_id), dict)
 
 
 if __name__ == "__main__":

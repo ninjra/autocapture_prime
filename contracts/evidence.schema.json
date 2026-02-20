@@ -154,6 +154,11 @@
     },
     {
       "type": "object",
+      "properties": {"record_type": {"enum": ["derived.ingest.stage1.complete"]}},
+      "required": ["ts_utc", "source_record_id", "source_record_type", "complete", "payload_hash"]
+    },
+    {
+      "type": "object",
       "properties": {"record_type": {"enum": ["derived.test"]}},
       "required": []
     }

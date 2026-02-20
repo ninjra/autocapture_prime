@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Iterator, cast
 
 from autocapture.indexing.factory import build_indexes
+from autocapture.storage.stage1 import mark_stage1_and_retention
 from autocapture_nx.kernel.config import ConfigPaths, load_config, reset_user_config, restore_user_config, validate_config
 from autocapture_nx.kernel.derived_records import (
     build_derivation_edge,
@@ -26,7 +27,7 @@ from autocapture_nx.kernel.query import run_query
 from autocapture_nx.kernel.telemetry import telemetry_snapshot, percentile
 from autocapture_nx.kernel.atomic_write import atomic_write_json
 from autocapture_nx.kernel.doctor import build_health_report
-from autocapture_nx.kernel.activity_signal import load_activity_signal
+from autocapture_nx.kernel.activity_signal import is_activity_signal_fresh, load_activity_signal
 from autocapture_nx.kernel.logging import JsonlLogger
 from autocapture_nx.plugin_system.manager import PluginManager
 from autocapture_nx.processing.idle import _extract_frame, _get_media_blob
@@ -979,7 +980,8 @@ class UXFacade:
 
     def query(self, text: str, *, schedule_extract: bool = False) -> dict[str, Any]:
         with self._kernel_mgr.session() as system:
-            return run_query(system, text, schedule_extract=bool(schedule_extract))
+            _ = schedule_extract
+            return run_query(system, text, schedule_extract=False)
 
     def state_query(self, text: str) -> dict[str, Any]:
         from autocapture_nx.kernel.query import run_state_query
@@ -2167,6 +2169,31 @@ class UXFacade:
                     "record_id": record_id,
                     "error": "storage_unavailable",
                 }
+            event_builder = None
+            try:
+                event_builder = system.get("event.builder") if hasattr(system, "get") else None
+            except Exception:
+                event_builder = None
+            logger = None
+            try:
+                logger = system.get("observability.logger") if hasattr(system, "get") else None
+            except Exception:
+                logger = None
+
+            def _mark_stage1_retention(reason: str) -> dict[str, Any] | None:
+                try:
+                    return mark_stage1_and_retention(
+                        metadata,
+                        record_id,
+                        record if isinstance(record, dict) else {},
+                        ts_utc=(record.get("ts_utc") if isinstance(record, dict) else None),
+                        reason=reason,
+                        event_builder=event_builder,
+                        logger=logger,
+                    )
+                except Exception:
+                    return None
+
             record = metadata.get(record_id, None) if hasattr(metadata, "get") else None
             if record is None:
                 return {"ok": False, "record_id": record_id, "error": "record_not_found"}
@@ -2200,12 +2227,11 @@ class UXFacade:
                         signal = load_activity_signal(system.config)
                     except Exception:
                         signal = None
-                    if signal is not None:
+                    if signal is not None and is_activity_signal_fresh(signal, system.config):
                         idle_seconds = float(signal.idle_seconds)
                         can_run = idle_seconds >= idle_window
                     else:
-                        assume_idle = bool(system.config.get("runtime", {}).get("activity", {}).get("assume_idle_when_missing", False))
-                        can_run = assume_idle
+                        can_run = False
             if not can_run:
                 return {
                     "ok": False,
@@ -2264,6 +2290,7 @@ class UXFacade:
                         "error": "pipeline_failed",
                         "detail": str(exc),
                     }
+                marker = _mark_stage1_retention("trace_process")
                 return {
                     "ok": True,
                     "record_id": record_id,
@@ -2271,6 +2298,8 @@ class UXFacade:
                     "derived_ids": list(result.derived_ids),
                     "pipeline_used": True,
                     "forced": bool(force),
+                    "stage1_marker": (marker or {}).get("stage1_record_id") if isinstance(marker, dict) else None,
+                    "retention_marker": (marker or {}).get("retention_record_id") if isinstance(marker, dict) else None,
                 }
 
             if not allow_ocr and not allow_vlm:
@@ -2305,12 +2334,6 @@ class UXFacade:
                 except Exception:
                     lexical = None
                     vector = None
-            event_builder = None
-            try:
-                event_builder = system.get("event.builder") if hasattr(system, "get") else None
-            except Exception:
-                event_builder = None
-
             run_id = record.get("run_id") if isinstance(record, dict) else None
             run_id = run_id or record_id.split("/", 1)[0]
             encoded_source = encode_record_id_component(record_id)
@@ -2397,6 +2420,7 @@ class UXFacade:
                     except Exception:
                         pass
 
+            marker = _mark_stage1_retention("trace_process")
             return {
                 "ok": True,
                 "record_id": record_id,
@@ -2404,6 +2428,8 @@ class UXFacade:
                 "derived_ids": derived_ids,
                 "pipeline_used": False,
                 "forced": bool(force),
+                "stage1_marker": (marker or {}).get("stage1_record_id") if isinstance(marker, dict) else None,
+                "retention_marker": (marker or {}).get("retention_record_id") if isinstance(marker, dict) else None,
             }
 
     def telemetry(self) -> dict[str, Any]:
