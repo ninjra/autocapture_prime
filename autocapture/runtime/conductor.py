@@ -20,7 +20,8 @@ from autocapture.runtime.gpu import release_vram
 from autocapture.runtime.gpu_guard import evaluate_gpu_lag_guard
 from autocapture.runtime.gpu_monitor import sample_gpu
 from autocapture.runtime.scheduler import Job, JobStepResult, Scheduler
-from autocapture_nx.kernel.activity_signal import load_activity_signal
+from autocapture_nx.ingest.handoff_ingest import auto_drain_handoff_spool
+from autocapture_nx.kernel.activity_signal import is_activity_signal_fresh, load_activity_signal
 from autocapture_nx.kernel.audit import append_audit_event
 from autocapture_nx.kernel.telemetry import record_telemetry
 from autocapture_nx.windows.fullscreen import fullscreen_snapshot
@@ -202,9 +203,14 @@ class RuntimeConductor:
                 signal = load_activity_signal(self._config)
             except Exception:
                 signal = None
-            if signal is not None:
+            if signal is not None and is_activity_signal_fresh(signal, self._config):
                 idle_seconds = float(signal.idle_seconds)
                 user_active = bool(signal.user_active)
+            else:
+                # Stale/missing sidecar activity is treated as active so Stage2+
+                # never runs without a fresh idle signal.
+                idle_seconds = 0.0
+                user_active = True
         if fixture_override:
             idle_seconds = float("inf")
             user_active = False
@@ -328,9 +334,11 @@ class RuntimeConductor:
             self._stats.last_idle_run = time.time()
             started = time.monotonic()
             idle_stats = None
+            handoff_stats = None
             done = True
             ts_utc = datetime.now(timezone.utc).isoformat()
             try:
+                handoff_stats = auto_drain_handoff_spool(self._config)
                 if hasattr(processor, "process_step"):
                     result = processor.process_step(
                         should_abort=should_abort,
@@ -375,6 +383,8 @@ class RuntimeConductor:
                     self._stats.last_idle_error = "idle_errors"
                     self._stats.last_idle_error_ts = time.time()
                 payload.update(stats_payload)
+            if isinstance(handoff_stats, dict):
+                payload["stage1_handoff"] = handoff_stats
             record_telemetry("processing.idle", payload)
             return JobStepResult(done=done, consumed_ms=consumed_ms)
 

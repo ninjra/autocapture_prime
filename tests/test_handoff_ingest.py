@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from autocapture_nx.ingest.handoff_ingest import HandoffIngestor
+from autocapture_nx.ingest.handoff_ingest import HandoffIngestor, auto_drain_handoff_spool
 
 
 def _write_handoff_metadata(path: Path, rows: list[tuple[str, dict]]) -> None:
@@ -152,6 +152,43 @@ class HandoffIngestTests(unittest.TestCase):
             self.assertEqual(result.stage1_complete_records, 1)
             self.assertEqual(result.stage1_retention_marked_records, 1)
             self.assertTrue((dest / "media" / "rid_frame_1.blob").exists())
+
+    def test_auto_drain_handoff_spool_marks_stage1(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            spool = root / "spool"
+            handoff = spool / "handoff-1"
+            dest = root / "dest"
+            (handoff / "media").mkdir(parents=True, exist_ok=True)
+            (handoff / "media" / "rid_frame_1.blob").write_bytes(b"frame-bytes")
+            payload = {
+                "schema_version": 1,
+                "record_type": "evidence.capture.frame",
+                "run_id": "run_test",
+                "ts_utc": "2026-02-20T00:00:00Z",
+                "blob_path": "media/rid_frame_1.blob",
+                "content_hash": "frame_hash_1",
+                "uia_ref": {"record_id": "run_test/evidence.uia.snapshot/1", "content_hash": "uia_hash_1"},
+                "input_ref": {"record_id": "run_test/evidence.input.batch/1"},
+            }
+            _write_handoff_metadata(handoff / "metadata.db", [("run_test/evidence.capture.frame/1", payload)])
+            cfg = {
+                "storage": {"data_dir": str(dest), "spool_dir": str(spool)},
+                "processing": {"idle": {"handoff_ingest": {"enabled": True, "mode": "copy", "strict": True}}},
+            }
+
+            first = auto_drain_handoff_spool(cfg)
+            self.assertTrue(bool(first.get("ok", False)))
+            self.assertEqual(int(first.get("processed", 0)), 1)
+            self.assertEqual(int(first.get("stage1_complete_records", 0)), 1)
+            self.assertEqual(int(first.get("stage1_retention_marked_records", 0)), 1)
+            self.assertEqual(_count_dest_records(dest / "metadata.db", "derived.ingest.stage1.complete"), 1)
+            self.assertEqual(_count_dest_records(dest / "metadata.db", "retention.eligible"), 1)
+
+            second = auto_drain_handoff_spool(cfg)
+            self.assertTrue(bool(second.get("ok", False)))
+            self.assertEqual(int(second.get("processed", 0)), 0)
+            self.assertGreaterEqual(int(second.get("skipped_marked", 0)), 1)
 
 
 if __name__ == "__main__":

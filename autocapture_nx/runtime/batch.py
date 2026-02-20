@@ -11,12 +11,34 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from autocapture.runtime.budgets import resolve_idle_budgets
 from autocapture.runtime.conductor import create_conductor
 from autocapture.runtime.governor import RuntimeGovernor
+from autocapture_nx.ingest.handoff_ingest import auto_drain_handoff_spool
 from autocapture_nx.kernel.hashing import sha256_canonical, sha256_file
 from autocapture_nx.kernel.loader import _canonicalize_config_for_hash
 from autocapture_nx.processing.idle import IdleProcessor
 from autocapture_nx.storage.facts_ndjson import append_fact_line
+
+
+def _canonical_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(k): _canonical_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_canonical_safe(v) for v in value]
+    if isinstance(value, tuple):
+        return [_canonical_safe(v) for v in value]
+    if isinstance(value, float):
+        # Canonical JSON forbids floats; keep metric fidelity by stringifying.
+        if value == float("inf"):
+            return "inf"
+        if value == float("-inf"):
+            return "-inf"
+        # NaN guard
+        if value != value:  # noqa: PLR0124
+            return "nan"
+        return f"{value:.6f}"
+    return value
 
 
 def _resolve_plugin_locks_path(config: dict[str, Any]) -> Path:
@@ -31,6 +53,7 @@ def _build_landscape_manifest(
     config: dict[str, Any],
     *,
     stats: list[dict[str, Any]],
+    sla: dict[str, Any] | None,
     done: bool,
     blocked_reason: str | None,
     loops: int,
@@ -63,8 +86,279 @@ def _build_landscape_manifest(
         "loops": int(max(0, loops)),
         "steps": list(stats),
     }
+    if isinstance(sla, dict):
+        payload["sla"] = dict(sla)
+    payload = _canonical_safe(payload)
     payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
     return payload
+
+
+def _to_float(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except Exception:
+        return None
+    if number < 0.0:
+        return None
+    return number
+
+
+def _clamp_int(value: Any, *, minimum: int, maximum: int, fallback: int) -> int:
+    try:
+        parsed = int(value)
+    except Exception:
+        parsed = int(fallback)
+    if parsed < minimum:
+        return minimum
+    if parsed > maximum:
+        return maximum
+    return parsed
+
+
+def _clamp_float(value: Any, *, minimum: float, maximum: float, fallback: float) -> float:
+    try:
+        parsed = float(value)
+    except Exception:
+        parsed = float(fallback)
+    if parsed < minimum:
+        return minimum
+    if parsed > maximum:
+        return maximum
+    return parsed
+
+
+def _apply_adaptive_idle_parallelism(
+    config: dict[str, Any],
+    *,
+    signals: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not isinstance(config, dict):
+        return None
+    processing_cfg = config.get("processing")
+    if not isinstance(processing_cfg, dict):
+        return None
+    idle_cfg = processing_cfg.get("idle")
+    if not isinstance(idle_cfg, dict):
+        return None
+
+    adaptive_cfg = idle_cfg.get("adaptive_parallelism")
+    if adaptive_cfg is None:
+        adaptive_cfg = {}
+    if not isinstance(adaptive_cfg, dict):
+        return None
+    if not bool(adaptive_cfg.get("enabled", False)):
+        return None
+
+    budgets = resolve_idle_budgets(config)
+    cpu_limit = float(budgets.cpu_max_utilization or 0.5)
+    ram_limit = float(budgets.ram_max_utilization or 0.5)
+    if cpu_limit <= 0.0:
+        cpu_limit = 0.5
+    if ram_limit <= 0.0:
+        ram_limit = 0.5
+
+    current_cpu = max(1, int(idle_cfg.get("max_concurrency_cpu", 1) or 1))
+    current_batch = max(1, int(idle_cfg.get("batch_size", 1) or 1))
+    current_items = max(1, int(idle_cfg.get("max_items_per_run", 20) or 1))
+
+    cpu_min = _clamp_int(adaptive_cfg.get("cpu_min", 1), minimum=1, maximum=64, fallback=1)
+    cpu_max_default = max(current_cpu, 4)
+    cpu_max = _clamp_int(adaptive_cfg.get("cpu_max", cpu_max_default), minimum=cpu_min, maximum=64, fallback=cpu_max_default)
+    cpu_step_up = _clamp_int(adaptive_cfg.get("cpu_step_up", 1), minimum=1, maximum=8, fallback=1)
+    cpu_step_down = _clamp_int(adaptive_cfg.get("cpu_step_down", 1), minimum=1, maximum=8, fallback=1)
+
+    batch_per_worker = _clamp_int(adaptive_cfg.get("batch_per_worker", 3), minimum=1, maximum=16, fallback=3)
+    items_per_worker = _clamp_int(adaptive_cfg.get("items_per_worker", 20), minimum=1, maximum=200, fallback=20)
+
+    batch_min_default = max(1, cpu_min * batch_per_worker)
+    batch_max_default = max(current_batch, cpu_max * batch_per_worker)
+    batch_min = _clamp_int(
+        adaptive_cfg.get("batch_min", batch_min_default),
+        minimum=1,
+        maximum=2048,
+        fallback=batch_min_default,
+    )
+    batch_max = _clamp_int(
+        adaptive_cfg.get("batch_max", batch_max_default),
+        minimum=batch_min,
+        maximum=2048,
+        fallback=batch_max_default,
+    )
+
+    items_min_default = max(1, cpu_min * items_per_worker)
+    items_max_default = max(current_items, cpu_max * items_per_worker)
+    items_min = _clamp_int(
+        adaptive_cfg.get("items_min", items_min_default),
+        minimum=1,
+        maximum=20000,
+        fallback=items_min_default,
+    )
+    items_max = _clamp_int(
+        adaptive_cfg.get("items_max", items_max_default),
+        minimum=items_min,
+        maximum=20000,
+        fallback=items_max_default,
+    )
+
+    low_watermark = _clamp_float(adaptive_cfg.get("low_watermark", 0.65), minimum=0.05, maximum=0.95, fallback=0.65)
+    high_watermark = _clamp_float(adaptive_cfg.get("high_watermark", 0.9), minimum=0.1, maximum=1.5, fallback=0.9)
+    if high_watermark <= low_watermark:
+        high_watermark = min(1.5, low_watermark + 0.1)
+
+    cpu_util = _to_float(signals.get("cpu_utilization"))
+    ram_util = _to_float(signals.get("ram_utilization"))
+    ratios = []
+    if cpu_util is not None and cpu_limit > 0.0:
+        ratios.append(cpu_util / cpu_limit)
+    if ram_util is not None and ram_limit > 0.0:
+        ratios.append(ram_util / ram_limit)
+    pressure_ratio = max(ratios) if ratios else None
+
+    action = "hold"
+    next_cpu = current_cpu
+    if pressure_ratio is not None:
+        if pressure_ratio >= high_watermark:
+            action = "scale_down"
+            next_cpu = max(cpu_min, current_cpu - cpu_step_down)
+        elif pressure_ratio <= low_watermark:
+            action = "scale_up"
+            next_cpu = min(cpu_max, current_cpu + cpu_step_up)
+    next_batch = _clamp_int(next_cpu * batch_per_worker, minimum=batch_min, maximum=batch_max, fallback=current_batch)
+    next_items = _clamp_int(next_cpu * items_per_worker, minimum=items_min, maximum=items_max, fallback=current_items)
+
+    if next_cpu != current_cpu:
+        idle_cfg["max_concurrency_cpu"] = int(next_cpu)
+    if next_batch != current_batch:
+        idle_cfg["batch_size"] = int(next_batch)
+    if next_items != current_items:
+        idle_cfg["max_items_per_run"] = int(next_items)
+
+    return {
+        "enabled": True,
+        "action": action,
+        "pressure_ratio": pressure_ratio,
+        "cpu_utilization": cpu_util,
+        "ram_utilization": ram_util,
+        "cpu_limit": cpu_limit,
+        "ram_limit": ram_limit,
+        "max_concurrency_cpu": int(idle_cfg.get("max_concurrency_cpu", current_cpu)),
+        "batch_size": int(idle_cfg.get("batch_size", current_batch)),
+        "max_items_per_run": int(idle_cfg.get("max_items_per_run", current_items)),
+    }
+
+
+def _parse_retention_horizon_hours(spec: Any) -> float | None:
+    if spec is None:
+        return None
+    text = str(spec or "").strip().lower()
+    if not text or text in {"infinite", "inf", "off", "none", "disabled", "0"}:
+        return None
+    raw_num = ""
+    raw_unit = ""
+    for ch in text:
+        if ch.isdigit():
+            if raw_unit:
+                return None
+            raw_num += ch
+            continue
+        if ch.isspace():
+            continue
+        raw_unit += ch
+    if not raw_num:
+        return None
+    value = float(int(raw_num))
+    unit = raw_unit or "d"
+    if unit.startswith("h"):
+        return value
+    if unit.startswith("m"):
+        return value / 60.0
+    if unit.startswith("s"):
+        return value / 3600.0
+    return value * 24.0
+
+
+def _estimate_sla_snapshot(config: dict[str, Any], *, steps: list[dict[str, Any]]) -> dict[str, Any]:
+    processing_cfg = config.get("processing", {}) if isinstance(config, dict) else {}
+    idle_cfg = processing_cfg.get("idle", {}) if isinstance(processing_cfg, dict) else {}
+    sla_cfg = idle_cfg.get("sla_control", {}) if isinstance(idle_cfg.get("sla_control", {}), dict) else {}
+    enabled = bool(sla_cfg.get("enabled", True))
+    storage_cfg = config.get("storage", {}) if isinstance(config, dict) else {}
+    retention_cfg = storage_cfg.get("retention", {}) if isinstance(storage_cfg, dict) else {}
+    retention_horizon_hours = _parse_retention_horizon_hours(retention_cfg.get("evidence"))
+    if retention_horizon_hours is None:
+        retention_horizon_hours = float(sla_cfg.get("retention_horizon_hours", 144.0) or 144.0)
+    warn_ratio = float(sla_cfg.get("lag_warn_ratio", 0.8) or 0.8)
+    if warn_ratio <= 0.0:
+        warn_ratio = 0.8
+
+    completed_records = 0
+    consumed_ms = 0
+    pending_records = 0
+    for row in steps:
+        if not isinstance(row, dict):
+            continue
+        consumed_ms += int(row.get("consumed_ms", 0) or 0)
+        idle_stats = row.get("idle_stats") if isinstance(row.get("idle_stats"), dict) else {}
+        completed_records += int(idle_stats.get("records_completed", 0) or 0)
+        pending_records = int(idle_stats.get("pending_records", pending_records) or pending_records)
+
+    throughput_records_per_s = 0.0
+    if consumed_ms > 0:
+        throughput_records_per_s = float(completed_records) / (float(consumed_ms) / 1000.0)
+    projected_lag_hours = 0.0
+    if pending_records > 0:
+        if throughput_records_per_s > 0.0:
+            projected_lag_hours = float(pending_records) / throughput_records_per_s / 3600.0
+        else:
+            projected_lag_hours = float("inf")
+    retention_risk = bool(
+        enabled
+        and pending_records > 0
+        and (
+            projected_lag_hours == float("inf")
+            or projected_lag_hours > float(retention_horizon_hours) * float(warn_ratio)
+        )
+    )
+    return {
+        "enabled": enabled,
+        "pending_records": int(pending_records),
+        "completed_records": int(completed_records),
+        "throughput_records_per_s": throughput_records_per_s,
+        "projected_lag_hours": projected_lag_hours,
+        "retention_horizon_hours": float(retention_horizon_hours),
+        "retention_risk": retention_risk,
+    }
+
+
+def _apply_retention_sla_pressure(config: dict[str, Any], *, previous_sla: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(config, dict) or not isinstance(previous_sla, dict):
+        return None
+    if not bool(previous_sla.get("retention_risk", False)):
+        return None
+    processing_cfg = config.get("processing", {}) if isinstance(config.get("processing"), dict) else {}
+    idle_cfg = processing_cfg.get("idle", {}) if isinstance(processing_cfg.get("idle"), dict) else {}
+    sla_cfg = idle_cfg.get("sla_control", {}) if isinstance(idle_cfg.get("sla_control", {}), dict) else {}
+    if not bool(sla_cfg.get("enabled", True)):
+        return None
+    step_up = max(1, int(sla_cfg.get("cpu_step_up_on_risk", 1) or 1))
+    current_cpu = max(1, int(idle_cfg.get("max_concurrency_cpu", 1) or 1))
+    adaptive_cfg = idle_cfg.get("adaptive_parallelism", {}) if isinstance(idle_cfg.get("adaptive_parallelism", {}), dict) else {}
+    cpu_max = max(current_cpu, int(adaptive_cfg.get("cpu_max", max(4, current_cpu)) or max(4, current_cpu)))
+    batch_per_worker = max(1, int(adaptive_cfg.get("batch_per_worker", 3) or 3))
+    items_per_worker = max(1, int(adaptive_cfg.get("items_per_worker", 20) or 20))
+
+    next_cpu = min(cpu_max, current_cpu + step_up)
+    if next_cpu == current_cpu:
+        return None
+    idle_cfg["max_concurrency_cpu"] = int(next_cpu)
+    idle_cfg["batch_size"] = max(1, int(next_cpu * batch_per_worker))
+    idle_cfg["max_items_per_run"] = max(1, int(next_cpu * items_per_worker))
+    return {
+        "action": "sla_scale_up",
+        "max_concurrency_cpu": int(next_cpu),
+        "batch_size": int(idle_cfg.get("batch_size", 1)),
+        "max_items_per_run": int(idle_cfg.get("max_items_per_run", 1)),
+    }
 
 
 def run_processing_batch(
@@ -87,9 +381,12 @@ def run_processing_batch(
     loop_stats: list[dict[str, Any]] = []
     done = False
     blocked_reason: str | None = None
+    previous_sla: dict[str, Any] | None = None
 
     for loop_idx in range(max(1, int(max_loops))):
         signals = conductor._signals()  # pylint: disable=protected-access
+        sla_pressure = _apply_retention_sla_pressure(config, previous_sla=previous_sla)
+        adaptive_idle = _apply_adaptive_idle_parallelism(config, signals=signals)
         decision = governor.decide(signals)
         if require_idle and decision.mode != "IDLE_DRAIN":
             blocked_reason = decision.reason or decision.mode
@@ -97,6 +394,8 @@ def run_processing_batch(
         if not decision.heavy_allowed:
             blocked_reason = decision.reason
             break
+
+        stage1_handoff = auto_drain_handoff_spool(config)
 
         lease = governor.lease("batch.idle.extract", int(decision.budget.remaining_ms), heavy=True)
         if not lease.allowed or lease.granted_ms <= 0:
@@ -138,8 +437,16 @@ def run_processing_batch(
             "consumed_ms": int(consumed_ms),
             "done": bool(step_done),
         }
+        if adaptive_idle is not None:
+            snapshot["adaptive_idle"] = adaptive_idle
+        if sla_pressure is not None:
+            snapshot["sla_pressure"] = sla_pressure
+        if isinstance(stage1_handoff, dict):
+            snapshot["stage1_handoff"] = stage1_handoff
         if step_stats:
             snapshot["idle_stats"] = step_stats
+        snapshot["sla"] = _estimate_sla_snapshot(config, steps=loop_stats + [snapshot])
+        previous_sla = snapshot["sla"] if isinstance(snapshot.get("sla"), dict) else None
         loop_stats.append(snapshot)
         if step_done:
             done = True
@@ -147,9 +454,11 @@ def run_processing_batch(
         if sleep_ms > 0:
             time.sleep(max(0.01, min(5.0, float(sleep_ms) / 1000.0)))
 
+    sla_snapshot = _estimate_sla_snapshot(config, steps=loop_stats)
     manifest = _build_landscape_manifest(
         config,
         stats=loop_stats,
+        sla=sla_snapshot,
         done=done,
         blocked_reason=blocked_reason,
         loops=len(loop_stats),
@@ -183,7 +492,7 @@ def run_processing_batch(
         "done": bool(done),
         "blocked_reason": blocked_reason,
         "loops": len(loop_stats),
+        "sla": sla_snapshot,
         "manifest": manifest,
         "steps": loop_stats,
     }
-

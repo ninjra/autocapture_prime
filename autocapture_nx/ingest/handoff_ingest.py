@@ -559,3 +559,81 @@ class HandoffIngestor:
             errors=errors,
             results=results,
         )
+
+
+def auto_drain_handoff_spool(
+    config: dict[str, Any],
+    *,
+    include_marked: bool = False,
+    fail_fast: bool = False,
+) -> dict[str, Any]:
+    """Best-effort Stage1 handoff drain from runtime config.
+
+    This is intentionally fail-open for runtime stability: any drain failure is
+    reported in the returned payload and callers should continue processing.
+    """
+
+    if not isinstance(config, dict):
+        return {"ok": True, "enabled": False, "reason": "config_missing"}
+    storage_cfg = config.get("storage", {})
+    if not isinstance(storage_cfg, dict):
+        return {"ok": True, "enabled": False, "reason": "storage_config_missing"}
+    data_dir_raw = str(storage_cfg.get("data_dir") or "").strip()
+    spool_root_raw = str(storage_cfg.get("spool_dir") or "").strip()
+    if not data_dir_raw or not spool_root_raw:
+        return {"ok": True, "enabled": False, "reason": "missing_data_or_spool_dir"}
+
+    processing_cfg = config.get("processing", {})
+    idle_cfg = processing_cfg.get("idle", {}) if isinstance(processing_cfg, dict) else {}
+    handoff_cfg = idle_cfg.get("handoff_ingest", {}) if isinstance(idle_cfg, dict) else {}
+    if not isinstance(handoff_cfg, dict):
+        handoff_cfg = {}
+    enabled = bool(handoff_cfg.get("enabled", True))
+    if not enabled:
+        return {"ok": True, "enabled": False, "reason": "handoff_ingest_disabled"}
+
+    mode = str(handoff_cfg.get("mode", "hardlink") or "hardlink").strip().lower()
+    if mode not in {"copy", "hardlink"}:
+        mode = "hardlink"
+    strict = bool(handoff_cfg.get("strict", True))
+    include_marked_flag = bool(handoff_cfg.get("include_marked", include_marked))
+    fail_fast_flag = bool(handoff_cfg.get("fail_fast", fail_fast))
+
+    try:
+        ingestor = HandoffIngestor(Path(data_dir_raw), mode=mode, strict=strict)
+        drained = ingestor.drain_spool(
+            Path(spool_root_raw),
+            include_marked=include_marked_flag,
+            fail_fast=fail_fast_flag,
+        )
+    except Exception as exc:  # pragma: no cover - defensive fail-open
+        return {
+            "ok": False,
+            "enabled": True,
+            "spool_root": str(spool_root_raw),
+            "data_dir": str(data_dir_raw),
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    results = drained.results if isinstance(drained.results, list) else []
+    stage1_complete_records = 0
+    stage1_retention_marked_records = 0
+    stage1_missing_retention_marker_count = 0
+    for row in results:
+        if not isinstance(row, dict):
+            continue
+        stage1_complete_records += _safe_int(row.get("stage1_complete_records", 0))
+        stage1_retention_marked_records += _safe_int(row.get("stage1_retention_marked_records", 0))
+        stage1_missing_retention_marker_count += _safe_int(row.get("stage1_missing_retention_marker_count", 0))
+    return {
+        "ok": len(drained.errors) == 0,
+        "enabled": True,
+        "spool_root": str(drained.spool_root),
+        "data_dir": str(drained.dest_data_root),
+        "processed": int(drained.processed),
+        "skipped_marked": int(drained.skipped_marked),
+        "errors": int(len(drained.errors)),
+        "stage1_complete_records": int(stage1_complete_records),
+        "stage1_retention_marked_records": int(stage1_retention_marked_records),
+        "stage1_missing_retention_marker_count": int(stage1_missing_retention_marker_count),
+    }
