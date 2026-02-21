@@ -1,6 +1,207 @@
 {
-  "type": "object",
   "additionalProperties": false,
+  "properties": {
+    "compat": {
+      "additionalProperties": false,
+      "properties": {
+        "requires_kernel": {
+          "type": "string"
+        },
+        "requires_schema_versions": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "requires_kernel",
+        "requires_schema_versions"
+      ],
+      "type": "object"
+    },
+    "conflicts_with": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "depends_on": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "entrypoints": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "callable": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "path",
+          "callable"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "filesystem_policy": {
+      "additionalProperties": false,
+      "properties": {
+        "read": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "readwrite": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "hash_lock": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_sha256": {
+          "type": "string"
+        },
+        "manifest_sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "manifest_sha256",
+        "artifact_sha256"
+      ],
+      "type": "object"
+    },
+    "optional_deps": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "permissions": {
+      "additionalProperties": false,
+      "properties": {
+        "filesystem": {
+          "type": "string"
+        },
+        "gpu": {
+          "type": "boolean"
+        },
+        "network": {
+          "type": "boolean"
+        },
+        "raw_input": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "filesystem",
+        "gpu",
+        "raw_input",
+        "network"
+      ],
+      "type": "object"
+    },
+    "plugin_id": {
+      "type": "string"
+    },
+    "replaces": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "settings_paths": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "settings_schema": {
+      "type": "object"
+    },
+    "settings_schema_path": {
+      "type": "string"
+    },
+    "io_contracts": {
+      "additionalProperties": {
+        "additionalProperties": {
+          "additionalProperties": false,
+          "properties": {
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": {
+              "type": "object"
+            },
+            "input_schema_path": {
+              "type": "string"
+            },
+            "output_schema_path": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "provides": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "capability_tags": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "required_capabilities": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "default_settings": {
+      "type": "object"
+    },
+    "stages": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "version": {
+      "type": "string"
+    }
+  },
   "required": [
     "plugin_id",
     "version",
@@ -9,61 +210,8 @@
     "permissions",
     "compat",
     "depends_on",
-    "hash_lock"
+    "hash_lock",
+    "required_capabilities"
   ],
-  "properties": {
-    "plugin_id": {"type": "string"},
-    "version": {"type": "string"},
-    "enabled": {"type": "boolean"},
-    "entrypoints": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["kind", "id", "path", "callable"],
-        "properties": {
-          "kind": {"type": "string"},
-          "id": {"type": "string"},
-          "path": {"type": "string"},
-          "callable": {"type": "string"}
-        }
-      }
-    },
-    "permissions": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["filesystem", "gpu", "raw_input", "network"],
-      "properties": {
-        "filesystem": {"type": "string"},
-        "gpu": {"type": "boolean"},
-        "raw_input": {"type": "boolean"},
-        "network": {"type": "boolean"}
-      }
-    },
-    "compat": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["requires_kernel", "requires_schema_versions"],
-      "properties": {
-        "requires_kernel": {"type": "string"},
-        "requires_schema_versions": {
-          "type": "array",
-          "items": {"type": "integer"}
-        }
-      }
-    },
-    "depends_on": {
-      "type": "array",
-      "items": {"type": "string"}
-    },
-    "hash_lock": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["manifest_sha256", "artifact_sha256"],
-      "properties": {
-        "manifest_sha256": {"type": "string"},
-        "artifact_sha256": {"type": "string"}
-      }
-    }
-  }
+  "type": "object"
 }

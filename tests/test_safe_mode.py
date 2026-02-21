@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,13 +25,36 @@ class SafeModeTests(unittest.TestCase):
             with open(schema_path, "w", encoding="utf-8") as handle:
                 json.dump(schema, handle, indent=2, sort_keys=True)
             with open(user_path, "w", encoding="utf-8") as handle:
-                json.dump({"plugins": {"enabled": {"builtin.egress.gateway": False}}}, handle)
+                json.dump(
+                    {
+                        "storage": {"data_dir": str(root / "data")},
+                        "plugins": {"enabled": {"builtin.egress.gateway": False}},
+                    },
+                    handle,
+                )
 
             paths = ConfigPaths(default_path, user_path, schema_path, backup_dir)
-            kernel = Kernel(paths, safe_mode=True)
-            system = kernel.boot()
-            plugin_ids = {p.plugin_id for p in system.plugins}
-            self.assertIn("builtin.egress.gateway", plugin_ids)
+            original_config = os.environ.get("AUTOCAPTURE_CONFIG_DIR")
+            original_data = os.environ.get("AUTOCAPTURE_DATA_DIR")
+            os.environ["AUTOCAPTURE_CONFIG_DIR"] = str(root)
+            os.environ["AUTOCAPTURE_DATA_DIR"] = str(root / "data")
+            try:
+                kernel = Kernel(paths, safe_mode=True)
+                system = kernel.boot()
+                try:
+                    plugin_ids = {p.plugin_id for p in system.plugins}
+                    self.assertIn("builtin.egress.gateway", plugin_ids)
+                finally:
+                    kernel.shutdown()
+            finally:
+                if original_config is None:
+                    os.environ.pop("AUTOCAPTURE_CONFIG_DIR", None)
+                else:
+                    os.environ["AUTOCAPTURE_CONFIG_DIR"] = original_config
+                if original_data is None:
+                    os.environ.pop("AUTOCAPTURE_DATA_DIR", None)
+                else:
+                    os.environ["AUTOCAPTURE_DATA_DIR"] = original_data
 
 
 if __name__ == "__main__":

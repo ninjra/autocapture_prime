@@ -1,28 +1,45 @@
 {
-  "plugin_id": "builtin.devtools.diffusion",
-  "version": "0.1.0",
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [],
   "enabled": true,
   "entrypoints": [
     {
-      "kind": "devtools.diffusion",
+      "callable": "create_plugin",
       "id": "default",
-      "path": "plugin.py",
-      "callable": "create_plugin"
+      "kind": "devtools.diffusion",
+      "path": "plugin.py"
     }
   ],
+  "filesystem_policy": {
+    "read": [
+      "{repo_root}/autocapture_nx"
+    ],
+    "readwrite": [
+      "{repo_root}/artifacts/devtools/diffusion_runs"
+    ]
+  },
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
   "permissions": {
     "filesystem": "readwrite",
     "gpu": false,
-    "raw_input": false,
-    "network": false
+    "network": false,
+    "raw_input": false
   },
-  "compat": {
-    "requires_kernel": ">=0.1.0",
-    "requires_schema_versions": [1]
-  },
-  "depends_on": [],
-  "hash_lock": {
-    "manifest_sha256": "",
-    "artifact_sha256": ""
-  }
+  "plugin_id": "builtin.devtools.diffusion",
+  "provides": [
+    "devtools.diffusion"
+  ],
+  "required_capabilities": [],
+  "settings_paths": [
+    "devtools"
+  ],
+  "version": "0.1.0"
 }

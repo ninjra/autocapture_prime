@@ -1,0 +1,115 @@
+{
+  "answer": {
+    "claims": [
+      {
+        "citations": [
+          {
+            "anchor_ref": "anchor:test",
+            "derived_hash": null,
+            "derived_id": null,
+            "evidence_hash": "hash_song_obs",
+            "evidence_id": "run_test/derived.text.obs/test_provider/song",
+            "ledger_head": "ledger:test",
+            "locator": {
+              "kind": "text_offsets",
+              "offset_end": 108,
+              "offset_start": 0,
+              "record_hash": "hash_song_obs",
+              "record_id": "run_test/derived.text.obs/test_provider/song",
+              "span_sha256": "067ac92b3bab180d4f1fa34c7fd77b43c4e3e97aaee02b60b8ab870d245cf792"
+            },
+            "offset_end": 108,
+            "offset_start": 0,
+            "schema_version": 1,
+            "source": "local",
+            "span_id": "run_test/derived.text.obs/test_provider/song",
+            "span_kind": "text",
+            "span_ref": null,
+            "stale": false,
+            "stale_reason": null
+          }
+        ],
+        "text": "Observation: current_song=Now playing: Jennifer Doherty - Sunlight. Now playing: Jennifer Doherty - Sunlight"
+      }
+    ],
+    "errors": [],
+    "policy": {
+      "require_citations": true
+    },
+    "state": "ok"
+  },
+  "custom_claims": {
+    "count": 0,
+    "debug": {
+      "mode": "persisted_only",
+      "screen_pipeline": {
+        "attempted": 0,
+        "claims_built": 0,
+        "enabled": false,
+        "provider_ids": {},
+        "reason": "raw_off_enforced"
+      }
+    },
+    "error": null
+  },
+  "evaluation": {
+    "blocked_extract": true,
+    "blocked_reason": "disabled",
+    "candidate_count": 1,
+    "coverage_ratio": 1.0,
+    "freshness_newest_ts_utc": null,
+    "missing_spans_count": 0,
+    "result_count": 1,
+    "scheduled_extract_job_id": null,
+    "schema_error": "$: Additional properties are not allowed ('scheduled_extract_job_id' was unexpected)",
+    "schema_version": 1
+  },
+  "intent": {
+    "query": "what song is playing",
+    "time_window": null
+  },
+  "processing": {
+    "extraction": {
+      "allowed": false,
+      "blocked": true,
+      "blocked_reason": "disabled",
+      "candidate_count": 1,
+      "extracted_count": 0,
+      "idle_seconds": null,
+      "idle_window_s": null,
+      "ran": false,
+      "require_idle": true,
+      "scheduled_job_id": null
+    },
+    "policy": {
+      "filtered_claim_count": 1,
+      "raw_claim_count": 1,
+      "source_guard_applied": true,
+      "source_rejections": [],
+      "source_rejections_count": 0
+    }
+  },
+  "provenance": {
+    "anchor_ref": "anchor:test",
+    "contracts_lock_sha256": "<hash>",
+    "data_dir": null,
+    "effective_config_sha256": "<hash>",
+    "generated_at_utc": "<ts>",
+    "plugin_locks_sha256": "<hash>",
+    "query_ledger_head": "ledger:test",
+    "run_id": null,
+    "schema_version": 1
+  },
+  "results": [
+    {
+      "derived_id": null,
+      "record_id": "run_test/derived.text.obs/test_provider/song"
+    }
+  ],
+  "scheduled_extract_job_id": null,
+  "synth_claims": {
+    "count": 0,
+    "debug": {},
+    "error": null
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "default_settings": {
+    "db_path": "",
+    "dim": 32,
+    "weight": 1.0
+  },
+  "depends_on": [
+    "builtin.index.colbert_hash"
+  ],
+  "enabled": true,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "retrieval.reranker",
+      "path": "plugin.py"
+    }
+  ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "permissions": {
+    "filesystem": "read",
+    "gpu": false,
+    "network": false,
+    "raw_input": false
+  },
+  "plugin_id": "builtin.reranker.colbert_hash",
+  "provides": [
+    "retrieval.reranker"
+  ],
+  "required_capabilities": [],
+  "settings_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "db_path": {
+        "type": "string"
+      },
+      "dim": {
+        "minimum": 8,
+        "type": "integer"
+      },
+      "weight": {
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "version": "0.1.0"
+}

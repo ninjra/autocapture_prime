@@ -1,0 +1,116 @@
+{
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "default_settings": {
+    "base_url": "http://127.0.0.1:8000/v1",
+    "device": "cuda",
+    "max_tokens": 384,
+    "model_id": "internvl3_5_8b",
+    "prompt": "Extract visible on-screen text exactly as shown. Return plain text only. Do not add commentary.",
+    "promptops": {
+      "enabled": true,
+      "metrics": {
+        "enabled": true
+      },
+      "mode": "auto_apply",
+      "model_strategy": "model_contract",
+      "persist_prompts": false,
+      "review": {
+        "enabled": true,
+        "on_failure_only": true,
+        "persist_prompts": true
+      }
+    },
+    "timeout_s": 25.0
+  },
+  "depends_on": [],
+  "enabled": false,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "ocr.engine",
+      "path": "plugin.py"
+    }
+  ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "optional_deps": [
+    "torch",
+    "transformers"
+  ],
+  "permissions": {
+    "filesystem": "read",
+    "gpu": true,
+    "network": false,
+    "raw_input": false
+  },
+  "plugin_id": "builtin.ocr.nemotron_torch",
+  "provides": [
+    "ocr.engine"
+  ],
+  "required_capabilities": [],
+  "settings_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "api_key": {
+        "type": "string"
+      },
+      "base_url": {
+        "type": "string"
+      },
+      "device": {
+        "type": "string"
+      },
+      "max_tokens": {
+        "type": "integer"
+      },
+      "model_id": {
+        "type": "string"
+      },
+      "prompt": {
+        "type": "string"
+      },
+      "promptops": {
+        "additionalProperties": true,
+        "properties": {
+          "data_dir": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "metrics": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "model_strategy": {
+            "type": "string"
+          },
+          "persist_prompts": {
+            "type": "boolean"
+          },
+          "review": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "timeout_s": {
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "version": "0.2.0"
+}

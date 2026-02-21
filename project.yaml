@@ -1,0 +1,10 @@
+project_id: autocapture-prime
+name: Autocapture Prime
+wsl:
+  distro: Ubuntu-22.04
+  host_mode: per_distro
+  host_endpoint: auto
+resources:
+  max_concurrent_jobs: 2
+plugins: []
+approved_capabilities: []

@@ -9,7 +9,8 @@
     "tzid",
     "offset_minutes",
     "event_type",
-    "payload"
+    "payload",
+    "run_id"
   ],
   "properties": {
     "schema_version": {"type": "integer"},
@@ -19,6 +20,26 @@
     "tzid": {"type": "string"},
     "offset_minutes": {"type": "integer"},
     "event_type": {"type": "string"},
-    "payload": {"type": "object"}
-  }
+    "payload": {"type": "object"},
+    "run_id": {"type": "string"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "enum": ["capture.stage", "capture.commit", "capture.unavailable"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["record_id", "record_type"]
+          }
+        }
+      }
+    }
+  ]
 }

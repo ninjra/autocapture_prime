@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autocapture.local/schemas/provenance.schema.json",
+  "title": "Provenance Bundle",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "evidence"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evidence_object"
+      }
+    }
+  },
+  "$defs": {
+    "bbox": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "frame_id": {
+          "type": "string"
+        },
+        "record_id": {
+          "type": "string"
+        },
+        "artifact_path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "evidence_object": {
+      "type": "object",
+      "required": [
+        "evidence_id",
+        "type",
+        "source",
+        "hash"
+      ],
+      "properties": {
+        "evidence_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "text",
+            "ui_node",
+            "image_region"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        },
+        "hash": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

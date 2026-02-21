@@ -1,0 +1,9 @@
+cases:
+  - id: QG-001
+    required_facts:
+      - "Master Cylinder - Jung At Heart"
+    required_evidence_refs:
+      - "evidence_id"
+      - "source"
+      - "hash"
+    answer_state: "ok"

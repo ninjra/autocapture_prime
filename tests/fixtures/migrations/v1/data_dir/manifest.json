@@ -1,0 +1,10 @@
+{
+  "files": {
+    "ledger.ndjson": "0b72ffd31d27b8ce565452c56db33d12850b9f332dd0c32e96fb9e5c2a2a6cbe",
+    "media/sample.bin": "af2bdbe1aa9b6ec1e2ade1d694f41fc71a831d0268e9891562113d8a62add1bf",
+    "metadata.db": "3cc22edbce7342594b1760c84d03b107b1ace7ae18bd51cc8b6bbe6c711ff2f1"
+  },
+  "total_bytes": 12312,
+  "total_files": 3,
+  "version": 1
+}

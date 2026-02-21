@@ -1,28 +1,57 @@
 {
-  "plugin_id": "builtin.storage.sqlcipher",
-  "version": "0.1.0",
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [],
   "enabled": true,
   "entrypoints": [
     {
-      "kind": "storage.metadata_store",
+      "callable": "create_plugin",
       "id": "default",
-      "path": "plugin.py",
-      "callable": "create_plugin"
+      "kind": "storage.metadata_store",
+      "path": "plugin.py"
     }
   ],
+  "filesystem_policy": {
+    "readwrite": [
+      "{data_dir}",
+      "{metadata_db_path}",
+      "{media_dir}",
+      "{blob_dir}",
+      "{spool_dir}",
+      "{lexical_db_path}",
+      "{vector_db_path}",
+      "{state_tape_db_path}",
+      "{state_vector_db_path}",
+      "{keyring_dir}",
+      "{root_key_dir}"
+    ]
+  },
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
   "permissions": {
     "filesystem": "readwrite",
     "gpu": false,
-    "raw_input": false,
-    "network": false
+    "network": false,
+    "raw_input": false
   },
-  "compat": {
-    "requires_kernel": ">=0.1.0",
-    "requires_schema_versions": [1]
-  },
-  "depends_on": [],
-  "hash_lock": {
-    "manifest_sha256": "",
-    "artifact_sha256": ""
-  }
+  "plugin_id": "builtin.storage.sqlcipher",
+  "provides": [
+    "storage.metadata",
+    "storage.media",
+    "storage.entity_map",
+    "storage.state_tape",
+    "storage.keyring"
+  ],
+  "required_capabilities": [],
+  "settings_paths": [
+    "storage",
+    "runtime"
+  ],
+  "version": "0.1.0"
 }

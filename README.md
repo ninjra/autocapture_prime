@@ -8,6 +8,8 @@ python3 -m autocapture_nx doctor
 python3 -m autocapture_nx config show
 ```
 
+Note: `autocapture_nx` is the canonical runtime. Legacy `autocapture` UX facades are deprecated and should not be used for new work.
+
 ## Tests
 Linux/WSL:
 ```bash
@@ -25,6 +27,17 @@ Notes:
 - By default it allows pip downloads; to disable, set `AUTO_CAPTURE_ALLOW_NETWORK=0`.
 - To include SQLCipher support, set `AUTO_CAPTURE_EXTRAS=sqlcipher` before running.
 - Logs are written to `tools\run_all_tests.log` and a concise report to `tools\run_all_tests_report.json`.
+
+## Fixture pipeline (CLI)
+Linux/WSL:
+```bash
+python3 tools/run_fixture_pipeline.py --manifest "docs/test sample/fixture_manifest.json"
+```
+
+Windows (PowerShell):
+```powershell
+.\tools\run_fixture_pipeline.ps1 -Manifest "docs\test sample\fixture_manifest.json"
+```
 
 ## Docs
 - `docs/plugin_model.md`

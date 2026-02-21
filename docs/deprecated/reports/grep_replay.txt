@@ -1,0 +1,44 @@
+# rg -n /replay/
+./docs/reports/grep_proof_bundle.txt:2:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_proof_bundle.txt:3:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_proof_bundle.txt:6:./docs/reports/grep_derived.txt:12:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_proof_bundle.txt:7:./docs/reports/grep_derived.txt:39:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_proof_bundle.txt:8:./docs/reports/grep_citation.txt:208:./docs/reports/grep_derived.txt:12:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_proof_bundle.txt:9:./docs/reports/grep_citation.txt:209:./docs/reports/grep_derived.txt:39:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_proof_bundle.txt:10:./docs/reports/grep_citation.txt:262:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_proof_bundle.txt:11:./docs/reports/grep_citation.txt:270:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_proof_bundle.txt:12:./docs/reports/grep_capture_pipeline.txt:1380:./docs/reports/grep_derived.txt:12:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_proof_bundle.txt:13:./docs/reports/grep_capture_pipeline.txt:1407:./docs/reports/grep_derived.txt:39:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_proof_bundle.txt:14:./docs/reports/grep_capture_pipeline.txt:1696:./docs/reports/grep_citation.txt:208:./docs/reports/grep_derived.txt:12:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_proof_bundle.txt:15:./docs/reports/grep_capture_pipeline.txt:1697:./docs/reports/grep_citation.txt:209:./docs/reports/grep_derived.txt:39:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_proof_bundle.txt:16:./docs/reports/grep_capture_pipeline.txt:1719:./docs/reports/grep_citation.txt:262:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_proof_bundle.txt:17:./docs/reports/grep_capture_pipeline.txt:1727:./docs/reports/grep_citation.txt:270:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_derived.txt:12:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_derived.txt:39:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_citation.txt:208:./docs/reports/grep_derived.txt:12:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_citation.txt:209:./docs/reports/grep_derived.txt:39:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_citation.txt:262:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_citation.txt:270:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_citation.txt:284:./docs/blueprints/autocapture_nx_blueprint.md:1778:  - replay tool validates retrieval/citations without model calls
+./docs/reports/grep_citation.txt:285:./docs/blueprints/autocapture_nx_blueprint.md:1780:  - Golden: replay reproduces expected citations and verification results
+./docs/reports/grep_ledger.txt:108:./docs/blueprints/autocapture_nx_blueprint.md:358:  - Gate: `tools/gate_ledger.py` verifies replay
+./docs/reports/grep_journal.txt:61:./docs/autocapture_nx_blueprint_final.md:1104:- journal-first design with restart replay
+./docs/reports/grep_capture_pipeline.txt:1005:./docs/reports/grep_ledger.txt:108:./docs/blueprints/autocapture_nx_blueprint.md:358:  - Gate: `tools/gate_ledger.py` verifies replay
+./docs/reports/grep_capture_pipeline.txt:1188:./docs/reports/grep_journal.txt:61:./docs/autocapture_nx_blueprint_final.md:1104:- journal-first design with restart replay
+./docs/reports/grep_capture_pipeline.txt:1380:./docs/reports/grep_derived.txt:12:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_capture_pipeline.txt:1407:./docs/reports/grep_derived.txt:39:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_capture_pipeline.txt:1696:./docs/reports/grep_citation.txt:208:./docs/reports/grep_derived.txt:12:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_capture_pipeline.txt:1697:./docs/reports/grep_citation.txt:209:./docs/reports/grep_derived.txt:39:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_capture_pipeline.txt:1719:./docs/reports/grep_citation.txt:262:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_capture_pipeline.txt:1727:./docs/reports/grep_citation.txt:270:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_capture_pipeline.txt:1741:./docs/reports/grep_citation.txt:284:./docs/blueprints/autocapture_nx_blueprint.md:1778:  - replay tool validates retrieval/citations without model calls
+./docs/reports/grep_capture_pipeline.txt:1742:./docs/reports/grep_citation.txt:285:./docs/blueprints/autocapture_nx_blueprint.md:1780:  - Golden: replay reproduces expected citations and verification results
+./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/blueprints/autocapture_nx_blueprint.md:358:  - Gate: `tools/gate_ledger.py` verifies replay
+./docs/blueprints/autocapture_nx_blueprint.md:1381:  - Binary log stores dense events for replay; JSON summary is searchable/indexed.
+./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/blueprints/autocapture_nx_blueprint.md:1778:  - replay tool validates retrieval/citations without model calls
+./docs/blueprints/autocapture_nx_blueprint.md:1780:  - Golden: replay reproduces expected citations and verification results
+./docs/autocapture_nx_blueprint_final.md:157:- P2 Accurate: deterministic replay and repair.
+./docs/autocapture_nx_blueprint_final.md:169:- Crash-replay tests: power-loss mid-write; repair is deterministic.
+./docs/autocapture_nx_blueprint_final.md:1104:- journal-first design with restart replay

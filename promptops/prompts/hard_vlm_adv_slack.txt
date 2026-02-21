@@ -1,0 +1,9 @@
+Return strict JSON only with keys dm_name, messages, thumbnail_desc. messages must be the last two visible messages nearest the bottom of the chat as ordered array of {sender,timestamp,text}. thumbnail_desc must be one sentence describing visible thumbnail content only. Output only a single JSON object with no markdown fences and no extra text.
+
+Answer this exact question context when extracting: In the Slack DM window: transcribe the last two visible messages as (sender, timestamp, exact text). Also describe what the embedded image thumbnail depicts in 1 sentence (do not infer beyond what is visible).
+Use only visible evidence from the image.
+
+Answer policy:
+- Prefer correctness over speed.
+- Use only grounded evidence from provided context.
+- If evidence is insufficient, explicitly return indeterminate.

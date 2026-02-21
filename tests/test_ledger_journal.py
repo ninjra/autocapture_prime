@@ -1,6 +1,8 @@
 import tempfile
 import unittest
 import json
+import builtins
+from unittest.mock import patch
 
 from autocapture_nx.plugin_system.api import PluginContext
 from plugins.builtin.ledger_basic.plugin import LedgerWriter
@@ -10,23 +12,36 @@ from plugins.builtin.journal_basic.plugin import JournalWriter
 class LedgerJournalTests(unittest.TestCase):
     def test_ledger_requires_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
-            ctx = PluginContext(config={"storage": {"data_dir": tmp}}, get_capability=lambda _k: None, logger=lambda _m: None)
+            ctx = PluginContext(
+                config={"storage": {"data_dir": tmp}, "runtime": {"run_id": "run1", "timezone": "UTC"}},
+                get_capability=lambda _k: None,
+                logger=lambda _m: None,
+            )
             ledger = LedgerWriter("ledger", ctx)
             with self.assertRaises(ValueError):
                 ledger.append({"schema_version": 1})
 
     def test_journal_requires_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
-            ctx = PluginContext(config={"storage": {"data_dir": tmp}}, get_capability=lambda _k: None, logger=lambda _m: None)
+            ctx = PluginContext(
+                config={"storage": {"data_dir": tmp}, "runtime": {"run_id": "run1", "timezone": "UTC"}},
+                get_capability=lambda _k: None,
+                logger=lambda _m: None,
+            )
             journal = JournalWriter("journal", ctx)
             with self.assertRaises(ValueError):
                 journal.append({"schema_version": 1})
 
     def test_ledger_hash_chain(self):
         with tempfile.TemporaryDirectory() as tmp:
-            ctx = PluginContext(config={"storage": {"data_dir": tmp}}, get_capability=lambda _k: None, logger=lambda _m: None)
+            ctx = PluginContext(
+                config={"storage": {"data_dir": tmp}, "runtime": {"run_id": "run1", "timezone": "UTC"}},
+                get_capability=lambda _k: None,
+                logger=lambda _m: None,
+            )
             ledger = LedgerWriter("ledger", ctx)
             entry1 = {
+                "record_type": "ledger.entry",
                 "schema_version": 1,
                 "entry_id": "e1",
                 "ts_utc": "2025-01-01T00:00:00Z",
@@ -37,6 +52,7 @@ class LedgerJournalTests(unittest.TestCase):
             }
             h1 = ledger.append(entry1)
             entry2 = {
+                "record_type": "ledger.entry",
                 "schema_version": 1,
                 "entry_id": "e2",
                 "ts_utc": "2025-01-01T00:00:01Z",
@@ -51,6 +67,70 @@ class LedgerJournalTests(unittest.TestCase):
                 lines = [json.loads(line) for line in handle if line.strip()]
             self.assertEqual(lines[0]["entry_hash"], h1)
             self.assertEqual(lines[1]["prev_hash"], h1)
+
+    def test_ledger_falls_back_when_primary_append_denied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = PluginContext(
+                config={"storage": {"data_dir": tmp}, "runtime": {"run_id": "run1", "timezone": "UTC"}},
+                get_capability=lambda _k: None,
+                logger=lambda _m: None,
+            )
+            ledger = LedgerWriter("ledger", ctx)
+            primary = f"{tmp}/ledger.ndjson"
+            real_open = builtins.open
+
+            def fake_open(path, *args, **kwargs):
+                mode = args[0] if args else kwargs.get("mode", "r")
+                if path == primary and "a" in str(mode):
+                    raise PermissionError("denied")
+                return real_open(path, *args, **kwargs)
+
+            entry = {
+                "record_type": "ledger.entry",
+                "schema_version": 1,
+                "entry_id": "e1",
+                "ts_utc": "2025-01-01T00:00:00Z",
+                "stage": "capture",
+                "inputs": [],
+                "outputs": ["e1"],
+                "policy_snapshot_hash": "hash",
+            }
+            with patch("plugins.builtin.ledger_basic.plugin.open", side_effect=fake_open):
+                h1 = ledger.append(entry)
+            self.assertTrue(h1)
+            self.assertNotEqual(ledger._path, primary)  # pylint: disable=protected-access
+
+    def test_journal_falls_back_when_primary_append_denied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = PluginContext(
+                config={"storage": {"data_dir": tmp}, "runtime": {"run_id": "run1", "timezone": "UTC"}},
+                get_capability=lambda _k: None,
+                logger=lambda _m: None,
+            )
+            journal = JournalWriter("journal", ctx)
+            primary = f"{tmp}/journal.ndjson"
+            real_open = builtins.open
+
+            def fake_open(path, *args, **kwargs):
+                mode = args[0] if args else kwargs.get("mode", "r")
+                if path == primary and "a" in str(mode):
+                    raise PermissionError("denied")
+                return real_open(path, *args, **kwargs)
+
+            payload = {
+                "schema_version": 1,
+                "event_id": "evt1",
+                "sequence": 1,
+                "ts_utc": "2025-01-01T00:00:00Z",
+                "tzid": "UTC",
+                "offset_minutes": 0,
+                "event_type": "test.event",
+                "payload": {"ok": True},
+                "run_id": "run1",
+            }
+            with patch("plugins.builtin.journal_basic.plugin.open", side_effect=fake_open):
+                journal.append(payload)
+            self.assertNotEqual(journal._path, primary)  # pylint: disable=protected-access
 
 
 if __name__ == "__main__":

@@ -1,0 +1,110 @@
+{
+  "created_utc": "2026-02-02T00:00:00Z",
+  "fixture_id": "docs-test-sample-20260202",
+  "inputs": {
+    "screenshots": [
+      {
+        "id": "screenshot_1",
+        "path": "/mnt/d/projects/autocapture_prime/docs/test sample/Screenshot 2026-02-02 113519.png"
+      }
+    ]
+  },
+  "queries": {
+    "auto": {
+      "casefold": true,
+      "include_visible_apps": true,
+      "include_window_titles": true,
+      "match_mode": "exact_word",
+      "max_tokens": 40,
+      "min_token_len": 4,
+      "stopwords": [
+        "about",
+        "after",
+        "again",
+        "also",
+        "and",
+        "another",
+        "back",
+        "because",
+        "before",
+        "being",
+        "below",
+        "between",
+        "both",
+        "button",
+        "could",
+        "does",
+        "download",
+        "edit",
+        "from",
+        "here",
+        "home",
+        "https",
+        "into",
+        "just",
+        "like",
+        "more",
+        "next",
+        "only",
+        "open",
+        "page",
+        "previous",
+        "save",
+        "search",
+        "settings",
+        "should",
+        "since",
+        "that",
+        "then",
+        "there",
+        "this",
+        "those",
+        "title",
+        "under",
+        "using",
+        "view",
+        "when",
+        "where",
+        "which",
+        "with",
+        "your"
+      ]
+    },
+    "explicit": [
+      {
+        "query": "what time is it on the vdi",
+        "expect": "VDI time:",
+        "match_mode": "contains"
+      },
+      {
+        "query": "who is working with me on the quorum task",
+        "expect": "Quorum task collaborator:",
+        "match_mode": "contains"
+      },
+      {
+        "query": "how many inboxes I have open",
+        "expect": "Open inboxes:",
+        "match_mode": "contains"
+      },
+      {
+        "query": "what song is playing",
+        "expect": "Now playing:",
+        "match_mode": "contains"
+      },
+      {
+        "query": "Master Cylinder",
+        "expect": "Master Cylinder",
+        "match_mode": "contains"
+      },
+      {
+        "query": "what time is it on the vdi, and who is working with me on the quorum task. Lastly tell me how many inboxes I have open.",
+        "expect": "Quorum task collaborator:",
+        "match_mode": "contains"
+      }
+    ],
+    "mode": "explicit",
+    "require_citations": true,
+    "require_state": "ok"
+  },
+  "version": 1
+}

@@ -1,28 +1,44 @@
 {
-  "plugin_id": "builtin.reranker.stub",
-  "version": "0.1.0",
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [],
   "enabled": false,
   "entrypoints": [
     {
-      "kind": "reranker",
+      "callable": "create_plugin",
       "id": "default",
-      "path": "plugin.py",
-      "callable": "create_plugin"
+      "kind": "reranker",
+      "path": "plugin.py"
     }
+  ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "optional_deps": [
+    "sentence-transformers",
+    "torch"
   ],
   "permissions": {
     "filesystem": "read",
     "gpu": false,
-    "raw_input": false,
-    "network": false
+    "network": false,
+    "raw_input": false
   },
-  "compat": {
-    "requires_kernel": ">=0.1.0",
-    "requires_schema_versions": [1]
-  },
-  "depends_on": [],
-  "hash_lock": {
-    "manifest_sha256": "",
-    "artifact_sha256": ""
-  }
+  "plugin_id": "builtin.reranker.basic",
+  "provides": [
+    "reranker"
+  ],
+  "replaces": [
+    "builtin.reranker.stub"
+  ],
+  "required_capabilities": [],
+  "settings_paths": [
+    "models"
+  ],
+  "version": "0.1.0"
 }

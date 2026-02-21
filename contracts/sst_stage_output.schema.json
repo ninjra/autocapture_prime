@@ -1,0 +1,501 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": [
+    "object",
+    "null"
+  ],
+  "additionalProperties": true,
+  "$defs": {
+    "bbox": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "confidence_bp": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "token_flags": {
+      "type": "object",
+      "properties": {
+        "monospace_likely": {"type": "boolean"},
+        "is_number": {"type": "boolean"},
+        "invalid_text": {"type": "boolean"},
+        "bbox_invalid": {"type": "boolean"},
+        "low_confidence": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    },
+    "token": {
+      "type": "object",
+      "required": [
+        "token_id",
+        "text",
+        "norm_text",
+        "bbox",
+        "confidence_bp",
+        "source",
+        "flags",
+        "provider_id",
+        "patch_id"
+      ],
+      "properties": {
+        "token_id": {"type": "string"},
+        "text": {"type": "string"},
+        "norm_text": {"type": "string"},
+        "bbox": {"$ref": "#/$defs/bbox"},
+        "confidence_bp": {"$ref": "#/$defs/confidence_bp"},
+        "source": {"type": "string"},
+        "flags": {"$ref": "#/$defs/token_flags"},
+        "provider_id": {"type": "string"},
+        "patch_id": {"type": "string"},
+        "line_id": {"type": "string"},
+        "block_id": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "text_line": {
+      "type": "object",
+      "required": [
+        "line_id",
+        "token_ids",
+        "bbox",
+        "text"
+      ],
+      "properties": {
+        "line_id": {"type": "string"},
+        "token_ids": {"type": "array", "items": {"type": "string"}},
+        "bbox": {"$ref": "#/$defs/bbox"},
+        "text": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "text_block": {
+      "type": "object",
+      "required": [
+        "block_id",
+        "line_ids",
+        "bbox",
+        "text"
+      ],
+      "properties": {
+        "block_id": {"type": "string"},
+        "line_ids": {"type": "array", "items": {"type": "string"}},
+        "bbox": {"$ref": "#/$defs/bbox"},
+        "text": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "table_cell": {
+      "type": "object",
+      "required": [
+        "r",
+        "c",
+        "bbox",
+        "text",
+        "norm_text",
+        "confidence_bp"
+      ],
+      "properties": {
+        "r": {"type": "integer"},
+        "c": {"type": "integer"},
+        "bbox": {"$ref": "#/$defs/bbox"},
+        "text": {"type": "string"},
+        "norm_text": {"type": "string"},
+        "confidence_bp": {"$ref": "#/$defs/confidence_bp"}
+      },
+      "additionalProperties": true
+    },
+    "table_merge": {
+      "type": "object",
+      "required": ["r1", "c1", "r2", "c2"],
+      "properties": {
+        "r1": {"type": "integer"},
+        "c1": {"type": "integer"},
+        "r2": {"type": "integer"},
+        "c2": {"type": "integer"}
+      },
+      "additionalProperties": true
+    },
+    "table_grid": {
+      "type": "object",
+      "required": ["rows", "cols", "row_y", "col_x", "merges"],
+      "properties": {
+        "rows": {"type": "integer"},
+        "cols": {"type": "integer"},
+        "row_y": {"type": "array", "items": {"type": "integer"}},
+        "col_x": {"type": "array", "items": {"type": "integer"}},
+        "merges": {"type": "array", "items": {"$ref": "#/$defs/table_merge"}}
+      },
+      "additionalProperties": true
+    },
+    "table": {
+      "type": "object",
+      "required": [
+        "table_id",
+        "state_id",
+        "bbox",
+        "rows",
+        "cols",
+        "row_y",
+        "col_x",
+        "merges",
+        "cells",
+        "csv",
+        "tsv",
+        "kind"
+      ],
+      "properties": {
+        "table_id": {"type": "string"},
+        "state_id": {"type": "string"},
+        "bbox": {"$ref": "#/$defs/bbox"},
+        "rows": {"type": "integer"},
+        "cols": {"type": "integer"},
+        "row_y": {"type": "array", "items": {"type": "integer"}},
+        "col_x": {"type": "array", "items": {"type": "integer"}},
+        "merges": {"type": "array", "items": {"$ref": "#/$defs/table_merge"}},
+        "grid": {"$ref": "#/$defs/table_grid"},
+        "cells": {"type": "array", "items": {"$ref": "#/$defs/table_cell"}},
+        "csv": {"type": "string"},
+        "tsv": {"type": "string"},
+        "kind": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "spreadsheet": {
+      "allOf": [
+        {"$ref": "#/$defs/table"},
+        {
+          "type": "object",
+          "properties": {
+            "active_cell": {"type": ["object", "null"], "additionalProperties": true},
+            "formula_bar": {"type": ["object", "null"], "additionalProperties": true},
+            "headers": {"type": ["object", "null"], "additionalProperties": true},
+            "header_map": {"type": ["object", "null"], "additionalProperties": true},
+            "top_row_cells": {"type": "array", "items": {"$ref": "#/$defs/table_cell"}}
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "code_block": {
+      "type": "object",
+      "required": [
+        "code_id",
+        "state_id",
+        "bbox",
+        "language",
+        "text",
+        "lines",
+        "confidence_bp"
+      ],
+      "properties": {
+        "code_id": {"type": "string"},
+        "state_id": {"type": "string"},
+        "bbox": {"$ref": "#/$defs/bbox"},
+        "language": {"type": "string"},
+        "text": {"type": "string"},
+        "lines": {"type": "array", "items": {"type": "string"}},
+        "line_numbers": {"type": "array", "items": {"type": ["string", "null"]}},
+        "caret": {"type": ["object", "null"], "additionalProperties": true},
+        "selection": {"type": ["object", "null"], "additionalProperties": true},
+        "confidence_bp": {"$ref": "#/$defs/confidence_bp"},
+        "diagnostics": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    },
+    "chart": {
+      "type": "object",
+      "required": [
+        "chart_id",
+        "state_id",
+        "bbox",
+        "chart_type",
+        "labels",
+        "ticks_x",
+        "ticks_y",
+        "series",
+        "evidence",
+        "confidence_bp"
+      ],
+      "properties": {
+        "chart_id": {"type": "string"},
+        "state_id": {"type": "string"},
+        "bbox": {"$ref": "#/$defs/bbox"},
+        "chart_type": {"type": "string"},
+        "labels": {"type": "array", "items": {"type": "string"}},
+        "ticks_x": {"type": "array", "items": {"type": "string"}},
+        "ticks_y": {"type": "array", "items": {"type": "string"}},
+        "series": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+        "evidence": {"type": "object", "additionalProperties": true},
+        "confidence_bp": {"$ref": "#/$defs/confidence_bp"}
+      },
+      "additionalProperties": true
+    },
+    "cursor": {
+      "type": "object",
+      "required": ["bbox", "type", "confidence_bp"],
+      "properties": {
+        "bbox": {"$ref": "#/$defs/bbox"},
+        "type": {"type": "string"},
+        "confidence_bp": {"$ref": "#/$defs/confidence_bp"}
+      },
+      "additionalProperties": true
+    },
+    "element": {
+      "type": "object",
+      "required": [
+        "element_id",
+        "type",
+        "bbox",
+        "text_refs",
+        "label",
+        "interactable",
+        "state",
+        "parent_id",
+        "children_ids",
+        "z"
+      ],
+      "properties": {
+        "element_id": {"type": "string"},
+        "type": {"type": "string"},
+        "bbox": {"$ref": "#/$defs/bbox"},
+        "text_refs": {"type": "array", "items": {"type": "string"}},
+        "label": {"type": ["string", "null"]},
+        "interactable": {"type": "boolean"},
+        "state": {"type": "object", "additionalProperties": true},
+        "parent_id": {"type": ["string", "null"]},
+        "children_ids": {"type": "array", "items": {"type": "string"}},
+        "z": {"type": "integer"},
+        "app_hint": {"type": ["string", "null"]}
+      },
+      "additionalProperties": true
+    },
+    "element_edge": {
+      "type": "object",
+      "required": ["src", "dst", "kind"],
+      "properties": {
+        "src": {"type": "string"},
+        "dst": {"type": "string"},
+        "kind": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "element_graph": {
+      "type": "object",
+      "required": ["state_id", "elements", "edges"],
+      "properties": {
+        "state_id": {"type": "string"},
+        "elements": {"type": "array", "items": {"$ref": "#/$defs/element"}},
+        "edges": {"type": "array", "items": {"$ref": "#/$defs/element_edge"}}
+      },
+      "additionalProperties": true
+    },
+    "delta_change": {
+      "type": "object",
+      "required": ["kind", "target_id", "detail"],
+      "properties": {
+        "kind": {"type": "string"},
+        "target_id": {"type": "string"},
+        "detail": {"type": "object", "additionalProperties": true}
+      },
+      "additionalProperties": true
+    },
+    "delta_event": {
+      "type": "object",
+      "required": [
+        "delta_id",
+        "from_state_id",
+        "to_state_id",
+        "ts_ms",
+        "changes",
+        "summary"
+      ],
+      "properties": {
+        "delta_id": {"type": "string"},
+        "from_state_id": {"type": "string"},
+        "to_state_id": {"type": "string"},
+        "ts_ms": {"type": "integer"},
+        "changes": {"type": "array", "items": {"$ref": "#/$defs/delta_change"}},
+        "summary": {"type": "object", "additionalProperties": true}
+      },
+      "additionalProperties": true
+    },
+    "action_alternative": {
+      "type": "object",
+      "required": ["kind", "target_element_id", "confidence_bp", "evidence"],
+      "properties": {
+        "kind": {"type": "string"},
+        "target_element_id": {"type": ["string", "null"]},
+        "confidence_bp": {"$ref": "#/$defs/confidence_bp"},
+        "evidence": {"type": "object", "additionalProperties": true}
+      },
+      "additionalProperties": true
+    },
+    "action_impact": {
+      "type": "object",
+      "required": ["created", "modified", "deleted"],
+      "properties": {
+        "created": {"type": "boolean"},
+        "modified": {"type": "boolean"},
+        "deleted": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    },
+    "action_event": {
+      "type": "object",
+      "required": [
+        "action_id",
+        "from_state_id",
+        "to_state_id",
+        "ts_ms",
+        "primary",
+        "alternatives",
+        "impact"
+      ],
+      "properties": {
+        "action_id": {"type": "string"},
+        "from_state_id": {"type": "string"},
+        "to_state_id": {"type": "string"},
+        "ts_ms": {"type": "integer"},
+        "primary": {"$ref": "#/$defs/action_alternative"},
+        "alternatives": {"type": "array", "items": {"$ref": "#/$defs/action_alternative"}},
+        "impact": {"$ref": "#/$defs/action_impact"}
+      },
+      "additionalProperties": true
+    },
+    "extra_doc": {
+      "type": "object",
+      "required": [
+        "doc_id",
+        "text",
+        "doc_kind",
+        "meta",
+        "provider_id",
+        "stage",
+        "confidence_bp",
+        "bboxes"
+      ],
+      "properties": {
+        "doc_id": {"type": "string"},
+        "text": {"type": "string"},
+        "doc_kind": {"type": "string"},
+        "meta": {"type": "object", "additionalProperties": true},
+        "provider_id": {"type": "string"},
+        "stage": {"type": "string"},
+        "confidence_bp": {"$ref": "#/$defs/confidence_bp"},
+        "bboxes": {"type": "array", "items": {"$ref": "#/$defs/bbox"}}
+      },
+      "additionalProperties": true
+    },
+    "persisted": {
+      "type": "object",
+      "required": ["handled"],
+      "properties": {
+        "handled": {"type": "boolean"},
+        "derived_records": {"type": "integer"},
+        "indexed_docs": {"type": "integer"},
+        "derived_ids": {"type": "array", "items": {"type": "string"}},
+        "indexed_ids": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    },
+    "patch": {
+      "type": "object",
+      "required": ["patch_id", "bbox", "width", "height"],
+      "properties": {
+        "patch_id": {"type": "string"},
+        "bbox": {"$ref": "#/$defs/bbox"},
+        "width": {"type": "integer"},
+        "height": {"type": "integer"},
+        "image_bytes": {},
+        "image_rgb": {}
+      },
+      "additionalProperties": true
+    },
+    "state": {
+      "type": "object",
+      "required": [
+        "state_id",
+        "frame_id",
+        "ts_ms",
+        "phash",
+        "width",
+        "height",
+        "tokens",
+        "element_graph",
+        "text_lines",
+        "text_blocks",
+        "tables",
+        "spreadsheets",
+        "code_blocks",
+        "charts",
+        "cursor",
+        "visible_apps",
+        "focus_element_id",
+        "state_confidence_bp",
+        "diagnostics"
+      ],
+      "properties": {
+        "state_id": {"type": "string"},
+        "frame_id": {"type": "string"},
+        "ts_ms": {"type": "integer"},
+        "phash": {"type": "string"},
+        "width": {"type": "integer"},
+        "height": {"type": "integer"},
+        "tokens": {"type": "array", "items": {"$ref": "#/$defs/token"}},
+        "tokens_raw": {"type": "array", "items": {"$ref": "#/$defs/token"}},
+        "tokens_raw_count": {"type": "integer"},
+        "element_graph": {"$ref": "#/$defs/element_graph"},
+        "text_lines": {"type": "array", "items": {"$ref": "#/$defs/text_line"}},
+        "text_blocks": {"type": "array", "items": {"$ref": "#/$defs/text_block"}},
+        "tables": {"type": "array", "items": {"$ref": "#/$defs/table"}},
+        "spreadsheets": {"type": "array", "items": {"$ref": "#/$defs/spreadsheet"}},
+        "code_blocks": {"type": "array", "items": {"$ref": "#/$defs/code_block"}},
+        "charts": {"type": "array", "items": {"$ref": "#/$defs/chart"}},
+        "cursor": {"anyOf": [{"$ref": "#/$defs/cursor"}, {"type": "null"}]},
+        "visible_apps": {"type": "array", "items": {"type": "string"}},
+        "focus_element_id": {"type": ["string", "null"]},
+        "state_confidence_bp": {"$ref": "#/$defs/confidence_bp"},
+        "diagnostics": {"type": "array", "items": {"type": "object", "additionalProperties": true}}
+      },
+      "additionalProperties": true
+    }
+  },
+  "properties": {
+    "boundary": {"type": "boolean"},
+    "boundary_reason": {"type": "string"},
+    "phash_distance": {"type": "integer"},
+    "diff_score_bp": {"type": "integer"},
+    "boundary_override": {"type": "boolean"},
+    "downscaled": {"type": "array"},
+    "image_rgb": {},
+    "image_sha256": {"type": "string"},
+    "phash": {"type": "string"},
+    "width": {"type": "integer"},
+    "height": {"type": "integer"},
+    "patches": {"type": "array", "items": {"$ref": "#/$defs/patch"}},
+    "tokens": {"type": "array", "items": {"$ref": "#/$defs/token"}},
+    "tokens_raw": {"type": "array", "items": {"$ref": "#/$defs/token"}},
+    "text_lines": {"type": "array", "items": {"$ref": "#/$defs/text_line"}},
+    "text_blocks": {"type": "array", "items": {"$ref": "#/$defs/text_block"}},
+    "tables": {"type": "array", "items": {"$ref": "#/$defs/table"}},
+    "spreadsheets": {"type": "array", "items": {"$ref": "#/$defs/spreadsheet"}},
+    "code_blocks": {"type": "array", "items": {"$ref": "#/$defs/code_block"}},
+    "charts": {"type": "array", "items": {"$ref": "#/$defs/chart"}},
+    "element_graph": {"$ref": "#/$defs/element_graph"},
+    "element_graph_raw": {"type": "object"},
+    "cursor": {"anyOf": [{"$ref": "#/$defs/cursor"}, {"type": "null"}]},
+    "state": {"$ref": "#/$defs/state"},
+    "delta_event": {"anyOf": [{"$ref": "#/$defs/delta_event"}, {"type": "null"}]},
+    "action_event": {"anyOf": [{"$ref": "#/$defs/action_event"}, {"type": "null"}]},
+    "persisted": {"$ref": "#/$defs/persisted"},
+    "extra_docs": {"type": "array", "items": {"$ref": "#/$defs/extra_doc"}},
+    "metrics": {"type": "object"},
+    "diagnostics": {"type": "array"}
+  }
+}

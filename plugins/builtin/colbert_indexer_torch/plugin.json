@@ -1,0 +1,64 @@
+{
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "default_settings": {
+    "db_path": "",
+    "device": "cuda",
+    "dim": 32,
+    "model_id": ""
+  },
+  "depends_on": [],
+  "enabled": false,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "index.postprocess",
+      "path": "plugin.py"
+    }
+  ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "optional_deps": [
+    "torch",
+    "transformers",
+    "numpy"
+  ],
+  "permissions": {
+    "filesystem": "readwrite",
+    "gpu": true,
+    "network": false,
+    "raw_input": false
+  },
+  "plugin_id": "builtin.index.colbert_torch",
+  "provides": [
+    "index.postprocess"
+  ],
+  "required_capabilities": [],
+  "settings_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "db_path": {
+        "type": "string"
+      },
+      "device": {
+        "type": "string"
+      },
+      "dim": {
+        "minimum": 8,
+        "type": "integer"
+      },
+      "model_id": {
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "version": "0.1.0"
+}

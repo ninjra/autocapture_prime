@@ -1,0 +1,6 @@
+Return strict JSON only with the key "windows" as an ordered array where each item has "active_title", "hostname", and "tab_count". Output only a single JSON object with no markdown fences and no extra text.
+
+Answer this exact question context when extracting: For each visible browser window in the screenshot, extract the active tab title, the address-bar hostname (hostname only), and the count of visible tabs in that window’s tab strip.
+
+Use only visible evidence from the image.
+Return strict JSON only with no extra commentary.

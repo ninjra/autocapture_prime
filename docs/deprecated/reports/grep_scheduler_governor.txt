@@ -1,0 +1,109 @@
+# rg -n /scheduler|governor/
+./docs/blueprints/autocapture_nx_blueprint.md:43:### Pattern D — Scheduler / governor (activity-authoritative)
+./docs/blueprints/autocapture_nx_blueprint.md:69:- **Phase 5: Scheduler/governor** — Activity-authoritative gating, budgets, preemption, telemetry integration.
+./docs/blueprints/autocapture_nx_blueprint.md:121:- [ ] **I044** (Phase 5) — [Real scheduler plugin gates heavy work on user activity](#i044)
+./docs/blueprints/autocapture_nx_blueprint.md:240:  - When extras missing, plugin is unavailable and scheduler marks jobs as NO_EVIDENCE.
+./docs/blueprints/autocapture_nx_blueprint.md:492:  - runtime governor → capture fps/quality controller
+./docs/blueprints/autocapture_nx_blueprint.md:1818:## Phase 5: Scheduler/governor
+./docs/blueprints/autocapture_nx_blueprint.md:1833:### I044 — Real scheduler plugin gates heavy work on user activity
+./docs/blueprints/autocapture_nx_blueprint.md:1838:  - new scheduler plugin (builtin): job admission based on activity
+./docs/blueprints/autocapture_nx_blueprint.md:1839:  - governor API used by all heavy workers
+./docs/blueprints/autocapture_nx_blueprint.md:1856:  - input_windows exposes aggregated activity signal channel to governor
+./docs/blueprints/autocapture_nx_blueprint.md:1888:  - governor decisions affect capture rate/quality and enrichment admission
+./docs/blueprints/autocapture_nx_blueprint.md:1890:  - Integration test: governor changes lead to fps/quality changes within bounded time
+./docs/blueprints/autocapture_nx_blueprint.md:1892:  - Expose governor outputs: allowed fps range, max CPU%, allow_enrich boolean.
+./docs/blueprints/autocapture_nx_blueprint.md:1903:  - scheduler cancels/deprioritizes heavy jobs on new input events
+./docs/blueprints/autocapture_nx_blueprint.md:1908:  - On ACTIVE transition, scheduler pauses queues and releases GPU leases.
+./docs/blueprints/autocapture_nx_blueprint.md:1918:  - scheduler budgets for model execution (CPU/GPU time, tokens, batch sizes)
+./docs/blueprints/autocapture_nx_blueprint.md:2291:  - proof/verify dashboard, plugins, keys, settings, jobs/scheduler.
+./docs/blueprints/autocapture_nx_blueprint.md:2336:  - Stream: capture telemetry (I46), scheduler state (I44), alerts (I81).
+./docs/blueprints/autocapture_nx_blueprint.md:2385:  - Integrate with scheduler: no heavy parsing while ACTIVE.
+./docs/autocapture_nx_blueprint_final.md:188:- Kernel runtime governor.
+./docs/autocapture_nx_blueprint_final.md:311:- Kernel runtime governor controls capture settings.
+./docs/autocapture_nx_blueprint_final.md:442:- **Kernel**: authoritative scheduler, policy enforcement, routing, and invariants.
+./docs/autocapture_nx_blueprint_final.md:662:- Kernel governor; capture plugin applies updates.
+./docs/autocapture_nx_blueprint_final.md:702:- Kernel governor + capture source plugin.
+./docs/autocapture_mx_implementation_plan.md:23:- Runtime governor + leases -> Capture -> Ingest -> Indexing -> Retrieval -> Answering
+./docs/autocapture_mx_implementation_plan.md:36:3) PolicyGate/Egress + Sanitizer + Runtime governor/leases (MX-POLICY-0001, MX-SAN-0001, MX-GOV-0001, MX-LEASE-0001)
+./docs/autocapture_mx_implementation_plan.md:46:| B | MOD-006..011 | redaction + runtime governor/leases + storage v2 + capture spool/pipeline | tests/test_sanitizer_no_raw_pii.py; tests/test_governor_gating.py; tests/test_work_leases.py; tests/test_capture_spool_idempotent.py; tests/test_sqlcipher_roundtrip.py |
+./docs/autocapture_mx_implementation_plan.md:71:| MX-GOV-0001 | tests/test_governor_gating.py | autocapture/runtime/governor.py; autocapture/runtime/activity.py; autocapture/runtime/scheduler.py; autocapture/runtime/budgets.py |
+./docs/autocapture_mx_implementation_plan.md:154:- Artifacts: autocapture/runtime/governor.py; autocapture/runtime/activity.py; autocapture/runtime/scheduler.py; autocapture/runtime/budgets.py
+./docs/autocapture_mx_implementation_plan.md:155:- Validation: unit_test tests/test_governor_gating.py
+./docs/spec/autocapture_mx_spec.yaml:181:      - autocapture/runtime/governor.py
+./docs/spec/autocapture_mx_spec.yaml:183:      - autocapture/runtime/scheduler.py
+./docs/spec/autocapture_mx_spec.yaml:187:        target: tests/test_governor_gating.py
+./docs/assumptions_checklist.md:48:     - Add scheduler gating to enforce runtime mode (IDLE_DRAIN only) unless user overrides.
+./docs/assumptions_checklist.md:120:10) Runtime governor only selects modes; worker suspension and VRAM release not enforced.
+./docs/assumptions_checklist.md:123:    - Current state: `plugins/builtin/runtime_governor/plugin.py` selects modes only.
+./docs/autocapture_mx_blueprint.md:136:    governor.py
+./docs/autocapture_mx_blueprint.md:139:    scheduler.py
+./docs/autocapture_mx_blueprint.md:469:The governor publishes a `RuntimeState`:
+./docs/autocapture_mx_blueprint.md:491:If a stage is skipped due to governor, MX records a deterministic degrade marker:
+./docs/autocapture_mx_blueprint.md:574:- governor allows, or
+./docs/autocapture_mx_blueprint.md:596:- governor state.
+./docs/autocapture_mx_blueprint.md:788:Training is local-only by default and respects governor budgets (never runs during active interaction unless explicitly commanded).
+./docs/autocapture_mx_blueprint.md:1050:      - autocapture/runtime/governor.py
+./docs/autocapture_mx_blueprint.md:1052:      - autocapture/runtime/scheduler.py
+./docs/autocapture_mx_blueprint.md:1056:        target: tests/test_governor_gating.py
+./autocapture/plugins/kinds.py:40:    "runtime.governor",
+./docs/assumptions.md:13:   - Mitigation: add scheduler gate enforcing runtime mode and background rekey jobs.
+./docs/assumptions.md:39:10) Runtime governor only selects modes; worker suspension and VRAM release are not yet enforced.
+./docs/mx_gap_matrix.md:96:- Existing (NX): plugins/builtin/runtime_governor/plugin.py
+./docs/mx_gap_matrix.md:97:- Missing (MX paths/tests): autocapture/runtime/governor.py; autocapture/runtime/activity.py; autocapture/runtime/scheduler.py; autocapture/runtime/budgets.py; tests/test_governor_gating.py
+./docs/mx_gap_matrix.md:99:  - Artifacts: autocapture/runtime/governor.py; autocapture/runtime/activity.py; autocapture/runtime/scheduler.py; autocapture/runtime/budgets.py
+./docs/mx_gap_matrix.md:100:  - Validators: unit_test tests/test_governor_gating.py
+./contracts/plugin_sdk.md:47:- `runtime.governor`
+./docs/mx_equivalence_map.md:71:- Proof: `plugins/builtin/runtime_governor/plugin.py` (mode selection)
+./docs/mx_equivalence_map.md:72:- Gap to MX: add runtime governor module + gating enforcement + tests.
+./docs/reports/grep_journal.txt:119:./docs/reports/blueprint_items.md:103:| I045 | Phase 5: Scheduler/governor | Input tracker exposes activity signals (not only journal) |  |  |  |
+./docs/reports/grep_plugin_manifest.txt:285:./plugins/builtin/runtime_governor/plugin.json:25:    "manifest_sha256": "",
+./contracts/ir_pins.json:15:    "runtime.governor",
+./contracts/ir_pins.json:129:      "id": "builtin.runtime.governor"
+./docs/reports/blueprint_items.md:102:| I044 | Phase 5: Scheduler/governor | Real scheduler plugin gates heavy work on user activity |  |  |  |
+./docs/reports/blueprint_items.md:103:| I045 | Phase 5: Scheduler/governor | Input tracker exposes activity signals (not only journal) |  |  |  |
+./docs/reports/blueprint_items.md:104:| I046 | Phase 5: Scheduler/governor | Capture emits telemetry (queues, drops, lag, CPU) |  |  |  |
+./docs/reports/blueprint_items.md:105:| I047 | Phase 5: Scheduler/governor | Governor outputs feed backpressure and job admission |  |  |  |
+./docs/reports/blueprint_items.md:106:| I048 | Phase 5: Scheduler/governor | Immediate ramp down on user input (cancel/deprioritize heavy jobs) |  |  |  |
+./docs/reports/blueprint_items.md:107:| I116 | Phase 5: Scheduler/governor | Model execution budgets per idle window |  |  |  |
+./docs/reports/blueprint_items.md:108:| I117 | Phase 5: Scheduler/governor | Preemption/chunking for long jobs |  |  |  |
+./tools/blueprint_items.json:764:    "phase": "Phase 5: Scheduler/governor",
+./tools/blueprint_items.json:765:    "title": "Real scheduler plugin gates heavy work on user activity",
+./tools/blueprint_items.json:772:    "phase": "Phase 5: Scheduler/governor",
+./tools/blueprint_items.json:780:    "phase": "Phase 5: Scheduler/governor",
+./tools/blueprint_items.json:788:    "phase": "Phase 5: Scheduler/governor",
+./tools/blueprint_items.json:796:    "phase": "Phase 5: Scheduler/governor",
+./tools/blueprint_items.json:804:    "phase": "Phase 5: Scheduler/governor",
+./tools/blueprint_items.json:812:    "phase": "Phase 5: Scheduler/governor",
+./config/plugin_locks.json:84:    "builtin.runtime.governor": {
+./config/default.json:71:      "runtime.governor",
+./config/default.json:116:      "builtin.runtime.governor",
+./config/default.json:157:      "builtin.runtime.governor",
+./config/default.json:200:      "builtin.runtime.governor": true,
+./config/default.json:222:        "builtin.runtime.governor",
+./plugins/builtin/runtime_governor/plugin.py:1:"""Runtime governor plugin for mode transitions."""
+./plugins/builtin/runtime_governor/plugin.py:22:        return {"runtime.governor": self}
+./plugins/builtin/runtime_governor/plugin.json:2:  "plugin_id": "builtin.runtime.governor",
+./plugins/builtin/runtime_governor/plugin.json:7:      "kind": "runtime.governor",
+./autocapture/runtime/__init__.py:5:from .governor import RuntimeGovernor, GovernorDecision
+./autocapture/runtime/__init__.py:6:from .scheduler import Scheduler, Job
+./autocapture/runtime/scheduler.py:1:"""Simple scheduler honoring RuntimeGovernor decisions."""
+./autocapture/runtime/scheduler.py:8:from autocapture.runtime.governor import RuntimeGovernor
+./autocapture/runtime/scheduler.py:19:    def __init__(self, governor: RuntimeGovernor) -> None:
+./autocapture/runtime/scheduler.py:20:        self._governor = governor
+./autocapture/runtime/scheduler.py:27:        decision = self._governor.decide(signals)
+./autocapture/runtime/governor.py:1:"""Runtime governor enforcing heavy-work gating."""
+./autocapture/runtime/governor.py:43:def create_governor(plugin_id: str) -> RuntimeGovernor:
+./tests/test_governor_gating.py:3:from autocapture.runtime.governor import RuntimeGovernor
+./tests/test_governor_gating.py:4:from autocapture.runtime.scheduler import Scheduler, Job
+./tests/test_governor_gating.py:8:    def test_governor_modes(self) -> None:
+./tests/test_governor_gating.py:9:        governor = RuntimeGovernor(idle_window_s=10)
+./tests/test_governor_gating.py:10:        self.assertEqual(governor.decide({"user_active": True, "idle_seconds": 1, "query_intent": False}).mode, "ACTIVE_CAPTURE_ONLY")
+./tests/test_governor_gating.py:11:        self.assertEqual(governor.decide({"user_active": False, "idle_seconds": 15, "query_intent": False}).mode, "IDLE_DRAIN")
+./tests/test_governor_gating.py:12:        self.assertEqual(governor.decide({"user_active": False, "idle_seconds": 1, "query_intent": True}).mode, "USER_QUERY")
+./tests/test_governor_gating.py:14:    def test_scheduler_respects_modes(self) -> None:
+./tests/test_governor_gating.py:15:        governor = RuntimeGovernor(idle_window_s=5)
+./tests/test_governor_gating.py:16:        scheduler = Scheduler(governor)
+./tests/test_governor_gating.py:18:        scheduler.enqueue(Job(name="heavy", fn=lambda: ran.append("heavy"), heavy=True))
+./tests/test_governor_gating.py:19:        scheduler.enqueue(Job(name="light", fn=lambda: ran.append("light"), heavy=False))
+./tests/test_governor_gating.py:21:        scheduler.run_pending({"user_active": True, "idle_seconds": 1, "query_intent": False})
+./tests/test_governor_gating.py:24:        scheduler.run_pending({"user_active": False, "idle_seconds": 10, "query_intent": False})

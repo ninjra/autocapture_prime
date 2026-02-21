@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .errors import ConfigError
+from .paths import apply_path_defaults, load_json, normalize_config_paths
 
 
 @dataclass(frozen=True)
@@ -21,10 +21,10 @@ class ConfigPaths:
 
 
 def _load_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
+    try:
+        return load_json(path)
+    except FileNotFoundError:
         raise ConfigError(f"Missing config file: {path}")
-    with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -37,10 +37,38 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return merged
 
 
+def _apply_capture_preset(config: dict[str, Any]) -> dict[str, Any]:
+    capture_cfg = config.get("capture")
+    if not isinstance(capture_cfg, dict):
+        return config
+    preset_name = capture_cfg.get("mode_preset")
+    if not preset_name:
+        return config
+    presets = capture_cfg.get("presets", {})
+    if not isinstance(presets, dict):
+        return config
+    preset_patch = presets.get(preset_name)
+    if not isinstance(preset_patch, dict):
+        return config
+    return _deep_merge(config, preset_patch)
+
+
+def _apply_safe_mode_overrides(config: dict[str, Any]) -> dict[str, Any]:
+    kernel_cfg = config.get("kernel")
+    if not isinstance(kernel_cfg, dict):
+        return config
+    overrides = kernel_cfg.get("safe_mode_overrides")
+    if not isinstance(overrides, dict) or not overrides:
+        return config
+    return _deep_merge(config, overrides)
+
+
 class SchemaLiteValidator:
     """Minimal schema validator supporting object/array/scalar types."""
 
     def validate(self, schema: dict[str, Any], data: Any, path: str = "$") -> None:
+        if "const" in schema and data != schema["const"]:
+            raise ConfigError(f"{path}: value {data!r} does not match const {schema['const']!r}")
         if "enum" in schema and data not in schema["enum"]:
             raise ConfigError(f"{path}: value {data!r} not in enum {schema['enum']}")
 
@@ -54,9 +82,40 @@ class SchemaLiteValidator:
             self._validate_array(schema, data, path)
         elif expected_type in ("integer", "number"):
             self._validate_number(schema, data, path)
+        else:
+            if isinstance(data, dict) and any(k in schema for k in ("required", "properties", "additionalProperties")):
+                self._validate_object(schema, data, path)
+            elif isinstance(data, list) and "items" in schema:
+                self._validate_array(schema, data, path)
+
+        if "allOf" in schema:
+            for subschema in schema["allOf"]:
+                self.validate(subschema, data, path)
+        if "anyOf" in schema:
+            if not self._matches_any(schema["anyOf"], data, path):
+                raise ConfigError(f"{path}: did not match anyOf schema")
+        if "oneOf" in schema:
+            matches = 0
+            for subschema in schema["oneOf"]:
+                try:
+                    self.validate(subschema, data, path)
+                    matches += 1
+                except ConfigError:
+                    continue
+            if matches != 1:
+                raise ConfigError(f"{path}: expected oneOf match, got {matches}")
+
+    def _matches_any(self, schemas: list[dict[str, Any]], data: Any, path: str) -> bool:
+        for subschema in schemas:
+            try:
+                self.validate(subschema, data, path)
+                return True
+            except ConfigError:
+                continue
+        return False
 
     def _validate_type(self, expected: str | list[str], data: Any, path: str) -> None:
-        type_map = {
+        type_map: dict[str, type | tuple[type, ...]] = {
             "object": dict,
             "array": list,
             "string": str,
@@ -122,12 +181,21 @@ def validate_config(schema_path: Path, data: dict[str, Any]) -> None:
 
 def load_config(paths: ConfigPaths, safe_mode: bool) -> dict[str, Any]:
     defaults = _load_json(paths.default_path)
+    defaults_data_dir = defaults.get("storage", {}).get("data_dir")
     if safe_mode:
         config = deepcopy(defaults)
         config.setdefault("plugins", {})["safe_mode"] = True
+        user_config: dict[str, Any] = {}
     else:
         user_config = _load_json(paths.user_path) if paths.user_path.exists() else {}
         config = _deep_merge(defaults, user_config)
+    config = _apply_capture_preset(config)
+    if safe_mode:
+        config = _apply_safe_mode_overrides(config)
+    merged_data_dir = config.get("storage", {}).get("data_dir")
+    config = apply_path_defaults(config, user_overrides=user_config)
+    legacy_dirs = [value for value in (defaults_data_dir, merged_data_dir) if isinstance(value, str)]
+    config = normalize_config_paths(config, legacy_data_dir=legacy_dirs)
     validate_config(paths.schema_path, config)
     return config
 

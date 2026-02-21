@@ -1,0 +1,48 @@
+{
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [
+    "builtin.journal.basic",
+    "builtin.ledger.basic",
+    "builtin.anchor.basic"
+  ],
+  "enabled": true,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "capture.screenshot",
+      "path": "plugin.py"
+    }
+  ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "permissions": {
+    "filesystem": "readwrite",
+    "gpu": false,
+    "network": false,
+    "raw_input": true
+  },
+  "plugin_id": "builtin.capture.screenshot.windows",
+  "provides": [
+    "capture.screenshot"
+  ],
+  "required_capabilities": [
+    "event.builder",
+    "observability.logger",
+    "storage.media",
+    "storage.metadata"
+  ],
+  "settings_paths": [
+    "capture",
+    "runtime",
+    "storage"
+  ],
+  "version": "0.1.0"
+}

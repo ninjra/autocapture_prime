@@ -1,0 +1,64 @@
+schema_version: 1
+plugin_id: mx.core.compression_and_verify
+version: 0.1.0
+display_name: MX Compression + Verify
+description: Compression and verification tools.
+extensions:
+  -
+    kind: compressor
+    factory: autocapture.storage.archive:create_compressor
+    name: zip
+    version: 0.1.0
+    caps:
+      - compressor
+    pillars:
+      data_handling:
+        local_only: true
+        egress:
+          allow_cloud: false
+          allow_cloud_images: false
+          require_sanitizer: false
+          sanitizer_kind: egress.sanitizer
+      performance:
+        qos_class: background
+        cpu_budget_ms_p95: 300
+        io_budget_mb_s: 20
+      accuracy:
+        deterministic: true
+        validation_level: schema
+      security:
+        network_access: none
+        secrets_access: read
+        sandbox: inproc
+      citable:
+        produces_citations: false
+        citation_granularity: event
+  -
+    kind: verifier
+    factory: autocapture.memory.verifier:create_verifier
+    name: claims
+    version: 0.1.0
+    caps:
+      - verifier
+    pillars:
+      data_handling:
+        local_only: true
+        egress:
+          allow_cloud: false
+          allow_cloud_images: false
+          require_sanitizer: true
+          sanitizer_kind: egress.sanitizer
+      performance:
+        qos_class: interactive
+        cpu_budget_ms_p95: 100
+        io_budget_mb_s: 5
+      accuracy:
+        deterministic: true
+        validation_level: strict
+      security:
+        network_access: none
+        secrets_access: none
+        sandbox: inproc
+      citable:
+        produces_citations: true
+        citation_granularity: claim

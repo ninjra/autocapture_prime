@@ -1,0 +1,44 @@
+# rg -n /canonical[_-]?json|canonical json/
+./tools/blueprint_items.json:45:    "title": "Add canonical-json safety tests for journal/ledger payloads",
+./tools/frozen_surfaces.py:20:from autocapture_nx.kernel.canonical_json import dumps as nx_canonical_dumps
+./tools/frozen_surfaces.py:196:        "canonical_json": _compute_canonical_section(),
+./tools/frozen_surfaces.py:240:    for section in ("canonical_json", "time_intent", "sanitizer"):
+./contracts/frozen_surfaces.json:2:  "canonical_json": {
+./tests/test_canonical_json.py:3:from autocapture_nx.kernel.canonical_json import dumps, CanonicalJSONError
+./docs/autocapture_mx_blueprint.md:444:- `hash = blake3(prev_hash + canonical_json(payload) + ts + type + id)`
+./docs/blueprints/autocapture_nx_blueprint.md:166:- [ ] **I089** (Phase 0) — [Add canonical-json safety tests for journal/ledger payloads](#i089)
+./docs/blueprints/autocapture_nx_blueprint.md:318:### I089 — Add canonical-json safety tests for journal/ledger payloads
+./docs/blueprints/autocapture_nx_blueprint.md:323:  - Unit tests for canonical-json compliance across all event builders
+./docs/blueprints/autocapture_nx_blueprint.md:332:  - All emitted events pass canonical-json validation in CI.
+./docs/blueprints/autocapture_nx_blueprint.md:474:  - EventBuilder + canonical_json encoder
+./docs/blueprints/autocapture_nx_blueprint.md:762:  - Test: EventBuilder outputs canonical-json-safe payloads
+./docs/blueprints/autocapture_nx_blueprint.md:796:  - Compute `policy_hash = sha256(canonical_json(policy_snapshot))` at run start.
+./docs/blueprints/autocapture_nx_blueprint.md:1611:  - hashing: media plaintext SHA-256; metadata canonical-json hash
+./docs/autocapture_nx_blueprint_final.md:150:Define `journal_v1` and `ledger_v1` schemas and a strict `canonical_json` function used for hashing.
+./docs/autocapture_nx_blueprint_final.md:564:- `entry_hash = SHA256(canonical_json(entry_without_entry_hash) || prev_hash)`
+./docs/autocapture_nx_blueprint_final.md:591:### `canonical_json`
+./docs/autocapture_nx_blueprint_final.md:1072:  - canonical_json
+./docs/mx_gap_matrix.md:32:- Existing (NX): autocapture_nx/kernel/canonical_json.py; autocapture_nx/kernel/hashing.py
+./docs/mx_equivalence_map.md:31:- Proof: `autocapture_nx/kernel/canonical_json.py` (canonical JSON); `autocapture_nx/kernel/hashing.py` (sha256 helpers); `tests/test_canonical_json.py`
+./docs/reports/grep_ledger.txt:12:./tools/blueprint_items.json:45:    "title": "Add canonical-json safety tests for journal/ledger payloads",
+./docs/reports/grep_ledger.txt:95:./docs/blueprints/autocapture_nx_blueprint.md:166:- [ ] **I089** (Phase 0) — [Add canonical-json safety tests for journal/ledger payloads](#i089)
+./docs/reports/grep_ledger.txt:103:./docs/blueprints/autocapture_nx_blueprint.md:318:### I089 — Add canonical-json safety tests for journal/ledger payloads
+./docs/reports/grep_ledger.txt:167:./docs/autocapture_nx_blueprint_final.md:150:Define `journal_v1` and `ledger_v1` schemas and a strict `canonical_json` function used for hashing.
+./docs/reports/grep_ledger.txt:187:./docs/reports/blueprint_items.md:12:| I089 | Phase 0: Scaffolding and gates | Add canonical-json safety tests for journal/ledger payloads |  |  |  |
+./plugins/builtin/capture_windows/plugin.py:12:from autocapture_nx.kernel.canonical_json import dumps
+./docs/reports/grep_journal.txt:15:./docs/blueprints/autocapture_nx_blueprint.md:166:- [ ] **I089** (Phase 0) — [Add canonical-json safety tests for journal/ledger payloads](#i089)
+./docs/reports/grep_journal.txt:20:./docs/blueprints/autocapture_nx_blueprint.md:318:### I089 — Add canonical-json safety tests for journal/ledger payloads
+./docs/reports/grep_journal.txt:52:./docs/autocapture_nx_blueprint_final.md:150:Define `journal_v1` and `ledger_v1` schemas and a strict `canonical_json` function used for hashing.
+./docs/reports/grep_journal.txt:70:./docs/reports/grep_ledger.txt:12:./tools/blueprint_items.json:45:    "title": "Add canonical-json safety tests for journal/ledger payloads",
+./docs/reports/grep_journal.txt:81:./docs/reports/grep_ledger.txt:95:./docs/blueprints/autocapture_nx_blueprint.md:166:- [ ] **I089** (Phase 0) — [Add canonical-json safety tests for journal/ledger payloads](#i089)
+./docs/reports/grep_journal.txt:84:./docs/reports/grep_ledger.txt:103:./docs/blueprints/autocapture_nx_blueprint.md:318:### I089 — Add canonical-json safety tests for journal/ledger payloads
+./docs/reports/grep_journal.txt:96:./docs/reports/grep_ledger.txt:167:./docs/autocapture_nx_blueprint_final.md:150:Define `journal_v1` and `ledger_v1` schemas and a strict `canonical_json` function used for hashing.
+./docs/reports/grep_journal.txt:98:./docs/reports/grep_ledger.txt:187:./docs/reports/blueprint_items.md:12:| I089 | Phase 0: Scaffolding and gates | Add canonical-json safety tests for journal/ledger payloads |  |  |  |
+./docs/reports/grep_journal.txt:113:./docs/reports/blueprint_items.md:12:| I089 | Phase 0: Scaffolding and gates | Add canonical-json safety tests for journal/ledger payloads |  |  |  |
+./docs/reports/grep_journal.txt:138:./tools/blueprint_items.json:45:    "title": "Add canonical-json safety tests for journal/ledger payloads",
+./docs/reports/blueprint_items.md:12:| I089 | Phase 0: Scaffolding and gates | Add canonical-json safety tests for journal/ledger payloads |  |  |  |
+./plugins/builtin/devtools_ast_ir/plugin.py:14:from autocapture_nx.kernel.canonical_json import dumps
+./plugins/builtin/anchor_basic/plugin.py:10:from autocapture_nx.kernel.canonical_json import dumps
+./autocapture_nx/kernel/key_rotation.py:8:from autocapture_nx.kernel.canonical_json import dumps
+./plugins/builtin/ledger_basic/plugin.py:10:from autocapture_nx.kernel.canonical_json import dumps
+./plugins/builtin/journal_basic/plugin.py:8:from autocapture_nx.kernel.canonical_json import dumps

@@ -1,0 +1,3166 @@
+const state = {
+  token: localStorage.getItem("acToken") || "",
+  ws: null,
+  settingsFields: [],
+  settingsDefaults: {},
+  settingsCurrent: {},
+  settingsDirty: {},
+  settingsGroupOpen: {},
+  settingsShowAll: localStorage.getItem("acSettingsShowAll") === "true",
+  pluginDirty: {},
+  activePluginId: null,
+  activePluginGroupId: null,
+  activePluginOptionGroup: null,
+  showAllPluginSettings: localStorage.getItem("acPluginShowAll") === "true",
+  plugins: [],
+  pluginGroups: [],
+  activePluginSettings: {},
+  config: {},
+  telemetry: {},
+  telemetryPoller: null,
+  status: {},
+  jepaModels: [],
+  activityFilters: {
+    activity: localStorage.getItem("acFilterActivity") !== "false",
+    changes: localStorage.getItem("acFilterChanges") !== "false",
+    bookmarks: localStorage.getItem("acFilterBookmarks") !== "false",
+  },
+};
+
+let telemetryRenderAt = 0;
+let latestScreenshotUrl = null;
+let tracePreviewUrl = null;
+
+const qs = (id) => document.getElementById(id);
+
+const tokenInput = qs("token");
+const saveTokenBtn = qs("saveToken");
+const telemetryState = qs("telemetryState");
+const telemetryPayload = qs("telemetryPayload");
+const statusRunId = qs("runId");
+const statusLedger = qs("ledgerHead");
+const statusCapture = qs("captureState");
+const kernelStatus = qs("kernelStatus");
+const safeModeCard = qs("safeModeCard");
+const safeModeReason = qs("safeModeReason");
+const captureBannerState = qs("captureBannerState");
+const processingBannerState = qs("processingBannerState");
+const captureBannerLast = qs("captureBannerLast");
+const captureBannerDisk = qs("captureBannerDisk");
+const captureBannerCpu = qs("captureBannerCpu");
+const captureBannerRam = qs("captureBannerRam");
+const alertsList = qs("alertsList");
+const sloSummary = qs("sloSummary");
+const sloList = qs("sloList");
+const timelineList = qs("timelineList");
+const pluginsList = qs("pluginsList");
+const pluginGroupsList = qs("pluginGroupsList");
+const pluginGroupTitle = qs("pluginGroupTitle");
+const pluginGroupMeta = qs("pluginGroupMeta");
+const pluginGroupControls = qs("pluginGroupControls");
+const pluginEnableAll = qs("pluginEnableAll");
+const pluginDisableAll = qs("pluginDisableAll");
+const jepaModelsList = qs("jepaModelsList");
+const refreshJepaModels = qs("refreshJepaModels");
+const approveJepaLatest = qs("approveJepaLatest");
+const jepaModelsStatus = qs("jepaModelsStatus");
+const jepaReportOutput = qs("jepaReportOutput");
+const clearJepaReport = qs("clearJepaReport");
+const keysPayload = qs("keysPayload");
+const queryInput = qs("queryInput");
+const queryOutput = qs("queryOutput");
+const queryStatus = qs("queryStatus");
+const queryScheduleExtract = qs("queryScheduleExtract");
+const verifyOutput = qs("verifyOutput");
+const configPatch = qs("configPatch");
+const configOutput = qs("configOutput");
+const egressList = qs("egressList");
+const settingsList = qs("settingsList");
+const settingsFilter = qs("settingsFilter");
+const settingsShowAll = qs("settingsShowAll");
+const settingsApply = qs("settingsApply");
+const settingsReload = qs("settingsReload");
+const settingsStatus = qs("settingsStatus");
+const presetStatus = qs("presetStatus");
+const captureEssentialsList = qs("captureEssentialsList");
+const captureEssentialsApply = qs("captureEssentialsApply");
+const captureEssentialsReload = qs("captureEssentialsReload");
+const captureEssentialsStatus = qs("captureEssentialsStatus");
+const storageEssentialsList = qs("storageEssentialsList");
+const storageEssentialsApply = qs("storageEssentialsApply");
+const storageEssentialsReload = qs("storageEssentialsReload");
+const storageEssentialsStatus = qs("storageEssentialsStatus");
+const capturePluginsList = qs("capturePluginsList");
+const refreshCapturePlugins = qs("refreshCapturePlugins");
+const metadataType = qs("metadataType");
+const refreshMetadataBtn = qs("refreshMetadata");
+const metadataList = qs("metadataList");
+const metadataDetail = qs("metadataDetail");
+const previewLatestScreenshotBtn = qs("previewLatestScreenshot");
+const latestScreenshotStatus = qs("latestScreenshotStatus");
+const latestScreenshotPreview = qs("latestScreenshotPreview");
+const pluginSettingsList = qs("pluginSettingsList");
+const pluginSettingsApply = qs("pluginSettingsApply");
+const pluginSettingsTitle = qs("pluginSettingsTitle");
+const pluginSettingsSubtitle = qs("pluginSettingsSubtitle");
+const pluginSettingsStatus = qs("pluginSettingsStatus");
+const pluginOptionGroups = qs("pluginOptionGroups");
+const pluginShowAll = qs("pluginShowAll");
+const quickCaptureToggle = qs("quickCaptureToggle");
+const quickPause10 = qs("quickPause10");
+const quickPause30 = qs("quickPause30");
+const quickResume = qs("quickResume");
+const quickPrivacyMode = qs("quickPrivacyMode");
+const quickFidelityMode = qs("quickFidelityMode");
+const bookmarkNote = qs("bookmarkNote");
+const bookmarkTags = qs("bookmarkTags");
+const bookmarkSave = qs("bookmarkSave");
+const bookmarkStatus = qs("bookmarkStatus");
+const bookmarkList = qs("bookmarkList");
+const quickPauseStatus = qs("quickPauseStatus");
+const fidelitySummary = qs("fidelitySummary");
+const healthSparkScreenshot = qs("healthSparkScreenshot");
+const healthSparkVideo = qs("healthSparkVideo");
+const healthScreenshot = qs("healthScreenshot");
+const healthVideo = qs("healthVideo");
+const healthQueue = qs("healthQueue");
+const healthLag = qs("healthLag");
+const healthEvent = qs("healthEvent");
+const refreshHealthBtn = qs("refreshHealth");
+const storageDir = qs("storageDir");
+const storageFree = qs("storageFree");
+const storageDays = qs("storageDays");
+const storageEvidence = qs("storageEvidence");
+const storageDerived = qs("storageDerived");
+const refreshStorageBtn = qs("refreshStorage");
+const storageHint = qs("storageHint");
+const configHistoryList = qs("configHistoryList");
+const configHistoryStatus = qs("configHistoryStatus");
+const refreshConfigHistoryBtn = qs("refreshConfigHistory");
+const configUndoLast = qs("configUndoLast");
+const activityTimelineList = qs("activityTimelineList");
+const refreshActivityTimelineBtn = qs("refreshActivityTimeline");
+const filterActivity = qs("filterActivity");
+const filterChanges = qs("filterChanges");
+const filterBookmarks = qs("filterBookmarks");
+const traceRecordType = qs("traceRecordType");
+const traceRecordId = qs("traceRecordId");
+const traceLoadLatest = qs("traceLoadLatest");
+const traceLoadRecord = qs("traceLoadRecord");
+const traceLoadPreview = qs("traceLoadPreview");
+const traceStatus = qs("traceStatus");
+const traceStaleBadge = qs("traceStaleBadge");
+const traceActiveRecord = qs("traceActiveRecord");
+const traceAllowOcr = qs("traceAllowOcr");
+const traceAllowVlm = qs("traceAllowVlm");
+const traceForceProcess = qs("traceForceProcess");
+const traceProcess = qs("traceProcess");
+const traceProcessStatus = qs("traceProcessStatus");
+const tracePreviewImage = qs("tracePreviewImage");
+const tracePreviewStatus = qs("tracePreviewStatus");
+const traceRecordJson = qs("traceRecordJson");
+const traceDerivedList = qs("traceDerivedList");
+const traceDerivedDetail = qs("traceDerivedDetail");
+const traceJournalList = qs("traceJournalList");
+const traceLedgerList = qs("traceLedgerList");
+const traceQueryInput = qs("traceQueryInput");
+const traceQueryRun = qs("traceQueryRun");
+const traceQueryOutput = qs("traceQueryOutput");
+const traceRecordTypeValue = qs("traceRecordTypeValue");
+const traceRecordTs = qs("traceRecordTs");
+const traceRecordContainer = qs("traceRecordContainer");
+const traceRecordSize = qs("traceRecordSize");
+const traceDerivedCount = qs("traceDerivedCount");
+
+if (tokenInput) {
+  tokenInput.value = state.token;
+}
+
+function setToken(value) {
+  state.token = value || "";
+  localStorage.setItem("acToken", state.token);
+  if (tokenInput) {
+    tokenInput.value = state.token;
+  }
+}
+
+function apiFetch(path, options = {}) {
+  const headers = options.headers || {};
+  if (state.token) {
+    headers["Authorization"] = `Bearer ${state.token}`;
+    headers["X-AC-Token"] = state.token;
+  }
+  return fetch(path, { ...options, headers });
+}
+
+async function readJson(resp) {
+  try {
+    return await resp.json();
+  } catch (err) {
+    return { ok: false, error: "invalid_json" };
+  }
+}
+
+function setStatus(text, ok = true) {
+  if (!telemetryState) return;
+  telemetryState.textContent = text;
+  telemetryState.classList.toggle("badge", true);
+  telemetryState.classList.toggle("warn", !ok);
+}
+
+function setSettingsStatusText(text) {
+  if (settingsStatus) settingsStatus.textContent = text;
+  if (captureEssentialsStatus) captureEssentialsStatus.textContent = text;
+  if (storageEssentialsStatus) storageEssentialsStatus.textContent = text;
+}
+
+function setQuickStatusText(text, warn = false) {
+  if (!quickPauseStatus) return;
+  quickPauseStatus.textContent = text || "";
+  quickPauseStatus.classList.toggle("warn", Boolean(warn));
+}
+
+function setPresetStatus(text) {
+  if (presetStatus) presetStatus.textContent = text || "";
+}
+
+function showPanel(name) {
+  document.querySelectorAll(".panel").forEach((panel) => {
+    panel.classList.toggle("active", panel.id === `panel-${name}`);
+  });
+  document.querySelectorAll(".nav-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.panel === name);
+  });
+  if (location.hash !== `#${name}`) {
+    history.replaceState(null, "", `#${name}`);
+  }
+}
+
+function initNav() {
+  document.querySelectorAll(".nav-btn").forEach((btn) => {
+    btn.addEventListener("click", () => showPanel(btn.dataset.panel));
+  });
+  const hash = (location.hash || "").replace("#", "");
+  if (hash) {
+    showPanel(hash);
+  } else {
+    showPanel("capture");
+  }
+}
+
+async function refreshStatus() {
+  const resp = await apiFetch("/api/status");
+  const data = await readJson(resp);
+  state.status = data || {};
+  statusRunId.textContent = data.run_id || "—";
+  statusLedger.textContent = data.ledger_head || "—";
+  statusCapture.textContent = data.capture_active ? "active" : "idle";
+  if (kernelStatus) {
+    if (data.kernel_ready === false) {
+      kernelStatus.textContent = data.kernel_error ? `error · ${data.kernel_error}` : "error";
+    } else if (data.kernel_ready === true) {
+      if (data.safe_mode) {
+        const reason = data.safe_mode_reason ? ` · ${data.safe_mode_reason}` : "";
+        kernelStatus.textContent = `ready · safe mode${reason}`;
+      } else {
+        kernelStatus.textContent = "ready";
+      }
+    } else {
+      kernelStatus.textContent = "—";
+    }
+  }
+  updateQuickControls();
+  renderStatusBanner();
+  renderSafeModeCard();
+  renderSlo();
+}
+
+function renderStatusBanner() {
+  const captureStatus = state.status.capture_status || {};
+  if (captureBannerState) {
+    const disk = captureStatus.disk || {};
+    const hardHalt = Boolean(disk.hard_halt);
+    let captureState = state.status.capture_active ? "RUNNING" : "STOPPED";
+    if (hardHalt) {
+      captureState = "HALTED";
+    }
+    captureBannerState.textContent = captureState;
+    captureBannerState.classList.toggle("warn", !state.status.capture_active || hardHalt);
+    captureBannerState.classList.toggle("critical", hardHalt);
+  }
+  if (processingBannerState) {
+    const processing = state.status.processing_state || {};
+    const watchdog = processing.watchdog || {};
+    const watchdogState = watchdog.state;
+    processingBannerState.classList.toggle("warn", false);
+    processingBannerState.classList.toggle("critical", false);
+    processingBannerState.classList.toggle("off", false);
+    if (watchdogState === "stalled") {
+      processingBannerState.textContent = `STALLED · ${watchdog.reason || "idle watchdog"}`;
+      processingBannerState.classList.toggle("critical", true);
+    } else if (watchdogState === "error") {
+      processingBannerState.textContent = `ERROR · ${watchdog.reason || "idle watchdog"}`;
+      processingBannerState.classList.toggle("warn", true);
+    } else if (processing.paused) {
+      processingBannerState.textContent = `PAUSED · ${processing.reason || "active user"}`;
+      processingBannerState.classList.toggle("warn", true);
+    } else if (processing.mode) {
+      processingBannerState.textContent = processing.mode;
+    } else {
+      processingBannerState.textContent = "—";
+      processingBannerState.classList.toggle("off", true);
+    }
+  }
+  if (captureBannerLast) {
+    const age = captureStatus.last_capture_age_seconds;
+    if (typeof age === "number") {
+      captureBannerLast.textContent = `${Math.round(age)}s ago`;
+    } else {
+      captureBannerLast.textContent = "—";
+    }
+  }
+  if (captureBannerDisk) {
+    const disk = captureStatus.disk || {};
+    if (disk.level) {
+      const level = String(disk.level).toUpperCase();
+      const hardHalt = Boolean(disk.hard_halt);
+      if (hardHalt) {
+        captureBannerDisk.textContent = `CAPTURE HALTED: DISK LOW · ${formatBytes(disk.free_bytes || 0)}`;
+      } else {
+        captureBannerDisk.textContent = `${level} · ${formatBytes(disk.free_bytes || 0)}`;
+      }
+      captureBannerDisk.classList.toggle("warn", !hardHalt && level !== "OK");
+      captureBannerDisk.classList.toggle("critical", hardHalt || level === "CRITICAL");
+      captureBannerDisk.classList.toggle("off", false);
+    } else {
+      captureBannerDisk.textContent = "—";
+      captureBannerDisk.classList.toggle("warn", false);
+      captureBannerDisk.classList.toggle("critical", false);
+      captureBannerDisk.classList.toggle("off", true);
+    }
+  }
+  const resources = state.status.resources || {};
+  if (captureBannerCpu) {
+    const cpu = resources.cpu_utilization;
+    if (typeof cpu === "number") {
+      const pct = Math.round(cpu * 100);
+      captureBannerCpu.textContent = `${pct}%`;
+      captureBannerCpu.classList.toggle("warn", pct >= 50);
+      captureBannerCpu.classList.toggle("off", false);
+    } else {
+      captureBannerCpu.textContent = "—";
+      captureBannerCpu.classList.toggle("warn", false);
+      captureBannerCpu.classList.toggle("off", true);
+    }
+  }
+  if (captureBannerRam) {
+    const ram = resources.ram_utilization;
+    if (typeof ram === "number") {
+      const pct = Math.round(ram * 100);
+      captureBannerRam.textContent = `${pct}%`;
+      captureBannerRam.classList.toggle("warn", pct >= 50);
+      captureBannerRam.classList.toggle("off", false);
+    } else {
+      captureBannerRam.textContent = "—";
+      captureBannerRam.classList.toggle("warn", false);
+      captureBannerRam.classList.toggle("off", true);
+    }
+  }
+}
+
+function renderSafeModeCard() {
+  if (!safeModeCard) return;
+  const safeMode = Boolean(state.status.safe_mode);
+  safeModeCard.hidden = !safeMode;
+  if (!safeMode) return;
+  if (safeModeReason) {
+    const reason = state.status.safe_mode_reason ? String(state.status.safe_mode_reason) : "unknown";
+    const crash = state.status.crash_loop || {};
+    const until = crash.safe_mode_until ? ` · until ${crash.safe_mode_until}` : "";
+    safeModeReason.textContent = `Reason: ${reason}${until}`;
+  }
+}
+
+function renderSlo() {
+  if (!sloList) return;
+  const slo = state.status.slo || {};
+  const capture = slo.capture || {};
+  const processing = slo.processing || {};
+  sloList.innerHTML = "";
+  if (sloSummary) {
+    const overall = (slo.overall || "unknown").toUpperCase();
+    const used = slo.error_budget_used_pct;
+    const budget = slo.error_budget_pct;
+    let summary = `Overall ${overall}`;
+    if (typeof used === "number" && typeof budget === "number") {
+      summary += ` · error budget ${used.toFixed(2)}% / ${budget.toFixed(2)}%`;
+    }
+    if (slo.window_samples) {
+      summary += ` · samples ${slo.window_samples}`;
+    }
+    sloSummary.textContent = summary;
+  }
+
+  function badgeClass(status) {
+    if (status === "pass") return "badge";
+    if (status === "fail") return "badge critical";
+    return "badge off";
+  }
+
+  function addItem(label, detail, status) {
+    const li = document.createElement("li");
+    const badge = document.createElement("span");
+    badge.className = badgeClass(status);
+    badge.textContent = (status || "unknown").toUpperCase();
+    const text = document.createElement("span");
+    text.textContent = `${label} · ${detail}`;
+    li.appendChild(badge);
+    li.appendChild(text);
+    sloList.appendChild(li);
+  }
+
+  const lagDetail =
+    capture.lag_p95_ms == null
+      ? "lag p95 —"
+      : `lag p95 ${Math.round(capture.lag_p95_ms)}ms ≤ ${Math.round(capture.lag_threshold_ms || 0)}ms`;
+  addItem("Capture latency", lagDetail, capture.status);
+
+  const queueDetail =
+    capture.queue_p95 == null
+      ? "queue p95 —"
+      : `queue p95 ${Math.round(capture.queue_p95)} ≤ ${Math.round(capture.queue_threshold || 0)}`;
+  addItem("Capture queue", queueDetail, capture.status);
+
+  const ageDetail =
+    capture.age_s == null
+      ? "last capture —"
+      : `last capture ${Number(capture.age_s).toFixed(1)}s ≤ ${Math.round(capture.age_threshold_s || 0)}s`;
+  addItem("Capture freshness", ageDetail, capture.status);
+
+  const procDetail = processing.watchdog_state ? `watchdog ${processing.watchdog_state}` : "watchdog —";
+  addItem("Processing", procDetail, processing.status);
+
+  const queryDetail =
+    slo.query && slo.query.latency_p95_ms == null
+      ? "query p95 —"
+      : `query p95 ${Math.round(slo.query.latency_p95_ms || 0)}ms ≤ ${Math.round(
+          slo.query.latency_threshold_ms || 0
+        )}ms`;
+  addItem("Query latency", queryDetail, slo.query ? slo.query.status : "unknown");
+}
+
+async function refreshAlerts() {
+  const resp = await apiFetch("/api/alerts");
+  const data = await readJson(resp);
+  alertsList.innerHTML = "";
+  const alerts = data.alerts || [];
+  if (!alerts.length) {
+    const li = document.createElement("li");
+    li.textContent = "No active alerts";
+    alertsList.appendChild(li);
+    return;
+  }
+  alerts.forEach((alert) => {
+    const li = document.createElement("li");
+    li.textContent = `[${alert.severity}] ${alert.title} · ${alert.ts_utc || ""}`;
+    alertsList.appendChild(li);
+  });
+}
+
+async function refreshTimeline() {
+  const resp = await apiFetch("/api/timeline?limit=25");
+  const data = await readJson(resp);
+  timelineList.innerHTML = "";
+  const events = data.events || [];
+  if (!events.length) {
+    const li = document.createElement("li");
+    li.textContent = "No journal activity";
+    timelineList.appendChild(li);
+    return;
+  }
+  events.forEach((event) => {
+    const li = document.createElement("li");
+    const label = event.event_type || event.event || "event";
+    const ts = event.ts_utc || "";
+    li.textContent = `${label} · ${ts}`;
+    timelineList.appendChild(li);
+  });
+}
+
+function formatBadge(text, variant = "") {
+  return `<span class="badge ${variant}">${text}</span>`;
+}
+
+const SETTINGS_GROUPS = [
+  {
+    id: "capture",
+    title: "Capture",
+    description: "Screenshots, video, audio, and input capture.",
+    prefixes: ["capture"],
+    summary: [
+      "capture.screenshot.enabled",
+      "capture.video.enabled",
+      "capture.audio.enabled",
+      "capture.cursor.enabled",
+    ],
+  },
+  {
+    id: "storage",
+    title: "Storage & Encryption",
+    description: "Where data lives and how it is protected.",
+    prefixes: ["storage"],
+    summary: [
+      "storage.data_dir",
+      "storage.encryption_required",
+      "storage.fsync_policy",
+      "storage.no_deletion_mode",
+      "storage.retention.evidence",
+    ],
+  },
+  {
+    id: "privacy",
+    title: "Privacy & Egress",
+    description: "Outbound sanitization and cloud policies.",
+    prefixes: ["privacy", "gateway"],
+    summary: [
+      "privacy.egress.enabled",
+      "privacy.egress.default_sanitize",
+      "privacy.egress.allow_raw_egress",
+      "privacy.cloud.enabled",
+    ],
+  },
+  {
+    id: "runtime",
+    title: "Runtime",
+    description: "Mode enforcement, budgets, and activity signals.",
+    prefixes: ["runtime", "performance", "alerts"],
+    summary: [
+      "runtime.idle_window_s",
+      "runtime.mode_enforcement.suspend_workers",
+      "runtime.telemetry.enabled",
+      "performance.startup_ms",
+    ],
+  },
+  {
+    id: "processing",
+    title: "Processing",
+    description: "Idle and on-query processing pipelines.",
+    prefixes: ["processing"],
+    summary: [
+      "processing.idle.enabled",
+      "processing.on_query.allow_decode_extract",
+      "processing.sst.enabled",
+    ],
+  },
+  {
+    id: "models",
+    title: "Models & AI",
+    description: "LLM, VLM, OCR, and model paths.",
+    prefixes: ["models", "llm", "indexing", "retrieval"],
+    summary: [
+      "llm.model",
+      "models.vlm_path",
+      "models.reranker_path",
+      "retrieval.vector_enabled",
+    ],
+  },
+  {
+    id: "web",
+    title: "Web & UI",
+    description: "Console access and auth.",
+    prefixes: ["web"],
+    summary: ["web.bind_port", "web.allow_remote"],
+  },
+  {
+    id: "plugins",
+    title: "Plugins & Hosting",
+    description: "Plugin hosting policies and locks.",
+    prefixes: ["plugins"],
+    summary: ["plugins.hosting.mode", "plugins.locks.enforce"],
+  },
+  {
+    id: "research",
+    title: "Research & PromptOps",
+    description: "Background research and prompt operations.",
+    prefixes: ["research", "promptops"],
+    summary: ["research.enabled", "promptops.enabled"],
+  },
+  {
+    id: "time",
+    title: "Time & Locale",
+    description: "Timezone and relative time parsing.",
+    prefixes: ["time"],
+    summary: ["time.timezone", "runtime.timezone"],
+  },
+];
+
+const PRESET_PATCHES = {
+  balanced: {},
+  high_fidelity: {
+    capture: {
+      video: {
+        fps_target: 30,
+        jpeg_quality: 95,
+      },
+    },
+    processing: {
+      idle: {
+        max_concurrency_cpu: 2,
+        max_concurrency_gpu: 1,
+      },
+    },
+  },
+  low_power: {
+    capture: {
+      video: {
+        fps_target: 10,
+        jpeg_quality: 80,
+      },
+    },
+    processing: {
+      idle: {
+        max_concurrency_cpu: 1,
+        max_concurrency_gpu: 0,
+      },
+    },
+  },
+};
+
+const CAPTURE_ESSENTIAL_FIELDS = [
+  "capture.auto_start",
+  "capture.screenshot.enabled",
+  "capture.screenshot.include_cursor",
+  "capture.screenshot.fps_target",
+  "capture.screenshot.dedupe.force_interval_s",
+  "capture.video.enabled",
+  "capture.video.container",
+  "capture.video.ffmpeg_path",
+  "capture.video.include_cursor",
+  "capture.video.fps_target",
+  "capture.video.segment_seconds",
+  "capture.cursor.enabled",
+  "runtime.telemetry.enabled",
+];
+
+const STORAGE_ESSENTIAL_FIELDS = [
+  "storage.data_dir",
+  "storage.media_dir",
+  "storage.metadata_path",
+  "storage.metadata_require_db",
+  "storage.encryption_enabled",
+  "storage.encryption_required",
+  "storage.retention.evidence",
+  "storage.anchor.sign",
+];
+
+const CAPTURE_PLUGIN_GROUPS = [
+  { id: "capture.source", title: "Screen capture source", kinds: ["capture.source"] },
+  { id: "capture.screenshot", title: "Screenshot capture", kinds: ["capture.screenshot"] },
+  { id: "capture.encoder", title: "Video encoding", kinds: ["capture.encoder"] },
+  { id: "capture.audio", title: "Audio capture", kinds: ["capture.audio"] },
+  { id: "tracking.cursor", title: "Cursor tracking", kinds: ["tracking.cursor"] },
+  { id: "tracking.input", title: "Input tracking", kinds: ["tracking.input"] },
+  { id: "window.metadata", title: "Window metadata", kinds: ["window.metadata"] },
+  { id: "storage.backends", title: "Storage backends", kinds: ["storage.metadata_store", "storage.media_backend"] },
+];
+
+const METADATA_TYPES = [
+  { id: "", label: "All records" },
+  { id: "evidence.capture.frame", label: "Screenshots" },
+  { id: "evidence.capture.segment", label: "Video segments" },
+  { id: "evidence.capture.audio", label: "Audio segments" },
+];
+
+const PLUGIN_GROUPS = [
+  {
+    id: "capture",
+    title: "Capture (Base Layer)",
+    kinds: ["capture.source", "capture.audio", "capture.screenshot", "tracking.input", "tracking.cursor", "tracking.clipboard", "tracking.file_activity", "window.metadata"],
+    settingsPrefixes: ["capture", "runtime", "backpressure"],
+  },
+  {
+    id: "vlm",
+    title: "Vision & VLM",
+    kinds: ["vision.extractor"],
+    capability: "vision.extractor",
+    settingsPrefixes: ["processing", "models", "indexing"],
+  },
+  {
+    id: "ocr",
+    title: "OCR",
+    kinds: ["ocr.engine"],
+    capability: "ocr.engine",
+    settingsPrefixes: ["processing", "models", "indexing"],
+  },
+  {
+    id: "retrieval",
+    title: "Retrieval & Ranking",
+    kinds: ["retrieval.strategy", "embedder.text", "reranker"],
+    capability: "retrieval.strategy",
+    settingsPrefixes: ["retrieval", "indexing", "models"],
+  },
+  {
+    id: "processing",
+    title: "Processing & Pipelines",
+    kinds: ["processing.pipeline", "processing.stage.hooks"],
+    capability: "processing.stage.hooks",
+    settingsPrefixes: ["processing"],
+  },
+  {
+    id: "storage",
+    title: "Storage & Proof",
+    kinds: ["storage.metadata_store", "ledger.writer", "journal.writer", "anchor.writer"],
+    settingsPrefixes: ["storage"],
+  },
+  {
+    id: "privacy",
+    title: "Privacy & Egress",
+    kinds: ["egress.gateway", "privacy.egress_sanitizer"],
+    settingsPrefixes: ["privacy", "gateway"],
+  },
+  {
+    id: "runtime",
+    title: "Runtime & Budgeting",
+    kinds: ["runtime.governor", "runtime.scheduler", "capture.backpressure", "observability.logger"],
+    settingsPrefixes: ["runtime", "performance", "alerts"],
+  },
+  {
+    id: "answers",
+    title: "Answering & Citations",
+    kinds: ["answer.builder", "citation.validator"],
+    capability: "answer.builder",
+    settingsPrefixes: [],
+  },
+  {
+    id: "time",
+    title: "Time & Locale",
+    kinds: ["time.intent_parser"],
+    settingsPrefixes: ["time", "runtime"],
+  },
+  {
+    id: "devtools",
+    title: "Devtools",
+    kinds: ["devtools.ast_ir", "devtools.diffusion", "meta.configurator", "meta.policy"],
+    settingsPrefixes: ["devtools", "plugins"],
+  },
+  {
+    id: "other",
+    title: "Other",
+    kinds: [],
+    settingsPrefixes: [],
+  },
+];
+
+function capitalize(value) {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : "";
+}
+
+function prettyLabel(path) {
+  if (!path) return "";
+  return path
+    .split(".")
+    .map((part) => capitalize(part.replace(/_/g, " ")))
+    .join(" · ");
+}
+
+function formatSummaryValue(value) {
+  if (typeof value === "boolean") return value ? "ON" : "OFF";
+  if (value === null || value === undefined) return "—";
+  if (Array.isArray(value)) return `${value.length} items`;
+  if (typeof value === "object") return "custom";
+  return String(value);
+}
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (!bytes) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let idx = 0;
+  let v = bytes;
+  while (v >= 1024 && idx < units.length - 1) {
+    v /= 1024;
+    idx += 1;
+  }
+  return `${v.toFixed(v >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+function formatTs(value) {
+  if (!value) return "—";
+  try {
+    return new Date(value).toLocaleString();
+  } catch (err) {
+    return String(value);
+  }
+}
+
+function formatAgo(value) {
+  if (!value) return "—";
+  const ts = Date.parse(value);
+  if (!Number.isFinite(ts)) return String(value);
+  const delta = Math.max(0, Date.now() - ts);
+  const seconds = Math.round(delta / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
+}
+
+function pickRecordTs(record) {
+  if (!record || typeof record !== "object") return "";
+  return record.ts_utc || record.ts_start_utc || record.ts_end_utc || "";
+}
+
+function summarizeMetadata(record) {
+  if (!record || typeof record !== "object") return "—";
+  const ts = pickRecordTs(record);
+  const parts = [];
+  if (record.record_type) parts.push(record.record_type);
+  if (ts) parts.push(formatTs(ts));
+  const resolution = record.resolution || (record.width && record.height ? `${record.width}x${record.height}` : "");
+  if (resolution) parts.push(resolution);
+  if (record.frame_count) parts.push(`${record.frame_count} frames`);
+  const bytes = record.content_size || record.output_bytes;
+  if (bytes) parts.push(formatBytes(bytes));
+  return parts.join(" · ") || "—";
+}
+
+function renderSparkline(container, values) {
+  if (!container) return;
+  container.innerHTML = "";
+  if (!values || !values.length) {
+    container.textContent = "—";
+    return;
+  }
+  const maxValue = Math.max(...values, 1);
+  values.forEach((value) => {
+    const bar = document.createElement("span");
+    const height = Math.max(4, Math.round((value / maxValue) * 28));
+    bar.className = "spark-bar";
+    bar.style.height = `${height}px`;
+    if (!value) {
+      bar.classList.add("dim");
+    }
+    container.appendChild(bar);
+  });
+}
+
+function pluginDisplayName(plugin) {
+  if (!plugin || !plugin.plugin_id) return "Plugin";
+  const raw = String(plugin.plugin_id || "");
+  const trimmed = raw.replace(/^builtin\./, "").replace(/^mx\./, "");
+  return trimmed
+    .split(".")
+    .map((part) =>
+      part
+        .replace(/_/g, " ")
+        .split(" ")
+        .map((word) => capitalize(word))
+        .join(" ")
+    )
+    .join(" ");
+}
+
+function pluginKinds(plugin) {
+  const kinds = new Set();
+  (plugin.kinds || []).forEach((kind) => kinds.add(kind));
+  (plugin.provides || []).forEach((kind) => kinds.add(kind));
+  return Array.from(kinds);
+}
+
+function pluginTelemetry(pluginId) {
+  const latest = (state.telemetry.latest || {})[`plugin.${pluginId}`];
+  return latest || null;
+}
+
+function findPluginByKind(kind) {
+  if (!kind) return null;
+  const enabled = state.plugins.filter((plugin) => plugin.enabled);
+  const pool = enabled.length ? enabled : state.plugins;
+  for (const plugin of pool) {
+    if ((plugin.kinds || []).includes(kind) || (plugin.provides || []).includes(kind)) {
+      return plugin;
+    }
+  }
+  return null;
+}
+
+function filterFieldsByPrefixes(fields, prefixes, showAll) {
+  if (showAll || !prefixes || !prefixes.length) return fields;
+  return fields.filter((field) => {
+    const path = field.path || "";
+    return prefixes.some((prefix) => path === prefix || path.startsWith(`${prefix}.`));
+  });
+}
+
+function buildPluginFieldGroups(settings) {
+  const groups = [];
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+    groups.push({ name: "General", fields: flattenSettings(settings) });
+    return groups;
+  }
+  const topKeys = Object.keys(settings).filter(
+    (key) => settings[key] && typeof settings[key] === "object" && !Array.isArray(settings[key])
+  );
+  if (!topKeys.length) {
+    groups.push({ name: "General", fields: flattenSettings(settings) });
+    return groups;
+  }
+  topKeys.forEach((key) => {
+    groups.push({ name: key, fields: flattenSettings(settings[key], [key]) });
+  });
+  return groups;
+}
+
+function groupPlugins(plugins) {
+  const groups = PLUGIN_GROUPS.map((def) => ({ ...def, plugins: [] }));
+  plugins.forEach((plugin) => {
+    const kinds = pluginKinds(plugin);
+    let matched = false;
+    groups.forEach((group) => {
+      if (group.id === "other") return;
+      const match = kinds.some((kind) => group.kinds.includes(kind));
+      if (match) {
+        group.plugins.push(plugin);
+        matched = true;
+      }
+    });
+    if (!matched) {
+      groups.find((g) => g.id === "other")?.plugins.push(plugin);
+    }
+  });
+  return groups.filter((group) => group.plugins.length);
+}
+
+function selectPluginGroup(groupId) {
+  state.activePluginGroupId = groupId;
+  state.activePluginId = null;
+  state.activePluginOptionGroup = null;
+  renderPluginGroups();
+  renderPluginList();
+  renderPluginDetail();
+}
+
+function selectPlugin(pluginId) {
+  state.activePluginId = pluginId;
+  state.activePluginOptionGroup = null;
+  loadPluginSettings(pluginId);
+}
+
+function renderPluginGroups() {
+  if (!pluginGroupsList) return;
+  pluginGroupsList.innerHTML = "";
+  state.pluginGroups.forEach((group) => {
+    const item = document.createElement("div");
+    item.className = "group-item";
+    if (group.id === state.activePluginGroupId) {
+      item.classList.add("active");
+    }
+    const title = document.createElement("div");
+    title.className = "group-title";
+    title.textContent = group.title;
+    const meta = document.createElement("div");
+    meta.className = "group-meta";
+    const enabledCount = group.plugins.filter((plugin) => plugin.enabled).length;
+    meta.textContent = `${enabledCount}/${group.plugins.length} enabled`;
+    item.appendChild(title);
+    item.appendChild(meta);
+    item.addEventListener("click", () => selectPluginGroup(group.id));
+    pluginGroupsList.appendChild(item);
+  });
+}
+
+async function toggleGroupEnabled(group, enabled) {
+  const tasks = group.plugins.map((plugin) => {
+    const endpoint = enabled ? "enable" : "disable";
+    return apiFetch(`/api/plugins/${plugin.plugin_id}/${endpoint}`, { method: "POST" });
+  });
+  await Promise.all(tasks);
+  await refreshPlugins();
+  await refreshConfigHistory();
+}
+
+async function updateCapabilityPolicy(capability, patch) {
+  if (!capability) return;
+  const payload = {
+    plugins: {
+      capabilities: {
+        [capability]: patch,
+      },
+    },
+  };
+  await apiFetch("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ patch: payload }),
+  });
+  await refreshConfig();
+  renderPluginList();
+}
+
+function renderGroupControls(group) {
+  if (!pluginGroupControls) return;
+  pluginGroupControls.innerHTML = "";
+  const enabledCount = group.plugins.filter((plugin) => plugin.enabled).length;
+  const enabled = enabledCount > 0;
+  const enableRow = document.createElement("div");
+  enableRow.className = "control-row";
+  const enableLabel = document.createElement("label");
+  enableLabel.textContent = "Group enabled";
+  const enableToggle = document.createElement("input");
+  enableToggle.type = "checkbox";
+  enableToggle.checked = enabled;
+  enableToggle.addEventListener("change", async () => {
+    await toggleGroupEnabled(group, enableToggle.checked);
+  });
+  enableRow.appendChild(enableLabel);
+  enableRow.appendChild(enableToggle);
+  pluginGroupControls.appendChild(enableRow);
+
+  if (group.capability) {
+    const policy = ((state.config.plugins || {}).capabilities || {})[group.capability] || {};
+    const modeRow = document.createElement("div");
+    modeRow.className = "control-row";
+    const modeLabel = document.createElement("label");
+    modeLabel.textContent = "Allow multiple providers";
+    const modeToggle = document.createElement("input");
+    modeToggle.type = "checkbox";
+    modeToggle.checked = String(policy.mode || "single") === "multi";
+    modeToggle.addEventListener("change", async () => {
+      await updateCapabilityPolicy(group.capability, { mode: modeToggle.checked ? "multi" : "single" });
+    });
+    modeRow.appendChild(modeLabel);
+    modeRow.appendChild(modeToggle);
+    pluginGroupControls.appendChild(modeRow);
+
+    if (modeToggle.checked) {
+      const maxRow = document.createElement("div");
+      maxRow.className = "control-row";
+      const maxLabel = document.createElement("label");
+      maxLabel.textContent = "Max providers";
+      const maxInput = document.createElement("input");
+      maxInput.type = "number";
+      maxInput.min = "0";
+      maxInput.value = policy.max_providers ?? 0;
+      maxInput.addEventListener("change", async () => {
+        const value = parseInt(maxInput.value || "0", 10);
+        await updateCapabilityPolicy(group.capability, { max_providers: value });
+      });
+      maxRow.appendChild(maxLabel);
+      maxRow.appendChild(maxInput);
+      pluginGroupControls.appendChild(maxRow);
+    }
+  }
+}
+
+function renderPluginList() {
+  if (!pluginsList) return;
+  pluginsList.innerHTML = "";
+  const group = state.pluginGroups.find((g) => g.id === state.activePluginGroupId);
+  if (!group) {
+    pluginsList.textContent = "Select a plugin group.";
+    if (pluginGroupTitle) pluginGroupTitle.textContent = "Select a group";
+    if (pluginGroupMeta) pluginGroupMeta.textContent = "";
+    if (pluginGroupControls) pluginGroupControls.innerHTML = "";
+    return;
+  }
+  if (pluginGroupTitle) pluginGroupTitle.textContent = group.title;
+  if (pluginGroupMeta) {
+    const enabledCount = group.plugins.filter((plugin) => plugin.enabled).length;
+    pluginGroupMeta.textContent = `${enabledCount}/${group.plugins.length} enabled`;
+  }
+  renderGroupControls(group);
+  group.plugins.forEach((plugin) => {
+    const row = document.createElement("div");
+    row.className = "table-row";
+    if (plugin.plugin_id === state.activePluginId) {
+      row.classList.add("active");
+    }
+    const name = document.createElement("div");
+    name.className = "plugin-name";
+    const title = document.createElement("span");
+    title.className = "plugin-title";
+    title.textContent = pluginDisplayName(plugin);
+    const hint = document.createElement("span");
+    hint.className = "plugin-id";
+    hint.textContent = plugin.plugin_id;
+    name.appendChild(title);
+    name.appendChild(hint);
+    const enabled = document.createElement("span");
+    enabled.innerHTML = plugin.enabled ? formatBadge("enabled") : formatBadge("disabled", "off");
+    const hash = document.createElement("span");
+    hash.innerHTML = plugin.hash_ok ? formatBadge("hash ok") : formatBadge("hash drift", "warn");
+    const lastOutput = document.createElement("span");
+    const telemetry = pluginTelemetry(plugin.plugin_id);
+    if (telemetry && telemetry.ts_utc) {
+      const size = telemetry.output_bytes ? ` · ${formatBytes(telemetry.output_bytes)}` : "";
+      lastOutput.textContent = `${formatAgo(telemetry.ts_utc)}${size}`;
+    } else {
+      lastOutput.textContent = "—";
+    }
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const toggle = document.createElement("button");
+    toggle.className = "ghost";
+    toggle.textContent = plugin.enabled ? "Disable" : "Enable";
+    toggle.onclick = async () => {
+      const endpoint = plugin.enabled ? "disable" : "enable";
+      await apiFetch(`/api/plugins/${plugin.plugin_id}/${endpoint}`, { method: "POST" });
+      await refreshPlugins();
+      await refreshConfigHistory();
+    };
+    const settingsBtn = document.createElement("button");
+    settingsBtn.textContent = "Configure";
+    settingsBtn.onclick = () => selectPlugin(plugin.plugin_id);
+    actions.appendChild(toggle);
+    actions.appendChild(settingsBtn);
+    row.appendChild(name);
+    row.appendChild(enabled);
+    row.appendChild(hash);
+    row.appendChild(lastOutput);
+    row.appendChild(actions);
+    pluginsList.appendChild(row);
+  });
+}
+
+function renderPluginDetail() {
+  if (!pluginSettingsList) return;
+  pluginSettingsList.innerHTML = "";
+  if (pluginOptionGroups) pluginOptionGroups.innerHTML = "";
+  if (!state.activePluginId) {
+    pluginSettingsList.textContent = "Select a plugin to configure.";
+    if (pluginSettingsTitle) pluginSettingsTitle.textContent = "Plugin Details";
+    if (pluginSettingsSubtitle) pluginSettingsSubtitle.textContent = "";
+    if (pluginShowAll) {
+      pluginShowAll.checked = false;
+      pluginShowAll.disabled = true;
+    }
+    return;
+  }
+  const info = state.plugins.find((plugin) => plugin.plugin_id === state.activePluginId);
+  const group = state.pluginGroups.find((item) => item.id === state.activePluginGroupId);
+  const groupLabel = group ? group.title : "";
+  const displayName = pluginDisplayName(info);
+  if (pluginSettingsTitle) pluginSettingsTitle.textContent = `Plugin · ${displayName}`;
+  if (pluginSettingsSubtitle) {
+    const status = info && info.enabled ? "enabled" : "disabled";
+    const version = info && info.version ? `v${info.version}` : "";
+    const pluginId = info && info.plugin_id ? info.plugin_id : "";
+    pluginSettingsSubtitle.textContent = [groupLabel, status, version, pluginId].filter(Boolean).join(" · ");
+  }
+  const settings = state.activePluginSettings || {};
+  const groups = buildPluginFieldGroups(settings);
+  const prefixes = (group && group.settingsPrefixes) || [];
+  const showAll = state.showAllPluginSettings || !prefixes.length;
+  if (pluginShowAll) {
+    if (!prefixes.length) {
+      pluginShowAll.checked = true;
+      pluginShowAll.disabled = true;
+    } else {
+      pluginShowAll.disabled = false;
+      pluginShowAll.checked = state.showAllPluginSettings;
+    }
+  }
+  const visibleGroups = groups
+    .map((entry) => ({
+      name: entry.name,
+      fields: filterFieldsByPrefixes(entry.fields, prefixes, showAll),
+    }))
+    .filter((entry) => entry.fields.length);
+  if (!visibleGroups.length) {
+    pluginSettingsList.textContent = showAll
+      ? "No settings exposed"
+      : 'No settings in this group. Enable "Show all settings" to view full plugin options.';
+    return;
+  }
+  const groupNames = visibleGroups.map((entry) => entry.name);
+  const activeGroup = groupNames.includes(state.activePluginOptionGroup)
+    ? state.activePluginOptionGroup
+    : groupNames[0];
+  state.activePluginOptionGroup = activeGroup;
+  if (pluginOptionGroups) {
+    visibleGroups.forEach((entry) => {
+      const btn = document.createElement("button");
+      btn.className = "pill-btn";
+      if (entry.name === activeGroup) btn.classList.add("active");
+      btn.textContent = entry.name;
+      btn.addEventListener("click", () => {
+        state.activePluginOptionGroup = entry.name;
+        renderPluginDetail();
+      });
+      pluginOptionGroups.appendChild(btn);
+    });
+  }
+  const activeEntry = visibleGroups.find((entry) => entry.name === activeGroup);
+  const fields = activeEntry ? activeEntry.fields : [];
+  if (!fields.length) {
+    pluginSettingsList.textContent = "No settings exposed";
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  fields.forEach((field) => {
+    renderField(fragment, { ...field, label: prettyLabel(field.path || "") }, state.pluginDirty);
+  });
+  pluginSettingsList.appendChild(fragment);
+}
+
+function renderCapturePlugins() {
+  if (!capturePluginsList) return;
+  capturePluginsList.innerHTML = "";
+  if (!state.plugins.length) {
+    capturePluginsList.textContent = "No plugins discovered";
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  CAPTURE_PLUGIN_GROUPS.forEach((group) => {
+    const matching = state.plugins.filter((plugin) =>
+      pluginKinds(plugin).some((kind) => group.kinds.includes(kind))
+    );
+    const enabled = matching.filter((plugin) => plugin.enabled);
+    const hasMismatch = enabled.some((plugin) => !plugin.hash_ok);
+    let statusText = "OK";
+    let statusClass = "badge";
+    if (!matching.length) {
+      statusText = "Missing";
+      statusClass = "badge warn";
+    } else if (!enabled.length) {
+      statusText = "Off";
+      statusClass = "badge off";
+    } else if (hasMismatch) {
+      statusText = "Check";
+      statusClass = "badge warn";
+    }
+
+    const row = document.createElement("div");
+    row.className = "table-row";
+    const nameCell = document.createElement("span");
+    nameCell.textContent = group.title;
+    const statusCell = document.createElement("span");
+    statusCell.className = statusClass;
+    statusCell.textContent = statusText;
+    const pluginCell = document.createElement("span");
+    if (enabled.length) {
+      pluginCell.textContent = enabled.map((plugin) => pluginDisplayName(plugin)).join(", ");
+    } else if (matching.length) {
+      pluginCell.textContent = `Disabled: ${matching.map((plugin) => pluginDisplayName(plugin)).join(", ")}`;
+      pluginCell.className = "muted";
+    } else {
+      pluginCell.textContent = "—";
+      pluginCell.className = "muted";
+    }
+    row.appendChild(nameCell);
+    row.appendChild(statusCell);
+    row.appendChild(pluginCell);
+    fragment.appendChild(row);
+  });
+  capturePluginsList.appendChild(fragment);
+}
+
+function initMetadataTypes() {
+  if (!metadataType) return;
+  metadataType.innerHTML = "";
+  METADATA_TYPES.forEach((entry) => {
+    const option = document.createElement("option");
+    option.value = entry.id;
+    option.textContent = entry.label;
+    metadataType.appendChild(option);
+  });
+  metadataType.value = "evidence.capture.frame";
+}
+
+async function refreshPlugins() {
+  const resp = await apiFetch("/api/plugins");
+  const data = await readJson(resp);
+  state.plugins = data.plugins || [];
+  state.pluginGroups = groupPlugins(state.plugins);
+  if (!state.activePluginGroupId && state.pluginGroups.length) {
+    state.activePluginGroupId = state.pluginGroups[0].id;
+  }
+  renderPluginGroups();
+  renderPluginList();
+  renderPluginDetail();
+  renderCapturePlugins();
+}
+
+function setJepaStatus(text, ok = true) {
+  if (!jepaModelsStatus) return;
+  jepaModelsStatus.textContent = text || "";
+  jepaModelsStatus.classList.toggle("warn", !ok);
+}
+
+function renderJepaModels(models) {
+  if (!jepaModelsList) return;
+  jepaModelsList.innerHTML = "";
+  if (!Array.isArray(models) || !models.length) {
+    jepaModelsList.textContent = "No JEPA models found";
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  models.forEach((model) => {
+    const row = document.createElement("div");
+    row.className = "table-row";
+    if (model.active) row.classList.add("active");
+
+    const nameCell = document.createElement("div");
+    nameCell.className = "model-name";
+    const versionSpan = document.createElement("span");
+    versionSpan.textContent = model.model_version || "unknown";
+    const runSpan = document.createElement("span");
+    runSpan.textContent = model.training_run_id || "";
+    nameCell.appendChild(versionSpan);
+    nameCell.appendChild(runSpan);
+    row.appendChild(nameCell);
+
+    const statusCell = document.createElement("span");
+    let statusText = "pending";
+    let statusClass = "badge off";
+    if (model.approved) {
+      statusText = "approved";
+      statusClass = "badge";
+    }
+    if (model.archived_ts_ms) {
+      statusText = "archived";
+      statusClass = "badge warn";
+    }
+    if (model.active) {
+      statusText = "active";
+      statusClass = "badge";
+    }
+    statusCell.className = statusClass;
+    statusCell.textContent = statusText;
+    row.appendChild(statusCell);
+
+    const createdCell = document.createElement("span");
+    const createdValue = Number(model.created_ts_ms || 0);
+    createdCell.textContent = createdValue ? formatTs(createdValue) : "—";
+    row.appendChild(createdCell);
+
+    const evalCell = document.createElement("span");
+    const evalOk = model.eval && typeof model.eval === "object" ? model.eval.ok : null;
+    if (evalOk === true) {
+      evalCell.className = "badge";
+      evalCell.textContent = "eval ok";
+    } else if (evalOk === false) {
+      evalCell.className = "badge warn";
+      evalCell.textContent = "eval fail";
+    } else {
+      evalCell.className = "badge off";
+      evalCell.textContent = "eval ?";
+    }
+    row.appendChild(evalCell);
+
+    const actionsCell = document.createElement("div");
+    actionsCell.className = "actions";
+    if (!model.approved && !model.archived_ts_ms) {
+      const approveBtn = document.createElement("button");
+      approveBtn.textContent = "Approve";
+      approveBtn.addEventListener("click", () => approveJepaModel(model));
+      actionsCell.appendChild(approveBtn);
+    }
+    if (model.approved && !model.active) {
+      const promoteBtn = document.createElement("button");
+      promoteBtn.className = "ghost";
+      promoteBtn.textContent = "Promote";
+      promoteBtn.addEventListener("click", () => promoteJepaModel(model));
+      actionsCell.appendChild(promoteBtn);
+    }
+    const reportBtn = document.createElement("button");
+    reportBtn.className = "ghost";
+    reportBtn.textContent = "Report";
+    reportBtn.addEventListener("click", () => loadJepaReport(model));
+    actionsCell.appendChild(reportBtn);
+    row.appendChild(actionsCell);
+
+    fragment.appendChild(row);
+  });
+  jepaModelsList.appendChild(fragment);
+}
+
+async function refreshJepaModelsList() {
+  if (!jepaModelsList) return;
+  setJepaStatus("Loading...");
+  const resp = await apiFetch("/api/state/jepa/models?archived=true");
+  const data = await readJson(resp);
+  if (data && data.error) {
+    setJepaStatus(`Error: ${data.error}`, false);
+    jepaModelsList.textContent = "Unable to load models";
+    return;
+  }
+  const models = data.models || [];
+  state.jepaModels = models;
+  renderJepaModels(models);
+  if (!models.length) {
+    setJepaStatus("No models found");
+  } else {
+    setJepaStatus(`${models.length} models`, true);
+  }
+}
+
+async function approveJepaModel(model) {
+  if (!model) return;
+  setJepaStatus("Approving model...");
+  const resp = await apiFetch("/api/state/jepa/approve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model_version: model.model_version,
+      training_run_id: model.training_run_id,
+    }),
+  });
+  const data = await readJson(resp);
+  if (data.error) {
+    setJepaStatus(`Approve failed: ${data.error}`, false);
+  } else {
+    setJepaStatus("Approved", true);
+  }
+  refreshJepaModelsList();
+}
+
+async function approveLatestJepaModel() {
+  setJepaStatus("Approving latest...");
+  const resp = await apiFetch("/api/state/jepa/approve-latest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ include_archived: false }),
+  });
+  const data = await readJson(resp);
+  if (data.error || data.approved === false) {
+    setJepaStatus(`Approve latest: ${data.reason || data.error || "failed"}`, false);
+  } else {
+    setJepaStatus("Approved latest", true);
+  }
+  refreshJepaModelsList();
+}
+
+async function promoteJepaModel(model) {
+  if (!model) return;
+  setJepaStatus("Promoting model...");
+  const resp = await apiFetch("/api/state/jepa/promote", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model_version: model.model_version,
+      training_run_id: model.training_run_id,
+    }),
+  });
+  const data = await readJson(resp);
+  if (data.error) {
+    setJepaStatus(`Promote failed: ${data.error}`, false);
+  } else {
+    setJepaStatus("Promoted", true);
+  }
+  refreshJepaModelsList();
+}
+
+async function loadJepaReport(model) {
+  if (!model || !jepaReportOutput) return;
+  jepaReportOutput.textContent = "Loading report...";
+  const resp = await apiFetch("/api/state/jepa/report", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model_version: model.model_version,
+      training_run_id: model.training_run_id,
+    }),
+  });
+  const data = await readJson(resp);
+  jepaReportOutput.textContent = JSON.stringify(data, null, 2);
+}
+
+async function postConfigPatch(patch) {
+  let resp;
+  try {
+    resp = await apiFetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ patch }),
+    });
+  } catch (err) {
+    const detail = err && err.message ? err.message : String(err);
+    return { ok: false, status: 0, data: null, error: `network_error: ${detail}` };
+  }
+  const status = Number(resp.status || 0);
+  const data = await readJson(resp);
+  let error = null;
+  if (!resp.ok || (data && data.error)) {
+    const detail = data && data.error ? data.error : resp.statusText || "request_failed";
+    error = status ? `HTTP ${status}: ${detail}` : detail;
+  }
+  return { ok: resp.ok && !error, status, data, error };
+}
+
+async function applyPreset(presetId) {
+  const patch = PRESET_PATCHES[presetId];
+  if (!patch) return;
+  setPresetStatus("Applying preset...");
+  try {
+    const result = await postConfigPatch(patch);
+    if (!result.ok) {
+      setPresetStatus(`Preset failed: ${result.error || "request_failed"}`);
+      return;
+    }
+    setPresetStatus("Preset applied");
+    await refreshConfig();
+    await refreshSettings();
+  } catch (err) {
+    const detail = err && err.message ? err.message : String(err);
+    setPresetStatus(`Preset failed: ${detail}`);
+  }
+}
+
+function updateQuickControls() {
+  const controlsEnabled = Boolean(state.status.capture_controls_enabled);
+  if (quickCaptureToggle) {
+    quickCaptureToggle.checked = Boolean(state.status.capture_active);
+    quickCaptureToggle.disabled = !controlsEnabled;
+  }
+  if (quickPauseStatus) {
+    quickPauseStatus.classList.toggle("warn", false);
+    if (state.status.paused_until_utc) {
+      quickPauseStatus.textContent = `Paused until ${formatTs(state.status.paused_until_utc)}`;
+    } else {
+      quickPauseStatus.textContent = state.status.capture_active ? "Capture running" : "Capture stopped";
+      if (!controlsEnabled) {
+        quickPauseStatus.textContent = "Capture locked on (no pause)";
+      }
+    }
+  }
+  if (quickPause10) quickPause10.disabled = !controlsEnabled;
+  if (quickPause30) quickPause30.disabled = !controlsEnabled;
+  if (quickResume) quickResume.disabled = !controlsEnabled;
+  if (quickPrivacyMode) {
+    const privacy = state.config.privacy || {};
+    const egressEnabled = privacy.egress?.enabled !== false;
+    const cloudEnabled = privacy.cloud?.enabled === true;
+    quickPrivacyMode.checked = !egressEnabled && !cloudEnabled;
+  }
+  if (quickFidelityMode) {
+    quickFidelityMode.checked = localStorage.getItem("acFidelityMode") === "true";
+  }
+  if (fidelitySummary) {
+    const video = state.config.capture?.video || {};
+    const activity = video.activity || {};
+    fidelitySummary.textContent =
+      `FPS ${video.fps_target ?? "—"} · Q ${video.jpeg_quality ?? "—"} · ` +
+      `Active ${activity.active_fps ?? "—"}fps/${activity.active_bitrate_kbps ?? "—"}kbps · ` +
+      `Idle ${activity.idle_fps ?? "—"}fps/${activity.idle_bitrate_kbps ?? "—"}kbps`;
+  }
+}
+
+function applyTelemetryPayload(payload) {
+  if (!payload || !payload.telemetry) return;
+  state.telemetry = payload.telemetry || {};
+  const now = Date.now();
+  if (now - telemetryRenderAt < 750) {
+    return;
+  }
+  telemetryRenderAt = now;
+  updateCaptureHealth();
+  renderPluginList();
+}
+
+function updateCaptureHealth() {
+  const latest = state.telemetry.latest || {};
+  if (healthQueue) {
+    const cap = latest.capture || {};
+    const depth = cap.queue_depth ?? "—";
+    const max = cap.queue_depth_max ?? "—";
+    healthQueue.textContent = `${depth} / ${max}`;
+  }
+  if (healthLag) {
+    const cap = latest.capture || {};
+    const lag = cap.lag_ms ? `${Math.round(cap.lag_ms)} ms` : "—";
+    const interval = cap.frame_interval_ms ? `${Math.round(cap.frame_interval_ms)} ms` : "—";
+    healthLag.textContent = `${lag} · ${interval}`;
+  }
+  if (healthScreenshot) {
+    const shot = latest["capture.screenshot"] || null;
+    if (shot && shot.ts_utc) {
+      const size = shot.output_bytes ? ` · ${formatBytes(shot.output_bytes)}` : "";
+      const saved = shot.saved_frames ? ` · ${shot.saved_frames}/${shot.seen_frames} saved` : "";
+      healthScreenshot.textContent = `${formatAgo(shot.ts_utc)}${size}${saved}`;
+    } else {
+      healthScreenshot.textContent = "—";
+    }
+  }
+  if (healthVideo) {
+    const vid = latest["capture.output"] || null;
+    if (vid && vid.ts_utc) {
+      const size = vid.output_bytes ? ` · ${formatBytes(vid.output_bytes)}` : "";
+      const frames = vid.frame_count ? ` · ${vid.frame_count} frames` : "";
+      healthVideo.textContent = `${formatAgo(vid.ts_utc)}${size}${frames}`;
+    } else {
+      healthVideo.textContent = "—";
+    }
+  }
+  const history = state.telemetry.history || {};
+  const shotHistory = (history["capture.screenshot"] || []).slice(-20);
+  const shotValues = shotHistory.map((item) => Number(item.write_ms || 0));
+  renderSparkline(healthSparkScreenshot, shotValues);
+  const videoHistory = (history["capture.output"] || []).slice(-20);
+  const videoValues = videoHistory.map((item) => Number(item.write_ms || 0));
+  renderSparkline(healthSparkVideo, videoValues);
+}
+
+async function refreshHealth() {
+  await refreshTimelineSummary();
+  await refreshTelemetrySnapshot();
+  await refreshHealthFallback();
+}
+
+async function refreshHealthFallback() {
+  if (healthScreenshot && healthScreenshot.textContent === "—") {
+    const resp = await apiFetch("/api/metadata/latest?record_type=evidence.capture.frame&limit=1");
+    const data = await readJson(resp);
+    const entry = (data.records || [])[0];
+    if (entry && entry.record) {
+      const ts = pickRecordTs(entry.record);
+      const size = entry.record.content_size ? ` · ${formatBytes(entry.record.content_size)}` : "";
+      healthScreenshot.textContent = `${formatAgo(ts)}${size}`;
+    }
+  }
+  if (healthVideo && healthVideo.textContent === "—") {
+    const resp = await apiFetch("/api/metadata/latest?record_type=evidence.capture.segment&limit=1");
+    const data = await readJson(resp);
+    const entry = (data.records || [])[0];
+    if (entry && entry.record) {
+      const ts = pickRecordTs(entry.record);
+      const size = entry.record.content_size ? ` · ${formatBytes(entry.record.content_size)}` : "";
+      const frames = entry.record.frame_count ? ` · ${entry.record.frame_count} frames` : "";
+      healthVideo.textContent = `${formatAgo(ts)}${size}${frames}`;
+    }
+  }
+}
+
+async function refreshTimelineSummary() {
+  if (!healthEvent) return;
+  const resp = await apiFetch("/api/timeline?limit=1");
+  const data = await readJson(resp);
+  const events = data.events || [];
+  if (!events.length) {
+    healthEvent.textContent = "—";
+    return;
+  }
+  const event = events[0];
+  const label = event.event_type || event.event || "event";
+  const ts = event.ts_utc || "";
+  healthEvent.textContent = `${label} · ${formatAgo(ts)}`;
+}
+
+async function refreshStorage() {
+  const usageResp = await apiFetch("/api/storage/usage");
+  const usage = await readJson(usageResp);
+  if (storageDir) storageDir.textContent = usage.data_dir || "—";
+  if (storageFree) {
+    const free = formatBytes(usage.free_bytes);
+    const total = formatBytes(usage.total_bytes);
+    storageFree.textContent = `${free} / ${total}`;
+  }
+  const forecastResp = await apiFetch("/api/storage/forecast");
+  const forecast = await readJson(forecastResp);
+  if (storageDays) {
+    storageDays.textContent = forecast.days_remaining === null ? "—" : `${forecast.days_remaining} days`;
+  }
+  if (storageEvidence) {
+    storageEvidence.textContent = formatBytes(forecast.evidence_bytes_per_day);
+  }
+  if (storageDerived) {
+    storageDerived.textContent = formatBytes(forecast.derived_bytes_per_day);
+  }
+  if (storageHint) {
+    if (forecast.samples && forecast.samples >= 2) {
+      storageHint.textContent = "";
+    } else {
+      storageHint.textContent = "Run capture to record disk pressure samples for runway forecasting.";
+    }
+  }
+}
+
+async function refreshMetadata() {
+  if (!metadataList) return;
+  const recordType = metadataType?.value ?? "";
+  metadataList.innerHTML = "";
+  if (metadataDetail) metadataDetail.textContent = "";
+  const query = recordType ? `record_type=${encodeURIComponent(recordType)}` : "";
+  const resp = await apiFetch(`/api/metadata/latest?${query}&limit=10`);
+  const data = await readJson(resp);
+  const records = data.records || [];
+  if (!records.length) {
+    const li = document.createElement("li");
+    li.textContent = "No metadata records found";
+    metadataList.appendChild(li);
+    return;
+  }
+  records.forEach((entry) => {
+    const li = document.createElement("li");
+    const record = entry.record || {};
+    li.textContent = `${entry.record_id} · ${summarizeMetadata(record)}`;
+    li.addEventListener("click", async () => {
+      const detailResp = await apiFetch(`/api/metadata/${entry.record_id}`);
+      const detail = await readJson(detailResp);
+      if (metadataDetail) {
+        metadataDetail.textContent = JSON.stringify(detail, null, 2);
+      }
+    });
+    metadataList.appendChild(li);
+  });
+}
+
+async function previewLatestScreenshot() {
+  if (!latestScreenshotPreview) return;
+  if (latestScreenshotStatus) latestScreenshotStatus.textContent = "Loading latest screenshot...";
+  try {
+    const resp = await apiFetch("/api/media/latest?record_type=evidence.capture.frame");
+    if (!resp.ok) {
+      let detail = "No screenshot available yet";
+      try {
+        const data = await resp.json();
+        if (data && data.error) {
+          const extra = data.detail ? ` · ${data.detail}` : "";
+          detail = `Unavailable: ${data.error}${extra}`;
+        }
+      } catch (err) {
+        // ignore parse errors for non-json responses
+      }
+      if (latestScreenshotStatus) latestScreenshotStatus.textContent = detail;
+      return;
+    }
+    const blob = await resp.blob();
+    if (!blob || !blob.size) {
+      if (latestScreenshotStatus) latestScreenshotStatus.textContent = "Empty screenshot response";
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    if (latestScreenshotUrl) URL.revokeObjectURL(latestScreenshotUrl);
+    latestScreenshotUrl = url;
+    latestScreenshotPreview.src = url;
+    latestScreenshotPreview.classList.add("visible");
+    const recordId = resp.headers.get("x-ac-record-id");
+    const stamp = new Date().toLocaleTimeString();
+    if (latestScreenshotStatus) {
+      latestScreenshotStatus.textContent = recordId ? `Loaded ${recordId} · ${stamp}` : `Loaded ${stamp}`;
+    }
+  } catch (err) {
+    if (latestScreenshotStatus) latestScreenshotStatus.textContent = `Error: ${err}`;
+  }
+}
+
+function setTraceStatus(text) {
+  if (traceStatus) traceStatus.textContent = text || "";
+}
+
+function setTraceProcessStatus(text) {
+  if (traceProcessStatus) traceProcessStatus.textContent = text || "";
+}
+
+function renderTraceRecord(record, recordId, derivedCount) {
+  if (traceRecordJson) {
+    traceRecordJson.textContent = record ? JSON.stringify(record, null, 2) : "";
+  }
+  if (traceRecordTypeValue) {
+    traceRecordTypeValue.textContent = record?.record_type || "—";
+  }
+  const ts = pickRecordTs(record);
+  if (traceRecordTs) {
+    traceRecordTs.textContent = ts ? `${formatTs(ts)} · ${formatAgo(ts)}` : "—";
+  }
+  if (traceRecordContainer) {
+    const container = record?.container?.type || record?.content_type || "—";
+    traceRecordContainer.textContent = container;
+  }
+  if (traceRecordSize) {
+    const bytes = record?.content_size || record?.output_bytes || null;
+    traceRecordSize.textContent = bytes ? formatBytes(bytes) : "—";
+  }
+  if (traceDerivedCount) {
+    traceDerivedCount.textContent = Number.isFinite(derivedCount) ? String(derivedCount) : "—";
+  }
+  if (traceActiveRecord) {
+    traceActiveRecord.textContent = recordId ? `Active record: ${recordId}` : "No record loaded.";
+  }
+}
+
+function renderTraceList(listEl, items, emptyText, formatter) {
+  if (!listEl) return;
+  listEl.innerHTML = "";
+  if (!items || !items.length) {
+    const li = document.createElement("li");
+    li.textContent = emptyText;
+    listEl.appendChild(li);
+    return;
+  }
+  items.forEach((item) => {
+    const li = document.createElement("li");
+    li.textContent = formatter(item);
+    listEl.appendChild(li);
+  });
+}
+
+function renderTraceDerived(items) {
+  if (traceDerivedDetail) traceDerivedDetail.textContent = "";
+  renderTraceList(
+    traceDerivedList,
+    items,
+    "No derived records yet",
+    (entry) => {
+      const record = entry?.record || {};
+      const ts = pickRecordTs(record);
+      const label = `${entry.record_id} · ${record.record_type || "derived"}`;
+      return ts ? `${label} · ${formatTs(ts)}` : label;
+    },
+  );
+  if (traceDerivedList) {
+    Array.from(traceDerivedList.children).forEach((li, idx) => {
+      li.addEventListener("click", () => {
+        if (traceDerivedDetail) {
+          traceDerivedDetail.textContent = JSON.stringify(items[idx], null, 2);
+        }
+      });
+    });
+  }
+}
+
+function renderTraceJournal(items) {
+  renderTraceList(traceJournalList, items, "No journal entries found", (entry) => {
+    const label = entry.event_type || entry.event || "event";
+    const ts = entry.ts_utc || "";
+    const payload = entry.payload || {};
+    const hint = payload.record_id || payload.derived_id || payload.source_id || "";
+    return hint ? `${label} · ${ts} · ${hint}` : `${label} · ${ts}`;
+  });
+}
+
+function renderTraceLedger(items) {
+  renderTraceList(traceLedgerList, items, "No ledger entries found", (entry) => {
+    const stage = entry.stage || "ledger";
+    const ts = entry.ts_utc || "";
+    const inCount = Array.isArray(entry.inputs) ? entry.inputs.length : 0;
+    const outCount = Array.isArray(entry.outputs) ? entry.outputs.length : 0;
+    const counts = `${inCount} in · ${outCount} out`;
+    return `${stage} · ${ts} · ${counts}`;
+  });
+}
+
+async function loadTraceLatest() {
+  const recordType = traceRecordType?.value || "evidence.capture.segment";
+  setTraceStatus("Loading latest record...");
+  const resp = await apiFetch(`/api/trace/latest?record_type=${encodeURIComponent(recordType)}`);
+  const data = await readJson(resp);
+  if (!resp.ok || data.error) {
+    setTraceStatus(`Error: ${data.error || resp.statusText}`);
+    return;
+  }
+  const recordId = data.record_id || data.record?.record_id || data.record?.id || "";
+  if (!recordId) {
+    setTraceStatus("Latest record id missing");
+    return;
+  }
+  if (traceRecordId) traceRecordId.value = recordId;
+  await loadTraceRecord(recordId, { loadPreview: true });
+}
+
+async function loadTraceRecord(recordId, { loadPreview = false } = {}) {
+  if (!recordId) {
+    setTraceStatus("Record id required");
+    return;
+  }
+  setTraceStatus(`Loading ${recordId}...`);
+  const resp = await apiFetch(`/api/trace/${encodeURIComponent(recordId)}`);
+  const data = await readJson(resp);
+  if (!resp.ok || data.error) {
+    setTraceStatus(`Error: ${data.error || resp.statusText}`);
+    renderTraceRecord(null, recordId, 0);
+    renderTraceDerived([]);
+    renderTraceJournal([]);
+    renderTraceLedger([]);
+    if (traceStaleBadge) {
+      traceStaleBadge.textContent = "Unknown";
+      traceStaleBadge.classList.add("off");
+    }
+    return;
+  }
+  const derived = data.derived || [];
+  renderTraceRecord(data.record, recordId, data.derived_count ?? derived.length);
+  renderTraceDerived(derived);
+  renderTraceJournal(data.journal || []);
+  renderTraceLedger(data.ledger || []);
+  if (traceStaleBadge) {
+    const stale = Boolean(data.stale);
+    traceStaleBadge.textContent = stale ? "Stale" : "Fresh";
+    traceStaleBadge.classList.toggle("warn", stale);
+    traceStaleBadge.classList.toggle("off", !stale);
+  }
+  setTraceStatus(`Loaded ${recordId}`);
+  if (loadPreview) {
+    await loadTracePreview(recordId);
+  }
+}
+
+async function loadTracePreview(recordId) {
+  if (!tracePreviewImage) return;
+  if (!recordId) {
+    if (tracePreviewStatus) tracePreviewStatus.textContent = "Record id required";
+    return;
+  }
+  if (tracePreviewStatus) tracePreviewStatus.textContent = "Loading preview...";
+  try {
+    const resp = await apiFetch(`/api/trace/${encodeURIComponent(recordId)}/preview`);
+    if (!resp.ok) {
+      let detail = resp.statusText || "Preview unavailable";
+      try {
+        const data = await resp.json();
+        if (data && data.error) {
+          detail = data.detail ? `${data.error} · ${data.detail}` : data.error;
+        }
+      } catch (err) {
+        // ignore parse errors for non-json responses
+      }
+      if (tracePreviewStatus) tracePreviewStatus.textContent = detail;
+      tracePreviewImage.classList.remove("visible");
+      return;
+    }
+    const blob = await resp.blob();
+    if (!blob || !blob.size) {
+      if (tracePreviewStatus) tracePreviewStatus.textContent = "Empty preview response";
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    if (tracePreviewUrl) URL.revokeObjectURL(tracePreviewUrl);
+    tracePreviewUrl = url;
+    tracePreviewImage.src = url;
+    tracePreviewImage.classList.add("visible");
+    const stamp = new Date().toLocaleTimeString();
+    const headerId = resp.headers.get("x-ac-record-id");
+    if (tracePreviewStatus) {
+      tracePreviewStatus.textContent = headerId ? `Loaded ${headerId} · ${stamp}` : `Loaded ${stamp}`;
+    }
+  } catch (err) {
+    if (tracePreviewStatus) tracePreviewStatus.textContent = `Error: ${err}`;
+  }
+}
+
+async function runTraceProcessing() {
+  const recordId = (traceRecordId?.value || "").trim();
+  if (!recordId) return;
+  setTraceProcessStatus("Processing...");
+  const payload = {
+    allow_ocr: traceAllowOcr ? traceAllowOcr.checked : true,
+    allow_vlm: traceAllowVlm ? traceAllowVlm.checked : true,
+    force: traceForceProcess ? traceForceProcess.checked : false,
+  };
+  const resp = await apiFetch(`/api/trace/${encodeURIComponent(recordId)}/process`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await readJson(resp);
+  if (!resp.ok || data.ok === false || data.error) {
+    if (data.error === "user_active") {
+      const idle = Math.round(Number(data.idle_seconds || 0));
+      const window = Math.round(Number(data.idle_window_s || 0));
+      setTraceProcessStatus(`Blocked: user active (${idle}s < ${window}s)`);
+    } else {
+      setTraceProcessStatus(`Error: ${data.error || resp.statusText}`);
+    }
+    return;
+  }
+  const derivedCount = Array.isArray(data.derived_ids) ? data.derived_ids.length : 0;
+  const processed = Number.isFinite(data.processed) ? data.processed : derivedCount;
+  setTraceProcessStatus(`Processed ${processed} derived`);
+  await loadTraceRecord(recordId, { loadPreview: false });
+}
+
+async function runTraceQuery() {
+  const query = (traceQueryInput?.value || "").trim();
+  if (!query) return;
+  if (traceQueryOutput) traceQueryOutput.textContent = "";
+  const resp = await apiFetch("/api/query", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+  const data = await readJson(resp);
+  if (traceQueryOutput) {
+    traceQueryOutput.textContent = JSON.stringify(data, null, 2);
+  }
+}
+
+async function refreshConfigHistory() {
+  if (!configHistoryList) return;
+  const resp = await apiFetch("/api/config/history?limit=20");
+  const data = await readJson(resp);
+  const changes = data.changes || [];
+  configHistoryList.innerHTML = "";
+  if (!changes.length) {
+    configHistoryList.textContent = "No changes recorded yet";
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  changes
+    .slice()
+    .reverse()
+    .forEach((change) => {
+      const row = document.createElement("div");
+      row.className = "history-item";
+      const meta = document.createElement("div");
+      meta.className = "history-meta";
+      const scope = change.scope || "config";
+      const ts = change.ts_utc ? formatAgo(change.ts_utc) : "—";
+      const plugin = change.plugin_id ? ` · ${change.plugin_id}` : "";
+      meta.textContent = `${scope}${plugin} · ${ts}`;
+      const actions = document.createElement("div");
+      actions.className = "history-actions";
+      const btn = document.createElement("button");
+      btn.className = "ghost";
+      btn.textContent = "Revert";
+      btn.addEventListener("click", async () => {
+        if (configHistoryStatus) configHistoryStatus.textContent = "Reverting...";
+        await apiFetch("/api/config/revert", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ change_id: change.id }),
+        });
+        if (configHistoryStatus) configHistoryStatus.textContent = "Reverted";
+        await refreshSettings();
+        await refreshConfig();
+        await refreshConfigHistory();
+      });
+      actions.appendChild(btn);
+      row.appendChild(meta);
+      row.appendChild(actions);
+      fragment.appendChild(row);
+    });
+  configHistoryList.appendChild(fragment);
+}
+
+async function refreshBookmarks() {
+  if (!bookmarkList) return;
+  const resp = await apiFetch("/api/bookmarks?limit=5");
+  const data = await readJson(resp);
+  const bookmarks = data.bookmarks || [];
+  bookmarkList.innerHTML = "";
+  if (!bookmarks.length) {
+    const li = document.createElement("li");
+    li.textContent = "No bookmarks yet";
+    bookmarkList.appendChild(li);
+    return;
+  }
+  bookmarks
+    .slice()
+    .reverse()
+    .forEach((entry) => {
+      const li = document.createElement("li");
+      const tags = entry.tags && entry.tags.length ? ` · ${entry.tags.join(", ")}` : "";
+      li.textContent = `${entry.note}${tags}`;
+      bookmarkList.appendChild(li);
+    });
+}
+
+async function refreshActivityTimeline() {
+  if (!activityTimelineList) return;
+  const [timelineResp, historyResp, bookmarkResp] = await Promise.all([
+    apiFetch("/api/timeline?limit=25"),
+    apiFetch("/api/config/history?limit=25"),
+    apiFetch("/api/bookmarks?limit=25"),
+  ]);
+  const timelineData = await readJson(timelineResp);
+  const historyData = await readJson(historyResp);
+  const bookmarkData = await readJson(bookmarkResp);
+  const events = (timelineData.events || []).map((event) => ({
+    ts_utc: event.ts_utc || "",
+    type: "activity",
+    label: event.event_type || event.event || "event",
+    detail: event.event_id || event.record_id || "",
+  }));
+  const changes = (historyData.changes || []).map((change) => ({
+    ts_utc: change.ts_utc || "",
+    type: "changes",
+    label: `${change.scope || "config"}${change.plugin_id ? ` · ${change.plugin_id}` : ""}`,
+    detail: change.id || "",
+  }));
+  const bookmarks = (bookmarkData.bookmarks || []).map((bookmark) => ({
+    ts_utc: bookmark.ts_utc || "",
+    type: "bookmarks",
+    label: bookmark.note || "bookmark",
+    detail: bookmark.id || "",
+  }));
+  let items = [...events, ...changes, ...bookmarks];
+  items = items.filter((item) => {
+    if (item.type === "activity" && !state.activityFilters.activity) return false;
+    if (item.type === "changes" && !state.activityFilters.changes) return false;
+    if (item.type === "bookmarks" && !state.activityFilters.bookmarks) return false;
+    return true;
+  });
+  items.sort((a, b) => {
+    const at = Date.parse(a.ts_utc || "") || 0;
+    const bt = Date.parse(b.ts_utc || "") || 0;
+    return bt - at;
+  });
+  activityTimelineList.innerHTML = "";
+  if (!items.length) {
+    const li = document.createElement("li");
+    li.textContent = "No activity yet";
+    activityTimelineList.appendChild(li);
+    return;
+  }
+  items.slice(0, 30).forEach((item) => {
+    const li = document.createElement("li");
+    const meta = item.detail ? ` · ${item.detail}` : "";
+    li.textContent = `${item.label} · ${formatAgo(item.ts_utc)}${meta}`;
+    activityTimelineList.appendChild(li);
+  });
+}
+
+async function refreshKeys() {
+  const resp = await apiFetch("/api/keys");
+  const data = await readJson(resp);
+  keysPayload.textContent = JSON.stringify(data, null, 2);
+}
+
+async function refreshEgress() {
+  const resp = await apiFetch("/api/egress/requests");
+  const data = await readJson(resp);
+  egressList.innerHTML = "";
+  const requests = data.requests || [];
+  if (!requests.length) {
+    const li = document.createElement("li");
+    li.textContent = "No pending approvals";
+    egressList.appendChild(li);
+    return;
+  }
+  requests.forEach((req) => {
+    const li = document.createElement("li");
+    const header = document.createElement("div");
+    header.textContent = `${req.approval_id} · ${req.policy_id}`;
+    const meta = document.createElement("div");
+    meta.textContent = `hash: ${req.packet_hash} · schema v${req.schema_version}`;
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const approve = document.createElement("button");
+    approve.textContent = "Approve";
+    approve.onclick = async () => {
+      const res = await apiFetch("/api/egress/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approval_id: req.approval_id }),
+      });
+      const payload = await readJson(res);
+      li.innerHTML = "";
+      const done = document.createElement("div");
+      done.textContent = `Approved · token ${payload.token}`;
+      li.appendChild(done);
+    };
+    const deny = document.createElement("button");
+    deny.className = "ghost";
+    deny.textContent = "Deny";
+    deny.onclick = async () => {
+      await apiFetch("/api/egress/deny", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approval_id: req.approval_id }),
+      });
+      refreshEgress();
+    };
+    actions.appendChild(approve);
+    actions.appendChild(deny);
+    li.appendChild(header);
+    li.appendChild(meta);
+    li.appendChild(actions);
+    egressList.appendChild(li);
+  });
+}
+
+async function runQuery() {
+  const query = (queryInput.value || "").trim();
+  if (!query) return;
+  queryOutput.textContent = "";
+  if (queryStatus) queryStatus.textContent = "";
+  if (queryScheduleExtract) {
+    queryScheduleExtract.disabled = true;
+    queryScheduleExtract.onclick = null;
+  }
+  const resp = await apiFetch("/api/query", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+  const data = await readJson(resp);
+  queryOutput.textContent = JSON.stringify(data, null, 2);
+
+  // UX-04: surface extraction completeness and offer scheduling when blocked.
+  const extraction = data?.processing?.extraction || {};
+  const blocked = Boolean(extraction?.blocked);
+  const reason = extraction?.blocked_reason || extraction?.reason || "";
+  const scheduledId = data?.scheduled_extract_job_id || extraction?.scheduled_extract_job_id || "";
+  if (queryStatus) {
+    if (scheduledId) {
+      queryStatus.textContent = `Extraction scheduled (${scheduledId})`;
+    } else if (blocked) {
+      queryStatus.textContent = `Extraction blocked: ${reason || "policy"}`;
+    } else if (extraction?.ran) {
+      queryStatus.textContent = "Extraction ran";
+    } else {
+      queryStatus.textContent = "Extraction unchanged";
+    }
+  }
+  if (queryScheduleExtract) {
+    if (blocked && !scheduledId) {
+      queryScheduleExtract.disabled = false;
+      queryScheduleExtract.onclick = async () => {
+        queryScheduleExtract.disabled = true;
+        if (queryStatus) queryStatus.textContent = "Scheduling extraction...";
+        const r2 = await apiFetch("/api/query", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, schedule_extract: true }),
+        });
+        const d2 = await readJson(r2);
+        queryOutput.textContent = JSON.stringify(d2, null, 2);
+        const sid = d2?.scheduled_extract_job_id || "";
+        if (queryStatus) queryStatus.textContent = sid ? `Extraction scheduled (${sid})` : "Schedule failed";
+      };
+    } else {
+      queryScheduleExtract.disabled = true;
+    }
+  }
+}
+
+async function runVerify(endpoint) {
+  verifyOutput.textContent = "";
+  const resp = await apiFetch(endpoint, { method: "POST" });
+  const data = await readJson(resp);
+  verifyOutput.textContent = JSON.stringify(data, null, 2);
+}
+
+function setNested(target, path, value) {
+  const parts = path.split(".");
+  let cursor = target;
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    const part = parts[i];
+    if (!cursor[part] || typeof cursor[part] !== "object" || Array.isArray(cursor[part])) {
+      cursor[part] = {};
+    }
+    cursor = cursor[part];
+  }
+  cursor[parts[parts.length - 1]] = value;
+}
+
+function buildPatch(dirty) {
+  const patch = {};
+  Object.entries(dirty).forEach(([path, value]) => {
+    setNested(patch, path, value);
+  });
+  return patch;
+}
+
+function getByPath(obj, path) {
+  if (!obj || typeof obj !== "object") return undefined;
+  const parts = (path || "").split(".");
+  let cursor = obj;
+  for (const part of parts) {
+    if (!part) continue;
+    if (!cursor || typeof cursor !== "object") return undefined;
+    cursor = cursor[part];
+  }
+  return cursor;
+}
+
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (!deepEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  if (a && b && typeof a === "object") {
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+    if (keysA.length !== keysB.length) return false;
+    keysA.sort();
+    keysB.sort();
+    for (let i = 0; i < keysA.length; i += 1) {
+      if (keysA[i] !== keysB[i]) return false;
+    }
+    for (const key of keysA) {
+      if (!deepEqual(a[key], b[key])) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+function inferType(value) {
+  if (typeof value === "boolean") return "boolean";
+  if (typeof value === "number") return Number.isInteger(value) ? "integer" : "number";
+  if (Array.isArray(value)) return "array";
+  if (value && typeof value === "object") return "object";
+  return "string";
+}
+
+function parseValue(type, raw, enumValues) {
+  if (enumValues && enumValues.length) {
+    return raw;
+  }
+  if (type === "boolean") {
+    return Boolean(raw);
+  }
+  if (type === "integer") {
+    const val = parseInt(raw, 10);
+    if (Number.isNaN(val)) throw new Error("invalid integer");
+    return val;
+  }
+  if (type === "number") {
+    const val = parseFloat(raw);
+    if (Number.isNaN(val)) throw new Error("invalid number");
+    return val;
+  }
+  if (type === "array" || type === "object") {
+    return JSON.parse(raw || "null");
+  }
+  return raw;
+}
+
+function renderField(container, field, dirtyStore) {
+  const row = document.createElement("div");
+  row.className = "settings-row";
+  const label = document.createElement("div");
+  label.className = "settings-path";
+  const labelTitle = field.label || prettyLabel(field.path || "") || field.path || "";
+  const labelText = document.createElement("span");
+  labelText.className = "settings-label";
+  labelText.textContent = labelTitle;
+  const labelHint = document.createElement("span");
+  labelHint.className = "settings-hint";
+  labelHint.textContent = field.path || "";
+  label.appendChild(labelText);
+  label.appendChild(labelHint);
+  const inputWrap = document.createElement("div");
+  inputWrap.className = "settings-input";
+
+  let input;
+  if (field.enum && Array.isArray(field.enum)) {
+    input = document.createElement("select");
+    field.enum.forEach((value) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      if (String(value) === String(field.value)) {
+        option.selected = true;
+      }
+      input.appendChild(option);
+    });
+  } else if (field.type === "boolean") {
+    input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = Boolean(field.value);
+  } else if (field.type === "integer" || field.type === "number") {
+    input = document.createElement("input");
+    input.type = "number";
+    input.value = field.value ?? "";
+  } else if (field.type === "array" || field.type === "object") {
+    input = document.createElement("textarea");
+    input.value = JSON.stringify(field.value ?? null, null, 2);
+  } else {
+    input = document.createElement("input");
+    input.type = "text";
+    input.value = field.value ?? "";
+  }
+
+  const onChange = () => {
+    try {
+      let value;
+      if (field.type === "boolean") {
+        value = input.checked;
+      } else {
+        value = parseValue(field.type, input.value, field.enum);
+      }
+      dirtyStore[field.path] = value;
+      input.classList.remove("warn");
+    } catch (err) {
+      input.classList.add("warn");
+    }
+  };
+
+  input.addEventListener("change", onChange);
+  inputWrap.appendChild(input);
+  row.appendChild(label);
+  row.appendChild(inputWrap);
+  container.appendChild(row);
+}
+
+function filterFields(fields, query) {
+  if (!query) return fields;
+  const q = query.toLowerCase();
+  return fields.filter((field) => {
+    const path = (field.path || "").toLowerCase();
+    const label = (field.label || "").toLowerCase();
+    return path.includes(q) || label.includes(q);
+  });
+}
+
+function selectFieldsByPaths(fields, paths) {
+  const map = new Map(fields.map((field) => [field.path, field]));
+  return paths.map((path) => map.get(path)).filter(Boolean);
+}
+
+function renderEssentialsList(container, fields, paths, emptyText) {
+  if (!container) return;
+  container.innerHTML = "";
+  const essentials = selectFieldsByPaths(fields, paths);
+  if (!essentials.length) {
+    container.textContent = emptyText || "No essentials found";
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  essentials.forEach((field) => {
+    renderField(fragment, field, state.settingsDirty);
+  });
+  container.appendChild(fragment);
+}
+
+function settingsGroupForPath(path) {
+  const prefix = (path || "").split(".")[0];
+  for (const group of SETTINGS_GROUPS) {
+    if (group.prefixes && group.prefixes.includes(prefix)) {
+      return group.id;
+    }
+  }
+  return "other";
+}
+
+function buildSettingsGroups(fields) {
+  const grouped = {};
+  fields.forEach((field) => {
+    const id = settingsGroupForPath(field.path);
+    if (!grouped[id]) grouped[id] = [];
+    grouped[id].push(field);
+  });
+  const groups = SETTINGS_GROUPS.map((def) => {
+    const groupFields = (grouped[def.id] || []).slice().sort((a, b) => (a.path || "").localeCompare(b.path || ""));
+    const summaryFields = (def.summary || [])
+      .map((path) => groupFields.find((field) => field.path === path))
+      .filter(Boolean);
+    return {
+      id: def.id,
+      title: def.title,
+      description: def.description,
+      fields: groupFields,
+      summaryFields,
+      open: Boolean(state.settingsGroupOpen[def.id]),
+    };
+  }).filter((group) => group.fields.length);
+  if (grouped.other && grouped.other.length) {
+    groups.push({
+      id: "other",
+      title: "Other",
+      description: "Everything else.",
+      fields: grouped.other.slice().sort((a, b) => (a.path || "").localeCompare(b.path || "")),
+      summaryFields: [],
+      open: Boolean(state.settingsGroupOpen.other),
+    });
+  }
+  return groups;
+}
+
+async function refreshSettings() {
+  const resp = await apiFetch("/api/settings/schema");
+  const data = await readJson(resp);
+  state.settingsFields = data.fields || [];
+  state.settingsDefaults = data.defaults || {};
+  state.settingsCurrent = data.current || {};
+  state.settingsDirty = {};
+  renderSettings();
+  renderCaptureEssentials();
+  renderStorageEssentials();
+}
+
+function renderSettings() {
+  if (!settingsList) return;
+  const query = (settingsFilter?.value || "").trim();
+  const fields = state.settingsFields.map((field) => {
+    const path = field.path || "";
+    const defaultValue = getByPath(state.settingsDefaults, path);
+    const isOverride = !deepEqual(field.value, defaultValue);
+    return {
+      ...field,
+      label: field.label || prettyLabel(path),
+      defaultValue,
+      isOverride,
+    };
+  });
+  let visibleFields = fields;
+  if (!state.settingsShowAll) {
+    visibleFields = fields.filter(
+      (field) => field.isOverride || Object.prototype.hasOwnProperty.call(state.settingsDirty, field.path)
+    );
+  }
+  settingsList.innerHTML = "";
+  if (query) {
+    visibleFields = filterFields(visibleFields, query);
+  }
+  if (!visibleFields.length) {
+    settingsList.textContent = query
+      ? "No settings found"
+      : state.settingsShowAll
+        ? "No settings found"
+        : "No overrides yet";
+    return;
+  }
+  const groups = buildSettingsGroups(visibleFields);
+  if (!groups.length) {
+    settingsList.textContent = "No settings found";
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  groups.forEach((group) => {
+    const card = document.createElement("div");
+    card.className = "settings-group";
+
+    const header = document.createElement("div");
+    header.className = "settings-group-header";
+    const title = document.createElement("div");
+    title.className = "group-title";
+    title.textContent = group.title;
+    const desc = document.createElement("div");
+    desc.className = "group-meta";
+    desc.textContent = group.description || "";
+    const actions = document.createElement("div");
+    actions.className = "group-actions";
+    const resetBtn = document.createElement("button");
+    resetBtn.className = "ghost";
+    resetBtn.textContent = "Reset group";
+    resetBtn.addEventListener("click", () => resetSettingsGroup(group.id));
+    actions.appendChild(resetBtn);
+    header.appendChild(title);
+    header.appendChild(desc);
+    header.appendChild(actions);
+    card.appendChild(header);
+
+    if (group.summaryFields.length) {
+      const essentials = document.createElement("div");
+      essentials.className = "settings-essentials";
+      const essentialsTitle = document.createElement("div");
+      essentialsTitle.className = "settings-section-title";
+      essentialsTitle.textContent = "Essentials";
+      essentials.appendChild(essentialsTitle);
+      group.summaryFields.forEach((field) => {
+        renderField(essentials, field, state.settingsDirty);
+      });
+      card.appendChild(essentials);
+    }
+
+    const advancedFields = group.fields.filter(
+      (field) => !group.summaryFields.find((summary) => summary.path === field.path)
+    );
+    if (advancedFields.length) {
+      const detail = document.createElement("details");
+      detail.className = "settings-advanced";
+      detail.open = Boolean(group.open);
+      detail.addEventListener("toggle", () => {
+        state.settingsGroupOpen[group.id] = detail.open;
+      });
+      const summary = document.createElement("summary");
+      summary.textContent = `Advanced (${advancedFields.length})`;
+      detail.appendChild(summary);
+      const body = document.createElement("div");
+      body.className = "settings-group-body";
+      advancedFields.forEach((field) => {
+        renderField(body, field, state.settingsDirty);
+      });
+      detail.appendChild(body);
+      card.appendChild(detail);
+    }
+
+    fragment.appendChild(card);
+  });
+  settingsList.appendChild(fragment);
+}
+
+function resetSettingsGroup(groupId) {
+  if (!groupId) return;
+  const defaults = state.settingsDefaults || {};
+  const allFields = state.settingsFields || [];
+  allFields.forEach((field) => {
+    if (!field || !field.path) return;
+    if (settingsGroupForPath(field.path) !== groupId) return;
+    const defValue = getByPath(defaults, field.path);
+    if (typeof defValue === "undefined") {
+      delete state.settingsDirty[field.path];
+    } else {
+      state.settingsDirty[field.path] = defValue;
+    }
+  });
+  setSettingsStatusText("Group reset to defaults (pending apply)");
+  renderSettings();
+}
+
+function renderCaptureEssentials() {
+  if (!captureEssentialsList) return;
+  const fields = state.settingsFields.map((field) => ({
+    ...field,
+    label: field.label || prettyLabel(field.path || ""),
+  }));
+  renderEssentialsList(captureEssentialsList, fields, CAPTURE_ESSENTIAL_FIELDS, "No capture essentials available");
+}
+
+function renderStorageEssentials() {
+  if (!storageEssentialsList) return;
+  const fields = state.settingsFields.map((field) => ({
+    ...field,
+    label: field.label || prettyLabel(field.path || ""),
+  }));
+  renderEssentialsList(storageEssentialsList, fields, STORAGE_ESSENTIAL_FIELDS, "No storage essentials available");
+}
+
+function flattenSettings(obj, prefix = []) {
+  const fields = [];
+  if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+    const keys = Object.keys(obj);
+    if (!keys.length) {
+      if (prefix.length) {
+        fields.push({ path: prefix.join("."), type: "object", value: obj });
+      }
+      return fields;
+    }
+    keys.forEach((key) => {
+      const value = obj[key];
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        fields.push(...flattenSettings(value, prefix.concat(key)));
+      } else {
+        fields.push({ path: prefix.concat(key).join("."), type: inferType(value), value });
+      }
+    });
+    return fields;
+  }
+  fields.push({ path: prefix.join("."), type: inferType(obj), value: obj });
+  return fields;
+}
+
+async function loadPluginSettings(pluginId) {
+  const resp = await apiFetch(`/api/plugins/${pluginId}/settings`);
+  const data = await readJson(resp);
+  const settings = data.settings || {};
+  state.pluginDirty = {};
+  state.activePluginId = pluginId;
+  state.activePluginSettings = settings;
+  if (pluginSettingsStatus) {
+    pluginSettingsStatus.textContent = "";
+  }
+  renderPluginDetail();
+}
+
+async function applySettings() {
+  if (!Object.keys(state.settingsDirty).length) {
+    setSettingsStatusText("No changes to apply");
+    return;
+  }
+  setSettingsStatusText("Applying...");
+  const patch = buildPatch(state.settingsDirty);
+  const resp = await apiFetch("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ patch }),
+  });
+  const data = await readJson(resp);
+  setSettingsStatusText(data.error ? `Error: ${data.error}` : "Applied");
+  await refreshSettings();
+  await refreshConfigHistory();
+}
+
+async function applyPluginSettings() {
+  if (!state.activePluginId) {
+    pluginSettingsStatus.textContent = "Select a plugin";
+    return;
+  }
+  if (!Object.keys(state.pluginDirty).length) {
+    pluginSettingsStatus.textContent = "No changes to apply";
+    return;
+  }
+  pluginSettingsStatus.textContent = "Applying...";
+  const patch = buildPatch(state.pluginDirty);
+  const resp = await apiFetch(`/api/plugins/${state.activePluginId}/settings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ patch }),
+  });
+  const data = await readJson(resp);
+  pluginSettingsStatus.textContent = data.error ? `Error: ${data.error}` : "Applied";
+  await loadPluginSettings(state.activePluginId);
+  await refreshConfigHistory();
+}
+
+async function ensureToken() {
+  if (state.token) return;
+  const statusResp = await apiFetch("/api/auth/status");
+  const status = await readJson(statusResp);
+  if (!status || status.allow_remote) return;
+  const tokenResp = await apiFetch("/api/auth/token");
+  const tokenData = await readJson(tokenResp);
+  if (tokenData && tokenData.token) {
+    setToken(tokenData.token);
+  }
+}
+
+function telemetryIntervalMs() {
+  const fallback = 2000;
+  const interval = Number(state.config?.web?.telemetry_interval_s || 0);
+  if (!Number.isFinite(interval) || interval <= 0) return fallback;
+  return Math.max(500, interval * 1000);
+}
+
+async function refreshTelemetrySnapshot() {
+  try {
+    const resp = await apiFetch("/api/telemetry");
+    const data = await readJson(resp);
+    if (telemetryPayload) {
+      telemetryPayload.textContent = JSON.stringify(data, null, 2);
+    }
+    applyTelemetryPayload(data);
+  } catch (err) {
+    setStatus("offline", false);
+  }
+}
+
+function startTelemetryPolling(label = "polling") {
+  if (state.telemetryPoller) return;
+  setStatus(label, true);
+  state.telemetryPoller = setInterval(refreshTelemetrySnapshot, telemetryIntervalMs());
+  refreshTelemetrySnapshot();
+}
+
+function stopTelemetryPolling() {
+  if (!state.telemetryPoller) return;
+  clearInterval(state.telemetryPoller);
+  state.telemetryPoller = null;
+}
+
+async function connectTelemetry() {
+  if (!telemetryState) return;
+  if (state.ws) {
+    state.ws.close();
+  }
+  try {
+    stopTelemetryPolling();
+    await ensureToken();
+    const wsBase = `${location.origin.replace("http", "ws")}/api/ws/telemetry`;
+    const wsUrl = new URL(wsBase);
+    if (state.token) {
+      wsUrl.searchParams.set("token", state.token);
+    }
+    const ws = new WebSocket(wsUrl.toString());
+    state.ws = ws;
+    ws.onopen = () => {
+      if (state.ws !== ws) return;
+      setStatus("live", true);
+      stopTelemetryPolling();
+    };
+    ws.onclose = () => {
+      if (state.ws !== ws) return;
+      setStatus("polling", true);
+      startTelemetryPolling();
+    };
+    ws.onerror = () => {
+      if (state.ws !== ws) return;
+      setStatus("polling", true);
+      startTelemetryPolling();
+    };
+    ws.onmessage = (evt) => {
+      try {
+        const data = JSON.parse(evt.data);
+        telemetryPayload.textContent = JSON.stringify(data, null, 2);
+        applyTelemetryPayload(data);
+      } catch (err) {
+        telemetryPayload.textContent = String(evt.data || "");
+      }
+    };
+  } catch (err) {
+    setStatus("polling", true);
+    startTelemetryPolling();
+  }
+}
+
+async function refreshConfig() {
+  const resp = await apiFetch("/api/config");
+  const data = await readJson(resp);
+  state.config = data || {};
+  configOutput.textContent = JSON.stringify(data, null, 2);
+  updateQuickControls();
+}
+
+async function applyConfigPatch() {
+  let patch = {};
+  try {
+    patch = JSON.parse(configPatch.value || "{}");
+  } catch (err) {
+    configOutput.textContent = `Invalid JSON: ${err}`;
+    return;
+  }
+  const resp = await apiFetch("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ patch }),
+  });
+  const data = await readJson(resp);
+  configOutput.textContent = JSON.stringify(data, null, 2);
+  refreshConfigHistory();
+}
+
+if (saveTokenBtn) {
+  saveTokenBtn.addEventListener("click", () => {
+    setToken(tokenInput.value);
+    connectTelemetry();
+  });
+}
+
+if (settingsFilter) {
+  settingsFilter.addEventListener("input", renderSettings);
+}
+
+if (settingsShowAll) {
+  settingsShowAll.checked = Boolean(state.settingsShowAll);
+  settingsShowAll.addEventListener("change", () => {
+    state.settingsShowAll = settingsShowAll.checked;
+    localStorage.setItem("acSettingsShowAll", state.settingsShowAll ? "true" : "false");
+    renderSettings();
+  });
+}
+
+if (settingsApply) {
+  settingsApply.addEventListener("click", applySettings);
+}
+
+if (settingsReload) {
+  settingsReload.addEventListener("click", refreshSettings);
+}
+
+document.querySelectorAll(".preset-card").forEach((btn) => {
+  btn.addEventListener("click", () => applyPreset(btn.dataset.preset));
+});
+
+if (captureEssentialsApply) {
+  captureEssentialsApply.addEventListener("click", applySettings);
+}
+
+if (captureEssentialsReload) {
+  captureEssentialsReload.addEventListener("click", refreshSettings);
+}
+
+if (storageEssentialsApply) {
+  storageEssentialsApply.addEventListener("click", applySettings);
+}
+
+if (storageEssentialsReload) {
+  storageEssentialsReload.addEventListener("click", refreshSettings);
+}
+
+if (pluginSettingsApply) {
+  pluginSettingsApply.addEventListener("click", applyPluginSettings);
+}
+
+if (pluginShowAll) {
+  pluginShowAll.addEventListener("change", () => {
+    state.showAllPluginSettings = pluginShowAll.checked;
+    localStorage.setItem("acPluginShowAll", state.showAllPluginSettings ? "true" : "false");
+    renderPluginDetail();
+  });
+}
+
+quickCaptureToggle?.addEventListener("change", async () => {
+  if (!state.status.capture_controls_enabled) {
+    updateQuickControls();
+    return;
+  }
+  if (quickCaptureToggle.checked) {
+    await apiFetch("/api/run/start", { method: "POST" });
+  } else {
+    await apiFetch("/api/run/stop", { method: "POST" });
+  }
+  refreshStatus();
+});
+
+quickPause10?.addEventListener("click", async () => {
+  if (!state.status.capture_controls_enabled) return;
+  await apiFetch("/api/run/pause", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ minutes: 10 }),
+  });
+  refreshStatus();
+});
+
+quickPause30?.addEventListener("click", async () => {
+  if (!state.status.capture_controls_enabled) return;
+  await apiFetch("/api/run/pause", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ minutes: 30 }),
+  });
+  refreshStatus();
+});
+
+quickResume?.addEventListener("click", async () => {
+  if (!state.status.capture_controls_enabled) return;
+  await apiFetch("/api/run/resume", { method: "POST" });
+  refreshStatus();
+});
+
+quickPrivacyMode?.addEventListener("change", async () => {
+  const baselineKey = "acPrivacyBaseline";
+  const targetEnabled = quickPrivacyMode.checked;
+  if (quickPrivacyMode.checked) {
+    const baseline = {
+      egress_enabled: state.config.privacy?.egress?.enabled,
+      cloud_enabled: state.config.privacy?.cloud?.enabled,
+    };
+    const result = await postConfigPatch({ privacy: { egress: { enabled: false }, cloud: { enabled: false } } });
+    if (!result.ok) {
+      setQuickStatusText(`Privacy mode failed: ${result.error || "request_failed"}`, true);
+      quickPrivacyMode.checked = !targetEnabled;
+      return;
+    }
+    localStorage.setItem(baselineKey, JSON.stringify(baseline));
+  } else {
+    let baseline = null;
+    try {
+      baseline = JSON.parse(localStorage.getItem(baselineKey) || "null");
+    } catch (err) {
+      baseline = null;
+    }
+    const egressEnabled = baseline && typeof baseline.egress_enabled === "boolean" ? baseline.egress_enabled : true;
+    const cloudEnabled = baseline && typeof baseline.cloud_enabled === "boolean" ? baseline.cloud_enabled : false;
+    const result = await postConfigPatch({ privacy: { egress: { enabled: egressEnabled }, cloud: { enabled: cloudEnabled } } });
+    if (!result.ok) {
+      setQuickStatusText(`Privacy mode failed: ${result.error || "request_failed"}`, true);
+      quickPrivacyMode.checked = !targetEnabled;
+      return;
+    }
+  }
+  refreshConfig();
+});
+
+quickFidelityMode?.addEventListener("change", async () => {
+  const modeKey = "acFidelityMode";
+  const baselineKey = "acFidelityBaseline";
+  const targetEnabled = quickFidelityMode.checked;
+  if (quickFidelityMode.checked) {
+    const video = state.config.capture?.video || {};
+    const activity = video.activity || {};
+    const baseline = {
+      fps_target: video.fps_target,
+      jpeg_quality: video.jpeg_quality,
+      activity_active_fps: activity.active_fps,
+      activity_idle_fps: activity.idle_fps,
+      activity_active_bitrate: activity.active_bitrate_kbps,
+      activity_idle_bitrate: activity.idle_bitrate_kbps,
+      activity_active_quality: activity.active_jpeg_quality,
+      activity_idle_quality: activity.idle_jpeg_quality,
+      activity_preserve: activity.preserve_quality,
+    };
+    const backpressure = state.config.backpressure || {};
+    const maxFps = backpressure.max_fps || video.fps_target || 30;
+    const maxBitrate = backpressure.max_bitrate_kbps || activity.active_bitrate_kbps || 8000;
+    const highQuality = Math.max(video.jpeg_quality || 90, 95);
+    const result = await postConfigPatch({
+      capture: {
+        video: {
+          fps_target: maxFps,
+          jpeg_quality: highQuality,
+          activity: {
+            active_fps: maxFps,
+            idle_fps: maxFps,
+            active_bitrate_kbps: maxBitrate,
+            idle_bitrate_kbps: maxBitrate,
+            active_jpeg_quality: highQuality,
+            idle_jpeg_quality: highQuality,
+            preserve_quality: true,
+          },
+        },
+      },
+    });
+    if (!result.ok) {
+      setQuickStatusText(`Fidelity mode failed: ${result.error || "request_failed"}`, true);
+      quickFidelityMode.checked = !targetEnabled;
+      return;
+    }
+    localStorage.setItem(baselineKey, JSON.stringify(baseline));
+    localStorage.setItem(modeKey, "true");
+  } else {
+    let baseline = null;
+    try {
+      baseline = JSON.parse(localStorage.getItem(baselineKey) || "null");
+    } catch (err) {
+      baseline = null;
+    }
+    if (baseline) {
+      const result = await postConfigPatch({
+        capture: {
+          video: {
+            fps_target: baseline.fps_target,
+            jpeg_quality: baseline.jpeg_quality,
+            activity: {
+              active_fps: baseline.activity_active_fps,
+              idle_fps: baseline.activity_idle_fps,
+              active_bitrate_kbps: baseline.activity_active_bitrate,
+              idle_bitrate_kbps: baseline.activity_idle_bitrate,
+              active_jpeg_quality: baseline.activity_active_quality,
+              idle_jpeg_quality: baseline.activity_idle_quality,
+              preserve_quality: baseline.activity_preserve,
+            },
+          },
+        },
+      });
+      if (!result.ok) {
+        setQuickStatusText(`Fidelity mode failed: ${result.error || "request_failed"}`, true);
+        quickFidelityMode.checked = !targetEnabled;
+        localStorage.setItem(modeKey, "true");
+        return;
+      }
+    }
+    localStorage.setItem(modeKey, "false");
+  }
+  refreshConfig();
+});
+
+bookmarkSave?.addEventListener("click", async () => {
+  if (!bookmarkNote) return;
+  const note = bookmarkNote.value.trim();
+  if (!note) return;
+  const tags = bookmarkTags?.value
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+  if (bookmarkStatus) bookmarkStatus.textContent = "Saving...";
+  await apiFetch("/api/bookmarks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note, tags }),
+  });
+  bookmarkNote.value = "";
+  if (bookmarkTags) bookmarkTags.value = "";
+  if (bookmarkStatus) bookmarkStatus.textContent = "Saved";
+  refreshBookmarks();
+});
+
+refreshHealthBtn?.addEventListener("click", refreshHealth);
+refreshStorageBtn?.addEventListener("click", refreshStorage);
+refreshConfigHistoryBtn?.addEventListener("click", refreshConfigHistory);
+refreshMetadataBtn?.addEventListener("click", refreshMetadata);
+metadataType?.addEventListener("change", refreshMetadata);
+previewLatestScreenshotBtn?.addEventListener("click", previewLatestScreenshot);
+traceLoadLatest?.addEventListener("click", loadTraceLatest);
+traceLoadRecord?.addEventListener("click", () => loadTraceRecord((traceRecordId?.value || "").trim(), { loadPreview: true }));
+traceLoadPreview?.addEventListener("click", () => loadTracePreview((traceRecordId?.value || "").trim()));
+traceProcess?.addEventListener("click", runTraceProcessing);
+traceQueryRun?.addEventListener("click", runTraceQuery);
+configUndoLast?.addEventListener("click", async () => {
+  if (configHistoryStatus) configHistoryStatus.textContent = "Reverting latest...";
+  const resp = await apiFetch("/api/config/history?limit=1");
+  const data = await readJson(resp);
+  const latest = (data.changes || []).slice(-1)[0];
+  if (!latest) {
+    if (configHistoryStatus) configHistoryStatus.textContent = "No changes to undo";
+    return;
+  }
+  await apiFetch("/api/config/revert", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ change_id: latest.id }),
+  });
+  if (configHistoryStatus) configHistoryStatus.textContent = "Reverted";
+  await refreshSettings();
+  await refreshConfig();
+  await refreshConfigHistory();
+});
+
+qs("runStart")?.addEventListener("click", async () => {
+  if (!state.status.capture_controls_enabled) return;
+  await apiFetch("/api/run/start", { method: "POST" });
+  refreshStatus();
+});
+
+qs("runStop")?.addEventListener("click", async () => {
+  if (!state.status.capture_controls_enabled) return;
+  await apiFetch("/api/run/stop", { method: "POST" });
+  refreshStatus();
+});
+
+qs("refreshAlerts")?.addEventListener("click", refreshAlerts);
+qs("refreshTimeline")?.addEventListener("click", refreshTimeline);
+qs("refreshPlugins")?.addEventListener("click", refreshPlugins);
+refreshCapturePlugins?.addEventListener("click", refreshPlugins);
+qs("reloadPlugins")?.addEventListener("click", async () => {
+  await apiFetch("/api/plugins/reload", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  refreshPlugins();
+});
+pluginEnableAll?.addEventListener("click", async () => {
+  const group = state.pluginGroups.find((item) => item.id === state.activePluginGroupId);
+  if (group) {
+    await toggleGroupEnabled(group, true);
+  }
+});
+pluginDisableAll?.addEventListener("click", async () => {
+  const group = state.pluginGroups.find((item) => item.id === state.activePluginGroupId);
+  if (group) {
+    await toggleGroupEnabled(group, false);
+  }
+});
+qs("refreshKeys")?.addEventListener("click", refreshKeys);
+qs("refreshEgress")?.addEventListener("click", refreshEgress);
+qs("runQuery")?.addEventListener("click", runQuery);
+qs("verifyLedger")?.addEventListener("click", () => runVerify("/api/verify/ledger"));
+qs("verifyAnchors")?.addEventListener("click", () => runVerify("/api/verify/anchors"));
+qs("verifyEvidence")?.addEventListener("click", () => runVerify("/api/verify/evidence"));
+qs("applyConfig")?.addEventListener("click", applyConfigPatch);
+refreshJepaModels?.addEventListener("click", refreshJepaModelsList);
+approveJepaLatest?.addEventListener("click", approveLatestJepaModel);
+clearJepaReport?.addEventListener("click", () => {
+  if (jepaReportOutput) jepaReportOutput.textContent = "";
+});
+refreshActivityTimelineBtn?.addEventListener("click", refreshActivityTimeline);
+filterActivity?.addEventListener("change", () => {
+  state.activityFilters.activity = filterActivity.checked;
+  localStorage.setItem("acFilterActivity", state.activityFilters.activity ? "true" : "false");
+  refreshActivityTimeline();
+});
+filterChanges?.addEventListener("change", () => {
+  state.activityFilters.changes = filterChanges.checked;
+  localStorage.setItem("acFilterChanges", state.activityFilters.changes ? "true" : "false");
+  refreshActivityTimeline();
+});
+filterBookmarks?.addEventListener("change", () => {
+  state.activityFilters.bookmarks = filterBookmarks.checked;
+  localStorage.setItem("acFilterBookmarks", state.activityFilters.bookmarks ? "true" : "false");
+  refreshActivityTimeline();
+});
+
+initNav();
+initMetadataTypes();
+if (traceRecordType && !traceRecordType.value) traceRecordType.value = "evidence.capture.segment";
+if (filterActivity) filterActivity.checked = state.activityFilters.activity;
+if (filterChanges) filterChanges.checked = state.activityFilters.changes;
+if (filterBookmarks) filterBookmarks.checked = state.activityFilters.bookmarks;
+refreshSettings();
+refreshConfig().then(refreshPlugins);
+refreshStatus();
+refreshAlerts();
+refreshTimeline();
+refreshTimelineSummary();
+refreshHealth();
+refreshStorage();
+refreshConfigHistory();
+refreshBookmarks();
+refreshActivityTimeline();
+refreshKeys();
+refreshEgress();
+refreshJepaModelsList();
+connectTelemetry();
+refreshMetadata();

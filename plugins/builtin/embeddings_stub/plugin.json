@@ -1,0 +1,42 @@
+{
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [],
+  "enabled": false,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "embedder.text",
+      "path": "plugin.py"
+    }
+  ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "optional_deps": [
+    "sentence-transformers",
+    "torch"
+  ],
+  "permissions": {
+    "filesystem": "read",
+    "gpu": false,
+    "network": false,
+    "raw_input": false
+  },
+  "plugin_id": "builtin.embeddings.basic",
+  "provides": [
+    "embedder.text"
+  ],
+  "replaces": [],
+  "required_capabilities": [],
+  "settings_paths": [
+    "indexing"
+  ],
+  "version": "0.1.0"
+}

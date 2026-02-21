@@ -1,25 +1,208 @@
+import tempfile
 import unittest
+from pathlib import Path
 
+from autocapture.core.hashing import hash_text, normalize_text
+from autocapture_nx.kernel.hashing import sha256_text
 from autocapture_nx.plugin_system.api import PluginContext
+from plugins.builtin.anchor_basic.plugin import AnchorWriter
 from plugins.builtin.answer_basic.plugin import AnswerBuilder
 from plugins.builtin.citation_basic.plugin import CitationValidator
+from plugins.builtin.ledger_basic.plugin import LedgerWriter
 
 
 class AnswerBuilderTests(unittest.TestCase):
     def test_build_with_citations(self):
-        validator = CitationValidator("cit", PluginContext(config={}, get_capability=lambda _k: None, logger=lambda _m: None))
-        def get_capability(name):
-            if name == "citation.validator":
-                return validator
-            raise KeyError(name)
-        ctx = PluginContext(config={}, get_capability=get_capability, logger=lambda _m: None)
-        builder = AnswerBuilder("ans", ctx)
-        claims = [{
-            "text": "Example claim",
-            "citations": [{"span_id": "s1", "source": "local", "offset_start": 0, "offset_end": 10}],
-        }]
-        result = builder.build(claims)
-        self.assertEqual(result["claims"][0]["text"], "Example claim")
+        class _MetaStore:
+            def __init__(self) -> None:
+                self._data: dict[str, dict] = {}
+
+            def put(self, record_id: str, value: dict) -> None:
+                self._data[record_id] = value
+
+            def get(self, record_id: str, default=None):
+                return self._data.get(record_id, default)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            anchor_path = Path(tmp) / "anchors.ndjson"
+            config = {
+                "storage": {"data_dir": tmp, "anchor": {"path": str(anchor_path), "use_dpapi": False}}
+            }
+            base_ctx = PluginContext(config=config, get_capability=lambda _n: None, logger=lambda _m: None)
+            ledger = LedgerWriter("ledger", base_ctx)
+            entry_hash = ledger.append(
+                {
+                    "record_type": "ledger.entry",
+                    "schema_version": 1,
+                    "entry_id": "run1/ledger/0",
+                    "ts_utc": "2026-01-01T00:00:00+00:00",
+                    "stage": "query.execute",
+                    "inputs": [],
+                    "outputs": [],
+                    "policy_snapshot_hash": "policy",
+                    "payload": {"event": "query.execute"},
+                }
+            )
+            anchor = AnchorWriter("anchor", base_ctx)
+            anchor_record = anchor.anchor(entry_hash)
+            anchor_ref = {
+                "anchor_seq": anchor_record.get("anchor_seq"),
+                "ledger_head_hash": anchor_record.get("ledger_head_hash"),
+            }
+
+            store = _MetaStore()
+            evidence_text = "evidence"
+            evidence_hash = hash_text(normalize_text(evidence_text))
+            derived_text = "claim text"
+            derived_hash = hash_text(normalize_text(derived_text))
+            store.put(
+                "run1/segment/0",
+                {"record_type": "evidence.capture.segment", "content_hash": evidence_hash, "text": evidence_text},
+            )
+            store.put(
+                "run1/derived/0",
+                {
+                    "record_type": "derived.text.ocr",
+                    "content_hash": derived_hash,
+                    "source_id": "run1/segment/0",
+                    "text": derived_text,
+                },
+            )
+
+            def get_meta(name: str):
+                if name == "storage.metadata":
+                    return store
+                raise KeyError(name)
+
+            validator = CitationValidator("cit", PluginContext(config=config, get_capability=get_meta, logger=lambda _m: None))
+
+            def get_capability(name):
+                if name == "citation.validator":
+                    return validator
+                raise KeyError(name)
+
+            ctx = PluginContext(config=config, get_capability=get_capability, logger=lambda _m: None)
+            builder = AnswerBuilder("ans", ctx)
+            claims = [
+                {
+                    "text": "Example claim",
+                    "citations": [
+                        {
+                            "schema_version": 1,
+                            "locator": {
+                                "kind": "text_offsets",
+                                "record_id": "run1/derived/0",
+                                "record_hash": derived_hash,
+                                "offset_start": 0,
+                                "offset_end": len(derived_text),
+                                "span_sha256": sha256_text(derived_text),
+                            },
+                            "span_id": "run1/segment/0",
+                            "evidence_id": "run1/segment/0",
+                            "evidence_hash": evidence_hash,
+                            "derived_id": "run1/derived/0",
+                            "derived_hash": derived_hash,
+                            "span_kind": "text",
+                            "ledger_head": entry_hash,
+                            "anchor_ref": anchor_ref,
+                            "source": "local",
+                            "offset_start": 0,
+                            "offset_end": len(derived_text),
+                        }
+                    ],
+                }
+            ]
+            result = builder.build(claims)
+            self.assertEqual(result["state"], "ok")
+            self.assertEqual(result["claims"][0]["text"], "Example claim")
+
+    def test_build_with_invalid_citations(self):
+        class _MetaStore:
+            def __init__(self) -> None:
+                self._data: dict[str, dict] = {}
+
+            def put(self, record_id: str, value: dict) -> None:
+                self._data[record_id] = value
+
+            def get(self, record_id: str, default=None):
+                return self._data.get(record_id, default)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            anchor_path = Path(tmp) / "anchors.ndjson"
+            config = {
+                "storage": {"data_dir": tmp, "anchor": {"path": str(anchor_path), "use_dpapi": False}}
+            }
+            base_ctx = PluginContext(config=config, get_capability=lambda _n: None, logger=lambda _m: None)
+            ledger = LedgerWriter("ledger", base_ctx)
+            entry_hash = ledger.append(
+                {
+                    "record_type": "ledger.entry",
+                    "schema_version": 1,
+                    "entry_id": "run1/ledger/0",
+                    "ts_utc": "2026-01-01T00:00:00+00:00",
+                    "stage": "query.execute",
+                    "inputs": [],
+                    "outputs": [],
+                    "policy_snapshot_hash": "policy",
+                    "payload": {"event": "query.execute"},
+                }
+            )
+            anchor = AnchorWriter("anchor", base_ctx)
+            anchor_record = anchor.anchor(entry_hash)
+            anchor_ref = {
+                "anchor_seq": anchor_record.get("anchor_seq"),
+                "ledger_head_hash": anchor_record.get("ledger_head_hash"),
+            }
+
+            store = _MetaStore()
+            evidence_text = "evidence"
+            evidence_hash = hash_text(normalize_text(evidence_text))
+            store.put(
+                "run1/segment/0",
+                {"record_type": "evidence.capture.segment", "content_hash": evidence_hash, "text": evidence_text},
+            )
+
+            def get_meta(name: str):
+                if name == "storage.metadata":
+                    return store
+                raise KeyError(name)
+
+            validator = CitationValidator("cit", PluginContext(config=config, get_capability=get_meta, logger=lambda _m: None))
+
+            def get_capability(name):
+                if name == "citation.validator":
+                    return validator
+                raise KeyError(name)
+
+            ctx = PluginContext(config=config, get_capability=get_capability, logger=lambda _m: None)
+            builder = AnswerBuilder("ans", ctx)
+            claims = [
+                {
+                    "text": "Example claim",
+                    "citations": [
+                        {
+                            "schema_version": 1,
+                            "locator": {
+                                "kind": "record",
+                                "record_id": "missing",
+                                "record_hash": evidence_hash,
+                            },
+                            "span_id": "missing",
+                            "evidence_id": "missing",
+                            "evidence_hash": evidence_hash,
+                            "span_kind": "record",
+                            "ledger_head": entry_hash,
+                            "anchor_ref": anchor_ref,
+                            "source": "local",
+                            "offset_start": 0,
+                            "offset_end": 0,
+                        }
+                    ],
+                }
+            ]
+            result = builder.build(claims)
+            self.assertEqual(result["state"], "no_evidence")
+            self.assertTrue(result["errors"])
 
 
 if __name__ == "__main__":

@@ -1,0 +1,66 @@
+{
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "default_settings": {
+    "api_key": "",
+    "base_url": "http://127.0.0.1:8000",
+    "fallback_model": "",
+    "model": "",
+    "strict_remote_only": true,
+    "timeout_s": 20.0
+  },
+  "depends_on": [],
+  "enabled": false,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "embedder.text",
+      "path": "plugin.py"
+    }
+  ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "permissions": {
+    "filesystem": "read",
+    "gpu": false,
+    "network": true,
+    "raw_input": false
+  },
+  "plugin_id": "builtin.embedder.vllm_localhost",
+  "provides": [
+    "embedder.text"
+  ],
+  "required_capabilities": [],
+  "settings_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "api_key": {
+        "type": "string"
+      },
+      "base_url": {
+        "type": "string"
+      },
+      "fallback_model": {
+        "type": "string"
+      },
+      "model": {
+        "type": "string"
+      },
+      "strict_remote_only": {
+        "type": "boolean"
+      },
+      "timeout_s": {
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "version": "0.1.0"
+}

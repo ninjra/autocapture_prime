@@ -1,0 +1,12 @@
+Return strict JSON only with keys bug and corrected_line. Identify the inconsistency in the final success log line of the script and provide the corrected PowerShell line. Output only a single JSON object with no markdown fences and no extra text.
+
+Answer this exact question context when extracting: Find one correctness bug/inconsistency in the script’s final success log line and provide the exact corrected line. (Hint: which variable is referenced in the message vs which endpoint may actually have succeeded?)
+Use only visible evidence from the image.
+Supplemental extracted text hints (may be noisy; use only if visually consistent):
+The script's final success log line incorrectly references the variable 'adv.focus.window' instead of the endpoint that actually succeeded, which should be 'adv.focus.evidence_count'.
+Keyboard focus inference with exact evidence texts from highlighted controls. Observation: adv.focus.window=Outlook VDI; adv.focus.evidence_count=2; adv.focus.evidence_1_kind=selected_message; adv.focus.evidence_1_text=…
+
+Answer policy:
+- Prefer correctness over speed.
+- Use only grounded evidence from provided context.
+- If evidence is insufficient, explicitly return indeterminate.

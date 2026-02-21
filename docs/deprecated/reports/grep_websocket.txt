@@ -1,0 +1,3 @@
+# rg -n /websocket/
+./docs/blueprints/autocapture_nx_blueprint.md:2332:  - websocket endpoint streams telemetry and job status
+./docs/blueprints/autocapture_nx_blueprint.md:2334:  - Test: websocket schema stable and rate-limited

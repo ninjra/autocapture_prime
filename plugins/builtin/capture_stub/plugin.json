@@ -1,28 +1,54 @@
 {
-  "plugin_id": "builtin.capture.stub",
-  "version": "0.1.0",
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [
+    "builtin.journal.basic",
+    "builtin.ledger.basic",
+    "builtin.anchor.basic",
+    "builtin.backpressure.basic"
+  ],
   "enabled": false,
   "entrypoints": [
     {
-      "kind": "capture.source",
+      "callable": "create_plugin",
       "id": "default",
-      "path": "plugin.py",
-      "callable": "create_plugin"
+      "kind": "capture.source",
+      "path": "plugin.py"
     }
   ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
   "permissions": {
     "filesystem": "readwrite",
-    "gpu": true,
-    "raw_input": true,
-    "network": false
+    "gpu": false,
+    "network": false,
+    "raw_input": false
   },
-  "compat": {
-    "requires_kernel": ">=0.1.0",
-    "requires_schema_versions": [1]
-  },
-  "depends_on": [],
-  "hash_lock": {
-    "manifest_sha256": "",
-    "artifact_sha256": ""
-  }
+  "plugin_id": "builtin.capture.basic",
+  "provides": [
+    "capture.source"
+  ],
+  "replaces": [
+    "builtin.capture.stub"
+  ],
+  "required_capabilities": [
+    "capture.backpressure",
+    "event.builder",
+    "observability.logger",
+    "storage.media",
+    "storage.metadata"
+  ],
+  "settings_paths": [
+    "capture",
+    "runtime",
+    "storage",
+    "backpressure"
+  ],
+  "version": "0.1.0"
 }

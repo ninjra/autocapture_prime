@@ -1,0 +1,166 @@
+{
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "record_type", "run_id"],
+  "properties": {
+    "schema_version": {"type": "integer"},
+    "record_type": {"type": "string"},
+    "run_id": {"type": "string"},
+    "ts_utc": {"type": "string"},
+    "ts_start_utc": {"type": "string"},
+    "ts_end_utc": {"type": "string"},
+    "start_ts_utc": {"type": "string"},
+    "end_ts_utc": {"type": "string"},
+    "segment_id": {"type": "string"},
+    "width": {"type": "integer"},
+    "height": {"type": "integer"},
+    "container": {"type": "object"},
+    "window": {"type": "object"},
+    "cursor": {"type": "object"},
+    "event_id": {"type": "string"},
+    "event_count": {"type": "integer"},
+    "text": {"type": "string"},
+    "content_type": {"type": "string"},
+    "content_size": {"type": "integer"},
+    "source_id": {"type": "string"},
+    "path": {"type": "string"},
+    "operation": {"type": "string"},
+    "size_bytes": {"type": "integer"},
+    "mtime_utc": {"type": "string"},
+    "parent_evidence_id": {"type": "string"},
+    "span_ref": {"type": "object"},
+    "method": {"type": "string"},
+    "provider_id": {"type": "string"},
+    "model_id": {"type": "string"},
+    "model_digest": {"type": "string"},
+    "model_provider": {"type": "string"},
+    "parameters": {"type": "object"},
+    "encoding": {"type": "string"},
+    "sample_rate": {"type": "integer"},
+    "channels": {"type": "integer"},
+    "reason": {"type": "string"},
+    "parent_id": {"type": "string"},
+    "child_id": {"type": "string"},
+    "relation_type": {"type": "string"},
+    "artifact_id": {"type": "string"},
+    "artifact_sha256": {"type": "string"},
+    "derived_from": {"type": "object"},
+    "kind": {"type": "string"},
+    "created_ts_ms": {"type": "integer"},
+    "extractor": {"type": "object"},
+    "provenance": {"type": "object"},
+    "content_hash": {"type": "string"},
+    "payload_hash": {"type": "string"}
+  },
+  "anyOf": [
+    {"required": ["content_hash"]},
+    {"required": ["payload_hash"]}
+  ],
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["evidence.capture.segment"]}},
+      "required": ["segment_id", "ts_start_utc", "ts_end_utc", "width", "height", "container"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["evidence.capture.frame"]}},
+      "required": ["ts_utc"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["evidence.capture.unavailable"]}},
+      "required": ["ts_utc", "reason"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["evidence.window.meta"]}},
+      "required": ["ts_utc", "window"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["evidence.clipboard.item"]}},
+      "required": ["ts_utc", "content_type", "content_size"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["evidence.file.activity"]}},
+      "required": ["ts_utc", "path", "operation"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["derived.text.ocr", "derived.text.vlm", "derived.text.qa"]}},
+      "required": [
+        "text",
+        "source_id",
+        "parent_evidence_id",
+        "span_ref",
+        "method",
+        "provider_id",
+        "model_id",
+        "model_digest"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["derived.input.summary"]}},
+      "required": ["start_ts_utc", "end_ts_utc", "event_id", "event_count"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["derived.cursor.sample"]}},
+      "required": ["ts_utc", "cursor"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["derived.audio.segment"]}},
+      "required": ["ts_utc", "encoding", "sample_rate", "channels"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["derived.graph.edge"]}},
+      "required": ["parent_id", "child_id", "relation_type", "span_ref", "method"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["derived.job.extract"]}},
+      "required": ["state", "candidate_ids", "allow_ocr", "allow_vlm"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["derived.artifact.manifest"]}},
+      "required": ["artifact_id", "artifact_sha256", "derived_from"]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "record_type": {
+          "enum": [
+            "derived.sst.frame",
+            "derived.sst.state",
+            "derived.sst.text",
+            "derived.sst.text.extra",
+            "derived.sst.delta",
+            "derived.sst.action"
+          ]
+        }
+      },
+      "required": ["artifact_id", "kind", "created_ts_ms", "extractor", "provenance"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["derived.state_tape.checkpoint"]}},
+      "required": ["ts_utc", "last_record_id", "processed_total", "payload_hash"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["derived.ingest.stage1.complete"]}},
+      "required": ["ts_utc", "source_record_id", "source_record_type", "complete", "payload_hash"]
+    },
+    {
+      "type": "object",
+      "properties": {"record_type": {"enum": ["derived.test"]}},
+      "required": []
+    }
+  ]
+}

@@ -13,6 +13,10 @@ class PluginError(AutocaptureError):
     """Raised when plugin loading or validation fails."""
 
 
+class PluginTimeoutError(PluginError):
+    """Raised when a plugin RPC call times out."""
+
+
 class PermissionError(AutocaptureError):
     """Raised when a permission check fails."""
 

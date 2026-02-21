@@ -1,0 +1,82 @@
+[
+  {
+    "id": "Q1",
+    "question": "Enumerate every distinct top-level window visible in the screenshot. For each window: app/product name, host-vs-VDI context, and whether it is fully visible or partially occluded. Return the list in front-to-back z-order.",
+    "improved": "Window detection; host/VDI attribution; occlusion + z-order reasoning",
+    "risked": "Merging overlapping windows; misclassifying VDI-contained UI as host; wrong z-order",
+    "enforcement_location": "Capture pipeline -> window segmentation + compositor/z-order logic",
+    "regression_detection": "Golden JSON: stable window count + ordered list; diff on name/context/order/occluded"
+  },
+  {
+    "id": "Q2",
+    "question": "Which window has keyboard/input focus? Provide 2 pieces of visual evidence (e.g., highlighted title bar, selected row, caret) and include the exact highlighted text for each evidence item.",
+    "improved": "Focus/active-window detection; evidence grounding",
+    "risked": "Incorrect focus under dark themes; false positives from hover/selection states",
+    "enforcement_location": "UI-state inference layer (focus heuristics + highlight detection)",
+    "regression_detection": "Assert (focused_window_id, evidence_text[]) matches baseline; require 2 evidence items"
+  },
+  {
+    "id": "Q3",
+    "question": "In the VDI Outlook reading pane showing a task/incident email: extract (a) email subject, (b) sender display name, (c) sender email domain only (do not return the full address), and (d) the labels of the primary action buttons in the embedded task card.",
+    "improved": "Small-font OCR; email header parsing; secure redaction behavior",
+    "risked": "OCR dropouts on dense UI; leaking full email address; missing embedded-card buttons",
+    "enforcement_location": "OCR + layout parser; PII redaction/sanitization stage",
+    "regression_detection": "Exact-string checks for subject/button labels; domain-only validation (reject '@' local-part leakage)"
+  },
+  {
+    "id": "Q4",
+    "question": "From that same task/incident view, extract the complete 'Record Activity' timeline: each entry’s timestamp (including timezone if shown) and its associated text, in the same top-to-bottom order displayed.",
+    "improved": "Timeline extraction; timestamp parsing; multi-line association",
+    "risked": "Dropping one of the timeline rows; mixing timestamp with wrong activity text",
+    "enforcement_location": "Structured extraction -> timeline parser (row grouping + ordering)",
+    "regression_detection": "Golden list length + exact text per row; stable ordering; fail if any row missing"
+  },
+  {
+    "id": "Q5",
+    "question": "From the 'Details' section in the same VDI task/incident view, extract all visible field labels and their values as key-value pairs (include fields that are present-but-empty as empty strings). Preserve the on-screen ordering.",
+    "improved": "Form/table key-value extraction; label/value association",
+    "risked": "Mis-pairing labels to wrong values; skipping empty fields; unstable ordering",
+    "enforcement_location": "Layout-aware KV extractor (two-column form parsing)",
+    "regression_detection": "Schema check + ordered-keys snapshot test; verify empty fields retained"
+  },
+  {
+    "id": "Q6",
+    "question": "In the VDI right-side calendar/schedule pane: extract the displayed month+year, the currently selected date, and then list the first 5 visible scheduled items (top-to-bottom) with start time + title.",
+    "improved": "Calendar widget parsing; dense list OCR; selection-state recognition",
+    "risked": "Wrong selected day; time/title misalignment; skipping items due to low contrast",
+    "enforcement_location": "Calendar/schedule parser (selection + list-row extraction)",
+    "regression_detection": "Golden month/year + selected-date + first-5 (time,title) tuples; strict row count"
+  },
+  {
+    "id": "Q7",
+    "question": "In the Slack DM window: transcribe the last two visible messages as (sender, timestamp, exact text). Also describe what the embedded image thumbnail depicts in 1 sentence (do not infer beyond what is visible).",
+    "improved": "Chat transcript extraction; timestamp association; image-thumbnail description",
+    "risked": "Timestamp/sender mismatch; partial message transcription; hallucinated thumbnail details",
+    "enforcement_location": "Chat UI parser + captioning module with 'visible-only' constraint",
+    "regression_detection": "Exact text match for the 2 messages; thumbnail description must reference visible UI elements only"
+  },
+  {
+    "id": "Q8",
+    "question": "In the upper-left dev note/terminal-summary window: extract the full 'What changed' section (each line), the 'Files:' list, and the exact 'Tests:' command shown.",
+    "improved": "Code-oriented OCR; section boundary detection; path/command extraction",
+    "risked": "Missing section headers; dropping file paths; truncating command-line text",
+    "enforcement_location": "Document-structure parser (header -> section -> list extraction)",
+    "regression_detection": "Golden sections: exact header+lines; exact file-path list; exact test command string"
+  },
+  {
+    "id": "Q9",
+    "question": "In the console/log window that contains both red and green text: extract all visible lines and classify each line by its rendered color (red/green/other). Return counts per color and the full text of every red line.",
+    "improved": "Color-aware text extraction; error-line isolation; count accuracy",
+    "risked": "Losing color classification; merging wrapped lines incorrectly; miscounting",
+    "enforcement_location": "Renderer-aware OCR (color sampling per line) + line-wrapping logic",
+    "regression_detection": "Assert (count_red,count_green,count_other) + exact list of red-line strings matches baseline"
+  },
+  {
+    "id": "Q10",
+    "question": "For each visible browser window in the screenshot: extract the active tab title, the address-bar hostname (hostname only), and the count of visible tabs in that window’s tab strip.",
+    "improved": "Browser chrome parsing; tab-title OCR; hostname normalization; multi-window disambiguation",
+    "risked": "Mixing tab strips between windows; wrong active tab; capturing full URL instead of hostname",
+    "enforcement_location": "Browser-UI parser (tab strip + address bar) + URL normalizer",
+    "regression_detection": "Golden per-window tuple: (active_title, hostname, visible_tab_count); validate hostname format (no path/query)"
+  }
+]

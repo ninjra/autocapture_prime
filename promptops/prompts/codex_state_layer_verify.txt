@@ -1,0 +1,58 @@
+You are Codex operating on the Autocapture repository.
+
+Goal: implement a new “State Layer” and plugins described below WITHOUT making changes until you first verify what must change.
+
+PHASE 1 — RECON (no code changes):
+1) Identify current pipeline stages and extension points:
+   - capture ingestion
+   - extraction (OCR/embeddings)
+   - indexing/search
+   - query/LLM orchestration
+2) Locate:
+   - plugin registry / DI container
+   - job scheduler / background worker
+   - artifact store + encryption boundary
+   - database schema + migrations framework
+3) Produce an inventory:
+   - files/modules to modify
+   - new files/modules to add
+   - new DB tables/migrations
+   - any required config flags
+4) For each identified change, map it to one of these new components:
+   - StateBuilderPlugin
+   - EvidenceCompilerPlugin
+   - StateTape storage (state_span/state_edge/state_evidence_link)
+   - VectorIndexPlugin (default linear scan; optional ANN)
+   - QueryEvidenceBundle API + policy gate
+5) List risks:
+   - performance hot paths
+   - security boundary violations
+   - determinism pitfalls
+   - schema migration hazards
+
+Output of PHASE 1 must be:
+A) a concrete change plan (by file path) and a migration plan
+B) a test plan with regression checks
+C) a rollout plan with feature flags (default off)
+
+PHASE 2 — IMPLEMENT (only after plan is accepted):
+Implement minimal baseline (no training required):
+- Create new DB tables and migration
+- Add StateLayer stage to pipeline
+- Implement baseline StateBuilderPlugin:
+  - deterministic windowing
+  - z_t pooling from existing extracted features
+  - Δz and pred_error baseline
+  - evidence + provenance attached
+- Implement retrieval API to return QueryEvidenceBundle
+- Update LLM orchestrator to require evidence bundle and to return “no evidence” when empty
+- Add tests:
+  - provenance completeness (required)
+  - deterministic IDs for same input/config (required)
+  - policy gate prevents raw export when disabled (required)
+  - query returns stable evidence references (required)
+
+Do not introduce new heavy dependencies unless already present.
+Prefer pure code / existing libraries already in repo.
+
+Stop immediately if any regression is detected; do not ship.

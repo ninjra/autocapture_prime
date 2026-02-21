@@ -1,0 +1,554 @@
+{
+  "generated_utc": "2026-02-07T00:00:00Z",
+  "source_doc": "docs/autocapture_prime_adversarial_redesign.md",
+  "items": [
+    {
+      "id": "FND-01",
+      "title": "Exclusive instance lock for data_dir",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/kernel/instance_lock.py",
+        "autocapture_nx/kernel/loader.py",
+        "tests/test_instance_lock.py"
+      ],
+      "validators": [
+        "tests/test_instance_lock.py"
+      ],
+      "notes": "Kernel boot acquires an exclusive data_dir lock and releases it on shutdown; second boot fails closed."
+    },
+    {
+      "id": "FND-02",
+      "title": "Atomic writes for JSON state/config",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/kernel/atomic_write.py",
+        "autocapture_nx/kernel/loader.py",
+        "autocapture_nx/ux/facade.py",
+        "autocapture_nx/plugin_system/manager.py",
+        "autocapture/config/load.py",
+        "tests/test_atomic_write.py"
+      ],
+      "validators": [
+        "tests/test_atomic_write.py"
+      ],
+      "notes": "State/config JSON writes are temp+fsync+replace; doctor checks parseability of critical state JSON."
+    },
+    {
+      "id": "FND-03",
+      "title": "Integrity scan (ledger + anchors + evidence + metadata refs)",
+      "status": "implemented",
+      "evidence": [
+        "autocapture/pillars/citable.py",
+        "autocapture_nx/ux/facade.py",
+        "autocapture_nx/cli.py",
+        "autocapture/web/routes/verify.py",
+        "tests/test_integrity_scan.py"
+      ],
+      "validators": [
+        "tests/test_integrity_scan.py"
+      ],
+      "notes": "Provides an integrity scan that verifies ledger chain, anchors file, evidence blobs/hashes, and metadata reference integrity."
+    },
+    {
+      "id": "OPS-02",
+      "title": "Operational metrics: TTFR + plugin timing",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/capture/pipeline.py",
+        "autocapture/web/routes/metrics.py",
+        "autocapture/web/routes/plugins.py",
+        "autocapture_nx/ux/facade.py",
+        "tests/test_metrics_ttfr.py"
+      ],
+      "validators": [
+        "tests/test_metrics_ttfr.py"
+      ],
+      "notes": "Metrics API includes ttfr percentiles and plugin timing aggregation derived from plugin execution trace."
+    },
+    {
+      "id": "META-03",
+      "title": "Provenance header on query outputs",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/kernel/query.py",
+        "autocapture_nx/cli.py",
+        "autocapture/web/routes/query.py",
+        "tests/test_query_provenance_header.py"
+      ],
+      "validators": [
+        "tests/test_query_provenance_header.py"
+      ],
+      "notes": "Query responses include a standard provenance object with config+lock hashes and anchor/ledger pointers."
+    },
+    {
+      "id": "RD-05",
+      "title": "Regression gates (do not ship on regression)",
+      "status": "implemented",
+      "evidence": [
+        "tools/gate_adversarial_redesign_coverage.py",
+        "tools/gate_doctor.py",
+        "tools/gate_ledger.py",
+        "tools/gate_perf.py",
+        "tools/gate_static.py",
+        "tools/gate_security.py",
+        "tools/run_adversarial_redesign_coverage.sh"
+      ],
+      "validators": [
+        "tools/gate_adversarial_redesign_coverage.py",
+        "tools/gate_doctor.py",
+        "tools/gate_ledger.py",
+        "tools/gate_perf.py",
+        "tools/gate_static.py",
+        "tools/gate_security.py"
+      ],
+      "notes": "Core regression gates exist and are runnable locally/CI; they cover coverage mapping, doctor/integrity, ledger invariants, perf budgets, static checks, and security checks."
+    },
+    {
+      "id": "RD-01",
+      "title": "Roadmap Phase 0 published with verifiable milestones",
+      "status": "implemented",
+      "evidence": [
+        "docs/roadmap.md"
+      ],
+      "validators": [
+        "tests/test_roadmap_sections_present.py"
+      ],
+      "notes": "This repo ships the roadmap as a versioned artifact; UI work is out of scope, but milestones are explicitly documented."
+    },
+    {
+      "id": "RD-02",
+      "title": "Roadmap Phase 1 published with verifiable milestones",
+      "status": "implemented",
+      "evidence": [
+        "docs/roadmap.md"
+      ],
+      "validators": [
+        "tests/test_roadmap_sections_present.py"
+      ],
+      "notes": "See docs/roadmap.md Phase 1 section."
+    },
+    {
+      "id": "RD-03",
+      "title": "Roadmap Phase 2 published with verifiable milestones",
+      "status": "implemented",
+      "evidence": [
+        "docs/roadmap.md"
+      ],
+      "validators": [
+        "tests/test_roadmap_sections_present.py"
+      ],
+      "notes": "See docs/roadmap.md Phase 2 section."
+    },
+    {
+      "id": "RD-04",
+      "title": "Roadmap Phase 3 published with verifiable milestones",
+      "status": "implemented",
+      "evidence": [
+        "docs/roadmap.md"
+      ],
+      "validators": [
+        "tests/test_roadmap_sections_present.py"
+      ],
+      "notes": "See docs/roadmap.md Phase 3 section."
+    },
+    {
+      "id": "SEC-08",
+      "title": "Make capture consent explicit: persistent indicator + start/stop events ledgered; prevent silent background capture",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/kernel/consent.py",
+        "autocapture_nx/ux/facade.py",
+        "config/default.json",
+        "contracts/config_schema.json"
+      ],
+      "validators": [
+        "tests/test_capture_consent.py"
+      ],
+      "notes": "This repo enforces explicit capture consent via a persistent state file and ledgers capture start/stop events. Tray indicator is implemented in the separate tray/UI repo; CLI/API remain authoritative."
+    },
+    {
+      "id": "SEC-03",
+      "title": "Make loopback binding enforceable: validate config + runtime bind address; tray launcher must respect config or refuse to start",
+      "status": "implemented",
+      "evidence": [
+        "contracts/config_schema.json",
+        "config/default.json",
+        "autocapture_nx/tray.py",
+        "autocapture/web/api.py"
+      ],
+      "validators": [
+        "tests/test_tray_launcher_respects_bind.py"
+      ],
+      "notes": "Config schema pins web.bind_host to 127.0.0.1; tray launcher enforces loopback at runtime; web middleware denies non-local requests."
+    },
+    {
+      "id": "SEC-02",
+      "title": "Ensure network_guard is applied early in subprocess plugins (sitecustomize) and covers common HTTP libs",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/plugin_system/runtime.py",
+        "autocapture_nx/plugin_system/host_runner.py"
+      ],
+      "validators": [
+        "tests/test_network_guard_applies_before_imports.py"
+      ],
+      "notes": "host_runner installs a process-wide deny policy before importing plugin modules; runtime patches socket/create_connection to fail closed for non-loopback."
+    },
+    {
+      "id": "SEC-09",
+      "title": "Secrets hygiene: enforce sanitize_env for all subprocesses, redact tokens in logs, and add repo-wide secret scanning gate",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/plugin_system/host.py",
+        "autocapture_nx/kernel/redaction.py",
+        "autocapture_nx/kernel/logging.py",
+        "autocapture_nx/kernel/diagnostics_bundle.py",
+        "tools/gate_secrets.py",
+        "tools/gate_security.py"
+      ],
+      "validators": [
+        "tests/test_log_redaction.py",
+        "tools/gate_secrets.py"
+      ],
+      "notes": "Subprocess env is sanitized; logs and diagnostics bundles redact common secret patterns; git-tracked files are scanned via tools/gate_secrets.py."
+    },
+    {
+      "id": "UX-01",
+      "title": "Add a first-class Activity Dashboard (Today/Recent) showing capture status, last ingest, errors, and SLO summary",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/ux/facade.py",
+        "autocapture/web/routes/status.py",
+        "autocapture/web/routes/telemetry.py",
+        "autocapture/web/routes/metrics.py"
+      ],
+      "validators": [
+        "tests/test_status_is_lightweight.py"
+      ],
+      "notes": "UI is out of scope; the required dashboard data is exposed via localhost-only CLI/API (`/api/status`, `/api/telemetry`, `/api/metrics`)."
+    },
+    {
+      "id": "UX-06",
+      "title": "Make dangerous toggles misclick-resistant (egress enable, allow_raw_egress, allow_images): require typed confirmation + undo window",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/ux/facade.py",
+        "autocapture/web/routes/settings.py"
+      ],
+      "validators": [
+        "tests/test_dangerous_toggle_requires_confirm.py"
+      ],
+      "notes": "Typed confirmation required for enable actions; undo is supported via config history + revert (append-only)."
+    },
+    {
+      "id": "META-05",
+      "title": "Stable citation locator contract (record+offsets/time-range)",
+      "status": "implemented",
+      "evidence": [
+        "contracts/citation.schema.json",
+        "plugins/builtin/citation_basic/plugin.py",
+        "autocapture_nx/kernel/query.py",
+        "tests/test_citation_span_contract.py"
+      ],
+      "validators": [
+        "tests/test_citation_span_contract.py",
+        "tests/test_citation_span_ref.py",
+        "tests/test_citation_validator_metadata.py"
+      ],
+      "notes": "Citations require a stable locator object; validator enforces locator record_id/hash and text span sha256 for offset spans."
+    },
+    {
+      "id": "RD-06",
+      "title": "Write an operator runbook: backup/restore, safe-mode triage, plugin rollback, disk pressure, and integrity verification",
+      "status": "implemented",
+      "evidence": [
+        "docs/runbook.md",
+        "docs/safe_mode.md",
+        "tests/test_runbook_docs.py"
+      ],
+      "validators": [
+        "tests/test_runbook_docs.py"
+      ],
+      "notes": "Docs are versioned artifacts; a deterministic test asserts required sections exist."
+    },
+    {
+      "id": "EXT-01",
+      "title": "Explicit plugin lifecycle states and enforced transitions",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/plugin_system/manager.py",
+        "autocapture/web/routes/plugins.py",
+        "tests/test_plugin_lifecycle_state_machine.py"
+      ],
+      "validators": [
+        "tests/test_plugin_lifecycle_state_machine.py"
+      ]
+    },
+    {
+      "id": "EXT-02",
+      "title": "Local-only plugin install with manifest validation + lock preview",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/plugin_system/manager.py",
+        "contracts/plugin_manifest.schema.json",
+        "tests/test_plugin_install_local_path.py"
+      ],
+      "validators": [
+        "tests/test_plugin_install_local_path.py"
+      ]
+    },
+    {
+      "id": "EXT-03",
+      "title": "Update + rollback with lock history and deterministic diffs",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/plugin_system/manager.py",
+        "autocapture/web/routes/plugins.py",
+        "tests/test_plugin_update_rollback.py"
+      ],
+      "validators": [
+        "tests/test_plugin_update_rollback.py"
+      ]
+    },
+    {
+      "id": "EXT-05",
+      "title": "Plugins plan/apply dry-run and deterministic plan hash",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/plugin_system/manager.py",
+        "autocapture_nx/ux/facade.py",
+        "autocapture/web/routes/plugins.py"
+      ],
+      "validators": [
+        "tests/test_plugins_plan_output_deterministic.py"
+      ]
+    },
+    {
+      "id": "EXT-06",
+      "title": "Permission approvals require explicit digest + high-risk confirmation",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/plugin_system/manager.py",
+        "autocapture/web/routes/plugins.py",
+        "autocapture_nx/cli.py"
+      ],
+      "validators": [
+        "tests/test_plugin_permission_prompt_required.py"
+      ]
+    },
+    {
+      "id": "EXT-07",
+      "title": "In-proc hosting is allowlist-only unless explicitly overridden",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/plugin_system/registry.py",
+        "config/default.json"
+      ],
+      "validators": [
+        "tests/test_inproc_allowlist_enforced.py"
+      ]
+    },
+    {
+      "id": "EXT-08",
+      "title": "Crash-loop quarantine on repeated plugin failures",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/plugin_system/registry.py",
+        "autocapture_nx/kernel/audit.py",
+        "autocapture_nx/plugin_system/manager.py"
+      ],
+      "validators": [
+        "tests/test_plugin_crash_loop_quarantine.py"
+      ]
+    },
+    {
+      "id": "EXT-09",
+      "title": "Per-plugin logs endpoint (sanitized) with token enforcement",
+      "status": "implemented",
+      "evidence": [
+        "autocapture/web/routes/plugins.py",
+        "autocapture_nx/ux/facade.py"
+      ],
+      "validators": [
+        "tests/test_plugin_logs_endpoint.py"
+      ]
+    },
+    {
+      "id": "EXT-12",
+      "title": "Capabilities matrix endpoint (deterministic)",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/ux/facade.py",
+        "autocapture/web/routes/plugins.py"
+      ],
+      "validators": [
+        "tests/test_capabilities_matrix_endpoint.py"
+      ]
+    },
+    {
+      "id": "OPS-05",
+      "title": "Operator commands are ledgered (append-only) and auditable",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/kernel/operator_ledger.py",
+        "autocapture_nx/ux/facade.py",
+        "autocapture_nx/cli.py"
+      ],
+      "validators": [
+        "tests/test_operator_commands_ledgered.py"
+      ]
+    },
+    {
+      "id": "OPS-06",
+      "title": "Doctor reports DB schema/version + checksums",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/kernel/db_status.py",
+        "autocapture/web/routes/doctor.py",
+        "autocapture_nx/ux/facade.py"
+      ],
+      "validators": [
+        "tests/test_doctor_reports_db_versions.py"
+      ]
+    },
+    {
+      "id": "OPS-07",
+      "title": "Self-test harness (offline) with timings",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/ux/facade.py",
+        "autocapture/web/routes/doctor.py",
+        "autocapture_nx/cli.py"
+      ],
+      "validators": [
+        "tests/test_self_test_harness.py"
+      ]
+    },
+    {
+      "id": "OPS-08",
+      "title": "SLO/error budget regression gate and surfacing",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/ux/facade.py",
+        "tools/gate_slo_budget.py"
+      ],
+      "validators": [
+        "tests/test_slo_budget_regression_gate.py"
+      ]
+    },
+    {
+      "id": "PERF-01",
+      "title": "Capture pipeline dedupe and throughput baselines (deterministic checks)",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/capture/pipeline.py",
+        "plugins/builtin/capture_windows/plugin.py"
+      ],
+      "validators": [
+        "tests/test_capture_throughput_baseline.py",
+        "tools/gate_perf.py"
+      ]
+    },
+    {
+      "id": "PERF-08",
+      "title": "Resource/budget visibility: status + UI badges",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/ux/facade.py",
+        "autocapture/web/ui/index.html",
+        "autocapture/web/ui/app.js"
+      ],
+      "validators": [
+        "tests/test_ui_resource_panel.py"
+      ]
+    },
+    {
+      "id": "UX-02",
+      "title": "Capture panel pause/resume API is idempotent",
+      "status": "implemented",
+      "evidence": [
+        "autocapture/web/routes/run.py",
+        "autocapture_nx/ux/facade.py",
+        "autocapture/web/ui/index.html"
+      ],
+      "validators": [
+        "tests/test_pause_resume_idempotent.py"
+      ]
+    },
+    {
+      "id": "UX-03",
+      "title": "Run detail provenance payload is exposed",
+      "status": "implemented",
+      "evidence": [
+        "autocapture/web/routes/run.py",
+        "autocapture_nx/ux/facade.py"
+      ],
+      "validators": [
+        "tests/test_run_detail_contains_provenance.py"
+      ]
+    },
+    {
+      "id": "UX-04",
+      "title": "Query UI surfaces blocked extraction and can schedule extraction",
+      "status": "implemented",
+      "evidence": [
+        "autocapture_nx/kernel/query.py",
+        "autocapture/web/ui/index.html",
+        "autocapture/web/ui/app.js"
+      ],
+      "validators": [
+        "tests/test_query_ui_shows_blocked_extract.py"
+      ]
+    },
+    {
+      "id": "UX-05",
+      "title": "Extension manager core flows (install/approve/enable) supported via API",
+      "status": "implemented",
+      "evidence": [
+        "autocapture/web/routes/plugins.py",
+        "autocapture_nx/plugin_system/manager.py",
+        "autocapture_nx/ux/facade.py"
+      ],
+      "validators": [
+        "tests/test_extension_manager_core_flows.py"
+      ]
+    },
+    {
+      "id": "UX-08",
+      "title": "Error-to-diagnostics flow: doctor bundle can be created after failures",
+      "status": "implemented",
+      "evidence": [
+        "autocapture/web/routes/doctor.py",
+        "autocapture_nx/ux/facade.py"
+      ],
+      "validators": [
+        "tests/test_error_to_diagnostics_flow.py"
+      ]
+    },
+    {
+      "id": "UX-09",
+      "title": "Config diff viewer endpoint (default vs user vs effective)",
+      "status": "implemented",
+      "evidence": [
+        "autocapture/web/routes/settings.py",
+        "autocapture_nx/ux/facade.py"
+      ],
+      "validators": [
+        "tests/test_config_diff_viewer.py"
+      ]
+    },
+    {
+      "id": "UX-10",
+      "title": "Terminology consistency: NX runtime statement in docs",
+      "status": "implemented",
+      "evidence": [
+        "README.md",
+        "contracts/user_surface.md",
+        "autocapture/web/ui/index.html"
+      ],
+      "validators": [
+        "tests/test_docs_consistency_smoke.py"
+      ]
+    }
+  ]
+}

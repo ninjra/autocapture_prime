@@ -1,0 +1,9 @@
+{
+  "detail": "protoc/grpc_tools.protoc not found",
+  "generated": false,
+  "generated_out_dir": "autocapture_prime/chronicle/v0",
+  "generator": "protoc/grpc_tools.protoc",
+  "pid": 71838,
+  "proto_path": "contracts/chronicle/v0/chronicle.proto",
+  "proto_sha256": "cc3ea48b074dc0b18b36618e3251f6a00d7feaf61d9323fb0d8c19378e94a8f1"
+}

@@ -2,6 +2,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
+    "record_type",
     "schema_version",
     "entry_id",
     "ts_utc",
@@ -13,6 +14,7 @@
     "entry_hash"
   ],
   "properties": {
+    "record_type": {"type": "string"},
     "schema_version": {"type": "integer"},
     "entry_id": {"type": "string"},
     "ts_utc": {"type": "string"},

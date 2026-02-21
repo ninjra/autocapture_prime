@@ -1,0 +1,17 @@
+# rg -n /proof[_ ]?bundle|proofbundle/
+./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/blueprints/autocapture_nx_blueprint.md:1763:  - proof bundle exporter in UX facade
+./docs/blueprints/autocapture_nx_blueprint.md:2259:  - run start/stop, query, verify, export proof bundles, model downloads.
+./docs/reports/grep_derived.txt:12:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_derived.txt:39:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_citation.txt:208:./docs/reports/grep_derived.txt:12:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_citation.txt:209:./docs/reports/grep_derived.txt:39:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_citation.txt:262:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_citation.txt:270:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_capture_pipeline.txt:1380:./docs/reports/grep_derived.txt:12:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_capture_pipeline.txt:1407:./docs/reports/grep_derived.txt:39:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_capture_pipeline.txt:1696:./docs/reports/grep_citation.txt:208:./docs/reports/grep_derived.txt:12:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_capture_pipeline.txt:1697:./docs/reports/grep_citation.txt:209:./docs/reports/grep_derived.txt:39:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_capture_pipeline.txt:1719:./docs/reports/grep_citation.txt:262:./docs/blueprints/autocapture_nx_blueprint.md:68:- **Phase 4: Retrieval + provenance + citations** — Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.
+./docs/reports/grep_capture_pipeline.txt:1727:./docs/reports/grep_citation.txt:270:./docs/blueprints/autocapture_nx_blueprint.md:1435:Deterministic retrieval, derived artifacts, citation resolver, proof bundles, replay.

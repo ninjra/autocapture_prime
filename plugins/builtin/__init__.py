@@ -1,0 +1,1 @@
+"""Builtin plugin resource namespace."""

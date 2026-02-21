@@ -1,28 +1,43 @@
 {
-  "plugin_id": "builtin.observability.basic",
-  "version": "0.1.0",
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [],
   "enabled": true,
   "entrypoints": [
     {
-      "kind": "observability.logger",
+      "callable": "create_plugin",
       "id": "default",
-      "path": "plugin.py",
-      "callable": "create_plugin"
+      "kind": "observability.logger",
+      "path": "plugin.py"
     }
   ],
+  "filesystem_policy": {
+    "readwrite": [
+      "{data_dir}"
+    ]
+  },
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
   "permissions": {
     "filesystem": "readwrite",
     "gpu": false,
-    "raw_input": false,
-    "network": false
+    "network": false,
+    "raw_input": false
   },
-  "compat": {
-    "requires_kernel": ">=0.1.0",
-    "requires_schema_versions": [1]
-  },
-  "depends_on": [],
-  "hash_lock": {
-    "manifest_sha256": "",
-    "artifact_sha256": ""
-  }
+  "plugin_id": "builtin.observability.basic",
+  "provides": [
+    "observability.logger"
+  ],
+  "required_capabilities": [],
+  "settings_paths": [
+    "observability",
+    "storage"
+  ],
+  "version": "0.1.0"
 }

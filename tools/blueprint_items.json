@@ -1,0 +1,1926 @@
+[
+  {
+    "id": "I084",
+    "phase": "Phase 0: Scaffolding and gates",
+    "title": "Split heavy ML dependencies into optional extras",
+    "enforcement_location": [
+      "pyproject.toml extras",
+      "plugin import boundaries (no unconditional torch/transformers imports)",
+      "builtin plugin manifests declare optional deps"
+    ],
+    "regression_detection": [
+      "CI matrix: minimal install runs capture+stores without ML deps",
+      "CI matrix: extras[vision]/[embeddings]/[sqlcipher] enable corresponding plugins",
+      "Gate: import-time scan ensures no heavy deps imported in ACTIVE ingest path"
+    ],
+    "acceptance_criteria": [
+      "Base installation captures and queries metadata without importing heavy ML deps.",
+      "Installing extras enables the associated plugins with no code changes."
+    ]
+  },
+  {
+    "id": "I085",
+    "phase": "Phase 0: Scaffolding and gates",
+    "title": "Make resource paths package-safe (no CWD dependence)",
+    "enforcement_location": [
+      "Replace relative paths with `importlib.resources` for packaged assets",
+      "`autocapture_nx/kernel/paths.py` (new) centralizes path resolution"
+    ],
+    "regression_detection": [
+      "Test: run from arbitrary CWD and verify default.json/contracts/plugins load",
+      "Wheel install test: builtin plugins discoverable and loadable"
+    ],
+    "acceptance_criteria": [
+      "Running from any directory yields identical behavior and finds assets."
+    ]
+  },
+  {
+    "id": "I086",
+    "phase": "Phase 0: Scaffolding and gates",
+    "title": "Use OS-appropriate default data/config dirs (platformdirs)",
+    "enforcement_location": [
+      "Use `platformdirs` to pick Windows-first locations",
+      "Config schema: `paths.config_dir`, `paths.data_dir` resolved at boot"
+    ],
+    "regression_detection": [
+      "Test matrix: Windows/Linux/WSL path resolution produces valid dirs",
+      "Doctor check: directories exist and are writable; vault is restricted"
+    ],
+    "acceptance_criteria": [
+      "Default paths are correct on Windows and do not depend on CWD."
+    ]
+  },
+  {
+    "id": "I087",
+    "phase": "Phase 0: Scaffolding and gates",
+    "title": "Package builtin plugins as package data",
+    "enforcement_location": [
+      "Packaging: include `plugins/builtin/**` as package data",
+      "Plugin discovery uses package resources when installed"
+    ],
+    "regression_detection": [
+      "Wheel install test: `autocapture doctor` lists builtin plugins",
+      "Gate: plugin lock hashing includes packaged plugin files"
+    ],
+    "acceptance_criteria": [
+      "Installed wheel runs with builtin plugins without requiring repo checkout."
+    ]
+  },
+  {
+    "id": "I088",
+    "phase": "Phase 0: Scaffolding and gates",
+    "title": "Add reproducible dependency lockfile (hash-locked)",
+    "enforcement_location": [
+      "Dependency lock: `requirements.lock` or `uv.lock` with hashes",
+      "CI verifies lock integrity and matches pyproject constraints"
+    ],
+    "regression_detection": [
+      "Gate: lock drift check fails if deps change without lock update",
+      "Supply-chain test: install from lock only; run smoke tests"
+    ],
+    "acceptance_criteria": [
+      "CI can build and install deterministically from lockfile."
+    ]
+  },
+  {
+    "id": "I089",
+    "phase": "Phase 0: Scaffolding and gates",
+    "title": "Add canonical-json safety tests for journal/ledger payloads",
+    "enforcement_location": [
+      "Unit tests for canonical-json compliance across all event builders",
+      "Gate: `tools/gate_canon.py` runs in CI"
+    ],
+    "regression_detection": [
+      "Test: generate sample events from each plugin; validate canonical JSON",
+      "Gate: fail on floats/bytes/non-UTC timestamps"
+    ],
+    "acceptance_criteria": [
+      "All emitted events pass canonical-json validation in CI."
+    ]
+  },
+  {
+    "id": "I090",
+    "phase": "Phase 0: Scaffolding and gates",
+    "title": "Add concurrency tests for ledger/journal append correctness",
+    "enforcement_location": [
+      "Thread-safety tests for ledger/journal writers",
+      "Gate: `tools/gate_concurrency.py`"
+    ],
+    "regression_detection": [
+      "Test: multi-thread append; verify entry count and stable chain",
+      "Test: forced thread interleavings do not corrupt files"
+    ],
+    "acceptance_criteria": [
+      "Ledger/journal remain valid under concurrent writes."
+    ]
+  },
+  {
+    "id": "I091",
+    "phase": "Phase 0: Scaffolding and gates",
+    "title": "Add golden chain test: ledger verify + anchor verify",
+    "enforcement_location": [
+      "Golden test corpus for ledger chain + anchors",
+      "Gate: `tools/gate_ledger.py` verifies replay"
+    ],
+    "regression_detection": [
+      "Test: produce N entries; verify chain and anchor head deterministically",
+      "Test: tamper with one entry; verification fails"
+    ],
+    "acceptance_criteria": [
+      "Verification reliably detects tampering and passes on untampered goldens."
+    ]
+  },
+  {
+    "id": "I092",
+    "phase": "Phase 0: Scaffolding and gates",
+    "title": "Add performance regression tests (capture latency/memory/query latency)",
+    "enforcement_location": [
+      "Perf suite: capture tick latency, memory ceiling, query latency",
+      "Gate: `tools/gate_perf.py` with thresholds"
+    ],
+    "regression_detection": [
+      "Bench: sustained capture at configured fps; assert bounded RAM",
+      "Bench: query over N records completes under budget"
+    ],
+    "acceptance_criteria": [
+      "Perf gate is deterministic and prevents accidental regressions."
+    ]
+  },
+  {
+    "id": "I093",
+    "phase": "Phase 0: Scaffolding and gates",
+    "title": "Add security regression tests (DPAPI fail-closed, network guard, no raw egress)",
+    "enforcement_location": [
+      "Security test suite run in CI",
+      "Gate: `tools/gate_security.py`"
+    ],
+    "regression_detection": [
+      "Test: DPAPI failure with encryption_required causes hard failure",
+      "Test: kernel process cannot open network sockets",
+      "Test: unsanitized egress blocked unless dangerous_ops enabled"
+    ],
+    "acceptance_criteria": [
+      "Security regressions are caught automatically."
+    ]
+  },
+  {
+    "id": "I094",
+    "phase": "Phase 0: Scaffolding and gates",
+    "title": "Static analysis: ruff + typing + vuln scan",
+    "enforcement_location": [
+      "Static analysis in CI (lint, type checks, dependency scan)"
+    ],
+    "regression_detection": [
+      "CI fails on new lint/type errors",
+      "CI fails on high-severity dependency vulnerabilities (policy-defined)"
+    ],
+    "acceptance_criteria": [
+      "Main branch stays lint/type clean; security issues surfaced early."
+    ]
+  },
+  {
+    "id": "I095",
+    "phase": "Phase 0: Scaffolding and gates",
+    "title": "Doctor validates locks, storage, anchors, and network policy",
+    "enforcement_location": [
+      "`autocapture doctor` (new) + `tools/gate_doctor.py`"
+    ],
+    "regression_detection": [
+      "Test: doctor detects missing lockfile, plugin hash mismatch, bad perms",
+      "Test: doctor output is stable (snapshot test)"
+    ],
+    "acceptance_criteria": [
+      "Doctor reliably detects misconfigurations before runtime failures."
+    ]
+  },
+  {
+    "id": "I126",
+    "phase": "Phase 0: Scaffolding and gates",
+    "title": "Make sha256_directory path sorting deterministic across OSes",
+    "enforcement_location": [
+      "`autocapture_nx/kernel/hashing.py` sha256_directory ordering",
+      "Used by plugin hashing + contract lock hashing"
+    ],
+    "regression_detection": [
+      "Test: same directory hashed on Windows/Linux yields identical digest",
+      "Gate: plugin lock update is deterministic on same content"
+    ],
+    "acceptance_criteria": [
+      "Hashing is deterministic across OS and filesystem orderings."
+    ]
+  },
+  {
+    "id": "I001",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Eliminate floats from journal/ledger payloads",
+    "enforcement_location": [
+      "EventBuilder + canonical_json encoder",
+      "All plugin event payloads"
+    ],
+    "regression_detection": [
+      "Gate-CANON: reject floats/bytes; unit tests for all event types",
+      "Test: capture disk-pressure event emits integer bytes, not floats"
+    ],
+    "acceptance_criteria": [
+      "No runtime path emits floats into canonical JSON; CI enforces."
+    ]
+  },
+  {
+    "id": "I002",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Make backpressure actually affect capture rate",
+    "enforcement_location": [
+      "capture_windows pipeline timing loop",
+      "runtime governor \u2192 capture fps/quality controller"
+    ],
+    "regression_detection": [
+      "Test: backpressure changes fps target and measured interval responds",
+      "Perf: capture tick p95 stays within budget under disk pressure"
+    ],
+    "acceptance_criteria": [
+      "When disk/queue pressure rises, capture rate drops within 1 second."
+    ]
+  },
+  {
+    "id": "I003",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Stop buffering whole segments in RAM; stream segments",
+    "enforcement_location": [
+      "capture_windows: segment packer/writer",
+      "media store write path supports streaming"
+    ],
+    "regression_detection": [
+      "Perf: sustained capture uses bounded RAM (ceiling configured)",
+      "Test: segments written continuously without OOM on large resolutions"
+    ],
+    "acceptance_criteria": [
+      "Capture can run indefinitely without unbounded memory growth."
+    ]
+  },
+  {
+    "id": "I004",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Do not write to storage from realtime audio callback",
+    "enforcement_location": [
+      "audio_windows: callback produces into queue only",
+      "audio writer thread performs storage IO"
+    ],
+    "regression_detection": [
+      "Test: callback path performs no disk IO (mock store asserts not called)",
+      "Perf: audio capture has no xruns under load (best-effort check)"
+    ],
+    "acceptance_criteria": [
+      "Audio callback is realtime-safe and never blocks on IO."
+    ]
+  },
+  {
+    "id": "I005",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Stop mutating primary evidence metadata during query",
+    "enforcement_location": [
+      "query pipeline (`autocapture_nx/kernel/query.py`)",
+      "metadata store API: forbid overwrites for primary evidence"
+    ],
+    "regression_detection": [
+      "Gate-IMMUT: detect `put_replace` on evidence types",
+      "Test: extraction creates `derived.*` record; parent unchanged (hash stable)"
+    ],
+    "acceptance_criteria": [
+      "No query path mutates primary evidence; citations remain stable over time."
+    ]
+  },
+  {
+    "id": "I006",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Introduce globally unique run/session identifier; prefix all record IDs",
+    "enforcement_location": [
+      "kernel run manager (new): run_id creation and propagation",
+      "all plugins include run_id in IDs and events"
+    ],
+    "regression_detection": [
+      "Test: two runs produce non-colliding IDs even with same sequences",
+      "Gate: lint rule forbids bare `segment_0` style IDs in plugins"
+    ],
+    "acceptance_criteria": [
+      "Replaying a second run never overwrites or collides with prior data."
+    ]
+  },
+  {
+    "id": "I007",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Make ledger writing thread-safe",
+    "enforcement_location": [
+      "ledger writer: single-writer lock + atomic append semantics"
+    ],
+    "regression_detection": [
+      "Concurrency tests (Phase 0 I090) validate chain under multi-threading"
+    ],
+    "acceptance_criteria": [
+      "Ledger chain remains valid under concurrent plugin writes."
+    ]
+  },
+  {
+    "id": "I008",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Make journal writing thread-safe; centralize sequences",
+    "enforcement_location": [
+      "journal writer centralizes sequencing and timestamps",
+      "plugins stop maintaining their own `seq += 1` counters"
+    ],
+    "regression_detection": [
+      "Test: concurrent writes produce strictly increasing per-stream sequence",
+      "Snapshot: journal schema stable and contains run_id"
+    ],
+    "acceptance_criteria": [
+      "All plugins emit events through EventBuilder+JournalWriter with stable schema."
+    ]
+  },
+  {
+    "id": "I009",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Fail closed if DPAPI protection fails when encryption_required",
+    "enforcement_location": [
+      "keyring DPAPI unprotect path",
+      "config: `storage.encryption_required` hard requirement"
+    ],
+    "regression_detection": [
+      "Security test: DPAPI fail leads to startup failure when encryption_required",
+      "Doctor reports actionable remediation (recreate vault, permissions, etc.)"
+    ],
+    "acceptance_criteria": [
+      "No path silently falls back to unprotected key bytes when encryption_required."
+    ]
+  },
+  {
+    "id": "I010",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Sort all store keys deterministically",
+    "enforcement_location": [
+      "store implementations: keys() ordering and iteration"
+    ],
+    "regression_detection": [
+      "Test: repeated `keys()` calls return identical order",
+      "Gate: retrieval is deterministic given identical data"
+    ],
+    "acceptance_criteria": [
+      "Iteration order is stable and deterministic across runs."
+    ]
+  },
+  {
+    "id": "I011",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Use monotonic clocks for segment duration",
+    "enforcement_location": [
+      "capture timing: use monotonic for intervals; UTC timestamps for provenance"
+    ],
+    "regression_detection": [
+      "Test: system clock changes do not break segment scheduling"
+    ],
+    "acceptance_criteria": [
+      "Capture schedule is robust to wall-clock adjustments."
+    ]
+  },
+  {
+    "id": "I012",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Align default config with implemented capture backend",
+    "enforcement_location": [
+      "config/default.json + config schema",
+      "capture plugin selection logic"
+    ],
+    "regression_detection": [
+      "Doctor warns if config selects unsupported backend",
+      "Test: default config runs capture without unsupported backend errors"
+    ],
+    "acceptance_criteria": [
+      "Out-of-the-box config matches real implementation."
+    ]
+  },
+  {
+    "id": "I013",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Remove hard-coded model paths; config-driven + portable",
+    "enforcement_location": [
+      "ML plugins: model cache/weights paths in config",
+      "doctor validates paths exist or can be downloaded"
+    ],
+    "regression_detection": [
+      "Test: no absolute host-specific paths in repo",
+      "Doctor: warns when model missing; offers download command"
+    ],
+    "acceptance_criteria": [
+      "Repo works on fresh machine without editing hard-coded paths."
+    ]
+  },
+  {
+    "id": "I014",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Enforce plugin compat.requires_kernel / schema versions",
+    "enforcement_location": [
+      "plugin loader enforces compat fields at load time",
+      "contracts define schema versions and kernel ABI"
+    ],
+    "regression_detection": [
+      "Test: incompatible plugin is refused with clear error",
+      "Doctor: lists plugin compat mismatches"
+    ],
+    "acceptance_criteria": [
+      "No plugin can run against incompatible kernel/schema without explicit override."
+    ]
+  },
+  {
+    "id": "I015",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Verify contract lock at boot/doctor",
+    "enforcement_location": [
+      "contract lock verification at boot and doctor",
+      "`contracts/lock.json` must match hashes of contract files"
+    ],
+    "regression_detection": [
+      "Gate: contract lock verify in CI and on startup",
+      "Test: modifying contract file without lock update fails"
+    ],
+    "acceptance_criteria": [
+      "Contracts cannot drift silently; every drift is detected."
+    ]
+  },
+  {
+    "id": "I096",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Fail loud on decrypt errors when encryption_required",
+    "enforcement_location": [
+      "Encrypted stores: decrypt error handling under encryption_required"
+    ],
+    "regression_detection": [
+      "Test: corrupted ciphertext causes explicit error, not silent default",
+      "Doctor: can detect corruption and suggest recovery steps"
+    ],
+    "acceptance_criteria": [
+      "Corruption is surfaced deterministically and does not produce false data."
+    ]
+  },
+  {
+    "id": "I097",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Add record type fields everywhere",
+    "enforcement_location": [
+      "All event/record schemas include `record_type` or `event_type`"
+    ],
+    "regression_detection": [
+      "Schema tests ensure `record_type` present for all stored records"
+    ],
+    "acceptance_criteria": [
+      "Every stored record can be typed without inspecting arbitrary fields."
+    ]
+  },
+  {
+    "id": "I098",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Add unified EventBuilder helper",
+    "enforcement_location": [
+      "New `autocapture_nx/kernel/event_builder.py`",
+      "All plugins use EventBuilder for journal/ledger payloads"
+    ],
+    "regression_detection": [
+      "Gate: forbid direct JournalWriter/LedgerWriter calls outside EventBuilder",
+      "Test: EventBuilder outputs canonical-json-safe payloads"
+    ],
+    "acceptance_criteria": [
+      "Plugins emit consistent, validated events via a single API."
+    ]
+  },
+  {
+    "id": "I099",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Stamp every journal event with run_id",
+    "enforcement_location": [
+      "JournalWriter automatically inserts run_id (from run manager)"
+    ],
+    "regression_detection": [
+      "Test: all journal events include run_id"
+    ],
+    "acceptance_criteria": [
+      "Journal is always partitionable by run_id."
+    ]
+  },
+  {
+    "id": "I100",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Cache policy snapshot hashing per run",
+    "enforcement_location": [
+      "policy snapshot hashing computed once per run and reused",
+      "capture records store `policy_hash` only"
+    ],
+    "regression_detection": [
+      "Perf test: capture loop no longer recomputes policy hash per segment",
+      "Test: policy hash stable for a run and changes when config changes"
+    ],
+    "acceptance_criteria": [
+      "Policy hashing overhead is removed from hot path."
+    ]
+  },
+  {
+    "id": "I123",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Write kernel boot ledger entry system.start",
+    "enforcement_location": [
+      "kernel boot sequence writes `system.start` ledger entry"
+    ],
+    "regression_detection": [
+      "Golden ledger test includes start entry",
+      "Doctor verifies presence of start entry for completed runs"
+    ],
+    "acceptance_criteria": [
+      "Every run has a verifiable origin entry in the ledger."
+    ]
+  },
+  {
+    "id": "I124",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Write kernel shutdown ledger entry system.stop",
+    "enforcement_location": [
+      "kernel shutdown writes `system.stop` ledger entry with final head hash"
+    ],
+    "regression_detection": [
+      "Test: graceful shutdown emits stop entry"
+    ],
+    "acceptance_criteria": [
+      "Every clean run has an explicit termination entry."
+    ]
+  },
+  {
+    "id": "I125",
+    "phase": "Phase 1: Correctness + immutability blockers",
+    "title": "Write crash ledger entry on next startup",
+    "enforcement_location": [
+      "startup recovery writes `system.crash_detected` if prior run missing stop"
+    ],
+    "regression_detection": [
+      "Test: simulate crash (no stop) then restart emits crash entry"
+    ],
+    "acceptance_criteria": [
+      "Crashes are recorded and do not silently break provenance."
+    ]
+  },
+  {
+    "id": "I016",
+    "phase": "Phase 2: Capture pipeline refactor",
+    "title": "Split capture into grab \u2192 encode/pack \u2192 encrypt/write pipeline",
+    "enforcement_location": [
+      "capture_windows plugin refactor into 3-stage pipeline",
+      "interfaces: grabber, encoder/packer, encrypted writer"
+    ],
+    "regression_detection": [
+      "Perf: capture tick p95 within budget while pipeline backlog grows",
+      "Test: pipeline stages can be independently throttled/cancelled"
+    ],
+    "acceptance_criteria": [
+      "Capture remains stable under load and isolates slow disk/encode paths."
+    ]
+  },
+  {
+    "id": "I017",
+    "phase": "Phase 2: Capture pipeline refactor",
+    "title": "Bounded queues with explicit drop policies",
+    "enforcement_location": [
+      "queue primitives in capture/audio/input pipelines",
+      "drop policy documented and recorded"
+    ],
+    "regression_detection": [
+      "Test: queue never grows beyond configured max",
+      "Test: drops are recorded in metadata and journal"
+    ],
+    "acceptance_criteria": [
+      "System remains bounded; any fidelity loss is explicit and auditable."
+    ]
+  },
+  {
+    "id": "I018",
+    "phase": "Phase 2: Capture pipeline refactor",
+    "title": "Replace zip-of-JPEG with real video container for primary artifact",
+    "enforcement_location": [
+      "media container format for primary capture evidence",
+      "segment format versioning"
+    ],
+    "regression_detection": [
+      "Test: segment decode/extract works on all supported OS targets",
+      "Test: container metadata timestamps align with recorded ts_start/end"
+    ],
+    "acceptance_criteria": [
+      "Primary capture evidence is efficient to store and seek deterministically."
+    ]
+  },
+  {
+    "id": "I019",
+    "phase": "Phase 2: Capture pipeline refactor",
+    "title": "Add GPU-accelerated capture/encode backend (NVENC/DD)",
+    "enforcement_location": [
+      "New capture backend plugin(s): Desktop Duplication + NVENC",
+      "Config: `capture.backend` selects backend"
+    ],
+    "regression_detection": [
+      "Perf: CPU usage drops vs mss baseline at target resolution/fps",
+      "Security: subprocess sandbox for encoder if using external binaries"
+    ],
+    "acceptance_criteria": [
+      "On capable GPUs, capture runs with minimal CPU while maintaining fidelity."
+    ]
+  },
+  {
+    "id": "I020",
+    "phase": "Phase 2: Capture pipeline refactor",
+    "title": "Record segment start/end timestamps",
+    "enforcement_location": [
+      "capture metadata schema includes `ts_start_utc` and `ts_end_utc`"
+    ],
+    "regression_detection": [
+      "Test: segments always have valid start/end with end >= start"
+    ],
+    "acceptance_criteria": [
+      "Every segment is time-bounded and usable for timeline queries."
+    ]
+  },
+  {
+    "id": "I021",
+    "phase": "Phase 2: Capture pipeline refactor",
+    "title": "Record capture parameters per segment",
+    "enforcement_location": [
+      "capture metadata includes capture parameters and achieved metrics"
+    ],
+    "regression_detection": [
+      "Schema test ensures required capture params exist"
+    ],
+    "acceptance_criteria": [
+      "Segments are self-describing for reproducibility and debugging."
+    ]
+  },
+  {
+    "id": "I022",
+    "phase": "Phase 2: Capture pipeline refactor",
+    "title": "Correlate frames with active window via synchronized timeline",
+    "enforcement_location": [
+      "window timeline store + correlation logic in retrieval"
+    ],
+    "regression_detection": [
+      "Test: given window-change events, frame-to-window mapping is correct"
+    ],
+    "acceptance_criteria": [
+      "Answers can cite which window/app a frame belonged to at a time."
+    ]
+  },
+  {
+    "id": "I023",
+    "phase": "Phase 2: Capture pipeline refactor",
+    "title": "Add cursor/input correlation timeline references",
+    "enforcement_location": [
+      "input events and cursor state exposed as timelines",
+      "correlation references stored in derived artifacts"
+    ],
+    "regression_detection": [
+      "Test: correlation graph includes references from text/citation to input bursts"
+    ],
+    "acceptance_criteria": [
+      "Investigations can align what was seen with what was done (time-synced)."
+    ]
+  },
+  {
+    "id": "I024",
+    "phase": "Phase 2: Capture pipeline refactor",
+    "title": "Disk pressure degrades capture quality before stopping",
+    "enforcement_location": [
+      "disk pressure controller in capture pipeline",
+      "policy thresholds in config"
+    ],
+    "regression_detection": [
+      "Test: under simulated low disk, capture degrades (fps/quality) before stop",
+      "Journal: emits `disk.pressure` and `capture.degrade` events"
+    ],
+    "acceptance_criteria": [
+      "Capture fails gracefully and predictably under storage pressure."
+    ]
+  },
+  {
+    "id": "I025",
+    "phase": "Phase 2: Capture pipeline refactor",
+    "title": "Atomic segment writes (temp + os.replace)",
+    "enforcement_location": [
+      "all store writes are atomic (temp + replace)",
+      "manifest and seal records only written after success"
+    ],
+    "regression_detection": [
+      "Test: crash mid-write does not produce partially visible evidence",
+      "Recovery scanner (I104) reconciles temp artifacts safely"
+    ],
+    "acceptance_criteria": [
+      "No partial evidence becomes 'valid' without explicit seal."
+    ]
+  },
+  {
+    "id": "I105",
+    "phase": "Phase 2: Capture pipeline refactor",
+    "title": "If keeping zips, use ZIP_STORED for JPEG frames",
+    "enforcement_location": [
+      "legacy zip segment path (if retained) uses ZIP_STORED"
+    ],
+    "regression_detection": [
+      "Perf: segment packing CPU drops vs deflate for JPEG frames"
+    ],
+    "acceptance_criteria": [
+      "Legacy zip path is less CPU-expensive and remains correct."
+    ]
+  },
+  {
+    "id": "I106",
+    "phase": "Phase 2: Capture pipeline refactor",
+    "title": "If keeping zips, stream ZipFile writes to a real file",
+    "enforcement_location": [
+      "legacy zip writer streams to file (no BytesIO)"
+    ],
+    "regression_detection": [
+      "Perf: no large in-memory segment buffers",
+      "Test: zip is valid and contains expected files"
+    ],
+    "acceptance_criteria": [
+      "Zip mode does not require segment-sized RAM buffers."
+    ]
+  },
+  {
+    "id": "I107",
+    "phase": "Phase 2: Capture pipeline refactor",
+    "title": "Batch input events to reduce write overhead",
+    "enforcement_location": [
+      "input_windows batches events by time window (e.g., 100\u2013250ms)",
+      "JournalWriter supports batch append"
+    ],
+    "regression_detection": [
+      "Perf: input plugin reduces write rate under heavy input",
+      "Test: event ordering within batch preserved and timestamped"
+    ],
+    "acceptance_criteria": [
+      "Input capture is scalable without overwhelming IO."
+    ]
+  },
+  {
+    "id": "I109",
+    "phase": "Phase 2: Capture pipeline refactor",
+    "title": "Add WASAPI loopback option for system audio capture",
+    "enforcement_location": [
+      "audio_windows supports WASAPI loopback capture mode",
+      "Config selects microphone vs loopback"
+    ],
+    "regression_detection": [
+      "Test: device enumeration deterministic; loopback selection works on CI mocks"
+    ],
+    "acceptance_criteria": [
+      "System audio can be captured as a first-class source when enabled."
+    ]
+  },
+  {
+    "id": "I110",
+    "phase": "Phase 2: Capture pipeline refactor",
+    "title": "Store audio as PCM/FLAC/Opus derived artifact",
+    "enforcement_location": [
+      "audio stored as derived artifact blocks with clear encoding"
+    ],
+    "regression_detection": [
+      "Test: audio roundtrip decode yields expected sample count"
+    ],
+    "acceptance_criteria": [
+      "Audio artifacts are decodable, time-aligned, and provenance-tracked."
+    ]
+  },
+  {
+    "id": "I111",
+    "phase": "Phase 2: Capture pipeline refactor",
+    "title": "Normalize active window process paths (device \u2192 drive paths)",
+    "enforcement_location": [
+      "window metadata plugin normalizes process paths"
+    ],
+    "regression_detection": [
+      "Test: device path conversion deterministic given known mappings"
+    ],
+    "acceptance_criteria": [
+      "Process paths are searchable and consistent across sessions."
+    ]
+  },
+  {
+    "id": "I112",
+    "phase": "Phase 2: Capture pipeline refactor",
+    "title": "Capture window.rect and monitor mapping",
+    "enforcement_location": [
+      "window metadata schema includes rect and monitor mapping"
+    ],
+    "regression_detection": [
+      "Test: rect fields present and valid; monitor id matches layout snapshot"
+    ],
+    "acceptance_criteria": [
+      "Window location can be correlated with capture frames deterministically."
+    ]
+  },
+  {
+    "id": "I113",
+    "phase": "Phase 2: Capture pipeline refactor",
+    "title": "Optional cursor position+shape capture",
+    "enforcement_location": [
+      "optional cursor capture plugin or extension to capture_windows"
+    ],
+    "regression_detection": [
+      "Test: cursor capture disabled by default; when enabled, schema valid",
+      "Security: ensure cursor capture does not leak privileged info beyond local store"
+    ],
+    "acceptance_criteria": [
+      "Cursor timeline is accurate when enabled and has bounded overhead."
+    ]
+  },
+  {
+    "id": "I026",
+    "phase": "Phase 3: Storage scaling + durability",
+    "title": "Default to SQLCipher for metadata when available",
+    "enforcement_location": [
+      "storage backend selection: prefer SQLCipher for metadata",
+      "config: `storage.metadata_backend=sqlcipher|encrypted_fs`"
+    ],
+    "regression_detection": [
+      "Test: metadata queries faster than directory scan at N records",
+      "Security: DB file encrypted and unreadable without key"
+    ],
+    "acceptance_criteria": [
+      "Metadata operations scale; encryption remains enforced."
+    ]
+  },
+  {
+    "id": "I027",
+    "phase": "Phase 3: Storage scaling + durability",
+    "title": "Add DB indexes on ts_utc, record_type, run_id",
+    "enforcement_location": [
+      "SQLCipher schema: indexes on `ts_utc`, `record_type`, `run_id`"
+    ],
+    "regression_detection": [
+      "EXPLAIN-based test: queries use indexes for common patterns"
+    ],
+    "acceptance_criteria": [
+      "Time-bounded queries are sub-linear and predictable."
+    ]
+  },
+  {
+    "id": "I028",
+    "phase": "Phase 3: Storage scaling + durability",
+    "title": "Store media in binary encrypted format (not base64 JSON)",
+    "enforcement_location": [
+      "media store format: binary encrypted files with versioned header"
+    ],
+    "regression_detection": [
+      "Test: media blobs are not valid JSON and have expected magic/version",
+      "Test: decrypt+verify hash roundtrip works"
+    ],
+    "acceptance_criteria": [
+      "Media storage is efficient and unambiguous; supports streaming."
+    ]
+  },
+  {
+    "id": "I029",
+    "phase": "Phase 3: Storage scaling + durability",
+    "title": "Stream encryption (avoid whole-segment in memory)",
+    "enforcement_location": [
+      "media encryption writer supports streaming/chunking"
+    ],
+    "regression_detection": [
+      "Perf: writing large segments does not allocate segment-sized RAM",
+      "Test: chunk boundaries validate and reject tampering"
+    ],
+    "acceptance_criteria": [
+      "Large artifacts are written/read with bounded memory and strong integrity."
+    ]
+  },
+  {
+    "id": "I030",
+    "phase": "Phase 3: Storage scaling + durability",
+    "title": "Immutability/versioning in stores (put_new vs put_replace)",
+    "enforcement_location": [
+      "store APIs: `put_new()` for immutable; `put_replace()` only for caches",
+      "kernel enforces type-based mutability rules"
+    ],
+    "regression_detection": [
+      "Gate-IMMUT: evidence types cannot call replace; tests enforce"
+    ],
+    "acceptance_criteria": [
+      "Evidence immutability is enforced by API, not convention."
+    ]
+  },
+  {
+    "id": "I031",
+    "phase": "Phase 3: Storage scaling + durability",
+    "title": "Make record ID encoding reversible (no lossy mapping)",
+    "enforcement_location": [
+      "record ID encoding/locator encoding is reversible"
+    ],
+    "regression_detection": [
+      "Test: encode\u2192decode roundtrip yields same ID for all legal IDs"
+    ],
+    "acceptance_criteria": [
+      "IDs remain canonical and collision-free while being filesystem-safe."
+    ]
+  },
+  {
+    "id": "I032",
+    "phase": "Phase 3: Storage scaling + durability",
+    "title": "Shard media/metadata directories by date/run",
+    "enforcement_location": [
+      "storage layout: shard by run/date to limit directory sizes"
+    ],
+    "regression_detection": [
+      "Perf test: listing/iterating keys remains fast at large scale"
+    ],
+    "acceptance_criteria": [
+      "Storage remains performant as record count grows."
+    ]
+  },
+  {
+    "id": "I033",
+    "phase": "Phase 3: Storage scaling + durability",
+    "title": "Add per-run storage manifest records",
+    "enforcement_location": [
+      "per-run manifest records (Pattern A) stored and ledgered"
+    ],
+    "regression_detection": [
+      "Test: manifest exists for each run and includes expected hashes"
+    ],
+    "acceptance_criteria": [
+      "Each run is reproducible/auditable from a single manifest."
+    ]
+  },
+  {
+    "id": "I034",
+    "phase": "Phase 3: Storage scaling + durability",
+    "title": "Configurable fsync policy (critical vs bulk)",
+    "enforcement_location": [
+      "fsync policy config applied in writers"
+    ],
+    "regression_detection": [
+      "Crash test: critical records survive; bulk media may lag but seals prevent inconsistency"
+    ],
+    "acceptance_criteria": [
+      "Durability is explicit, configurable, and does not compromise provenance."
+    ]
+  },
+  {
+    "id": "I101",
+    "phase": "Phase 3: Storage scaling + durability",
+    "title": "Add content_hash to metadata for every media put",
+    "enforcement_location": [
+      "media store returns content_hash; metadata stores it for every blob"
+    ],
+    "regression_detection": [
+      "Test: content_hash present and matches recomputed hash after decrypt"
+    ],
+    "acceptance_criteria": [
+      "Evidence can be verified end-to-end by hash."
+    ]
+  },
+  {
+    "id": "I102",
+    "phase": "Phase 3: Storage scaling + durability",
+    "title": "Track partial failures explicitly in journal/ledger",
+    "enforcement_location": [
+      "all failures emit typed journal/ledger events"
+    ],
+    "regression_detection": [
+      "Test: injected failures produce explicit failure records"
+    ],
+    "acceptance_criteria": [
+      "Failures are visible, auditable, and do not silently corrupt state."
+    ]
+  },
+  {
+    "id": "I103",
+    "phase": "Phase 3: Storage scaling + durability",
+    "title": "Add segment sealing ledger entry after successful write",
+    "enforcement_location": [
+      "segment lifecycle includes explicit `segment.sealed` ledger entry"
+    ],
+    "regression_detection": [
+      "Test: sealed only after media+metadata committed and hashes known"
+    ],
+    "acceptance_criteria": [
+      "A segment is only considered valid if sealed."
+    ]
+  },
+  {
+    "id": "I104",
+    "phase": "Phase 3: Storage scaling + durability",
+    "title": "Add startup recovery scanner to reconcile stores",
+    "enforcement_location": [
+      "startup recovery scanner reconciles temp/partial artifacts",
+      "writes recovery actions to ledger/journal"
+    ],
+    "regression_detection": [
+      "Crash simulation: partial writes detected and repaired/quarantined"
+    ],
+    "acceptance_criteria": [
+      "System self-heals from crashes without silently losing provenance."
+    ]
+  },
+  {
+    "id": "I108",
+    "phase": "Phase 3: Storage scaling + durability",
+    "title": "Add compact binary input log (derived) + JSON summary",
+    "enforcement_location": [
+      "input pipeline writes compact binary derived log + JSON summary records"
+    ],
+    "regression_detection": [
+      "Test: binary log roundtrip decode; JSON summary matches counts/time range"
+    ],
+    "acceptance_criteria": [
+      "Input data scales without losing queryability or provenance."
+    ]
+  },
+  {
+    "id": "I128",
+    "phase": "Phase 3: Storage scaling + durability",
+    "title": "Tooling to migrate data_dir safely (copy+verify, no delete)",
+    "enforcement_location": [
+      "CLI/API command: `storage.migrate` copy+verify strategy"
+    ],
+    "regression_detection": [
+      "Test: migrate copies all evidence and manifests; verification passes"
+    ],
+    "acceptance_criteria": [
+      "Users can move data safely without data loss or provenance breakage."
+    ]
+  },
+  {
+    "id": "I129",
+    "phase": "Phase 3: Storage scaling + durability",
+    "title": "Disk usage forecasting (days remaining) + alerts",
+    "enforcement_location": [
+      "telemetry + alerts: disk usage trends and days remaining estimate"
+    ],
+    "regression_detection": [
+      "Test: forecasting produces deterministic output for fixed input series"
+    ],
+    "acceptance_criteria": [
+      "System warns before disk exhaustion and informs mitigation choices."
+    ]
+  },
+  {
+    "id": "I130",
+    "phase": "Phase 3: Storage scaling + durability",
+    "title": "Storage compaction for derived artifacts only",
+    "enforcement_location": [
+      "compaction applies only to derived artifacts and rebuildable indexes"
+    ],
+    "regression_detection": [
+      "Gate-IMMUT: compaction never touches primary evidence",
+      "Test: compaction reduces size; citations still resolve"
+    ],
+    "acceptance_criteria": [
+      "Storage is optimized without compromising evidence immutability or citations."
+    ]
+  },
+  {
+    "id": "I035",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Replace full-scan query with tiered indexed retrieval",
+    "enforcement_location": [
+      "retrieval pipeline plugin replaces full-scan approach",
+      "SQLCipher/FTS + optional embeddings"
+    ],
+    "regression_detection": [
+      "Perf: query latency improves at N records vs full scan baseline",
+      "Accuracy: golden queries return expected evidence set deterministically"
+    ],
+    "acceptance_criteria": [
+      "Queries scale without full scans and remain deterministic."
+    ]
+  },
+  {
+    "id": "I036",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Deterministic retrieval ordering (stable sort keys)",
+    "enforcement_location": [
+      "retrieval sorts by stable keys: time, record_type, evidence_id"
+    ],
+    "regression_detection": [
+      "Test: same dataset yields identical ranked output across runs"
+    ],
+    "acceptance_criteria": [
+      "Retrieval ordering is stable and reproducible."
+    ]
+  },
+  {
+    "id": "I037",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Candidate-first extraction (retrieve then extract)",
+    "enforcement_location": [
+      "extraction planner: select candidates then extract"
+    ],
+    "regression_detection": [
+      "Perf: extraction work bounded to top-K candidates",
+      "Accuracy: extraction uses explicit time/span constraints"
+    ],
+    "acceptance_criteria": [
+      "Extraction cost is bounded and targeted; no random scans."
+    ]
+  },
+  {
+    "id": "I038",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Derived artifact records for OCR/VLM outputs",
+    "enforcement_location": [
+      "schema: `derived.text.*` records",
+      "store APIs enforce immutability (I30)"
+    ],
+    "regression_detection": [
+      "Test: derived text record includes parent reference and span_ref",
+      "Test: model identity fields present and hashed"
+    ],
+    "acceptance_criteria": [
+      "All extraction outputs are provenance-tracked derived artifacts."
+    ]
+  },
+  {
+    "id": "I039",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Ledger query executions (inputs/outputs)",
+    "enforcement_location": [
+      "query execution writes ledger entry: inputs + retrieval plan + outputs"
+    ],
+    "regression_detection": [
+      "Golden: query ledger entry reproducible for fixed corpus"
+    ],
+    "acceptance_criteria": [
+      "Every answer can be tied to a ledgered query execution record."
+    ]
+  },
+  {
+    "id": "I040",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Ledger extraction operations (inputs/outputs)",
+    "enforcement_location": [
+      "extraction writes ledger entry linking inputs/outputs"
+    ],
+    "regression_detection": [
+      "Test: derived artifacts have corresponding ledger derivation entries"
+    ],
+    "acceptance_criteria": [
+      "Derivations are verifiable and reconstructable."
+    ]
+  },
+  {
+    "id": "I041",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Citations point to immutable evidence IDs + spans",
+    "enforcement_location": [
+      "citation schema uses evidence_id + span_ref + hashes"
+    ],
+    "regression_detection": [
+      "Schema test: citations cannot be created without required fields"
+    ],
+    "acceptance_criteria": [
+      "Citations are independently verifiable pointers, not best-effort strings."
+    ]
+  },
+  {
+    "id": "I042",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Citation resolver validates hashes/anchors/spans",
+    "enforcement_location": [
+      "citation resolver service + CLI validates evidence and provenance"
+    ],
+    "regression_detection": [
+      "Test: resolver detects tampering and missing spans"
+    ],
+    "acceptance_criteria": [
+      "Every citation displayed in UI can be validated locally on demand."
+    ]
+  },
+  {
+    "id": "I043",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Fail closed if citations do not resolve",
+    "enforcement_location": [
+      "answer pipeline refuses to return `state=ok` if citations unresolved"
+    ],
+    "regression_detection": [
+      "Golden tests: unresolved citations produce `state=no_evidence` or `state=partial`"
+    ],
+    "acceptance_criteria": [
+      "System never asserts unsupported answers; failure modes are explicit."
+    ]
+  },
+  {
+    "id": "I065",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Define canonical evidence model (EvidenceObject)",
+    "enforcement_location": [
+      "contracts: evidence schema and versioning",
+      "EventBuilder enforces EvidenceObject fields"
+    ],
+    "regression_detection": [
+      "Schema tests cover all evidence types and require minimal fields"
+    ],
+    "acceptance_criteria": [
+      "Evidence model is consistent and contract-checked."
+    ]
+  },
+  {
+    "id": "I066",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Hash everything that matters (media/metadata/derived)",
+    "enforcement_location": [
+      "hashing: media plaintext SHA-256; metadata canonical-json hash"
+    ],
+    "regression_detection": [
+      "Verify: recomputed hashes match stored hashes for sample corpus"
+    ],
+    "acceptance_criteria": [
+      "Every evidence/derived object is hash-addressable and verifiable."
+    ]
+  },
+  {
+    "id": "I067",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Ledger every state transition",
+    "enforcement_location": [
+      "ledger coverage expanded across all plugins and transitions"
+    ],
+    "regression_detection": [
+      "Gate: required event types appear for each run (start, evidence writes, stop/crash)"
+    ],
+    "acceptance_criteria": [
+      "Ledger provides complete provenance coverage for the system's actions."
+    ]
+  },
+  {
+    "id": "I068",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Anchor on schedule (N entries or M minutes)",
+    "enforcement_location": [
+      "anchor plugin anchors ledger head on schedule"
+    ],
+    "regression_detection": [
+      "Test: anchors created at configured cadence; verification passes"
+    ],
+    "acceptance_criteria": [
+      "Ledger heads are periodically sealed for tamper evidence."
+    ]
+  },
+  {
+    "id": "I069",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Immutable per-run manifest (config+locks+versions)",
+    "enforcement_location": [
+      "run manifest evidence record written early and finalized at end"
+    ],
+    "regression_detection": [
+      "Test: manifest includes config/plugin/contracts hashes + versions"
+    ],
+    "acceptance_criteria": [
+      "A single manifest summarizes and identifies the full run context."
+    ]
+  },
+  {
+    "id": "I070",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Citation objects carry verifiable pointers",
+    "enforcement_location": [
+      "citation schema: include evidence hash + ledger/anchor refs"
+    ],
+    "regression_detection": [
+      "Resolver rejects citations missing required verification fields"
+    ],
+    "acceptance_criteria": [
+      "Citations are self-contained verification units."
+    ]
+  },
+  {
+    "id": "I071",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Citation resolver CLI/API",
+    "enforcement_location": [
+      "CLI/API endpoints: `verify citation`, `resolve citation`"
+    ],
+    "regression_detection": [
+      "Golden: resolver output stable and correct for known citations"
+    ],
+    "acceptance_criteria": [
+      "Users can verify citations with one command."
+    ]
+  },
+  {
+    "id": "I072",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Metadata immutable by default; derived never overwrites",
+    "enforcement_location": [
+      "store mutability policies enforced per record_type (I30)"
+    ],
+    "regression_detection": [
+      "Gate-IMMUT catches any overwrite on evidence/derived records"
+    ],
+    "acceptance_criteria": [
+      "Immutability is enforced uniformly across the codebase."
+    ]
+  },
+  {
+    "id": "I073",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Persist derivation graphs (parent\u2192child links)",
+    "enforcement_location": [
+      "derivation graph store and schema",
+      "ledger entries reference derivation edges"
+    ],
+    "regression_detection": [
+      "Test: derived artifacts create derivation edge to parent"
+    ],
+    "acceptance_criteria": [
+      "Any derived output can be traced back to its precise evidence parents."
+    ]
+  },
+  {
+    "id": "I074",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Record model identity for ML outputs",
+    "enforcement_location": [
+      "model identity schema and recording in derived artifacts",
+      "model manager records weight digests (Phase 6)"
+    ],
+    "regression_detection": [
+      "Test: derived artifacts contain model_name + model_digest + params"
+    ],
+    "acceptance_criteria": [
+      "ML outputs are reproducible and attributable to exact model artifacts."
+    ]
+  },
+  {
+    "id": "I075",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Deterministic text normalization before hashing",
+    "enforcement_location": [
+      "text normalization function used before hashing and indexing"
+    ],
+    "regression_detection": [
+      "Test: normalization is deterministic and stable on sample inputs"
+    ],
+    "acceptance_criteria": [
+      "Text hashes and indexes are stable and reproducible."
+    ]
+  },
+  {
+    "id": "I076",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Proof bundles export (evidence + ledger slice + anchors)",
+    "enforcement_location": [
+      "proof bundle exporter in UX facade"
+    ],
+    "regression_detection": [
+      "Test: exported bundle verifies on a clean machine without network"
+    ],
+    "acceptance_criteria": [
+      "Bundles are self-contained, verifiable, and suitable for audit/sharing (sanitized)."
+    ]
+  },
+  {
+    "id": "I077",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Replay mode validates citations without model calls",
+    "enforcement_location": [
+      "replay tool validates retrieval/citations without model calls"
+    ],
+    "regression_detection": [
+      "Golden: replay reproduces expected citations and verification results"
+    ],
+    "acceptance_criteria": [
+      "Citations can be validated deterministically offline."
+    ]
+  },
+  {
+    "id": "I118",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Index versioning for retrieval reproducibility",
+    "enforcement_location": [
+      "indexes record version/digest in manifest and query ledger entries"
+    ],
+    "regression_detection": [
+      "Test: query includes index version refs; rebuild increments version"
+    ],
+    "acceptance_criteria": [
+      "Answers can identify which index snapshot they used."
+    ]
+  },
+  {
+    "id": "I127",
+    "phase": "Phase 4: Retrieval + provenance + citations",
+    "title": "Record python/OS/package versions into run manifest",
+    "enforcement_location": [
+      "run manifest captures environment versions"
+    ],
+    "regression_detection": [
+      "Test: manifest contains python version, OS build, package versions list"
+    ],
+    "acceptance_criteria": [
+      "Runs are attributable to an environment fingerprint for debugging and audits."
+    ]
+  },
+  {
+    "id": "I044",
+    "phase": "Phase 5: Scheduler/governor",
+    "title": "Real scheduler plugin gates heavy work on user activity",
+    "enforcement_location": [
+      "new scheduler plugin (builtin): job admission based on activity",
+      "governor API used by all heavy workers"
+    ],
+    "regression_detection": [
+      "Test: ACTIVE mode prevents OCR/VLM/embeddings/indexing jobs from running",
+      "Test: IDLE mode allows bounded enrichment and records budgets in journal"
+    ],
+    "acceptance_criteria": [
+      "No heavy processing occurs while user active; enrichment happens predictably when allowed."
+    ]
+  },
+  {
+    "id": "I045",
+    "phase": "Phase 5: Scheduler/governor",
+    "title": "Input tracker exposes activity signals (not only journal)",
+    "enforcement_location": [
+      "input_windows exposes aggregated activity signal channel to governor"
+    ],
+    "regression_detection": [
+      "Test: simulated input produces immediate ACTIVE signal",
+      "Test: inactivity decays to IDLE after configured timeout"
+    ],
+    "acceptance_criteria": [
+      "Scheduler has an authoritative, low-latency activity signal."
+    ]
+  },
+  {
+    "id": "I046",
+    "phase": "Phase 5: Scheduler/governor",
+    "title": "Capture emits telemetry (queues, drops, lag, CPU)",
+    "enforcement_location": [
+      "capture pipeline emits telemetry events and exposes metrics endpoint"
+    ],
+    "regression_detection": [
+      "Test: telemetry includes queue depths, drops, lag, CPU",
+      "Websocket (I83) streams telemetry with stable schema"
+    ],
+    "acceptance_criteria": [
+      "Performance issues are observable without instrumenting code manually."
+    ]
+  },
+  {
+    "id": "I047",
+    "phase": "Phase 5: Scheduler/governor",
+    "title": "Governor outputs feed backpressure and job admission",
+    "enforcement_location": [
+      "governor decisions affect capture rate/quality and enrichment admission"
+    ],
+    "regression_detection": [
+      "Integration test: governor changes lead to fps/quality changes within bounded time"
+    ],
+    "acceptance_criteria": [
+      "System responds quickly and deterministically to activity and pressure changes."
+    ]
+  },
+  {
+    "id": "I048",
+    "phase": "Phase 5: Scheduler/governor",
+    "title": "Immediate ramp down on user input (cancel/deprioritize heavy jobs)",
+    "enforcement_location": [
+      "scheduler cancels/deprioritizes heavy jobs on new input events"
+    ],
+    "regression_detection": [
+      "Test: user input interrupts ongoing enrichment within timeout budget"
+    ],
+    "acceptance_criteria": [
+      "User interaction immediately restores invisibility by halting heavy work."
+    ]
+  },
+  {
+    "id": "I116",
+    "phase": "Phase 5: Scheduler/governor",
+    "title": "Model execution budgets per idle window",
+    "enforcement_location": [
+      "scheduler budgets for model execution (CPU/GPU time, tokens, batch sizes)"
+    ],
+    "regression_detection": [
+      "Test: budgets enforced; jobs stop/continue across idle windows without violating budget"
+    ],
+    "acceptance_criteria": [
+      "ML workloads are bounded and cannot starve the system."
+    ]
+  },
+  {
+    "id": "I117",
+    "phase": "Phase 5: Scheduler/governor",
+    "title": "Preemption/chunking for long jobs",
+    "enforcement_location": [
+      "all long jobs implemented as chunked work units with checkpoints"
+    ],
+    "regression_detection": [
+      "Test: job can be paused/resumed without redoing completed work"
+    ],
+    "acceptance_criteria": [
+      "Heavy processing is preemptible and resumes deterministically."
+    ]
+  },
+  {
+    "id": "I049",
+    "phase": "Phase 6: Security + egress hardening",
+    "title": "Egress gateway must be subprocess-hosted; kernel network-denied",
+    "enforcement_location": [
+      "process model: kernel has network denied; egress plugin runs in subprocess",
+      "network guard applied at OS/process boundary where possible"
+    ],
+    "regression_detection": [
+      "Security test: kernel cannot reach network even if code tries",
+      "Test: egress plugin can reach allowlisted endpoints only"
+    ],
+    "acceptance_criteria": [
+      "Network access is centralized, auditable, and policy-controlled."
+    ]
+  },
+  {
+    "id": "I050",
+    "phase": "Phase 6: Security + egress hardening",
+    "title": "Minimize inproc_allowlist; prefer subprocess hosting",
+    "enforcement_location": [
+      "plugin registry: inproc_allowlist minimized; default subprocess"
+    ],
+    "regression_detection": [
+      "Gate: fail if new inproc plugin added without security justification entry"
+    ],
+    "acceptance_criteria": [
+      "Kernel attack surface reduced while keeping capture performance."
+    ]
+  },
+  {
+    "id": "I051",
+    "phase": "Phase 6: Security + egress hardening",
+    "title": "Capability bridging for subprocess plugins (real capability plumbing)",
+    "enforcement_location": [
+      "subprocess host runner provides real capability access (not None)"
+    ],
+    "regression_detection": [
+      "Test: subprocess plugin receives only declared capabilities and can operate"
+    ],
+    "acceptance_criteria": [
+      "Subprocess plugins are first-class and do not require inproc hosting to function."
+    ]
+  },
+  {
+    "id": "I052",
+    "phase": "Phase 6: Security + egress hardening",
+    "title": "Enforce least privilege per plugin manifest",
+    "enforcement_location": [
+      "plugin manifest declares required capabilities; loader enforces deny-by-default"
+    ],
+    "regression_detection": [
+      "Test: plugin without declared capability cannot access it"
+    ],
+    "acceptance_criteria": [
+      "Least privilege is enforced mechanically."
+    ]
+  },
+  {
+    "id": "I053",
+    "phase": "Phase 6: Security + egress hardening",
+    "title": "Enforce filesystem permission policy declared by plugins",
+    "enforcement_location": [
+      "filesystem sandboxing for subprocess plugins",
+      "manifest-declared read/readwrite paths enforced"
+    ],
+    "regression_detection": [
+      "Test: plugin cannot read outside allowed roots (integration)"
+    ],
+    "acceptance_criteria": [
+      "Plugins cannot exfiltrate or tamper with files beyond their declared scope."
+    ]
+  },
+  {
+    "id": "I054",
+    "phase": "Phase 6: Security + egress hardening",
+    "title": "Strengthen Windows job object restrictions (limits)",
+    "enforcement_location": [
+      "Windows job object: CPU/memory limits, kill-on-close, child restrictions"
+    ],
+    "regression_detection": [
+      "Test: runaway plugin is terminated and reported"
+    ],
+    "acceptance_criteria": [
+      "Untrusted/hung plugins are contained without harming system stability."
+    ]
+  },
+  {
+    "id": "I055",
+    "phase": "Phase 6: Security + egress hardening",
+    "title": "Sanitize subprocess env; pin caches; disable proxies",
+    "enforcement_location": [
+      "subprocess environment sanitizer in host"
+    ],
+    "regression_detection": [
+      "Test: proxy env vars removed; cache dirs pinned"
+    ],
+    "acceptance_criteria": [
+      "Plugin behavior is deterministic and not affected by ambient environment."
+    ]
+  },
+  {
+    "id": "I056",
+    "phase": "Phase 6: Security + egress hardening",
+    "title": "Plugin RPC timeouts and watchdogs",
+    "enforcement_location": [
+      "plugin RPC layer: timeouts + watchdog to restart hung plugins"
+    ],
+    "regression_detection": [
+      "Test: hung plugin call times out and system recovers without deadlock"
+    ],
+    "acceptance_criteria": [
+      "Plugin failures do not stall capture or UI."
+    ]
+  },
+  {
+    "id": "I057",
+    "phase": "Phase 6: Security + egress hardening",
+    "title": "Max message size limits in plugin RPC protocol",
+    "enforcement_location": [
+      "plugin RPC protocol enforces max message sizes and streaming"
+    ],
+    "regression_detection": [
+      "Test: oversized message rejected; chunked streaming used for large blobs"
+    ],
+    "acceptance_criteria": [
+      "IPC is resilient and cannot be abused for memory exhaustion."
+    ]
+  },
+  {
+    "id": "I058",
+    "phase": "Phase 6: Security + egress hardening",
+    "title": "Harden hashing against symlinks / filesystem nondeterminism",
+    "enforcement_location": [
+      "hashing policy: symlink handling defined and enforced"
+    ],
+    "regression_detection": [
+      "Test: symlinks in plugin root are rejected or hashed deterministically"
+    ],
+    "acceptance_criteria": [
+      "Hashing cannot be bypassed via filesystem tricks."
+    ]
+  },
+  {
+    "id": "I059",
+    "phase": "Phase 6: Security + egress hardening",
+    "title": "Secure vault file permissions (Windows ACLs)",
+    "enforcement_location": [
+      "vault and data dirs created with restrictive ACLs on Windows"
+    ],
+    "regression_detection": [
+      "Test: created files are not world-readable (platform-dependent assertions)"
+    ],
+    "acceptance_criteria": [
+      "Secrets and encrypted stores are protected by OS permissions."
+    ]
+  },
+  {
+    "id": "I060",
+    "phase": "Phase 6: Security + egress hardening",
+    "title": "Separate keys by purpose (metadata/media/tokenization/anchor)",
+    "enforcement_location": [
+      "key manager defines separate keys per purpose + key ids"
+    ],
+    "regression_detection": [
+      "Test: rotating one key does not break others; derived artifacts remain readable as policy dictates"
+    ],
+    "acceptance_criteria": [
+      "Key separation limits blast radius and supports safe rotation."
+    ]
+  },
+  {
+    "id": "I061",
+    "phase": "Phase 6: Security + egress hardening",
+    "title": "Anchor signing (HMAC/signature) with separate key domain",
+    "enforcement_location": [
+      "anchor plugin uses HMAC/signature over ledger head"
+    ],
+    "regression_detection": [
+      "Test: anchor verify fails if anchor modified or wrong key used"
+    ],
+    "acceptance_criteria": [
+      "Anchors provide tamper evidence independent of ledger storage."
+    ]
+  },
+  {
+    "id": "I062",
+    "phase": "Phase 6: Security + egress hardening",
+    "title": "Add verify commands (ledger/anchors/evidence)",
+    "enforcement_location": [
+      "verify CLI/API: `verify ledger`, `verify anchors`, `verify evidence`"
+    ],
+    "regression_detection": [
+      "Golden verification suite passes; tamper cases fail"
+    ],
+    "acceptance_criteria": [
+      "Users can validate integrity with deterministic tooling."
+    ]
+  },
+  {
+    "id": "I063",
+    "phase": "Phase 6: Security + egress hardening",
+    "title": "Audit security events in ledger (key rotations, lock updates, config)",
+    "enforcement_location": [
+      "ledger event types for security-relevant operations"
+    ],
+    "regression_detection": [
+      "Test: key rotation and lock updates emit ledger entries"
+    ],
+    "acceptance_criteria": [
+      "Security posture changes are auditable and tamper-evident."
+    ]
+  },
+  {
+    "id": "I064",
+    "phase": "Phase 6: Security + egress hardening",
+    "title": "Dependency pinning + hash checking (supply chain)",
+    "enforcement_location": [
+      "runtime dependency verification and build-time pinning"
+    ],
+    "regression_detection": [
+      "CI verifies dependency hashes; runtime doctor reports mismatches"
+    ],
+    "acceptance_criteria": [
+      "Supply chain drift is detected and controlled."
+    ]
+  },
+  {
+    "id": "I119",
+    "phase": "Phase 6: Security + egress hardening",
+    "title": "Persist entity-tokenizer key id/version; version tokenization",
+    "enforcement_location": [
+      "tokenizer plugin stores key id/version used for each tokenization"
+    ],
+    "regression_detection": [
+      "Test: tokenization output is stable under same key id; rotation yields new version"
+    ],
+    "acceptance_criteria": [
+      "Tokenization is reproducible and rotation-aware."
+    ]
+  },
+  {
+    "id": "I120",
+    "phase": "Phase 6: Security + egress hardening",
+    "title": "Ledger sanitized egress packets (hash + schema version)",
+    "enforcement_location": [
+      "egress gateway writes ledger entry for each sanitized outbound packet"
+    ],
+    "regression_detection": [
+      "Test: egress attempt emits `egress.packet` ledger entry with hash + schema version"
+    ],
+    "acceptance_criteria": [
+      "Outbound actions are fully auditable without storing raw sensitive payloads."
+    ]
+  },
+  {
+    "id": "I078",
+    "phase": "Phase 7: FastAPI UX facade + Web Console",
+    "title": "FastAPI UX facade as canonical interface",
+    "enforcement_location": [
+      "new FastAPI app provides canonical UX facade endpoints",
+      "kernel exposes only internal APIs; UI/CLI call facade"
+    ],
+    "regression_detection": [
+      "API contract tests: endpoints stable and validated against schemas",
+      "Security: binds to localhost by default; requires auth token (I82)"
+    ],
+    "acceptance_criteria": [
+      "All user interactions route through a single, testable facade."
+    ]
+  },
+  {
+    "id": "I079",
+    "phase": "Phase 7: FastAPI UX facade + Web Console",
+    "title": "CLI parity: CLI calls shared UX facade functions",
+    "enforcement_location": [
+      "CLI uses shared UX facade functions (no direct kernel calls)"
+    ],
+    "regression_detection": [
+      "Test: CLI commands produce identical results as API endpoints"
+    ],
+    "acceptance_criteria": [
+      "UI/CLI parity is enforced and drift is prevented."
+    ]
+  },
+  {
+    "id": "I080",
+    "phase": "Phase 7: FastAPI UX facade + Web Console",
+    "title": "Web Console UI (status/timeline/query/proof/plugins/keys)",
+    "enforcement_location": [
+      "Web Console served by FastAPI (or static assets) as sole maintained UI"
+    ],
+    "regression_detection": [
+      "UI smoke tests: load pages and call API endpoints (headless)",
+      "API snapshot tests for UI-critical views"
+    ],
+    "acceptance_criteria": [
+      "Web UI covers all critical workflows without requiring CLI."
+    ]
+  },
+  {
+    "id": "I081",
+    "phase": "Phase 7: FastAPI UX facade + Web Console",
+    "title": "Alerts panel driven by journal events",
+    "enforcement_location": [
+      "alerts derived from journal/telemetry streams"
+    ],
+    "regression_detection": [
+      "Test: disk pressure and capture drops appear as alerts"
+    ],
+    "acceptance_criteria": [
+      "Operational problems are visible immediately with actionable context."
+    ]
+  },
+  {
+    "id": "I082",
+    "phase": "Phase 7: FastAPI UX facade + Web Console",
+    "title": "Local-only auth boundary (bind localhost + token)",
+    "enforcement_location": [
+      "API auth middleware: token-based auth; localhost binding by default"
+    ],
+    "regression_detection": [
+      "Security test: state-changing endpoints require auth token"
+    ],
+    "acceptance_criteria": [
+      "Local API is not accidentally exposed or writable without authorization."
+    ]
+  },
+  {
+    "id": "I083",
+    "phase": "Phase 7: FastAPI UX facade + Web Console",
+    "title": "Websocket for live telemetry",
+    "enforcement_location": [
+      "websocket endpoint streams telemetry and job status"
+    ],
+    "regression_detection": [
+      "Test: websocket schema stable and rate-limited"
+    ],
+    "acceptance_criteria": [
+      "UI can display live status without polling overhead."
+    ]
+  },
+  {
+    "id": "I121",
+    "phase": "Phase 7: FastAPI UX facade + Web Console",
+    "title": "Egress approval workflow in UI",
+    "enforcement_location": [
+      "UI + facade implement explicit approval flow for any outbound egress"
+    ],
+    "regression_detection": [
+      "Test: egress blocked without approval; approved egress logs approval id + packet hash (I120)"
+    ],
+    "acceptance_criteria": [
+      "Outbound actions are user-controlled, auditable, and sanitized by default."
+    ]
+  },
+  {
+    "id": "I114",
+    "phase": "Phase 8: Optional expansion plugins",
+    "title": "Clipboard capture plugin (local-only, append-only)",
+    "enforcement_location": [
+      "new clipboard capture plugin (subprocess-hosted by default)"
+    ],
+    "regression_detection": [
+      "Test: disabled by default; when enabled, records are append-only and ledgered",
+      "Security: redaction policy for sensitive clipboard types (optional) is explicit"
+    ],
+    "acceptance_criteria": [
+      "Clipboard history is captured locally with provenance and controlled overhead."
+    ]
+  },
+  {
+    "id": "I115",
+    "phase": "Phase 8: Optional expansion plugins",
+    "title": "File activity capture plugin (USN journal / watcher)",
+    "enforcement_location": [
+      "new file activity plugin (Windows USN journal or watcher)"
+    ],
+    "regression_detection": [
+      "Test: disabled by default; when enabled, events are time-ordered and searchable"
+    ],
+    "acceptance_criteria": [
+      "File activity timeline can be correlated with other evidence by time."
+    ]
+  },
+  {
+    "id": "I122",
+    "phase": "Phase 8: Optional expansion plugins",
+    "title": "Plugin hot-reload with hash verification and safe swap",
+    "enforcement_location": [
+      "plugin manager supports hot-reload for non-core plugins with hash verification"
+    ],
+    "regression_detection": [
+      "Test: hot-reload updates plugin only if lockfile updated and verified",
+      "Test: in-flight jobs are drained/cancelled safely on reload"
+    ],
+    "acceptance_criteria": [
+      "Plugins can be updated without downtime while preserving security and determinism."
+    ]
+  }
+]

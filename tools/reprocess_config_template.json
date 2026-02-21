@@ -1,0 +1,115 @@
+{
+  "capture": {
+    "auto_start": false,
+    "audio": {
+      "enabled": false
+    },
+    "screenshot": {
+      "enabled": false
+    },
+    "video": {
+      "enabled": false
+    },
+    "stub": {
+      "enabled": false
+    }
+  },
+  "models": {
+    "providers": {}
+  },
+  "processing": {
+    "idle": {
+      "enabled": true,
+      "extractors": {
+        "ocr": true,
+        "vlm": true
+      },
+      "order_by": "ts_utc",
+      "checkpoint_mode": "none",
+      "backfill_out_of_order": true,
+      "max_concurrency_cpu": 2,
+      "max_concurrency_gpu": 2,
+      "max_items_per_run": 50,
+      "max_seconds_per_run": 60,
+      "sleep_ms": 1000
+    },
+    "on_query": {
+      "allow_decode_extract": false,
+      "extractors": {
+        "ocr": true,
+        "vlm": true
+      },
+      "require_idle": true
+    },
+    "state_layer": {
+      "enabled": true,
+      "query_enabled": true,
+      "emit_frame_evidence": true
+    }
+  },
+  "plugins": {
+    "capabilities": {
+      "ocr.engine": {
+        "mode": "multi",
+        "fanout": true,
+        "max_providers": 0,
+        "preferred": [],
+        "provider_ids": []
+      },
+      "vision.extractor": {
+        "mode": "multi",
+        "fanout": true,
+        "max_providers": 0,
+        "preferred": [],
+        "provider_ids": []
+      }
+    },
+    "permissions": {
+      "network_allowed_plugin_ids": []
+    }
+  },
+  "privacy": {
+    "cloud": {
+      "enabled": false,
+      "allow_images": false
+    },
+    "egress": {
+      "enabled": false,
+      "approval_required": false,
+      "allow_raw_egress": false
+    }
+  },
+  "runtime": {
+    "activity": {
+      "assume_idle_when_missing": false,
+      "display_power_enabled": false,
+      "screensaver_enabled": true,
+      "screensaver_poll_interval_s": 1.0,
+      "screensaver_idle_seconds": 15
+    },
+    "budgets": {
+      "allow_heavy_during_active": false,
+      "cpu_max_utilization": 0.5,
+      "ram_max_utilization": 0.5
+    },
+    "mode_enforcement": {
+      "fixture_override": false,
+      "fixture_override_reason": ""
+    }
+  },
+  "gpu": {
+    "allow_during_active": false
+  },
+  "storage": {
+    "anchor": {
+      "every_entries": 1,
+      "every_minutes": 1
+    },
+    "no_deletion_mode": true,
+    "raw_first_local": true
+  },
+  "web": {
+    "allow_remote": false,
+    "bind_host": "127.0.0.1"
+  }
+}

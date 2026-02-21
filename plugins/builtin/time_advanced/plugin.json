@@ -1,28 +1,38 @@
 {
-  "plugin_id": "builtin.time.advanced",
-  "version": "0.1.0",
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [],
   "enabled": true,
   "entrypoints": [
     {
-      "kind": "time.intent_parser",
+      "callable": "create_plugin",
       "id": "default",
-      "path": "plugin.py",
-      "callable": "create_plugin"
+      "kind": "time.intent_parser",
+      "path": "plugin.py"
     }
   ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
   "permissions": {
     "filesystem": "read",
     "gpu": false,
-    "raw_input": false,
-    "network": false
+    "network": false,
+    "raw_input": false
   },
-  "compat": {
-    "requires_kernel": ">=0.1.0",
-    "requires_schema_versions": [1]
-  },
-  "depends_on": [],
-  "hash_lock": {
-    "manifest_sha256": "",
-    "artifact_sha256": ""
-  }
+  "plugin_id": "builtin.time.advanced",
+  "provides": [
+    "time.intent_parser"
+  ],
+  "required_capabilities": [],
+  "settings_paths": [
+    "time",
+    "runtime"
+  ],
+  "version": "0.1.0"
 }

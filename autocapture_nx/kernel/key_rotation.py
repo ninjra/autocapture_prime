@@ -2,53 +2,77 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
+import getpass
 
-from autocapture_nx.kernel.canonical_json import dumps
 from autocapture_nx.kernel.crypto import derive_key
-from autocapture_nx.kernel.hashing import sha256_text
+from autocapture_nx.kernel.audit import append_audit_event
 
 
-def rotate_keys(system) -> dict[str, Any]:
+def rotate_root_key(system) -> dict[str, Any]:
     keyring = system.get("storage.keyring")
-    old_id = keyring.active_key_id
-    new_id = keyring.rotate()
-    _active_id, new_root = keyring.active_key()
-    meta_key = derive_key(new_root, "metadata")
-    media_key = derive_key(new_root, "media")
-    entity_key = derive_key(new_root, "entity_tokens")
-
+    purposes = ["metadata", "media", "entity_tokens", "anchor"]
+    old_ids = {purpose: keyring.active_key_id_for(purpose) for purpose in purposes}
     rotated: dict[str, Any] = {}
-    metadata = system.get("storage.metadata")
-    if hasattr(metadata, "rotate"):
-        rotated["metadata"] = metadata.rotate(meta_key)
-    media = system.get("storage.media")
-    if hasattr(media, "rotate"):
-        rotated["media"] = media.rotate(media_key)
-    entity = system.get("storage.entity_map")
-    if hasattr(entity, "rotate"):
-        rotated["entity_map"] = entity.rotate(entity_key)
+    new_ids: dict[str, str] = {}
+    try:
+        for purpose in purposes:
+            new_ids[purpose] = keyring.rotate(purpose)
 
-    policy_snapshot_hash = sha256_text(dumps(system.config))
-    ts = datetime.now(timezone.utc).isoformat()
-    ledger = system.get("ledger.writer")
-    entry = {
-        "schema_version": 1,
-        "entry_id": f"key_rotation_{new_id}",
-        "ts_utc": ts,
-        "stage": "security",
-        "inputs": [old_id],
-        "outputs": [new_id],
-        "policy_snapshot_hash": policy_snapshot_hash,
-    }
-    ledger_hash = ledger.append(entry)
-    anchor = system.get("anchor.writer")
-    anchor.anchor(ledger_hash)
+        meta_root = keyring.key_for("metadata", new_ids["metadata"])
+        media_root = keyring.key_for("media", new_ids["media"])
+        entity_root = keyring.key_for("entity_tokens", new_ids["entity_tokens"])
 
+        metadata = system.get("storage.metadata")
+        if hasattr(metadata, "rotate"):
+            rotated["metadata"] = metadata.rotate(derive_key(meta_root, "metadata"))
+        media = system.get("storage.media")
+        if hasattr(media, "rotate"):
+            rotated["media"] = media.rotate(derive_key(media_root, "media"))
+        entity = system.get("storage.entity_map")
+        if hasattr(entity, "rotate"):
+            rotated["entity_map"] = entity.rotate(derive_key(entity_root, "entity_tokens"))
+    except Exception as exc:
+        for purpose, key_id in old_ids.items():
+            try:
+                keyring.set_active(purpose, key_id)
+            except Exception:
+                pass
+        append_audit_event(
+            action="key_rotation.rollback",
+            actor="kernel.key_rotation",
+            outcome="error",
+            details={"error": str(exc)},
+        )
+        return {"ok": False, "error": str(exc), "old_key_ids": old_ids}
+
+    event_builder = system.get("event.builder")
+    actor = getpass.getuser()
+    ledger_hash = event_builder.ledger_entry(
+        "security",
+        inputs=list(old_ids.values()),
+        outputs=list(new_ids.values()),
+        payload={
+            "event": "key_rotation",
+            "actor": actor,
+            "old_key_ids": old_ids,
+            "new_key_ids": new_ids,
+        },
+    )
+    append_audit_event(
+        action="key_rotation.commit",
+        actor=actor,
+        outcome="ok",
+        details={"old_key_ids": old_ids, "new_key_ids": new_ids},
+    )
     return {
-        "old_key_id": old_id,
-        "new_key_id": new_id,
+        "ok": True,
+        "old_key_ids": old_ids,
+        "new_key_ids": new_ids,
         "rotated": rotated,
         "ledger_hash": ledger_hash,
     }
+
+
+def rotate_keys(system) -> dict[str, Any]:
+    return rotate_root_key(system)

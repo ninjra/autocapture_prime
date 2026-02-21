@@ -1,0 +1,214 @@
+{
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "default_settings": {
+    "api_key": "",
+    "base_url": "http://127.0.0.1:8000/v1",
+    "factpack_enabled": true,
+    "factpack_max_tokens": 1536,
+    "factpack_prompt": "",
+    "fail_open_after_errors": 2,
+    "failure_cooldown_s": 45.0,
+    "grid_enforced": true,
+    "grid_sections": 8,
+    "max_retries": 3,
+    "max_rois": 8,
+    "max_tokens": 256,
+    "model": "internvl3_5_8b",
+    "n": 1,
+    "prompt": "",
+    "promptops": {
+      "enabled": true,
+      "metrics": {
+        "enabled": true
+      },
+      "mode": "auto_apply",
+      "model_strategy": "model_contract",
+      "persist_prompts": false,
+      "review": {
+        "enabled": true,
+        "on_failure_only": true,
+        "persist_prompts": true
+      }
+    },
+    "roi_max_side": 2048,
+    "roi_max_tokens": 1536,
+    "roi_prompt": "",
+    "seed": 0,
+    "temperature": 0.0,
+    "thumb_max_px": 960,
+    "thumb_max_tokens": 768,
+    "thumb_prompt": "",
+    "timeout_s": 30.0,
+    "top_p": 1.0,
+    "topic_factpack_enabled": true,
+    "topic_factpack_max_tokens": 1024,
+    "topic_factpack_min_topics": 6,
+    "topic_factpack_topics": [],
+    "two_pass_enabled": true
+  },
+  "depends_on": [],
+  "enabled": false,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "vision.extractor",
+      "path": "plugin.py"
+    }
+  ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "optional_deps": [
+    "Pillow"
+  ],
+  "permissions": {
+    "filesystem": "read",
+    "gpu": true,
+    "network": true,
+    "raw_input": false
+  },
+  "plugin_id": "builtin.vlm.vllm_localhost",
+  "provides": [
+    "vision.extractor"
+  ],
+  "required_capabilities": [],
+  "settings_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "api_key": {
+        "type": "string"
+      },
+      "base_url": {
+        "type": "string"
+      },
+      "factpack_enabled": {
+        "type": "boolean"
+      },
+      "factpack_max_tokens": {
+        "type": "integer"
+      },
+      "factpack_prompt": {
+        "type": "string"
+      },
+      "fail_open_after_errors": {
+        "type": "integer"
+      },
+      "failure_cooldown_s": {
+        "type": "number"
+      },
+      "grid_enforced": {
+        "type": "boolean"
+      },
+      "grid_sections": {
+        "type": "integer"
+      },
+      "max_retries": {
+        "type": "integer"
+      },
+      "max_rois": {
+        "type": "integer"
+      },
+      "max_tokens": {
+        "type": "integer"
+      },
+      "model": {
+        "type": "string"
+      },
+      "n": {
+        "type": "integer"
+      },
+      "prompt": {
+        "type": "string"
+      },
+      "promptops": {
+        "additionalProperties": true,
+        "properties": {
+          "data_dir": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "metrics": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "model_strategy": {
+            "type": "string"
+          },
+          "persist_prompts": {
+            "type": "boolean"
+          },
+          "review": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "roi_max_side": {
+        "type": "integer"
+      },
+      "roi_max_tokens": {
+        "type": "integer"
+      },
+      "roi_prompt": {
+        "type": "string"
+      },
+      "seed": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "temperature": {
+        "type": "number"
+      },
+      "thumb_max_px": {
+        "type": "integer"
+      },
+      "thumb_max_tokens": {
+        "type": "integer"
+      },
+      "thumb_prompt": {
+        "type": "string"
+      },
+      "timeout_s": {
+        "type": "number"
+      },
+      "top_p": {
+        "type": "number"
+      },
+      "topic_factpack_enabled": {
+        "type": "boolean"
+      },
+      "topic_factpack_max_tokens": {
+        "type": "integer"
+      },
+      "topic_factpack_min_topics": {
+        "type": "integer"
+      },
+      "topic_factpack_topics": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "two_pass_enabled": {
+        "type": "boolean"
+      }
+    },
+    "type": "object"
+  },
+  "version": "0.1.0"
+}

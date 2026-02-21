@@ -10,28 +10,110 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "LicenseRef-Proprietary"
 dependencies = [
-  "cryptography>=41.0.0",
+  "cryptography>=46.0.5",
+  "fastapi>=0.110.0",
+  "httpx>=0.27.0",
+  "jsonschema>=4.19.0",
+  "psutil>=5.9.0",
+  "pywebview>=5.1",
+  "uvicorn>=0.27.0",
   "tzdata>=2024.1",
+  "platformdirs",
   "mss>=9.0.1",
-  "Pillow>=10.0.0",
+  "Pillow>=12.1.1",
   "pynput>=1.7.6",
   "sounddevice>=0.4.6",
-  "pytesseract>=0.3.10",
-  "sentence-transformers>=2.2.2",
-  "transformers>=4.38.0",
-  "torch>=2.1.0"
+  "PyYAML>=6.0.1",
+  "PyPDF2>=3.0.0",
+  "protobuf>=4.25.0",
+  "zstandard>=0.22.0",
+  "ruff>=0.6.0",
+  "mypy>=1.8.0"
 ]
 
 [project.scripts]
 autocapture = "autocapture_nx.cli:main"
+autocapture-prime = "autocapture_prime.cli:main"
 
 [project.optional-dependencies]
 sqlcipher = ["pysqlcipher3-binary>=1.0.4"]
+ocr = ["pytesseract>=0.3.10"]
+embeddings = [
+  "sentence-transformers>=2.2.2",
+  "torch>=2.1.0"
+]
+vision = [
+  "transformers>=4.38.0",
+  "torch>=2.1.0"
+]
+chronicle = [
+  "duckdb>=1.1.0",
+  "pyarrow>=18.0.0",
+  "faiss-cpu>=1.8.0"
+]
+dev = [
+  "ruff>=0.6.0",
+  "mypy>=1.8.0",
+  "pip-audit>=2.7.0"
+]
 
 [tool.setuptools]
-packages = ["autocapture_nx", "autocapture_nx.kernel", "autocapture_nx.plugin_system", "autocapture_nx.windows"]
+packages = [
+  "config",
+  "contracts",
+  "autocapture",
+  "autocapture.config",
+  "autocapture.core",
+  "autocapture.codex",
+  "autocapture.tools",
+  "autocapture.plugins",
+  "autocapture.memory",
+  "autocapture.ux",
+  "autocapture.runtime",
+  "autocapture.storage",
+  "autocapture.pillars",
+  "autocapture.capture",
+  "autocapture.ingest",
+  "autocapture.indexing",
+  "autocapture.retrieval",
+  "autocapture.web",
+  "autocapture.gateway",
+  "autocapture.promptops",
+  "autocapture.training",
+  "autocapture.research",
+  "autocapture.rules",
+  "autocapture_nx",
+  "autocapture_nx.capture",
+  "autocapture_nx.kernel",
+  "autocapture_nx.plugin_system",
+  "autocapture_nx.ux",
+  "autocapture_nx.processing",
+  "autocapture_nx.processing.sst",
+  "autocapture_nx.windows",
+  "autocapture_prime",
+  "autocapture_prime.ingest",
+  "autocapture_prime.ocr",
+  "autocapture_prime.layout",
+  "autocapture_prime.link",
+  "autocapture_prime.store",
+  "autocapture_prime.eval",
+  "autocapture_prime.chronicle",
+  "autocapture_prime.chronicle.v0",
+  "services",
+  "services.chronicle_api",
+  "plugins",
+  "plugins.builtin",
+]
+
+[tool.setuptools.package-data]
+config = ["*.json"]
+contracts = ["*.json", "*.md", "**/*.proto", "**/*.md", "**/*.json"]
+plugins = ["builtin/**"]
 
 [tool.autocapture]
 config_default_path = "config/default.json"
 config_user_path = "config/user.json"
 contracts_lock_path = "contracts/lock.json"
+
+[tool.ruff]
+extend-exclude = [".venv_win", ".venv_win311"]

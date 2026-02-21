@@ -1,0 +1,552 @@
+{
+  "capture": {
+    "auto_start": false,
+    "audio": {
+      "enabled": false
+    },
+    "screenshot": {
+      "enabled": false
+    },
+    "stub": {
+      "frame_format": "png",
+      "frames_dir": "__FIXTURE_FRAMES_DIR__",
+      "jpeg_quality": 90,
+      "lossless": true,
+      "loop": false,
+      "timestamp_source": "now",
+      "max_frames": 0
+    },
+    "video": {
+      "activity": {
+        "enabled": false
+      },
+      "backend": "mss",
+      "container": "zip",
+      "dedupe": {
+        "enabled": false
+      },
+      "enabled": true,
+      "frame_format": "png",
+      "fps_target": 1,
+      "segment_seconds": 1
+    },
+    "window_metadata": {
+      "enabled": false
+    }
+  },
+  "models": {
+    "ocr_max_image_side": 900,
+    "vlm_path": "/mnt/d/autocapture/models/qwen2-vl-2b-instruct",
+    "vlm_prompt": "Describe the screen contents concisely. Include any visible media playback and list the current song title and artist if shown. Capture on-screen labels or track info verbatim when possible.",
+    "vlm_max_new_tokens": 256
+  },
+  "tools": {
+    "fixture": {
+      "probe_all_providers": false
+    }
+  },
+  "kernel": {
+    "safe_mode_required_capabilities": [
+      "storage.keyring",
+      "storage.metadata",
+      "storage.media",
+      "storage.entity_map",
+      "ledger.writer",
+      "journal.writer",
+      "anchor.writer",
+      "event.builder",
+      "observability.logger",
+      "time.intent_parser",
+      "ocr.engine",
+      "retrieval.strategy",
+      "answer.builder",
+      "citation.validator",
+      "runtime.governor",
+      "runtime.scheduler",
+      "capture.source",
+      "capture.backpressure"
+    ]
+  },
+  "processing": {
+    "idle": {
+      "enabled": true,
+      "max_seconds_per_run": 45,
+      "max_items_per_run": 20,
+      "max_concurrency_cpu": 1,
+      "max_concurrency_gpu": 2,
+      "batch_size": 2,
+      "extractors": {
+        "ocr": true,
+        "vlm": false
+      },
+      "order_by": "ts_utc",
+      "checkpoint_mode": "none",
+      "backfill_out_of_order": true
+    },
+    "on_query": {
+      "allow_decode_extract": false,
+      "extractors": {
+        "ocr": true,
+        "vlm": false
+      },
+      "require_idle": true
+    },
+    "sst": {
+      "enabled": false,
+      "heavy_always": true,
+      "allow_ocr": true,
+      "ocr_min_conf_bp": 0,
+      "ocr_max_patches": 24,
+      "ocr_max_tokens": 1200,
+      "ocr_prefer_full_frame": true,
+      "persist": {
+        "mode": "replace"
+      },
+      "redact_enabled": false,
+      "ui_vlm": {
+        "enabled": false,
+        "max_providers": 0
+      }
+    },
+    "state_layer": {
+      "enabled": false,
+      "query_enabled": false,
+      "index": {
+        "min_score": 0.0
+      },
+      "evidence": {
+        "max_snippet_chars": 25000
+      },
+      "features": {
+        "index_enabled": true,
+        "workflow_enabled": true,
+        "anomaly_enabled": true,
+        "training_enabled": true
+      }
+    }
+  },
+  "plugins": {
+    "safe_mode": true,
+    "default_pack": [
+      "builtin.anchor.basic",
+      "builtin.answer.basic",
+      "builtin.backpressure.basic",
+      "builtin.capture.basic",
+      "builtin.citation.basic",
+      "builtin.journal.basic",
+      "builtin.ledger.basic",
+      "builtin.observability.basic",
+      "builtin.ocr.basic",
+      "builtin.screen.parse.v1",
+      "builtin.screen.index.v1",
+      "builtin.screen.answer.v1",
+      "builtin.processing.sst.pipeline",
+      "builtin.retrieval.basic",
+      "builtin.sst.index",
+      "builtin.sst.layout.assemble",
+      "builtin.sst.ocr.onnx",
+      "builtin.sst.persist",
+      "builtin.sst.preprocess.normalize",
+      "builtin.sst.preprocess.tile",
+      "builtin.sst.temporal.segment",
+      "builtin.time.basic",
+      "builtin.storage.encrypted"
+    ],
+    "enabled": {
+      "builtin.capture.audio.windows": false,
+      "builtin.capture.basic": true,
+      "builtin.capture.screenshot.windows": false,
+      "builtin.capture.windows": false,
+      "builtin.cursor.windows": false,
+      "builtin.processing.sst.pipeline": false,
+      "builtin.processing.sst.ui_vlm": false,
+      "builtin.runtime.governor": true,
+      "builtin.runtime.scheduler": true,
+      "builtin.sst.build.delta": false,
+      "builtin.sst.build.state": false,
+      "builtin.sst.compliance.redact": false,
+      "builtin.sst.extract.chart": false,
+      "builtin.sst.extract.code": false,
+      "builtin.sst.extract.spreadsheet": false,
+      "builtin.sst.extract.table": false,
+      "builtin.sst.index": true,
+      "builtin.sst.infer.action": false,
+      "builtin.sst.layout.assemble": true,
+      "builtin.sst.match.ids": false,
+      "builtin.sst.ocr.onnx": true,
+      "builtin.ocr.rapid": false,
+      "builtin.ocr.basic": true,
+      "builtin.screen.parse.v1": true,
+      "builtin.screen.index.v1": true,
+      "builtin.screen.answer.v1": true,
+      "builtin.sst.persist": true,
+      "builtin.sst.preprocess.normalize": true,
+      "builtin.sst.preprocess.tile": true,
+      "builtin.sst.temporal.segment": true,
+      "builtin.sst.track.cursor": false,
+      "builtin.sst.ui.parse": false,
+      "builtin.sst.qa.answers": false,
+      "builtin.state.anomaly": false,
+      "builtin.state.policy": false,
+      "builtin.state.evidence.compiler": false,
+      "builtin.state.jepa_like": false,
+      "builtin.state.jepa.training": false,
+      "builtin.state.retrieval": false,
+      "builtin.state.vector.sqlite_ts": false,
+      "builtin.state.workflow.miner": false,
+      "builtin.storage.encrypted": true,
+      "builtin.vlm.basic": false,
+      "builtin.vlm.qwen2_vl_2b": false,
+      "builtin.tracking.input.windows": true,
+      "builtin.window.metadata.windows": false
+    },
+    "conflicts": {
+      "enforce": false
+    },
+    "hosting": {
+      "rpc_timeout_s": 60,
+      "rpc_startup_timeout_s": 60,
+      "rpc_timeout_limit": 6,
+      "rpc_timeout_window_s": 300,
+      "inproc_allowlist": [
+        "builtin.runtime.governor",
+        "builtin.runtime.scheduler",
+        "builtin.processing.sst.pipeline",
+        "builtin.processing.sst.ui_vlm",
+        "builtin.sst.temporal.segment",
+        "builtin.sst.preprocess.normalize",
+        "builtin.sst.preprocess.tile",
+        "builtin.sst.ocr.onnx",
+        "builtin.ocr.rapid",
+        "builtin.ocr.basic",
+        "builtin.sst.layout.assemble",
+        "builtin.sst.extract.table",
+        "builtin.sst.extract.spreadsheet",
+        "builtin.sst.extract.code",
+        "builtin.sst.extract.chart",
+        "builtin.sst.ui.parse",
+        "builtin.sst.track.cursor",
+        "builtin.sst.build.state",
+        "builtin.sst.match.ids",
+        "builtin.sst.build.delta",
+        "builtin.sst.infer.action",
+        "builtin.sst.compliance.redact",
+        "builtin.sst.persist",
+        "builtin.sst.index",
+        "builtin.state.policy",
+        "builtin.state.evidence.compiler",
+        "builtin.state.jepa_like",
+        "builtin.state.retrieval",
+        "builtin.state.vector.sqlite_ts",
+        "builtin.screen.parse.v1",
+        "builtin.screen.index.v1",
+        "builtin.screen.answer.v1",
+        "builtin.storage.sqlcipher"
+      ],
+      "inproc_justifications": {
+        "builtin.runtime.governor": "Fixture run requires local governor decisions without JSON IPC.",
+        "builtin.runtime.scheduler": "Fixture run avoids IPC for scheduler state.",
+        "builtin.processing.sst.pipeline": "Fixture run keeps SST results local to avoid IPC serialization issues.",
+        "builtin.processing.sst.ui_vlm": "Fixture run keeps SST VLM stage in-process to avoid IPC serialization issues.",
+        "builtin.sst.temporal.segment": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.preprocess.normalize": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.preprocess.tile": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.ocr.onnx": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.ocr.rapid": "Fixture run keeps RapidOCR tokens in-process to avoid IPC serialization of OCR text.",
+        "builtin.ocr.basic": "Fixture run keeps basic OCR tokens in-process to avoid IPC serialization of OCR text.",
+        "builtin.sst.layout.assemble": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.extract.table": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.extract.spreadsheet": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.extract.code": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.extract.chart": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.ui.parse": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.track.cursor": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.build.state": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.match.ids": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.build.delta": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.infer.action": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.compliance.redact": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.persist": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.sst.index": "Fixture run keeps SST stage hooks in-process to avoid IPC serialization of image data.",
+        "builtin.state.policy": "Fixture run keeps policy gate local; plugin is not IPC-safe.",
+        "builtin.state.evidence.compiler": "Fixture run keeps evidence compiler local for deterministic metadata access.",
+        "builtin.state.jepa_like": "Fixture run keeps JEPA-like state builder in-process for deterministic span building.",
+        "builtin.state.retrieval": "Fixture run keeps state retrieval local for deterministic vector access.",
+        "builtin.state.vector.sqlite_ts": "Fixture run keeps vector index local for deterministic SQLite access.",
+        "builtin.screen.parse.v1": "Fixture run keeps screen parse in-process for deterministic UI-graph extraction.",
+        "builtin.screen.index.v1": "Fixture run keeps screen index in-process for deterministic chunk/evidence build.",
+        "builtin.screen.answer.v1": "Fixture run keeps screen answer in-process for deterministic cited claims.",
+        "builtin.storage.sqlcipher": "Fixture run keeps metadata storage local for deterministic SQLite writes."
+      }
+    },
+    "capabilities": {
+      "capture.source": {
+        "mode": "single",
+        "preferred": [
+          "builtin.capture.basic"
+        ],
+        "provider_ids": [
+          "builtin.capture.basic"
+        ]
+      },
+      "ocr.engine": {
+        "mode": "multi",
+        "fanout": true,
+        "max_providers": 0,
+        "preferred": [
+          "builtin.ocr.rapid"
+        ],
+        "provider_ids": [
+          "builtin.ocr.rapid",
+          "builtin.ocr.basic"
+        ]
+      },
+      "vision.extractor": {
+        "mode": "multi",
+        "fanout": true,
+        "max_providers": 1,
+        "preferred": [
+          "builtin.vlm.qwen2_vl_2b"
+        ],
+        "provider_ids": [
+          "builtin.vlm.qwen2_vl_2b"
+        ]
+      },
+      "screen.parse.v1": {
+        "mode": "single",
+        "fanout": false,
+        "max_providers": 1,
+        "preferred": [
+          "builtin.screen.parse.v1"
+        ],
+        "provider_ids": [
+          "builtin.screen.parse.v1"
+        ]
+      },
+      "screen.index.v1": {
+        "mode": "single",
+        "fanout": false,
+        "max_providers": 1,
+        "preferred": [
+          "builtin.screen.index.v1"
+        ],
+        "provider_ids": [
+          "builtin.screen.index.v1"
+        ]
+      },
+      "screen.answer.v1": {
+        "mode": "single",
+        "fanout": false,
+        "max_providers": 1,
+        "preferred": [
+          "builtin.screen.answer.v1"
+        ],
+        "provider_ids": [
+          "builtin.screen.answer.v1"
+        ]
+      },
+      "storage.metadata": {
+        "mode": "single",
+        "fanout": false,
+        "max_providers": 1,
+        "preferred": [
+          "builtin.storage.sqlcipher",
+          "builtin.storage.encrypted"
+        ],
+        "provider_ids": []
+      },
+      "storage.media": {
+        "mode": "single",
+        "fanout": false,
+        "max_providers": 1,
+        "preferred": [
+          "builtin.storage.sqlcipher",
+          "builtin.storage.encrypted"
+        ],
+        "provider_ids": []
+      },
+      "storage.entity_map": {
+        "mode": "single",
+        "fanout": false,
+        "max_providers": 1,
+        "preferred": [
+          "builtin.storage.sqlcipher",
+          "builtin.storage.encrypted"
+        ],
+        "provider_ids": []
+      },
+      "storage.keyring": {
+        "mode": "single",
+        "fanout": false,
+        "max_providers": 1,
+        "preferred": [
+          "builtin.storage.sqlcipher",
+          "builtin.storage.encrypted"
+        ],
+        "provider_ids": []
+      },
+      "storage.state_tape": {
+        "mode": "single",
+        "fanout": false,
+        "max_providers": 1,
+        "preferred": [
+          "builtin.storage.sqlcipher",
+          "builtin.storage.encrypted"
+        ],
+        "provider_ids": []
+      }
+    },
+    "filesystem_policies": {
+      "builtin.state.jepa.training": {
+        "readwrite": [
+          "{data_dir}/state"
+        ]
+      },
+      "builtin.state.jepa_like": {
+        "readwrite": [
+          "{data_dir}/state"
+        ]
+      },
+      "builtin.state.retrieval": {
+        "readwrite": [
+          "{data_dir}/state"
+        ]
+      },
+      "builtin.state.vector.sqlite_ts": {
+        "readwrite": [
+          "{data_dir}/state"
+        ]
+      },
+      "builtin.state.workflow.miner": {
+        "readwrite": [
+          "{data_dir}/state"
+        ]
+      },
+      "builtin.state.anomaly": {
+        "readwrite": [
+          "{data_dir}/state"
+        ]
+      },
+      "builtin.state.evidence.compiler": {
+        "readwrite": [
+          "{data_dir}/state"
+        ]
+      },
+      "builtin.processing.sst.pipeline": {
+        "readwrite": [
+          "{data_dir}"
+        ]
+      },
+      "builtin.retrieval.basic": {
+        "readwrite": [
+          "{data_dir}"
+        ]
+      },
+      "builtin.ocr.rapid": {
+        "read": [
+          "/etc/os-release"
+        ]
+      },
+      "builtin.vlm.qwen2_vl_2b": {
+        "read": [
+          "/mnt/d/autocapture/models/qwen2-vl-2b-instruct"
+        ]
+      },
+      "builtin.storage.sqlcipher": {
+        "readwrite": [
+          "{data_dir}"
+        ]
+      },
+      "builtin.sst.index": {
+        "readwrite": [
+          "{data_dir}"
+        ]
+      }
+    },
+    "settings": {
+      "builtin.state.jepa.training": {
+        "storage": {
+          "data_dir": "{data_dir}"
+        }
+      },
+      "builtin.processing.sst.pipeline": {
+        "storage": {
+          "data_dir": "{data_dir}",
+          "lexical_path": "{data_dir}/lexical.db",
+          "vector_path": "{data_dir}/vector.db"
+        },
+        "indexing": {
+          "vector_backend": "sqlite"
+        }
+      },
+      "builtin.retrieval.basic": {
+        "storage": {
+          "data_dir": "{data_dir}",
+          "lexical_path": "{data_dir}/lexical.db",
+          "vector_path": "{data_dir}/vector.db"
+        }
+      }
+    }
+  },
+  "runtime": {
+    "activity": {
+      "assume_idle_when_missing": true,
+      "display_power_enabled": false,
+      "screensaver_enabled": true,
+      "screensaver_poll_interval_s": 1.0,
+      "screensaver_idle_seconds": 15
+    },
+    "mode_enforcement": {
+      "fixture_override": true,
+      "fixture_override_reason": "fixture_pipeline",
+      "suspend_workers": true
+    },
+    "silence": {
+      "enabled": false
+    },
+    "budgets": {
+      "cpu_max_utilization": 0.5,
+      "ram_max_utilization": 0.5,
+      "window_budget_ms": 300000,
+      "per_job_max_ms": 120000,
+      "max_jobs_per_window": 20,
+      "preempt_grace_ms": 2000
+    },
+    "routing": {
+      "gpu_heavy": {
+        "allow_fallback": true,
+        "target": "native"
+      }
+    }
+  },
+  "storage": {
+    "anchor": {
+      "every_entries": 1,
+      "every_minutes": 0,
+      "path": "{data_dir}/anchor/anchors.ndjson"
+    },
+    "audit_db_path": "{data_dir}/audit/kernel_audit.db",
+    "blob_dir": "{data_dir}/blobs",
+    "crypto": {
+      "backend": "aesgcm",
+      "keyring_backend": "auto",
+      "keyring_credential_name": "autocapture.keyring",
+      "keyring_path": "{data_dir}/vault/keyring.json",
+      "root_key_path": "{data_dir}/vault/root.key"
+    },
+    "data_dir": "{data_dir}",
+    "lexical_path": "{data_dir}/lexical.db",
+    "media_dir": "{data_dir}/media",
+    "vector_path": "{data_dir}/vector.db",
+    "metadata_path": "{data_dir}/metadata.db",
+    "no_deletion_mode": true,
+    "raw_first_local": true,
+    "spool_dir": "{data_dir}/spool",
+    "state_tape_path": "{data_dir}/state/state_tape.db",
+    "state_vector_path": "{data_dir}/state/state_vector.db"
+  },
+  "web": {
+    "allow_remote": false,
+    "bind_host": "127.0.0.1"
+  }
+}

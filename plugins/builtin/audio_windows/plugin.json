@@ -1,28 +1,44 @@
 {
-  "plugin_id": "builtin.capture.audio.windows",
-  "version": "0.1.0",
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [
+    "builtin.journal.basic"
+  ],
   "enabled": true,
   "entrypoints": [
     {
-      "kind": "capture.audio",
+      "callable": "create_plugin",
       "id": "default",
-      "path": "plugin.py",
-      "callable": "create_plugin"
+      "kind": "capture.audio",
+      "path": "plugin.py"
     }
   ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
   "permissions": {
     "filesystem": "readwrite",
     "gpu": false,
-    "raw_input": true,
-    "network": false
+    "network": false,
+    "raw_input": true
   },
-  "compat": {
-    "requires_kernel": ">=0.1.0",
-    "requires_schema_versions": [1]
-  },
-  "depends_on": ["builtin.journal.basic"],
-  "hash_lock": {
-    "manifest_sha256": "",
-    "artifact_sha256": ""
-  }
+  "plugin_id": "builtin.capture.audio.windows",
+  "provides": [
+    "capture.audio"
+  ],
+  "required_capabilities": [
+    "event.builder",
+    "storage.media",
+    "storage.metadata"
+  ],
+  "settings_paths": [
+    "capture",
+    "runtime"
+  ],
+  "version": "0.1.0"
 }

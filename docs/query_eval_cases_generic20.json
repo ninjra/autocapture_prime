@@ -1,0 +1,182 @@
+[
+  {
+    "id": "GQ1",
+    "question": "Enumerate every distinct top-level window currently visible. For each, provide app/product name, host-vs-remote context, and whether it is fully visible or partially occluded. Return the list in front-to-back order where provable.",
+    "difficulty_class": "window_inventory",
+    "improved": "Window segmentation + occlusion reasoning",
+    "risked": "Merged windows; incorrect z-order where no overlap exists",
+    "enforcement_location": "window graph + compositor reasoning",
+    "regression_detection": "stable window list schema + explicit NO_EVIDENCE markers"
+  },
+  {
+    "id": "GQ2",
+    "question": "Which window appears focused for keyboard input? Provide two independent visual evidence items and include exact highlighted/selected text for each evidence item.",
+    "difficulty_class": "focus_detection",
+    "improved": "Active-context inference with evidence grounding",
+    "risked": "False focus from hover styling",
+    "enforcement_location": "focus heuristic + selection-state parser",
+    "regression_detection": "focused_window + evidence_count>=2"
+  },
+  {
+    "id": "GQ3",
+    "question": "In the most prominent reading/detail pane, extract subject/title, sender/display identity, organization/domain-only value, and the labels of primary action buttons.",
+    "difficulty_class": "detail_pane_parse",
+    "improved": "Dense UI OCR/VLM structure extraction",
+    "risked": "Domain/address leakage or button misses",
+    "enforcement_location": "structured parser + redaction policy adapter",
+    "regression_detection": "required fields present and normalized"
+  },
+  {
+    "id": "GQ4",
+    "question": "Extract the full visible activity timeline from the active detail pane: timestamp plus associated activity text, preserving top-to-bottom order.",
+    "difficulty_class": "timeline_extraction",
+    "improved": "Row grouping + ordering reliability",
+    "risked": "Timestamp/text mis-association across wrapped rows",
+    "enforcement_location": "timeline row linker",
+    "regression_detection": "ordered row array with timestamp+text per row"
+  },
+  {
+    "id": "GQ5",
+    "question": "Extract all visible key-value fields from the details form in on-screen order, including present-but-empty fields as empty strings.",
+    "difficulty_class": "form_kv_extraction",
+    "improved": "Label-value pairing under dense layouts",
+    "risked": "Skipped empty fields; unstable ordering",
+    "enforcement_location": "layout-aware KV parser",
+    "regression_detection": "ordered keys retained with explicit empty values"
+  },
+  {
+    "id": "GQ6",
+    "question": "From the visible calendar/schedule panel, return month+year, selected date, and the first five visible schedule rows (time + title) in display order.",
+    "difficulty_class": "calendar_parse",
+    "improved": "Widget parsing and row extraction",
+    "risked": "Selected-day mismatch; time/title misalignment",
+    "enforcement_location": "calendar parser",
+    "regression_detection": "strict tuple count + parsed selection state"
+  },
+  {
+    "id": "GQ7",
+    "question": "In the visible chat/DM thread, transcribe the last two visible messages as sender, timestamp, and exact text; also provide one sentence describing the embedded thumbnail without inferring hidden content.",
+    "difficulty_class": "chat_transcript",
+    "improved": "Message boundary detection + visible-only captioning",
+    "risked": "Sender/timestamp swap; hallucinated thumbnail details",
+    "enforcement_location": "chat parser + constrained captioner",
+    "regression_detection": "last-two message schema + visible-only description"
+  },
+  {
+    "id": "GQ8",
+    "question": "Extract the changelog/summary section from the top-left engineering notes area, including all bullet lines, file paths, and exact test command shown.",
+    "difficulty_class": "dev_notes_parse",
+    "improved": "Code-oriented OCR/VLM parsing",
+    "risked": "Dropped paths or truncated commands",
+    "enforcement_location": "sectioned document parser",
+    "regression_detection": "section completeness checks"
+  },
+  {
+    "id": "GQ9",
+    "question": "For the console area with mixed text colors, classify each visible line as red/green/other and return counts per class plus the full text of all red lines.",
+    "difficulty_class": "color_line_extraction",
+    "improved": "Color-aware line segmentation",
+    "risked": "Wrapped-line merge errors; color misclassification",
+    "enforcement_location": "renderer-aware text pipeline",
+    "regression_detection": "count tuple + extracted red line list"
+  },
+  {
+    "id": "GQ10",
+    "question": "For each visible browser window, return active tab title, address-bar hostname (hostname only), and visible tab count for that window.",
+    "difficulty_class": "browser_chrome_parse",
+    "improved": "Per-window tab/address disambiguation",
+    "risked": "Cross-window tab strip mixing",
+    "enforcement_location": "browser UI parser + URL normalizer",
+    "regression_detection": "per-window tuple schema with hostname validation"
+  },
+  {
+    "id": "GQ11",
+    "question": "Compute a cross-panel elapsed-time metric using two independently visible timestamps. Return both source timestamps and elapsed minutes with a short rationale.",
+    "difficulty_class": "cross_time_reasoning",
+    "improved": "Multi-source timestamp normalization",
+    "risked": "Timezone mismatch or wrong timestamp binding",
+    "enforcement_location": "time normalizer + arithmetic reducer",
+    "regression_detection": "structured output includes both timestamps + delta"
+  },
+  {
+    "id": "GQ12",
+    "question": "Find numeric presets visible in one panel and verify each against any visible clamp/range rule in another panel. Return sum, range, and validity per value.",
+    "difficulty_class": "cross_panel_numeric_reasoning",
+    "improved": "Cross-context numeric consistency checks",
+    "risked": "Wrong range linkage or arithmetic drift",
+    "enforcement_location": "promptops rewrite + numeric reducer",
+    "regression_detection": "deterministic numeric table output"
+  },
+  {
+    "id": "GQ13",
+    "question": "Identify two numeric values referenced in one communication panel, infer their best matching parameter name from technical notes, and produce example request query strings using those values.",
+    "difficulty_class": "semantic_parameter_mapping",
+    "improved": "Semantic grounding across chat and code notes",
+    "risked": "Parameter-name hallucination",
+    "enforcement_location": "cross-panel linker + query synthesizer",
+    "regression_detection": "parameter + examples emitted with rationale"
+  },
+  {
+    "id": "GQ14",
+    "question": "Convert the visible control-flow script logic into pseudocode with explicit branch conditions, retry behavior, and terminal success/failure outcomes.",
+    "difficulty_class": "logic_summarization",
+    "improved": "Program-logic extraction from rendered text",
+    "risked": "Missing branch guards or retry predicates",
+    "enforcement_location": "code parser + reasoning synthesis",
+    "regression_detection": "must include switch condition and retry condition"
+  },
+  {
+    "id": "GQ15",
+    "question": "Detect one correctness issue in a visible script/log message where the referenced variable may not match actual runtime behavior. Provide the corrected line.",
+    "difficulty_class": "bug_detection",
+    "improved": "Grounded static reasoning from on-screen code",
+    "risked": "Speculative bug reports",
+    "enforcement_location": "reasoner + evidence linker",
+    "regression_detection": "issue + corrected line + evidence anchor"
+  },
+  {
+    "id": "GQ16",
+    "question": "Normalize one ambiguous form field into a canonical schema with separate presence and value fields, and provide deterministic transformed values for the visible record.",
+    "difficulty_class": "data_normalization",
+    "improved": "Structured data cleaning logic",
+    "risked": "Over-interpreting ambiguous values",
+    "enforcement_location": "normalizer transform stage",
+    "regression_detection": "canonical key set + deterministic transformed output"
+  },
+  {
+    "id": "GQ17",
+    "question": "Count completed checklist items in the engineering notes/log area and identify the currently running action line directly below the checklist.",
+    "difficulty_class": "worklog_reasoning",
+    "improved": "Symbol-aware parsing of checklist state",
+    "risked": "Checkbox OCR ambiguity",
+    "enforcement_location": "document parser + symbol classifier",
+    "regression_detection": "count + running-action text present"
+  },
+  {
+    "id": "GQ18",
+    "question": "In a message list region, count rows marked with an unread visual indicator for the currently selected date bucket only, excluding other buckets.",
+    "difficulty_class": "visual_indicator_count",
+    "improved": "Icon/state counting with section constraints",
+    "risked": "Date-bucket leakage",
+    "enforcement_location": "UI list parser + indicator detector",
+    "regression_detection": "section-scoped count with evidence rows"
+  },
+  {
+    "id": "GQ19",
+    "question": "Classify visible carousel/content tiles into three semantic classes and return per-class counts plus the entity title used for each classification.",
+    "difficulty_class": "semantic_classification",
+    "improved": "Entity extraction + class mapping",
+    "risked": "Class confusion on truncated labels",
+    "enforcement_location": "tile extractor + classifier",
+    "regression_detection": "count map + entity/class list"
+  },
+  {
+    "id": "GQ20",
+    "question": "Return screenshot-normalized bounding boxes for two named actionable controls visible in the active detail card, with coordinates in [0,1] and deterministic ordering.",
+    "difficulty_class": "action_grounding",
+    "improved": "Precise grounding for clickable targets",
+    "risked": "Box drift under scaling",
+    "enforcement_location": "detector + coordinate normalizer",
+    "regression_detection": "normalized boxes + stable key ordering"
+  }
+]

@@ -1,0 +1,63 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "locator",
+    "span_id",
+    "evidence_id",
+    "evidence_hash",
+    "span_kind",
+    "offset_start",
+    "offset_end",
+    "ledger_head",
+    "anchor_ref",
+    "source"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer"},
+    "locator": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["kind", "record_id", "record_hash"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["text_offsets", "time_range", "record"]
+        },
+        "record_id": {"type": "string"},
+        "record_hash": {"type": "string"},
+        "offset_start": {"type": ["integer", "null"]},
+        "offset_end": {"type": ["integer", "null"]},
+        "span_sha256": {"type": ["string", "null"]},
+        "ts_start_ms": {"type": ["integer", "null"]},
+        "ts_end_ms": {"type": ["integer", "null"]}
+      }
+    },
+    "span_id": {"type": "string"},
+    "evidence_id": {"type": "string"},
+    "evidence_hash": {"type": "string"},
+    "derived_id": {"type": ["string", "null"]},
+    "derived_hash": {"type": ["string", "null"]},
+    "span_kind": {"type": "string"},
+    "span_ref": {"type": ["object", "null"]},
+    "ledger_head": {"type": "string"},
+    "anchor_ref": {
+      "type": "object",
+      "required": ["anchor_seq", "ledger_head_hash"],
+      "properties": {
+        "anchor_seq": {"type": "integer"},
+        "ledger_head_hash": {"type": "string"},
+        "ts_utc": {"type": "string"},
+        "record_type": {"type": "string"},
+        "schema_version": {"type": "integer"},
+        "anchor_key_id": {"type": "string"},
+        "anchor_hmac": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "source": {"type": "string"},
+    "offset_start": {"type": "integer"},
+    "offset_end": {"type": "integer"}
+  }
+}

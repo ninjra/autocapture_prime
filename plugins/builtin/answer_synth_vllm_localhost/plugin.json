@@ -1,0 +1,111 @@
+{
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "default_settings": {
+    "api_key": "",
+    "base_url": "http://127.0.0.1:8000/v1",
+    "max_evidence_chars": 2400,
+    "max_tokens": 512,
+    "model": "internvl3_5_8b",
+    "promptops": {
+      "enabled": true,
+      "metrics": {
+        "enabled": true
+      },
+      "mode": "auto_apply",
+      "model_strategy": "model_contract",
+      "persist_prompts": false,
+      "review": {
+        "enabled": true,
+        "on_failure_only": true,
+        "persist_prompts": true
+      }
+    },
+    "timeout_s": 30.0
+  },
+  "depends_on": [],
+  "enabled": false,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "answer.synthesizer",
+      "path": "plugin.py"
+    }
+  ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "permissions": {
+    "filesystem": "read",
+    "gpu": true,
+    "network": true,
+    "raw_input": false
+  },
+  "plugin_id": "builtin.answer.synth_vllm_localhost",
+  "provides": [
+    "answer.synthesizer"
+  ],
+  "required_capabilities": [
+    "citation.validator"
+  ],
+  "settings_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "api_key": {
+        "type": "string"
+      },
+      "base_url": {
+        "type": "string"
+      },
+      "max_evidence_chars": {
+        "type": "integer"
+      },
+      "max_tokens": {
+        "type": "integer"
+      },
+      "model": {
+        "type": "string"
+      },
+      "promptops": {
+        "additionalProperties": true,
+        "properties": {
+          "data_dir": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "metrics": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "model_strategy": {
+            "type": "string"
+          },
+          "persist_prompts": {
+            "type": "boolean"
+          },
+          "review": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "timeout_s": {
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "version": "0.1.0"
+}

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "steps": [
+    {
+      "id": "tray-launch",
+      "cwd": "D:\\projects\\autocapture_prime",
+      "shell": "powershell",
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"D:\\\\projects\\\\autocapture_prime\\\\ops\\\\dev\\\\launch_tray.ps1\""
+    }
+  ]
+}

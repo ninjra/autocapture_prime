@@ -1,28 +1,52 @@
 {
-  "plugin_id": "builtin.egress.gateway",
-  "version": "0.1.0",
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [
+    "builtin.privacy.egress_sanitizer"
+  ],
   "enabled": true,
   "entrypoints": [
     {
-      "kind": "egress.gateway",
+      "callable": "create_plugin",
       "id": "default",
-      "path": "plugin.py",
-      "callable": "create_plugin"
+      "kind": "egress.gateway",
+      "path": "plugin.py"
     }
   ],
+  "filesystem_policy": {
+    "read": [
+      "{repo_root}/contracts"
+    ]
+  },
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
   "permissions": {
     "filesystem": "readwrite",
     "gpu": false,
-    "raw_input": false,
-    "network": true
+    "network": true,
+    "raw_input": false
   },
-  "compat": {
-    "requires_kernel": ">=0.1.0",
-    "requires_schema_versions": [1]
-  },
-  "depends_on": ["builtin.privacy.egress_sanitizer"],
-  "hash_lock": {
-    "manifest_sha256": "",
-    "artifact_sha256": ""
-  }
+  "plugin_id": "builtin.egress.gateway",
+  "provides": [
+    "egress.gateway"
+  ],
+  "required_capabilities": [
+    "privacy.egress_sanitizer",
+    "event.builder",
+    "egress.approval_store"
+  ],
+  "settings_paths": [
+    "gateway",
+    "plugins.permissions",
+    "plugins.safe_mode",
+    "privacy",
+    "storage"
+  ],
+  "version": "0.1.0"
 }

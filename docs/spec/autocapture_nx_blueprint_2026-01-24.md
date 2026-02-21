@@ -1,17 +1,276 @@
 Source_Document: docs/spec/autocapture_nx_blueprint_2026-01-24.md
 
 # 1. Source_Index
-- SRC-001: [MISSING_VALUE]
+- SRC-001: I001 (Phase 1) - Eliminate floats from journal/ledger payloads
+- SRC-002: I002 (Phase 1) - Make backpressure actually affect capture rate
+- SRC-003: I003 (Phase 1) - Stop buffering whole segments in RAM; stream segments
+- SRC-004: I004 (Phase 1) - Do not write to storage from realtime audio callback
+- SRC-005: I005 (Phase 1) - Stop mutating primary evidence metadata during query
+- SRC-006: I006 (Phase 1) - Introduce globally unique run/session identifier; prefix all record IDs
+- SRC-007: I007 (Phase 1) - Make ledger writing thread-safe
+- SRC-008: I008 (Phase 1) - Make journal writing thread-safe; centralize sequences
+- SRC-009: I009 (Phase 1) - Fail closed if DPAPI protection fails when encryption_required
+- SRC-010: I010 (Phase 1) - Sort all store keys deterministically
+- SRC-011: I011 (Phase 1) - Use monotonic clocks for segment duration
+- SRC-012: I012 (Phase 1) - Align default config with implemented capture backend
+- SRC-013: I013 (Phase 1) - Remove hard-coded model paths; config-driven + portable
+- SRC-014: I014 (Phase 1) - Enforce plugin compat.requires_kernel / schema versions
+- SRC-015: I015 (Phase 1) - Verify contract lock at boot/doctor
+- SRC-016: I016 (Phase 2) - Split capture into grab -> encode/pack -> encrypt/write pipeline
+- SRC-017: I017 (Phase 2) - Bounded queues with explicit drop policies
+- SRC-018: I018 (Phase 2) - Replace zip-of-JPEG with real video container for primary artifact
+- SRC-019: I019 (Phase 2) - Add GPU-accelerated capture/encode backend (NVENC/DD)
+- SRC-020: I020 (Phase 2) - Record segment start/end timestamps
+- SRC-021: I021 (Phase 2) - Record capture parameters per segment
+- SRC-022: I022 (Phase 2) - Correlate frames with active window via synchronized timeline
+- SRC-023: I023 (Phase 2) - Add cursor/input correlation timeline references
+- SRC-024: I024 (Phase 2) - Disk pressure degrades capture quality before stopping
+- SRC-025: I025 (Phase 2) - Atomic segment writes (temp + os.replace)
+- SRC-026: I026 (Phase 3) - Default to SQLCipher for metadata when available
+- SRC-027: I027 (Phase 3) - Add DB indexes on ts_utc, record_type, run_id
+- SRC-028: I028 (Phase 3) - Store media in binary encrypted format (not base64 JSON)
+- SRC-029: I029 (Phase 3) - Stream encryption (avoid whole-segment in memory)
+- SRC-030: I030 (Phase 3) - Immutability/versioning in stores (put_new vs put_replace)
+- SRC-031: I031 (Phase 3) - Make record ID encoding reversible (no lossy mapping)
+- SRC-032: I032 (Phase 3) - Shard media/metadata directories by date/run
+- SRC-033: I033 (Phase 3) - Add per-run storage manifest records
+- SRC-034: I034 (Phase 3) - Configurable fsync policy (critical vs bulk)
+- SRC-035: I035 (Phase 4) - Replace full-scan query with tiered indexed retrieval
+- SRC-036: I036 (Phase 4) - Deterministic retrieval ordering (stable sort keys)
+- SRC-037: I037 (Phase 4) - Candidate-first extraction (retrieve then extract)
+- SRC-038: I038 (Phase 4) - Derived artifact records for OCR/VLM outputs
+- SRC-039: I039 (Phase 4) - Ledger query executions (inputs/outputs)
+- SRC-040: I040 (Phase 4) - Ledger extraction operations (inputs/outputs)
+- SRC-041: I041 (Phase 4) - Citations point to immutable evidence IDs + spans
+- SRC-042: I042 (Phase 4) - Citation resolver validates hashes/anchors/spans
+- SRC-043: I043 (Phase 4) - Fail closed if citations do not resolve
+- SRC-044: I044 (Phase 5) - Real scheduler plugin gates heavy work on user activity
+- SRC-045: I045 (Phase 5) - Input tracker exposes activity signals (not only journal)
+- SRC-046: I046 (Phase 5) - Capture emits telemetry (queues, drops, lag, CPU)
+- SRC-047: I047 (Phase 5) - Governor outputs feed backpressure and job admission
+- SRC-048: I048 (Phase 5) - Immediate ramp down on user input (cancel/deprioritize heavy jobs)
+- SRC-049: I049 (Phase 6) - Egress gateway must be subprocess-hosted; kernel network-denied
+- SRC-050: I050 (Phase 6) - Minimize inproc_allowlist; prefer subprocess hosting
+- SRC-051: I051 (Phase 6) - Capability bridging for subprocess plugins (real capability plumbing)
+- SRC-052: I052 (Phase 6) - Enforce least privilege per plugin manifest
+- SRC-053: I053 (Phase 6) - Enforce filesystem permission policy declared by plugins
+- SRC-054: I054 (Phase 6) - Strengthen Windows job object restrictions (limits)
+- SRC-055: I055 (Phase 6) - Sanitize subprocess env; pin caches; disable proxies
+- SRC-056: I056 (Phase 6) - Plugin RPC timeouts and watchdogs
+- SRC-057: I057 (Phase 6) - Max message size limits in plugin RPC protocol
+- SRC-058: I058 (Phase 6) - Harden hashing against symlinks / filesystem nondeterminism
+- SRC-059: I059 (Phase 6) - Secure vault file permissions (Windows ACLs)
+- SRC-060: I060 (Phase 6) - Separate keys by purpose (metadata/media/tokenization/anchor)
+- SRC-061: I061 (Phase 6) - Anchor signing (HMAC/signature) with separate key domain
+- SRC-062: I062 (Phase 6) - Add verify commands (ledger/anchors/evidence)
+- SRC-063: I063 (Phase 6) - Audit security events in ledger (key rotations, lock updates, config)
+- SRC-064: I064 (Phase 6) - Dependency pinning + hash checking (supply chain)
+- SRC-065: I065 (Phase 4) - Define canonical evidence model (EvidenceObject)
+- SRC-066: I066 (Phase 4) - Hash everything that matters (media/metadata/derived)
+- SRC-067: I067 (Phase 4) - Ledger every state transition
+- SRC-068: I068 (Phase 4) - Anchor on schedule (N entries or M minutes)
+- SRC-069: I069 (Phase 4) - Immutable per-run manifest (config+locks+versions)
+- SRC-070: I070 (Phase 4) - Citation objects carry verifiable pointers
+- SRC-071: I071 (Phase 4) - Citation resolver CLI/API
+- SRC-072: I072 (Phase 4) - Metadata immutable by default; derived never overwrites
+- SRC-073: I073 (Phase 4) - Persist derivation graphs (parent->child links)
+- SRC-074: I074 (Phase 4) - Record model identity for ML outputs
+- SRC-075: I075 (Phase 4) - Deterministic text normalization before hashing
+- SRC-076: I076 (Phase 4) - Proof bundles export (evidence + ledger slice + anchors)
+- SRC-077: I077 (Phase 4) - Replay mode validates citations without model calls
+- SRC-078: I078 (Phase 7) - FastAPI UX facade as canonical interface
+- SRC-079: I079 (Phase 7) - CLI parity: CLI calls shared UX facade functions
+- SRC-080: I080 (Phase 7) - Web Console UI (status/timeline/query/proof/plugins/keys)
+- SRC-081: I081 (Phase 7) - Alerts panel driven by journal events
+- SRC-082: I082 (Phase 7) - Local-only auth boundary (bind localhost + token)
+- SRC-083: I083 (Phase 7) - Websocket for live telemetry
+- SRC-084: I084 (Phase 0) - Split heavy ML dependencies into optional extras
+- SRC-085: I085 (Phase 0) - Make resource paths package-safe (no CWD dependence)
+- SRC-086: I086 (Phase 0) - Use OS-appropriate default data/config dirs (platformdirs)
+- SRC-087: I087 (Phase 0) - Package builtin plugins as package data
+- SRC-088: I088 (Phase 0) - Add reproducible dependency lockfile (hash-locked)
+- SRC-089: I089 (Phase 0) - Add canonical-json safety tests for journal/ledger payloads
+- SRC-090: I090 (Phase 0) - Add concurrency tests for ledger/journal append correctness
+- SRC-091: I091 (Phase 0) - Add golden chain test: ledger verify + anchor verify
+- SRC-092: I092 (Phase 0) - Add performance regression tests (capture latency/memory/query latency)
+- SRC-093: I093 (Phase 0) - Add security regression tests (DPAPI fail-closed, network guard, no raw egress)
+- SRC-094: I094 (Phase 0) - Static analysis: ruff + typing + vuln scan
+- SRC-095: I095 (Phase 0) - Doctor validates locks, storage, anchors, and network policy
+- SRC-096: I096 (Phase 1) - Fail loud on decrypt errors when encryption_required
+- SRC-097: I097 (Phase 1) - Add record type fields everywhere
+- SRC-098: I098 (Phase 1) - Add unified EventBuilder helper
+- SRC-099: I099 (Phase 1) - Stamp every journal event with run_id
+- SRC-100: I100 (Phase 1) - Cache policy snapshot hashing per run
+- SRC-101: I101 (Phase 3) - Add content_hash to metadata for every media put
+- SRC-102: I102 (Phase 3) - Track partial failures explicitly in journal/ledger
+- SRC-103: I103 (Phase 3) - Add segment sealing ledger entry after successful write
+- SRC-104: I104 (Phase 3) - Add startup recovery scanner to reconcile stores
+- SRC-105: I105 (Phase 2) - If keeping zips, use ZIP_STORED for JPEG frames
+- SRC-106: I106 (Phase 2) - If keeping zips, stream ZipFile writes to a real file
+- SRC-107: I107 (Phase 2) - Batch input events to reduce write overhead
+- SRC-108: I108 (Phase 3) - Add compact binary input log (derived) + JSON summary
+- SRC-109: I109 (Phase 2) - Add WASAPI loopback option for system audio capture
+- SRC-110: I110 (Phase 2) - Store audio as PCM/FLAC/Opus derived artifact
+- SRC-111: I111 (Phase 2) - Normalize active window process paths (device -> drive paths)
+- SRC-112: I112 (Phase 2) - Capture window.rect and monitor mapping
+- SRC-113: I113 (Phase 2) - Optional cursor position+shape capture
+- SRC-114: I114 (Phase 8) - Clipboard capture plugin (local-only, append-only)
+- SRC-115: I115 (Phase 8) - File activity capture plugin (USN journal / watcher)
+- SRC-116: I116 (Phase 5) - Model execution budgets per idle window
+- SRC-117: I117 (Phase 5) - Preemption/chunking for long jobs
+- SRC-118: I118 (Phase 4) - Index versioning for retrieval reproducibility
+- SRC-119: I119 (Phase 6) - Persist entity-tokenizer key id/version; version tokenization
+- SRC-120: I120 (Phase 6) - Ledger sanitized egress packets (hash + schema version)
+- SRC-121: I121 (Phase 7) - Egress approval workflow in UI
+- SRC-122: I122 (Phase 8) - Plugin hot-reload with hash verification and safe swap
+- SRC-123: I123 (Phase 1) - Write kernel boot ledger entry system.start
+- SRC-124: I124 (Phase 1) - Write kernel shutdown ledger entry system.stop
+- SRC-125: I125 (Phase 1) - Write crash ledger entry on next startup
+- SRC-126: I126 (Phase 0) - Make sha256_directory path sorting deterministic across OSes
+- SRC-127: I127 (Phase 4) - Record python/OS/package versions into run manifest
+- SRC-128: I128 (Phase 3) - Tooling to migrate data_dir safely (copy+verify, no delete)
+- SRC-129: I129 (Phase 3) - Disk usage forecasting (days remaining) + alerts
+- SRC-130: I130 (Phase 3) - Storage compaction for derived artifacts only
 
 # 2. Coverage_Map
-- SRC-001: [MISSING_VALUE]
+
+- SRC-001: implemented; autocapture_nx/kernel/canonical_json.py; autocapture_nx/kernel/event_builder.py; plugins/builtin/journal_basic/plugin.py; plugins/builtin/ledger_basic/plugin.py; tests/test_canonical_payloads.py
+- SRC-002: implemented; plugins/builtin/backpressure_basic/plugin.py; plugins/builtin/capture_windows/plugin.py; autocapture_nx/windows/win_capture.py; tests/test_backpressure.py; tests/test_capture_rate.py
+- SRC-003: implemented; plugins/builtin/capture_windows/plugin.py; plugins/builtin/storage_encrypted/plugin.py; plugins/builtin/storage_memory/plugin.py; tests/test_capture_streaming.py
+- SRC-004: implemented; plugins/builtin/audio_windows/plugin.py; tests/test_audio_callback_queue.py
+- SRC-005: implemented; autocapture_nx/kernel/query.py; autocapture_nx/kernel/metadata_store.py; tests/test_query_derived_records.py
+- SRC-006: implemented; autocapture_nx/kernel/ids.py; autocapture_nx/kernel/event_builder.py; plugins/builtin/capture_windows/plugin.py; plugins/builtin/audio_windows/plugin.py; plugins/builtin/input_windows/plugin.py; plugins/builtin/window_metadata_windows/plugin.py; tests/test_journal_run_id.py; tests/test_run_state_entries.py
+- SRC-007: implemented; plugins/builtin/ledger_basic/plugin.py; tests/test_ledger_journal_concurrency.py
+- SRC-008: implemented; plugins/builtin/journal_basic/plugin.py; tests/test_ledger_journal_concurrency.py
+- SRC-009: implemented; autocapture_nx/kernel/keyring.py; plugins/builtin/storage_encrypted/plugin.py; tests/test_encrypted_store_fail_loud.py
+- SRC-010: implemented; plugins/builtin/storage_encrypted/plugin.py; plugins/builtin/storage_memory/plugin.py; plugins/builtin/storage_sqlcipher/plugin.py; tests/test_storage_encrypted.py
+- SRC-011: implemented; plugins/builtin/capture_windows/plugin.py; tests/test_capture_monotonic.py
+- SRC-012: implemented; config/default.json; plugins/builtin/capture_windows/plugin.py; tests/test_capture_backend_default.py
+- SRC-013: implemented; config/default.json; plugins/builtin/embedder_stub/plugin.py; plugins/builtin/reranker_stub/plugin.py; plugins/builtin/vlm_stub/plugin.py; tests/test_model_paths_config.py
+- SRC-014: implemented; autocapture_nx/plugin_system/registry.py; tests/test_plugin_loader.py
+- SRC-015: implemented; autocapture_nx/kernel/loader.py; tests/test_contract_pins.py
+- SRC-016: implemented; autocapture_nx/capture/pipeline.py; plugins/builtin/capture_windows/plugin.py
+- SRC-017: implemented; autocapture_nx/capture/queues.py; autocapture_nx/capture/pipeline.py
+- SRC-018: implemented; autocapture_nx/capture/pipeline.py
+- SRC-019: implemented; autocapture_nx/capture/pipeline.py; autocapture_nx/windows/win_capture.py
+- SRC-020: implemented; autocapture_nx/capture/pipeline.py
+- SRC-021: implemented; autocapture_nx/capture/pipeline.py
+- SRC-022: implemented; plugins/builtin/window_metadata_windows/plugin.py; autocapture_nx/capture/pipeline.py
+- SRC-023: implemented; plugins/builtin/input_windows/plugin.py; plugins/builtin/cursor_windows/plugin.py; plugins/builtin/retrieval_basic/plugin.py; autocapture_nx/capture/pipeline.py
+- SRC-024: implemented; autocapture_nx/capture/pipeline.py
+- SRC-025: implemented; autocapture_nx/capture/pipeline.py
+- SRC-026: implemented; plugins/builtin/storage_sqlcipher/plugin.py; config/default.json
+- SRC-027: implemented; plugins/builtin/storage_sqlcipher/plugin.py
+- SRC-028: implemented; plugins/builtin/storage_encrypted/plugin.py; plugins/builtin/storage_sqlcipher/plugin.py
+- SRC-029: implemented; plugins/builtin/storage_encrypted/plugin.py; autocapture_nx/capture/pipeline.py
+- SRC-030: implemented; plugins/builtin/storage_encrypted/plugin.py; plugins/builtin/storage_sqlcipher/plugin.py; autocapture_nx/kernel/metadata_store.py
+- SRC-031: implemented; autocapture_nx/kernel/ids.py; autocapture_nx/processing/idle.py; autocapture_nx/kernel/query.py; autocapture_nx/capture/pipeline.py
+- SRC-032: implemented; plugins/builtin/storage_encrypted/plugin.py
+- SRC-033: implemented; autocapture_nx/kernel/loader.py
+- SRC-034: implemented; plugins/builtin/storage_encrypted/plugin.py; plugins/builtin/journal_basic/plugin.py; plugins/builtin/ledger_basic/plugin.py
+- SRC-035: implemented; plugins/builtin/retrieval_basic/plugin.py; autocapture/indexing/lexical.py; autocapture/indexing/vector.py
+- SRC-036: implemented; plugins/builtin/retrieval_basic/plugin.py
+- SRC-037: implemented; autocapture_nx/kernel/query.py
+- SRC-038: implemented; autocapture_nx/kernel/derived_records.py; autocapture_nx/kernel/query.py; autocapture_nx/processing/idle.py
+- SRC-039: implemented; autocapture_nx/kernel/query.py; autocapture_nx/kernel/event_builder.py
+- SRC-040: implemented; autocapture_nx/kernel/query.py
+- SRC-041: implemented; contracts/citation.schema.json; plugins/builtin/citation_basic/plugin.py; autocapture_nx/kernel/query.py
+- SRC-042: implemented; plugins/builtin/citation_basic/plugin.py
+- SRC-043: implemented; plugins/builtin/answer_basic/plugin.py
+- SRC-044: implemented; autocapture/runtime/conductor.py; autocapture/runtime/scheduler.py; autocapture/runtime/governor.py; autocapture/runtime/budgets.py; plugins/builtin/runtime_scheduler/plugin.py; plugins/builtin/runtime_governor/plugin.py
+- SRC-045: implemented; plugins/builtin/input_windows/plugin.py
+- SRC-046: implemented; autocapture_nx/capture/pipeline.py; autocapture_nx/kernel/telemetry.py; autocapture/web/routes/metrics.py
+- SRC-047: implemented; autocapture_nx/capture/pipeline.py; autocapture/runtime/conductor.py
+- SRC-048: implemented; autocapture/runtime/governor.py; autocapture/runtime/scheduler.py; autocapture/runtime/conductor.py; autocapture_nx/processing/idle.py
+- SRC-049: implemented; autocapture_nx/kernel/loader.py; autocapture_nx/plugin_system/runtime.py; autocapture_nx/plugin_system/host_runner.py; autocapture_nx/plugin_system/registry.py; config/default.json
+- SRC-050: implemented; config/default.json; autocapture_nx/plugin_system/registry.py
+- SRC-051: implemented; autocapture_nx/plugin_system/runtime.py; autocapture_nx/plugin_system/host_runner.py; autocapture_nx/plugin_system/registry.py
+- SRC-052: implemented; contracts/plugin_manifest.schema.json; plugins/builtin/*/plugin.json; autocapture_nx/plugin_system/registry.py
+- SRC-053: implemented; autocapture_nx/plugin_system/registry.py; autocapture_nx/plugin_system/host_runner.py; autocapture_nx/plugin_system/runtime.py
+- SRC-054: implemented; autocapture_nx/windows/win_sandbox.py; autocapture_nx/plugin_system/host.py; config/default.json
+- SRC-055: implemented; autocapture_nx/plugin_system/host.py
+- SRC-056: implemented; autocapture_nx/plugin_system/host.py
+- SRC-057: implemented; autocapture_nx/plugin_system/host.py; autocapture_nx/plugin_system/host_runner.py
+- SRC-058: implemented; autocapture_nx/kernel/hashing.py
+- SRC-059: implemented; autocapture_nx/windows/acl.py; autocapture_nx/kernel/crypto.py; autocapture_nx/kernel/keyring.py
+- SRC-060: implemented; autocapture_nx/kernel/keyring.py; autocapture/storage/blob_store.py; autocapture/storage/database.py; autocapture/storage/keys.py; autocapture/storage/sqlcipher.py; plugins/builtin/anchor_basic/plugin.py; plugins/builtin/egress_sanitizer/plugin.py; plugins/builtin/storage_encrypted/plugin.py
+- SRC-061: implemented; plugins/builtin/anchor_basic/plugin.py; autocapture_nx/kernel/keyring.py; autocapture/pillars/citable.py
+- SRC-062: implemented; autocapture_nx/cli.py; autocapture/pillars/citable.py; autocapture/ux/facade.py; autocapture/web/routes/verify.py; plugins/builtin/ledger_basic/plugin.py; plugins/builtin/journal_basic/plugin.py
+- SRC-063: implemented; autocapture_nx/kernel/key_rotation.py; autocapture_nx/kernel/loader.py; plugins/builtin/ledger_basic/plugin.py
+- SRC-064: implemented; autocapture_nx/kernel/loader.py; requirements.lock.json
+- SRC-065: implemented; contracts/evidence.schema.json; autocapture_nx/kernel/metadata_store.py
+- SRC-066: implemented; autocapture_nx/capture/pipeline.py; autocapture_nx/kernel/derived_records.py; plugins/builtin/window_metadata_windows/plugin.py
+- SRC-067: implemented; autocapture_nx/capture/pipeline.py
+- SRC-068: implemented; autocapture_nx/kernel/event_builder.py; config/default.json
+- SRC-069: implemented; autocapture_nx/kernel/loader.py
+- SRC-070: implemented; contracts/citation.schema.json; plugins/builtin/citation_basic/plugin.py
+- SRC-071: implemented; autocapture_nx/cli.py; autocapture/web/routes/citations.py; autocapture/ux/facade.py
+- SRC-072: implemented; autocapture_nx/kernel/metadata_store.py
+- SRC-073: implemented; autocapture_nx/kernel/derived_records.py; autocapture_nx/kernel/query.py
+- SRC-074: implemented; autocapture_nx/kernel/derived_records.py
+- SRC-075: implemented; autocapture/core/hashing.py; autocapture_nx/kernel/derived_records.py
+- SRC-076: implemented; autocapture_nx/kernel/proof_bundle.py; autocapture_nx/cli.py; autocapture/ux/facade.py
+- SRC-077: implemented; autocapture_nx/kernel/replay.py; autocapture_nx/cli.py
+- SRC-078: implemented; autocapture_nx/ux/facade.py; autocapture/web/api.py; autocapture/web/routes
+- SRC-079: implemented; autocapture_nx/cli.py; autocapture_nx/ux/facade.py
+- SRC-080: implemented; autocapture/web/ui; autocapture/web/api.py
+- SRC-081: implemented; autocapture_nx/kernel/alerts.py; autocapture/web/routes/alerts.py; autocapture/web/ui
+- SRC-082: implemented; autocapture/web/auth.py; autocapture_nx/kernel/auth.py; config/default.json
+- SRC-083: implemented; autocapture/web/routes/telemetry.py; autocapture/web/ui
+- SRC-084: implemented; pyproject.toml; plugins/builtin/*/plugin.json; tests/test_optional_deps_imports.py; tests/test_optional_dependency_imports.py
+- SRC-085: implemented; autocapture_nx/kernel/paths.py; tests/test_paths_package_safe.py; tests/test_packaged_resources.py
+- SRC-086: implemented; autocapture_nx/kernel/paths.py; tests/test_platform_paths.py; config/default.json
+- SRC-087: implemented; pyproject.toml; tests/test_packaged_resources.py; tests/test_plugin_package_data.py
+- SRC-088: implemented; requirements.lock.json; tools/generate_dep_lock.py; tools/gate_deps_lock.py
+- SRC-089: implemented; tests/test_canonical_payloads.py; tests/test_canonical_json.py; tools/gate_canon.py
+- SRC-090: implemented; tests/test_ledger_journal_concurrency.py; tools/gate_concurrency.py
+- SRC-091: implemented; tests/test_ledger_anchor_golden.py; tools/gate_ledger.py
+- SRC-092: implemented; tools/gate_perf.py; tools/run_all_tests.py
+- SRC-093: implemented; tools/gate_security.py; tests/test_network_guard.py; tests/test_plugin_network_block.py; tests/test_encrypted_store_fail_loud.py; tests/test_policy_gate.py
+- SRC-094: implemented; tools/gate_static.py; tools/gate_vuln.py; pyproject.toml; tools/run_all_tests.py
+- SRC-095: implemented; autocapture_nx/kernel/loader.py; tools/gate_doctor.py; tests/test_doctor_locks.py; tests/test_doctor_report_schema.py
+- SRC-096: implemented; autocapture_nx/kernel/keyring.py; plugins/builtin/storage_encrypted/plugin.py; plugins/builtin/storage_sqlcipher/plugin.py; tests/test_encrypted_store_fail_loud.py
+- SRC-097: implemented; autocapture_nx/kernel/metadata_store.py; plugins/builtin/capture_windows/plugin.py; plugins/builtin/window_metadata_windows/plugin.py; tests/test_metadata_record_type.py
+- SRC-098: implemented; autocapture_nx/kernel/event_builder.py; autocapture_nx/kernel/loader.py; plugins/builtin/capture_windows/plugin.py; plugins/builtin/audio_windows/plugin.py; tests/test_event_builder.py
+- SRC-099: implemented; plugins/builtin/journal_basic/plugin.py; autocapture_nx/kernel/event_builder.py; tests/test_journal_run_id.py
+- SRC-100: implemented; autocapture_nx/kernel/event_builder.py; tests/test_event_builder.py
+- SRC-101: implemented; autocapture_nx/capture/pipeline.py; plugins/builtin/audio_windows/plugin.py; plugins/builtin/input_windows/plugin.py
+- SRC-102: implemented; autocapture_nx/capture/pipeline.py
+- SRC-103: implemented; autocapture_nx/capture/pipeline.py
+- SRC-104: implemented; autocapture_nx/kernel/loader.py
+- SRC-105: implemented; autocapture_nx/capture/pipeline.py
+- SRC-106: implemented; autocapture_nx/capture/pipeline.py
+- SRC-107: implemented; plugins/builtin/input_windows/plugin.py; plugins/builtin/journal_basic/plugin.py
+- SRC-108: implemented; plugins/builtin/input_windows/plugin.py
+- SRC-109: implemented; plugins/builtin/audio_windows/plugin.py
+- SRC-110: implemented; plugins/builtin/audio_windows/plugin.py
+- SRC-111: implemented; autocapture_nx/windows/win_window.py; plugins/builtin/window_metadata_windows/plugin.py
+- SRC-112: implemented; autocapture_nx/windows/win_window.py; plugins/builtin/window_metadata_windows/plugin.py
+- SRC-113: implemented; autocapture_nx/windows/win_cursor.py; plugins/builtin/cursor_windows/plugin.py; autocapture_nx/capture/pipeline.py
+- SRC-114: implemented; plugins/builtin/clipboard_windows
+- SRC-115: implemented; plugins/builtin/file_activity_windows
+- SRC-116: implemented; autocapture/runtime/governor.py; autocapture/runtime/scheduler.py; autocapture/runtime/budgets.py; autocapture/runtime/conductor.py; autocapture_nx/processing/idle.py
+- SRC-117: implemented; autocapture/runtime/conductor.py; autocapture_nx/processing/idle.py; autocapture/research/runner.py
+- SRC-118: implemented; autocapture/indexing/manifest.py; autocapture/indexing/lexical.py; autocapture/indexing/vector.py; plugins/builtin/retrieval_basic/plugin.py
+- SRC-119: implemented; plugins/builtin/egress_sanitizer/plugin.py; plugins/builtin/storage_sqlcipher/plugin.py; plugins/builtin/storage_encrypted/plugin.py; plugins/builtin/storage_memory/plugin.py
+- SRC-120: implemented; plugins/builtin/egress_gateway/plugin.py; autocapture_nx/kernel/egress_approvals.py
+- SRC-121: implemented; autocapture_nx/kernel/egress_approvals.py; autocapture/web/routes/egress.py; autocapture/web/ui
+- SRC-122: implemented; autocapture_nx/plugin_system/registry.py; autocapture_nx/kernel/loader.py
+- SRC-123: implemented; autocapture_nx/kernel/loader.py; tests/test_run_state_entries.py
+- SRC-124: implemented; autocapture_nx/kernel/loader.py; tests/test_run_state_entries.py
+- SRC-125: implemented; autocapture_nx/kernel/loader.py; tests/test_run_state_entries.py
+- SRC-126: implemented; autocapture_nx/kernel/hashing.py; tests/test_directory_hashing.py; tests/test_hashing_directory_deterministic.py
+- SRC-127: implemented; autocapture_nx/kernel/loader.py
+- SRC-128: implemented; autocapture/storage/migrate.py; autocapture_nx/cli.py
+- SRC-129: implemented; autocapture/storage/pressure.py; autocapture/storage/forecast.py; autocapture/runtime/conductor.py; autocapture_nx/kernel/loader.py; autocapture_nx/cli.py
+- SRC-130: implemented; autocapture/storage/compaction.py; autocapture_nx/kernel/metadata_store.py; autocapture_nx/cli.py
 
 # 3. Modules
-- MOD-001: [MISSING_VALUE]
-  Sources: [SRC-001]
+- MOD-001: Blueprint coverage gate
+  Sources: [SRC-001, SRC-002, SRC-003, SRC-004, SRC-005, SRC-006, SRC-007, SRC-008, SRC-009, SRC-010, SRC-011, SRC-012, SRC-013, SRC-014, SRC-015, SRC-016, SRC-017, SRC-018, SRC-019, SRC-020, SRC-021, SRC-022, SRC-023, SRC-024, SRC-025, SRC-026, SRC-027, SRC-028, SRC-029, SRC-030, SRC-031, SRC-032, SRC-033, SRC-034, SRC-035, SRC-036, SRC-037, SRC-038, SRC-039, SRC-040, SRC-041, SRC-042, SRC-043, SRC-044, SRC-045, SRC-046, SRC-047, SRC-048, SRC-049, SRC-050, SRC-051, SRC-052, SRC-053, SRC-054, SRC-055, SRC-056, SRC-057, SRC-058, SRC-059, SRC-060, SRC-061, SRC-062, SRC-063, SRC-064, SRC-065, SRC-066, SRC-067, SRC-068, SRC-069, SRC-070, SRC-071, SRC-072, SRC-073, SRC-074, SRC-075, SRC-076, SRC-077, SRC-078, SRC-079, SRC-080, SRC-081, SRC-082, SRC-083, SRC-084, SRC-085, SRC-086, SRC-087, SRC-088, SRC-089, SRC-090, SRC-091, SRC-092, SRC-093, SRC-094, SRC-095, SRC-096, SRC-097, SRC-098, SRC-099, SRC-100, SRC-101, SRC-102, SRC-103, SRC-104, SRC-105, SRC-106, SRC-107, SRC-108, SRC-109, SRC-110, SRC-111, SRC-112, SRC-113, SRC-114, SRC-115, SRC-116, SRC-117, SRC-118, SRC-119, SRC-120, SRC-121, SRC-122, SRC-123, SRC-124, SRC-125, SRC-126, SRC-127, SRC-128, SRC-129, SRC-130]
 
-- FS-001: [MISSING_VALUE]
-  Sources: [SRC-001]
+- FS-001: Blueprint gap tracker (I001-I130)
+  Sources: [SRC-001, SRC-002, SRC-003, SRC-004, SRC-005, SRC-006, SRC-007, SRC-008, SRC-009, SRC-010, SRC-011, SRC-012, SRC-013, SRC-014, SRC-015, SRC-016, SRC-017, SRC-018, SRC-019, SRC-020, SRC-021, SRC-022, SRC-023, SRC-024, SRC-025, SRC-026, SRC-027, SRC-028, SRC-029, SRC-030, SRC-031, SRC-032, SRC-033, SRC-034, SRC-035, SRC-036, SRC-037, SRC-038, SRC-039, SRC-040, SRC-041, SRC-042, SRC-043, SRC-044, SRC-045, SRC-046, SRC-047, SRC-048, SRC-049, SRC-050, SRC-051, SRC-052, SRC-053, SRC-054, SRC-055, SRC-056, SRC-057, SRC-058, SRC-059, SRC-060, SRC-061, SRC-062, SRC-063, SRC-064, SRC-065, SRC-066, SRC-067, SRC-068, SRC-069, SRC-070, SRC-071, SRC-072, SRC-073, SRC-074, SRC-075, SRC-076, SRC-077, SRC-078, SRC-079, SRC-080, SRC-081, SRC-082, SRC-083, SRC-084, SRC-085, SRC-086, SRC-087, SRC-088, SRC-089, SRC-090, SRC-091, SRC-092, SRC-093, SRC-094, SRC-095, SRC-096, SRC-097, SRC-098, SRC-099, SRC-100, SRC-101, SRC-102, SRC-103, SRC-104, SRC-105, SRC-106, SRC-107, SRC-108, SRC-109, SRC-110, SRC-111, SRC-112, SRC-113, SRC-114, SRC-115, SRC-116, SRC-117, SRC-118, SRC-119, SRC-120, SRC-121, SRC-122, SRC-123, SRC-124, SRC-125, SRC-126, SRC-127, SRC-128, SRC-129, SRC-130]
   Sample_Table:
   | field_a | field_b |
   | row1_a  | row1_b  |
@@ -19,5 +278,5 @@ Source_Document: docs/spec/autocapture_nx_blueprint_2026-01-24.md
   | row3_a  | row3_b  |
 
 # 4. ADRs
-- ADR-001: [MISSING_VALUE]
+- ADR-001: Blueprint coverage policy
   Sources: [SRC-001]

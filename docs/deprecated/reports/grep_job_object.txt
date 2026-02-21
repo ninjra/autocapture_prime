@@ -1,0 +1,13 @@
+# rg -n /job[_ ]?object/
+./tools/blueprint_items.json:861:    "title": "Strengthen Windows job object restrictions (limits)",
+./autocapture_nx/windows/win_sandbox.py:52:def assign_job_object(pid: int) -> None:
+./docs/blueprints/autocapture_nx_blueprint.md:131:- [ ] **I054** (Phase 6) — [Strengthen Windows job object restrictions (limits)](#i054)
+./docs/blueprints/autocapture_nx_blueprint.md:2031:  - Prefer OS mechanisms (job object + restricted token) on Windows.
+./docs/blueprints/autocapture_nx_blueprint.md:2037:### I054 — Strengthen Windows job object restrictions (limits)
+./docs/blueprints/autocapture_nx_blueprint.md:2042:  - Windows job object: CPU/memory limits, kill-on-close, child restrictions
+./docs/blueprints/autocapture_nx_blueprint.md:2046:  - Add limits to job object; configure per plugin class (capture vs enrichment).
+./docs/reports/grep_capture_pipeline.txt:1545:./docs/blueprints/autocapture_nx_blueprint.md:2046:  - Add limits to job object; configure per plugin class (capture vs enrichment).
+./docs/reports/grep_capture_pipeline.txt:2318:./autocapture_nx/plugin_system/host.py:15:from autocapture_nx.windows.win_sandbox import assign_job_object
+./docs/reports/blueprint_items.md:114:| I054 | Phase 6: Security + egress hardening | Strengthen Windows job object restrictions (limits) |  |  |  |
+./autocapture_nx/plugin_system/host.py:15:from autocapture_nx.windows.win_sandbox import assign_job_object
+./autocapture_nx/plugin_system/host.py:76:        assign_job_object(self._proc.pid)

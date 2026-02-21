@@ -1,10 +1,248 @@
 {
-  "schema_version": 1,
-  "profile": "justin_full_fidelity",
+  "backpressure": {
+    "hysteresis_s": 10,
+    "max_bitrate_kbps": 8000,
+    "max_fps": 30,
+    "max_queue_depth": 5,
+    "max_segment_seconds": 120,
+    "max_step_bitrate_kbps": 1000,
+    "max_step_fps": 5,
+    "min_bitrate_kbps": 1000,
+    "min_fps": 5,
+    "min_segment_seconds": 30
+  },
+  "capture": {
+    "auto_start": false,
+    "mode_preset": "",
+    "diff_epsilon": 0,
+    "duplicate_threshold": "exact_only",
+    "always_store_fullres": true,
+    "block_fullscreen": false,
+    "active_hash_check_interval_ms": 500,
+    "presets": {
+      "memory_replacement_raw": {
+        "capture": {
+          "diff_epsilon": 0,
+          "duplicate_threshold": "exact_only",
+          "always_store_fullres": true,
+          "block_fullscreen": false,
+          "active_hash_check_interval_ms": 500,
+          "screenshot": {
+            "enabled": true,
+            "fps_target": 2,
+            "resolution": "native",
+            "dedupe": {
+              "enabled": true,
+              "hash": "sha256",
+              "sample_bytes": 0,
+              "force_interval_s": 0
+            }
+          }
+        }
+      }
+    },
+    "audio": {
+      "blocksize": 44100,
+      "channels": 2,
+      "device": null,
+      "enabled": false,
+      "encoding": "wav",
+      "ffmpeg_path": "",
+      "microphone": true,
+      "mode": "auto",
+      "queue_max": 8,
+      "sample_rate": 44100,
+      "system_audio": true
+    },
+    "cursor": {
+      "enabled": false,
+      "include_shape": true,
+      "sample_hz": 5
+    },
+    "input_tracking": {
+      "flush_interval_ms": 250,
+      "mode": "off",
+      "store_derived": true
+    },
+    "clipboard": {
+      "enabled": false,
+      "max_bytes": 200000,
+      "poll_interval_s": 0.5,
+      "redact": {
+        "action": "mask",
+        "enabled": false,
+        "patterns": []
+      }
+    },
+    "file_activity": {
+      "enabled": false,
+      "exclude_patterns": [
+        "*.tmp",
+        "*.log"
+      ],
+      "include_patterns": [],
+      "max_events_per_scan": 200,
+      "max_files": 20000,
+      "poll_interval_s": 2.0,
+      "roots": []
+    },
+    "stub": {
+      "frame_height": 720,
+      "frame_format": "jpeg",
+      "frame_width": 1280,
+      "frames_dir": "",
+      "jpeg_quality": 90,
+      "lossless": false,
+      "loop": false,
+      "max_frames": 0
+    },
+    "image": {
+      "mss_jpeg": {
+        "quality": 90
+      }
+    },
+    "video": {
+      "activity": {
+        "active_bitrate_kbps": 2000,
+        "active_fps": 10,
+        "active_jpeg_quality": 90,
+        "active_window_s": 3,
+        "assume_idle_when_missing": true,
+        "capture_when_idle": false,
+        "check_interval_s": 1,
+        "enabled": true,
+        "idle_bitrate_kbps": 2000,
+        "idle_fps": 10,
+        "idle_jpeg_quality": 90,
+        "preserve_quality": true
+      },
+      "backend": "mss",
+      "dd_nvenc": {
+        "allow_fallback": true
+      },
+      "container": "ffmpeg_mp4",
+      "dedupe": {
+        "enabled": true,
+        "hash": "blake2b",
+        "min_repeat": 1,
+        "mode": "mark_only",
+        "sample_bytes": 65536,
+        "window_ms": 1500
+      },
+      "enabled": false,
+      "ffmpeg_path": "",
+      "frame_format": "auto",
+      "include_cursor": true,
+      "include_cursor_shape": true,
+      "encoder": "auto",
+      "fps_target": 30,
+      "jpeg_quality": 90,
+      "monitor_index": 0,
+      "resolution": "native",
+      "segment_seconds": 60
+    },
+    "screenshot": {
+      "activity": {
+        "active_interval_s": 0.5,
+        "active_window_s": 300,
+        "assume_active_when_missing": true,
+        "enabled": true,
+        "idle_interval_s": 60
+      },
+      "backend": "mss",
+      "dedupe": {
+        "enabled": true,
+        "force_interval_s": 60,
+        "hash": "blake2b",
+        "sample_bytes": 0
+      },
+      "enabled": false,
+      "fps_target": 2,
+      "include_cursor": true,
+      "include_cursor_shape": true,
+      "media_fsync_policy": "bulk",
+      "render_cursor": false,
+      "monitor_index": 0,
+      "png_compress_level": 1,
+      "resolution": "native"
+    },
+    "window_metadata": {
+      "enabled": false,
+      "sample_hz": 5
+    }
+  },
+  "paths": {
+    "config_dir": "config",
+    "data_dir": "data",
+    "preferred_data_dir_windows": "D:\\autocapture"
+  },
+  "devtools": {
+    "ast_ir": {
+      "pin_path": "contracts/ir_pins.json"
+    },
+    "diffusion": {
+      "dry_run": true,
+      "k_variants": 1,
+      "hypervisor_base_url": "http://127.0.0.1:7411",
+      "hypervisor_diffusion_path": "/v1/autocapture/devtools/diffusion",
+      "hypervisor_timeout_s": 120
+    }
+  },
+  "gateway": {
+    "egress_path": "/v1/egress",
+    "openai_api_key": "",
+    "openai_base_url": "",
+    "timeout_s": 30
+  },
+  "indexing": {
+    "embedder_model": null,
+    "qdrant": {
+      "binary_path": "vendor/qdrant.exe",
+      "collection": "autocapture",
+      "health_path": "/healthz",
+      "url": "http://localhost:6333"
+    },
+    "vector_backend": "sqlite"
+  },
   "kernel": {
+    "safe_mode_fast_boot": true,
+    "safe_mode_required_capabilities": [
+      "storage.keyring",
+      "storage.metadata",
+      "storage.media",
+      "ledger.writer",
+      "journal.writer",
+      "anchor.writer"
+    ],
+    "crash_loop": {
+      "enabled": true,
+      "max_crashes": 3,
+      "window_s": 600,
+      "min_runtime_s": 0,
+      "cooldown_s": 0,
+      "reset_on_clean_shutdown": true
+    },
+    "safe_mode_overrides": {
+      "processing": {
+        "idle": {
+          "auto_start": false,
+          "enabled": false
+        },
+        "on_query": {
+          "allow_decode_extract": false
+        },
+        "sst": {
+          "enabled": false
+        }
+      },
+      "research": {
+        "enabled": false
+      }
+    },
     "required_capabilities": [
       "egress.gateway",
       "privacy.egress_sanitizer",
+      "event.builder",
       "storage.metadata",
       "storage.media",
       "storage.entity_map",
@@ -16,260 +254,1513 @@
       "answer.builder",
       "citation.validator",
       "runtime.governor",
+      "runtime.scheduler",
       "capture.backpressure",
       "observability.logger",
       "devtools.diffusion",
       "devtools.ast_ir"
-    ]
-  },
-  "runtime": {
-    "timezone": "America/Denver",
-    "active_window_s": 3,
-    "idle_window_s": 45,
-    "mode_enforcement": {
-      "suspend_workers": true,
-      "suspend_deadline_ms": 100
-    },
-    "gpu": {
-      "release_vram_on_active": true,
-      "release_vram_deadline_ms": 250
+    ],
+    "dependency_pinning": {
+      "enforce": true,
+      "allow_missing": [
+        "mypy",
+        "pynput",
+        "pywebview",
+        "ruff",
+        "sounddevice",
+        "uvicorn"
+      ]
     }
   },
-  "time": {
-    "timezone": "America/Denver",
-    "dst_tie_breaker": "earliest",
-    "relative_window_max_days": 30
+  "llm": {
+    "model": "sshleifer/tiny-gpt2"
   },
-  "backpressure": {
-    "min_fps": 5,
-    "max_fps": 30,
-    "min_bitrate_kbps": 1000,
-    "max_bitrate_kbps": 8000,
-    "min_segment_seconds": 30,
-    "max_segment_seconds": 120,
-    "hysteresis_s": 10,
-    "max_step_fps": 5,
-    "max_step_bitrate_kbps": 1000,
-    "max_queue_depth": 5
-  },
-  "performance": {
-    "startup_ms": 500,
-    "query_latency_ms": 2000,
-    "ingestion_mb_s": 50
-  },
-  "capture": {
-    "video": {
-      "enabled": true,
-      "backend": "desktop_duplication_nvenc",
-      "segment_seconds": 60,
-      "fps_target": 30,
-      "resolution": "native"
-    },
-    "audio": {
-      "system_audio": true,
-      "microphone": true
-    },
-    "window_metadata": {
-      "enabled": true,
-      "sample_hz": 5
-    },
-    "input_tracking": {
-      "mode": "raw",
-      "flush_interval_ms": 250
-    }
-  },
-  "processing": {
-    "idle": {
-      "max_concurrency_gpu": 1,
-      "max_concurrency_cpu": 2
-    },
-    "on_query": {
-      "allow_decode_extract": true,
-      "max_window_minutes": 120
-    }
-  },
-  "storage": {
-    "data_dir": "data",
-    "encryption_required": true,
-    "crypto": {
-      "backend": "aesgcm",
-      "root_key_path": "data/vault/root.key",
-      "keyring_path": "data/vault/keyring.json"
-    },
-    "retention": {
-      "evidence": "infinite"
-    },
-    "disk_pressure": {
-      "warn_free_gb": 200,
-      "critical_free_gb": 50
-    },
-    "entity_map": {
-      "persist": true
-    },
-    "anchor": {
-      "path": "data_anchor/anchors.ndjson",
-      "use_dpapi": true
-    }
-  },
-  "privacy": {
-    "egress": {
-      "enabled": true,
-      "default_sanitize": true,
-      "allow_raw_egress": false,
-      "reasoning_packet_only": true,
-      "token_scope": "per_provider",
-      "token_format": "⟦ENT:{type}:{token}⟧",
-      "recognizers": {
-        "ssn": true,
-        "credit_card": true,
-        "email": true,
-        "phone": true,
-        "ipv4": true,
-        "url": true,
-        "filepath": true,
-        "names": true,
-        "custom_regex": []
-      }
-    },
-    "cloud": {
-      "enabled": false,
-      "allow_images": false
-    }
+  "models": {
+    "ocr_lang": null,
+    "ocr_oem": null,
+    "ocr_path": null,
+    "ocr_psm": null,
+    "reranker_path": null,
+    "vlm_max_new_tokens": 160,
+    "vlm_path": null,
+    "vlm_prompt": "Describe the screen contents concisely."
   },
   "observability": {
     "allow_evidence": false,
-    "allowlist_keys": ["event", "level", "message"]
+    "allowlist_keys": [
+      "event",
+      "level",
+      "message"
+    ]
+  },
+  "alerts": {
+    "enabled": true,
+    "max_records": 200,
+    "rules": {
+      "capture.backend_fallback": {
+        "severity": "warning",
+        "title": "Capture backend fallback"
+      },
+      "capture.degrade": {
+        "severity": "warning",
+        "title": "Capture degraded"
+      },
+      "capture.drop": {
+        "severity": "warning",
+        "title": "Capture dropped"
+      },
+      "capture.silence": {
+        "severity": "critical",
+        "title": "Capture silent while active"
+      },
+      "capture.restore": {
+        "severity": "info",
+        "title": "Capture restored"
+      },
+      "disk.critical": {
+        "severity": "critical",
+        "title": "Disk critical"
+      },
+      "disk.pressure": {
+        "severity": "warning",
+        "title": "Disk pressure"
+      },
+      "processing.watchdog.error": {
+        "severity": "warning",
+        "title": "Processing watchdog error"
+      },
+      "processing.watchdog.restore": {
+        "severity": "info",
+        "title": "Processing watchdog restored"
+      },
+      "processing.watchdog.stalled": {
+        "severity": "critical",
+        "title": "Processing watchdog stalled"
+      }
+    }
+  },
+  "performance": {
+    "capture_age_s": 10,
+    "capture_lag_p95_ms": 1500,
+    "capture_queue_p95": 3,
+    "error_budget_pct": 1.0,
+    "ingestion_mb_s": 50,
+    "memory_ceiling_mb": 768,
+    "query_latency_ms": 2000,
+    "startup_ms": 1000,
+    "state_layer": {
+      "ingestion_latency_regression_pct": 10,
+      "query_p95_ms": 1500,
+      "storage_growth_mb_per_day": 250
+    }
   },
   "plugins": {
-    "safe_mode": false,
     "allowlist": [
-      "builtin.egress.gateway",
-      "builtin.privacy.egress_sanitizer",
-      "builtin.storage.sqlcipher",
-      "builtin.storage.encrypted",
       "builtin.anchor.basic",
-      "builtin.ledger.basic",
-      "builtin.journal.basic",
-      "builtin.retrieval.basic",
-      "builtin.time.advanced",
       "builtin.answer.basic",
-      "builtin.citation.basic",
-      "builtin.runtime.governor",
       "builtin.backpressure.basic",
-      "builtin.observability.basic",
-      "builtin.devtools.diffusion",
+      "builtin.capture.audio.windows",
+      "builtin.capture.screenshot.windows",
+      "builtin.capture.basic",
+      "builtin.capture.windows",
+      "builtin.cursor.windows",
+      "builtin.citation.basic",
       "builtin.devtools.ast_ir",
+      "builtin.devtools.diffusion",
+      "builtin.egress.gateway",
+      "builtin.embedder.basic",
+      "builtin.journal.basic",
+      "builtin.ledger.basic",
+      "builtin.observation.graph",
+      "builtin.sst.qa.answers",
       "builtin.meta.configurator.noop",
       "builtin.meta.policy.noop",
-      "builtin.capture.windows",
-      "builtin.capture.audio.windows",
-      "builtin.tracking.input.windows",
-      "builtin.window.metadata.windows",
-      "builtin.capture.stub",
-      "builtin.ocr.stub",
-      "builtin.embedder.stub",
-      "builtin.reranker.stub",
-      "builtin.vlm.stub"
-    ],
-    "default_pack": [
-      "builtin.egress.gateway",
-      "builtin.privacy.egress_sanitizer",
-      "builtin.storage.sqlcipher",
-      "builtin.anchor.basic",
-      "builtin.ledger.basic",
-      "builtin.journal.basic",
-      "builtin.retrieval.basic",
-      "builtin.time.advanced",
-      "builtin.answer.basic",
-      "builtin.citation.basic",
-      "builtin.runtime.governor",
-      "builtin.backpressure.basic",
       "builtin.observability.basic",
-      "builtin.devtools.diffusion",
-      "builtin.devtools.ast_ir",
-      "builtin.capture.windows",
-      "builtin.capture.audio.windows",
+      "builtin.ocr.basic",
+      "builtin.ocr.rapid",
+      "builtin.privacy.egress_sanitizer",
+      "builtin.processing.sst.pipeline",
+      "builtin.processing.sst.uia_context",
+      "builtin.processing.sst.ui_vlm",
+      "builtin.prompt.bundle.default",
+      "builtin.reranker.basic",
+      "builtin.retrieval.basic",
+      "builtin.runtime.governor",
+      "builtin.runtime.scheduler",
+      "builtin.storage.encrypted",
+      "builtin.storage.sqlcipher",
+      "builtin.time.advanced",
       "builtin.tracking.input.windows",
+      "builtin.tracking.clipboard.windows",
+      "builtin.tracking.file_activity.windows",
+      "builtin.vlm.basic",
+      "builtin.vlm.deepseek_ocr2",
+      "builtin.vlm.qwen2_vl_7b",
+      "builtin.vlm.qwen2_vl_2b",
+      "builtin.vlm.llava_1_5_7b",
+      "builtin.vlm.minicpm_v_2_6",
+      "builtin.vlm.vllm_localhost",
       "builtin.window.metadata.windows",
-      "builtin.ocr.stub",
-      "builtin.embedder.stub",
-      "builtin.reranker.stub",
-      "builtin.vlm.stub"
+      "mx.core.capture_win",
+      "mx.core.compression_and_verify",
+      "mx.core.egress_sanitizer",
+      "mx.core.embed_local",
+      "mx.core.export_import",
+      "mx.core.llm_local",
+      "mx.core.llm_openai_compat",
+      "mx.core.ocr_local",
+      "mx.core.retrieval_tiers",
+      "mx.core.storage_sqlite",
+      "mx.core.vector_local",
+      "mx.core.web_ui",
+      "mx.prompts.default",
+      "mx.research.default",
+      "mx.training.default",
+      "builtin.sst.preprocess.normalize",
+      "builtin.sst.preprocess.tile",
+      "builtin.sst.ocr.onnx",
+      "builtin.sst.ui.parse",
+      "builtin.sst.layout.assemble",
+      "builtin.sst.extract.table",
+      "builtin.sst.extract.spreadsheet",
+      "builtin.sst.extract.code",
+      "builtin.sst.extract.chart",
+      "builtin.sst.track.cursor",
+      "builtin.sst.build.state",
+      "builtin.sst.match.ids",
+      "builtin.sst.temporal.segment",
+      "builtin.sst.build.delta",
+      "builtin.sst.infer.action",
+      "builtin.sst.compliance.redact",
+      "builtin.sst.persist",
+      "builtin.sst.index",
+      "builtin.screen.parse.v1",
+      "builtin.screen.index.v1",
+      "builtin.screen.answer.v1"
+    ],
+    "capabilities": {
+      "anchor.writer": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.anchor.basic"
+        ],
+        "provider_ids": []
+      },
+      "answer.builder": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.answer.basic"
+        ],
+        "provider_ids": []
+      },
+      "capture.audio": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.capture.audio.windows"
+        ],
+        "provider_ids": []
+      },
+      "capture.backpressure": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.backpressure.basic"
+        ],
+        "provider_ids": []
+      },
+      "capture.screenshot": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.capture.screenshot.windows"
+        ],
+        "provider_ids": []
+      },
+      "capture.source": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.capture.windows",
+          "builtin.capture.basic"
+        ],
+        "provider_ids": []
+      },
+      "citation.validator": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.citation.basic"
+        ],
+        "provider_ids": []
+      },
+      "devtools.ast_ir": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.devtools.ast_ir"
+        ],
+        "provider_ids": []
+      },
+      "devtools.diffusion": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.devtools.diffusion"
+        ],
+        "provider_ids": []
+      },
+      "egress.gateway": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.egress.gateway"
+        ],
+        "provider_ids": []
+      },
+      "embedder.text": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.embedder.basic"
+        ],
+        "provider_ids": []
+      },
+      "journal.writer": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.journal.basic"
+        ],
+        "provider_ids": []
+      },
+      "ledger.writer": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.ledger.basic"
+        ],
+        "provider_ids": []
+      },
+      "observability.logger": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.observability.basic"
+        ],
+        "provider_ids": []
+      },
+      "ocr.engine": {
+        "fanout": true,
+        "max_providers": 8,
+        "mode": "multi",
+        "preferred": [
+          "mx.core.ocr_local",
+          "builtin.ocr.basic"
+        ],
+        "provider_ids": []
+      },
+      "privacy.egress_sanitizer": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.privacy.egress_sanitizer"
+        ],
+        "provider_ids": []
+      },
+      "processing.pipeline": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.processing.sst.pipeline"
+        ],
+        "provider_ids": []
+      },
+      "processing.stage.hooks": {
+        "fanout": true,
+        "max_providers": 16,
+        "mode": "multi",
+        "preferred": [],
+        "provider_ids": []
+      },
+      "reranker": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.reranker.basic"
+        ],
+        "provider_ids": []
+      },
+      "retrieval.strategy": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.retrieval.basic"
+        ],
+        "provider_ids": []
+      },
+      "runtime.governor": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.runtime.governor"
+        ],
+        "provider_ids": []
+      },
+      "runtime.scheduler": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.runtime.scheduler"
+        ],
+        "provider_ids": []
+      },
+      "storage.entity_map": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.storage.sqlcipher",
+          "builtin.storage.encrypted",
+          "builtin.storage.memory"
+        ],
+        "provider_ids": []
+      },
+      "storage.keyring": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.storage.sqlcipher",
+          "builtin.storage.encrypted"
+        ],
+        "provider_ids": []
+      },
+      "storage.media": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.storage.sqlcipher",
+          "builtin.storage.encrypted",
+          "builtin.storage.memory"
+        ],
+        "provider_ids": []
+      },
+      "storage.metadata": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.storage.sqlcipher",
+          "builtin.storage.encrypted",
+          "builtin.storage.memory"
+        ],
+        "provider_ids": []
+      },
+      "time.intent_parser": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.time.advanced"
+        ],
+        "provider_ids": []
+      },
+      "tracking.cursor": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.cursor.windows"
+        ],
+        "provider_ids": []
+      },
+      "tracking.clipboard": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.tracking.clipboard.windows"
+        ],
+        "provider_ids": []
+      },
+      "tracking.file_activity": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.tracking.file_activity.windows"
+        ],
+        "provider_ids": []
+      },
+      "tracking.input": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.tracking.input.windows"
+        ],
+        "provider_ids": []
+      },
+      "vision.extractor": {
+        "fanout": true,
+        "max_providers": 8,
+        "mode": "multi",
+        "preferred": [
+          "builtin.vlm.vllm_localhost",
+          "builtin.vlm.basic"
+        ],
+        "provider_ids": []
+      },
+      "screen.parse.v1": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.screen.parse.v1"
+        ],
+        "provider_ids": []
+      },
+      "screen.index.v1": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.screen.index.v1"
+        ],
+        "provider_ids": []
+      },
+      "screen.answer.v1": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.screen.answer.v1"
+        ],
+        "provider_ids": []
+      },
+      "window.metadata": {
+        "fanout": false,
+        "max_providers": 1,
+        "mode": "single",
+        "preferred": [
+          "builtin.window.metadata.windows"
+        ],
+        "provider_ids": []
+      }
+    },
+    "failure_ordering": {
+      "enabled": true,
+      "min_calls": 3
+    },
+    "conflicts": {
+      "allow_pairs": [],
+      "enforce": true
+    },
+    "default_pack": [
+      "builtin.anchor.basic",
+      "builtin.answer.basic",
+      "builtin.backpressure.basic",
+      "builtin.capture.audio.windows",
+      "builtin.capture.screenshot.windows",
+      "builtin.capture.windows",
+      "builtin.citation.basic",
+      "builtin.devtools.ast_ir",
+      "builtin.devtools.diffusion",
+      "builtin.egress.gateway",
+      "builtin.embedder.basic",
+      "builtin.journal.basic",
+      "builtin.ledger.basic",
+      "builtin.observability.basic",
+      "builtin.observation.graph",
+      "builtin.ocr.basic",
+      "builtin.privacy.egress_sanitizer",
+      "builtin.screen.parse.v1",
+      "builtin.screen.index.v1",
+      "builtin.screen.answer.v1",
+      "builtin.processing.sst.pipeline",
+      "builtin.processing.sst.uia_context",
+      "builtin.prompt.bundle.default",
+      "builtin.reranker.basic",
+      "builtin.retrieval.basic",
+      "builtin.state.jepa_like",
+      "builtin.state.vector.linear",
+      "builtin.state.vector.sqlite_ts",
+      "builtin.state.vector.hnsw",
+      "builtin.state.evidence.compiler",
+      "builtin.state.retrieval",
+      "builtin.state.policy",
+      "builtin.state.workflow.miner",
+      "builtin.state.anomaly",
+      "builtin.state.jepa.training",
+      "builtin.storage.sqlcipher",
+      "builtin.time.advanced",
+      "builtin.tracking.input.windows",
+      "builtin.vlm.basic",
+      "builtin.vlm.vllm_localhost",
+      "builtin.window.metadata.windows",
+      "mx.core.capture_win",
+      "mx.core.compression_and_verify",
+      "mx.core.egress_sanitizer",
+      "mx.core.embed_local",
+      "mx.core.export_import",
+      "mx.core.llm_local",
+      "mx.core.llm_openai_compat",
+      "mx.core.ocr_local",
+      "mx.core.retrieval_tiers",
+      "mx.core.storage_sqlite",
+      "mx.core.vector_local",
+      "mx.core.web_ui",
+      "mx.prompts.default",
+      "mx.research.default",
+      "mx.training.default"
     ],
     "enabled": {
-      "builtin.egress.gateway": true,
-      "builtin.privacy.egress_sanitizer": true,
-      "builtin.storage.sqlcipher": false,
-      "builtin.storage.encrypted": true,
       "builtin.anchor.basic": true,
-      "builtin.ledger.basic": true,
-      "builtin.journal.basic": true,
-      "builtin.retrieval.basic": true,
-      "builtin.time.advanced": true,
       "builtin.answer.basic": true,
-      "builtin.citation.basic": true,
-      "builtin.runtime.governor": true,
       "builtin.backpressure.basic": true,
-      "builtin.observability.basic": true,
-      "builtin.devtools.diffusion": true,
+      "builtin.capture.audio.windows": false,
+      "builtin.capture.basic": false,
+      "builtin.capture.screenshot.windows": false,
+      "builtin.capture.windows": false,
+      "builtin.citation.basic": true,
+      "builtin.cursor.windows": false,
       "builtin.devtools.ast_ir": true,
-      "builtin.capture.windows": true,
-      "builtin.capture.audio.windows": true,
-      "builtin.tracking.input.windows": true,
-      "builtin.window.metadata.windows": true,
+      "builtin.devtools.diffusion": true,
+      "builtin.egress.gateway": true,
+      "builtin.embedder.basic": true,
+      "builtin.journal.basic": true,
+      "builtin.ledger.basic": true,
+      "builtin.observation.graph": true,
       "builtin.meta.configurator.noop": false,
       "builtin.meta.policy.noop": false,
-      "builtin.capture.stub": false,
-      "builtin.ocr.stub": true,
-      "builtin.embedder.stub": true,
-      "builtin.reranker.stub": true,
-      "builtin.vlm.stub": true
+      "builtin.observability.basic": true,
+      "builtin.ocr.basic": true,
+      "builtin.privacy.egress_sanitizer": true,
+      "builtin.screen.parse.v1": true,
+      "builtin.screen.index.v1": true,
+      "builtin.screen.answer.v1": true,
+      "builtin.processing.sst.pipeline": true,
+      "builtin.processing.sst.uia_context": true,
+      "builtin.prompt.bundle.default": true,
+      "builtin.research.default": false,
+      "builtin.processing.sst.ui_vlm": true,
+      "builtin.reranker.basic": true,
+      "builtin.retrieval.basic": true,
+      "builtin.state.jepa_like": true,
+      "builtin.state.vector.linear": false,
+      "builtin.state.vector.sqlite_ts": true,
+      "builtin.state.vector.hnsw": true,
+      "builtin.state.evidence.compiler": true,
+      "builtin.state.retrieval": true,
+      "builtin.state.policy": true,
+      "builtin.state.workflow.miner": false,
+      "builtin.state.anomaly": false,
+      "builtin.state.jepa.training": false,
+      "builtin.runtime.governor": false,
+      "builtin.runtime.scheduler": false,
+      "builtin.sst.build.delta": false,
+      "builtin.sst.build.state": false,
+      "builtin.sst.compliance.redact": false,
+      "builtin.sst.extract.chart": false,
+      "builtin.sst.extract.code": false,
+      "builtin.sst.extract.spreadsheet": false,
+      "builtin.sst.extract.table": false,
+      "builtin.sst.index": false,
+      "builtin.sst.infer.action": false,
+      "builtin.sst.layout.assemble": false,
+      "builtin.sst.match.ids": false,
+      "builtin.sst.ocr.onnx": false,
+      "builtin.sst.persist": false,
+      "builtin.sst.preprocess.normalize": false,
+      "builtin.sst.preprocess.tile": false,
+      "builtin.sst.temporal.segment": false,
+      "builtin.sst.track.cursor": false,
+      "builtin.sst.ui.parse": false,
+      "builtin.sst.qa.answers": false,
+      "builtin.storage.encrypted": false,
+      "builtin.storage.sqlcipher": true,
+      "builtin.time.advanced": true,
+      "builtin.tracking.input.windows": false,
+      "builtin.tracking.clipboard.windows": false,
+      "builtin.tracking.file_activity.windows": false,
+      "builtin.vlm.basic": true,
+      "builtin.vlm.vllm_localhost": true,
+      "builtin.window.metadata.windows": false
     },
-    "search_paths": [],
+    "settings": {
+      "builtin.processing.sst.uia_context": {
+        "dataroot": "/mnt/d/autocapture",
+        "allow_latest_snapshot_fallback": true,
+        "require_hash_match": true,
+        "max_focus_nodes": 64,
+        "max_context_nodes": 96,
+        "max_operable_nodes": 128,
+        "drop_offscreen": true
+      }
+    },
+    "filesystem_defaults": {
+      "read": [
+        "{repo_root}",
+        "{run_dir}",
+        "{metadata_db_path}",
+        "{audit_db_path}",
+        "{lexical_db_path}",
+        "{vector_db_path}",
+        "{state_tape_db_path}",
+        "{state_vector_db_path}"
+      ],
+      "readwrite": [
+        "{data_dir}",
+        "{run_dir}"
+      ]
+    },
+    "filesystem_policies": {
+      "builtin.anchor.basic": {
+        "readwrite": [
+          "{anchor_dir}"
+        ]
+      },
+      "builtin.observability.basic": {
+        "readwrite": [
+          "{data_dir}"
+        ]
+      },
+      "builtin.storage.encrypted": {
+        "readwrite": [
+          "{data_dir}",
+          "{metadata_db_path}",
+          "{media_dir}",
+          "{blob_dir}",
+          "{spool_dir}",
+          "{lexical_db_path}",
+          "{vector_db_path}",
+          "{state_tape_db_path}",
+          "{state_vector_db_path}",
+          "{keyring_dir}",
+          "{root_key_dir}"
+        ]
+      },
+      "builtin.storage.sqlcipher": {
+        "readwrite": [
+          "{data_dir}",
+          "{metadata_db_path}",
+          "{media_dir}",
+          "{blob_dir}",
+          "{spool_dir}",
+          "{lexical_db_path}",
+          "{vector_db_path}",
+          "{state_tape_db_path}",
+          "{state_vector_db_path}",
+          "{keyring_dir}",
+          "{root_key_dir}"
+        ]
+      },
+      "builtin.storage.memory": {
+        "readwrite": [
+          "{data_dir}"
+        ]
+      },
+      "builtin.ledger.basic": {
+        "readwrite": [
+          "{data_dir}"
+        ]
+      },
+      "builtin.journal.basic": {
+        "readwrite": [
+          "{data_dir}"
+        ]
+      },
+      "builtin.citation.basic": {
+        "read": [
+          "{data_dir}",
+          "{anchor_dir}"
+        ]
+      },
+      "builtin.egress.gateway": {
+        "read": [
+          "{repo_root}/contracts"
+        ]
+      },
+      "builtin.privacy.egress_sanitizer": {
+        "readwrite": [
+          "{keyring_dir}",
+          "{root_key_dir}"
+        ]
+      },
+      "builtin.devtools.ast_ir": {
+        "read": [
+          "{repo_root}/autocapture_nx",
+          "{repo_root}/contracts/ir_pins.json"
+        ],
+        "readwrite": [
+          "{run_dir}"
+        ]
+      },
+      "builtin.devtools.diffusion": {
+        "read": [
+          "{repo_root}/autocapture_nx"
+        ],
+        "readwrite": [
+          "{repo_root}/artifacts/devtools/diffusion_runs"
+        ]
+      },
+      "builtin.vlm.qwen2_vl_2b": {
+        "read": [
+          "{data_dir}",
+          "/dev",
+          "/dev/null",
+          "/proc",
+          "/tmp",
+          "/mnt/d/autocapture/models"
+        ],
+        "readwrite": [
+          "{data_dir}",
+          "/dev",
+          "/dev/null",
+          "/tmp"
+        ]
+      }
+    },
+    "hosting": {
+      "cache_dir": "data/cache/plugins",
+      "inproc_allowlist": [],
+      "inproc_justifications": {},
+      "job_limits": {
+        "cpu_time_ms": 60000,
+        "max_memory_mb": 512,
+        "max_processes": 1
+      },
+      "mode": "subprocess",
+      "wsl_force_lazy_start": true,
+      "wsl_force_inproc": true,
+      "subprocess_spawn_concurrency": 1,
+      "subprocess_max_hosts": 2,
+      "subprocess_idle_ttl_s": 10.0,
+      "rpc_max_message_bytes": 20000000,
+      "rpc_failure_limit": 3,
+      "rpc_failure_window_s": 60,
+      "rpc_failure_cooldown_s": 30,
+      "rpc_timeout_limit": 3,
+      "rpc_timeout_s": 10,
+      "rpc_startup_timeout_s": 60,
+      "rpc_timeout_window_s": 60,
+      "rpc_watchdog_backoff_s": 0.2,
+      "rpc_watchdog_restart_max": 3,
+      "offline_env": true,
+      "sanitize_env": true
+    },
+    "hot_reload": {
+      "allowlist": [],
+      "blocklist": [],
+      "enabled": true
+    },
     "locks": {
       "enforce": true,
       "lockfile": "config/plugin_locks.json"
     },
-    "hosting": {
-      "mode": "subprocess",
-      "inproc_allowlist": [
-        "builtin.egress.gateway",
-        "builtin.privacy.egress_sanitizer",
-        "builtin.storage.sqlcipher",
-        "builtin.storage.encrypted",
-        "builtin.ledger.basic",
-        "builtin.journal.basic",
-        "builtin.anchor.basic",
-        "builtin.capture.windows",
-        "builtin.capture.audio.windows",
-        "builtin.tracking.input.windows",
-        "builtin.window.metadata.windows",
-        "builtin.backpressure.basic",
-        "builtin.runtime.governor",
-        "builtin.observability.basic",
-        "builtin.retrieval.basic",
-        "builtin.time.advanced",
-        "builtin.answer.basic",
-        "builtin.citation.basic",
-        "builtin.devtools.diffusion",
-        "builtin.devtools.ast_ir"
-      ]
-    },
-    "permissions": {
-      "network_allowed_plugin_ids": ["builtin.egress.gateway"]
-    },
     "meta": {
       "configurator_allowed": [],
       "policy_allowed": []
+    },
+    "permissions": {
+      "network_allowed_plugin_ids": [
+        "builtin.egress.gateway"
+      ],
+      "localhost_allowed_plugin_ids": [
+        "builtin.vlm.vllm_localhost"
+      ]
+    },
+    "approvals": {
+      "required": false
+    },
+    "safe_mode": false,
+    "safe_mode_minimal": false,
+    "search_paths": [
+      "autocapture_plugins"
+    ]
+  },
+  "privacy": {
+    "capture": {
+      "require_consent": true
+    },
+    "cloud": {
+      "allow_images": false,
+      "enabled": false
+    },
+    "egress": {
+      "allow_raw_egress": false,
+      "approval_required": true,
+      "approval_store_path": "data/egress/approvals.json",
+      "approval_ttl_s": 300,
+      "destination_allowlist": [],
+      "default_sanitize": true,
+      "enabled": true,
+      "policy_id": "",
+      "reasoning_packet_only": true,
+      "recognizers": {
+        "credit_card": true,
+        "custom_regex": [],
+        "email": true,
+        "filepath": true,
+        "ipv4": true,
+        "names": true,
+        "phone": true,
+        "ssn": true,
+        "url": true
+      },
+      "token_format": "\u27e6ENT:{type}:{token}\u27e7",
+      "token_scope": "per_provider"
     }
   },
-  "devtools": {
-    "diffusion": {
-      "k_variants": 1,
-      "dry_run": true
+  "processing": {
+    "idle": {
+      "auto_start": true,
+      "enabled": true,
+      "adaptive_parallelism": {
+        "enabled": true,
+        "cpu_min": 1,
+        "cpu_max": 4,
+        "cpu_step_up": 1,
+        "cpu_step_down": 1,
+        "batch_per_worker": 3,
+        "items_per_worker": 20,
+        "batch_min": 3,
+        "batch_max": 18,
+        "items_min": 20,
+        "items_max": 120,
+        "low_watermark": 0.65,
+        "high_watermark": 0.9
+      },
+      "intelligent_batch": {
+        "enabled": true,
+        "defer_vlm_on_hash_repeat": true,
+        "hash_repeat_window": 8,
+        "max_vlm_records_per_run": 0,
+        "max_pipeline_records_per_run": 0
+      },
+      "sla_control": {
+        "enabled": true,
+        "retention_horizon_hours": 144,
+        "lag_warn_ratio": 0.8,
+        "cpu_step_up_on_risk": 1
+      },
+      "extractors": {
+        "ocr": true,
+        "vlm": true
+      },
+      "max_concurrency_cpu": 2,
+      "max_concurrency_gpu": 1,
+      "batch_size": 6,
+      "max_items_per_run": 20,
+      "max_seconds_per_run": 30,
+      "sleep_ms": 2000
     },
-    "ast_ir": {
-      "pin_path": "contracts/ir_pins.json"
+    "on_query": {
+      "allow_decode_extract": false,
+      "extractors": {
+        "ocr": true,
+        "vlm": false
+      },
+      "max_window_minutes": 120,
+      "require_idle": true
+    },
+    "state_layer": {
+      "enabled": true,
+      "query_enabled": true,
+      "emit_frame_evidence": true,
+      "segment_frame_index": 0,
+      "builder_plugin_id": "builtin.state.jepa_like",
+      "vector_index_plugin_id": "builtin.state.vector.sqlite_ts",
+      "evidence_compiler_plugin_id": "builtin.state.evidence.compiler",
+      "retrieval_plugin_id": "builtin.state.retrieval",
+      "policy_plugin_id": "builtin.state.policy",
+      "workflow_miner_plugin_id": "builtin.state.workflow.miner",
+      "anomaly_plugin_id": "builtin.state.anomaly",
+      "training_plugin_id": "builtin.state.jepa.training",
+      "windowing_mode": "fixed_duration",
+      "window_ms": 5000,
+      "max_evidence_refs": 3,
+      "builder": {
+        "text_weight": 1.0,
+        "vision_weight": 0.6,
+        "layout_weight": 0.4,
+        "input_weight": 0.2
+      },
+      "index": {
+        "top_k": 5,
+        "min_score": 0.1,
+        "max_candidates": 200
+      },
+      "evidence": {
+        "max_hits": 5,
+        "max_evidence_per_hit": 3,
+        "max_snippets_per_hit": 2,
+        "max_snippet_chars": 280
+      },
+      "policy": {
+        "allow_raw_media": false,
+        "allow_text_export": true,
+        "redact_text": false,
+        "app_allowlist": [],
+        "app_denylist": []
+      },
+      "anomaly": {
+        "pred_error_threshold": 0.4,
+        "max_alerts_per_run": 25
+      },
+      "workflow": {
+        "min_support": 2,
+        "min_len": 2,
+        "max_len": 4,
+        "max_workflows": 5,
+        "max_gap_ms": 300000,
+        "seed": ""
+      },
+      "training": {
+        "latent_dim": 64,
+        "learning_rate": 0.01,
+        "epochs": 3,
+        "max_samples": 200,
+        "init_scale": 0.02,
+        "weight_scale": 1000000,
+        "error_clip": 1.0,
+        "activation": "tanh",
+        "projection_seed": "",
+        "seed": "",
+        "auto_approve": false,
+        "fallback_enabled": true,
+        "retention": {
+          "enabled": false,
+          "max_active_models": 3,
+          "archive_unapproved": false,
+          "archive_dir": ""
+        }
+      },
+      "batch": {
+        "max_states_per_run": 200,
+        "overlap_states": 1
+      },
+      "features": {
+        "index_enabled": true,
+        "workflow_enabled": false,
+        "anomaly_enabled": false,
+        "training_enabled": true
+      }
+    },
+    "watchdog": {
+      "enabled": true,
+      "stall_seconds": 300,
+      "min_idle_seconds": 120
+    },
+    "sst": {
+      "chart_min_ticks": 2,
+      "code_detect_caret": false,
+      "code_detect_selection": false,
+      "code_min_keywords": 1,
+      "cursor_detect": {
+        "downscale": 5000,
+        "enabled": false,
+        "scales": [
+          7500,
+          10000,
+          12500
+        ],
+        "stride_px": 4,
+        "threshold": 6500
+      },
+      "d_boundary": 12,
+      "d_stable": 4,
+      "delta_bbox_shift_px": 24,
+      "delta_table_match_iou_bp": 3000,
+      "diff_threshold_bp": 1800,
+      "enabled": true,
+      "heavy_always": false,
+      "heavy_on_boundary": true,
+      "layout_align_tol_px": 48,
+      "layout_block_gap_px": 28,
+      "layout_line_y_px": 12,
+      "ocr_max_patches": 64,
+      "ocr_max_tokens": 4000,
+      "ocr_min_conf_bp": 3500,
+      "ocr_nms_iou_bp": 7000,
+      "persist": {
+        "mode": "shadow"
+      },
+      "phash_downscale": 32,
+      "phash_size": 8,
+      "redact_denylist": [],
+      "redact_enabled": true,
+      "schema_version": 1,
+      "segment_downscale_px": 64,
+      "sheet_header_scan_rows": 2,
+      "stage_providers": {
+        "build.delta": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "build.state": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "compliance.redact": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "extract.chart": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "extract.code": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "extract.spreadsheet": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "extract.table": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "index.text": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "infer.action": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "ingest.frame": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "layout.assemble": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "match.ids": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "ocr.onnx": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "persist.bundle": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "preprocess.normalize": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "preprocess.tile": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "temporal.segment": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "track.cursor": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "ui.parse": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        },
+        "vision.vlm": {
+          "enabled": true,
+          "fanout": true,
+          "max_providers": 0,
+          "provider_ids": []
+        }
+      },
+      "strip_alpha": true,
+      "table_col_gap_px": 36,
+      "table_max_cells": 2500,
+      "table_min_cols": 2,
+      "table_min_rows": 2,
+      "table_row_gap_px": 18,
+      "temporal_segment": {
+        "mode": "shadow"
+      },
+      "tile_add_full_frame": true,
+      "tile_max_px": 1024,
+      "tile_overlap_px": 64,
+      "tile_refine_cluster_gap_px": 48,
+      "tile_refine_enabled": false,
+      "tile_refine_low_conf_bp": 6500,
+      "tile_refine_max_patches": 12,
+      "tile_refine_padding_px": 24,
+      "ui_parse": {
+        "enabled": true,
+        "fallback_detector": false,
+        "max_providers": 1,
+        "mode": "vlm_json"
+      },
+      "ui_vlm": {
+        "enabled": true,
+        "max_providers": 1,
+        "prefer_live_vlm": true,
+        "use_cached_tokens": false
+      }
     }
+  },
+  "profile": "justin_full_fidelity",
+  "promptops": {
+    "banned_patterns": [
+      "http://",
+      "https://",
+      "curl ",
+      "wget ",
+      "Invoke-WebRequest",
+      "os.system",
+      "subprocess"
+    ],
+    "bundle_name": "default",
+    "bundle_root": "promptops/sources",
+    "enabled": true,
+    "examples": {},
+    "examples_path": "data/promptops/examples.json",
+    "eval": {
+      "enabled": false,
+      "cases_path": "tests/fixtures/promptops_eval_cases.json",
+      "output_path": "artifacts/promptops_eval.json",
+      "include_prompt": false,
+      "include_sources": false,
+      "overrides": {
+        "enabled": true,
+        "mode": "auto_apply",
+        "persist_prompts": false,
+        "history": {
+          "enabled": false,
+          "include_prompt": false
+        },
+        "github": {
+          "enabled": false
+        }
+      }
+    },
+    "github": {
+      "body": "Automated prompt update.",
+      "enabled": false,
+      "output_path": "artifacts/promptops_pr.json",
+      "title": "PromptOps update"
+    },
+    "history": {
+      "enabled": true,
+      "include_prompt": false
+    },
+    "metrics": {
+      "capture_prompt_text": true,
+      "max_prompt_text_chars": 4096,
+      "enabled": true,
+      "output_path": "data/promptops/metrics.jsonl"
+    },
+    "prompt_dir": "promptops/prompts",
+    "max_chars": 8000,
+    "max_tokens": 2000,
+    "min_pass_rate_pct": 100,
+    "mode": "auto_apply",
+    "model_strategy": "model_contract",
+    "persist_prompts": false,
+    "persist_query_prompts": true,
+    "require_query_path": true,
+    "query_strategy": "normalize_query",
+    "require_citations": true,
+    "review": {
+      "approved_prompt_ids": [],
+      "auto_approve": true,
+      "allow_empty_examples": false,
+      "base_url": "http://127.0.0.1:8000/v1",
+      "enabled": true,
+      "max_tokens": 256,
+      "model": "internvl3_5_8b",
+      "on_failure_only": true,
+      "preflight_auto_recover": true,
+      "preflight_completion_timeout_s": 15.0,
+      "preflight_retries": 1,
+      "preflight_require_completion": true,
+      "require_preflight": true,
+      "persist_prompts": true,
+      "timeout_s": 15.0
+    },
+    "optimizer": {
+      "enabled": true,
+      "interval_s": 300,
+      "estimate_ms": 1500,
+      "metrics_window_rows": 5000,
+      "refresh_examples": true,
+      "query_trace_path": "data/facts/query_trace.ndjson",
+      "min_interactions": 10,
+      "min_success_rate": 0.7,
+      "max_latency_p95_ms": 4000.0,
+      "max_prompt_ids": 3,
+      "strategies": [
+        "normalize_query",
+        "model_contract"
+      ],
+      "auto_promote": false,
+      "min_pass_rate_delta": 0.05,
+      "output_path": "artifacts/promptops/optimizer_latest.json"
+    },
+    "sources": [],
+    "strategy": "append_sources"
+  },
+  "research": {
+    "cache_dir": "data/research/cache",
+    "enabled": false,
+    "fail_closed_on_plugin_error": false,
+    "interval_s": 1800,
+    "owner": "hypervisor",
+    "report_dir": "data/research/reports",
+    "run_on_idle": true,
+    "source_name": "default",
+    "sources": [],
+    "threshold_pct": 10,
+    "watchlist": {
+      "tags": []
+    },
+    "watchlist_name": "default"
+  },
+  "retrieval": {
+    "allow_full_scan": false,
+    "fast_threshold": 3,
+    "fusion_threshold": 5,
+    "limit": 25,
+    "rrf_k": 60,
+    "vector_enabled": true,
+    "vector_idle_seconds": 45,
+    "vector_limit": 25,
+    "vector_requires_idle": true,
+    "window_limit": 1000
+  },
+  "runtime": {
+    "active_window_s": 300,
+    "activity": {
+      "assume_idle_when_missing": false,
+      "display_power_enabled": false,
+      "display_poll_interval_s": 1.0,
+      "display_idle_seconds": 300,
+      "screensaver_enabled": true,
+      "screensaver_poll_interval_s": 1.0,
+      "screensaver_idle_seconds": 300,
+      "screensaver_trigger_enabled": true,
+      "screensaver_trigger_idle_seconds": 300
+    },
+    "capture_controls": {
+      "enabled": false
+    },
+    "budgets": {
+      "allow_heavy_during_active": false,
+      "cpu_max_utilization": 0.5,
+      "max_heavy_concurrency": 1,
+      "max_jobs_per_window": 4,
+      "min_idle_seconds": 45,
+      "per_job_max_ms": 2500,
+      "preempt_grace_ms": 150,
+      "ram_max_utilization": 0.5,
+      "window_budget_ms": 8000,
+      "window_s": 120
+    },
+  "gpu": {
+    "allow_during_active": false,
+    "device_index": 0,
+    "lag_guard": {
+      "enabled": true,
+      "max_capture_age_s": 2.0,
+      "max_capture_lag_ms": 50,
+      "max_queue_depth_p95": 12
+    },
+    "release_vram_deadline_ms": 250,
+    "release_vram_on_active": true
+  },
+    "job_limits": {
+      "capture": {
+        "cpu_time_ms": 60000,
+        "max_memory_mb": 2048,
+        "max_processes": 1
+      }
+    },
+    "idle_window_s": 45,
+  "mode_enforcement": {
+    "idle_resume_budget_ms": 3000,
+    "suspend_deadline_ms": 500,
+    "fixture_override": false,
+    "fixture_override_reason": "",
+    "suspend_workers": true
+  },
+  "fullscreen_halt": {
+    "enabled": true,
+    "poll_ms": 250
+  },
+  "routing": {
+    "gpu_heavy": {
+      "allow_fallback": true,
+      "distro": "",
+      "protocol_version": 1,
+      "shared_queue_dir": "artifacts/wsl2_queue",
+      "target": "native"
+    }
+  },
+    "silence": {
+      "active_window_s": 3,
+      "cooldown_s": 60,
+      "enabled": true,
+      "max_capture_age_s": 15
+    },
+    "telemetry": {
+      "emit_interval_s": 5,
+      "enabled": true
+    },
+    "timezone": "America/Denver"
+  },
+  "web": {
+    "allow_remote": false,
+    "auth_token_path": "vault/web_token.json",
+    "bind_host": "127.0.0.1",
+    "bind_port": 8787,
+    "telemetry_interval_s": 1.0
+  },
+  "schema_version": 1,
+  "storage": {
+    "anchor": {
+      "every_entries": 50,
+      "every_minutes": 5,
+      "path": "anchor/anchors.ndjson",
+      "sign": true,
+      "use_dpapi": true
+    },
+    "archive": {
+      "safe_extract": true
+    },
+    "blob_dir": "data/blobs",
+    "crypto": {
+      "backend": "aesgcm",
+      "keyring_backend": "auto",
+      "keyring_credential_name": "autocapture.keyring",
+      "keyring_path": "data/vault/keyring.json",
+      "root_key_path": "data/vault/root.key"
+    },
+    "data_dir": "data",
+    "no_deletion_mode": true,
+    "raw_first_local": true,
+    "disk_pressure": {
+      "critical_free_gb": 50,
+      "interval_s": 3600,
+      "soft_free_gb": 100,
+      "warn_free_gb": 200,
+      "watermark_soft_mb": 102400,
+      "watermark_hard_mb": 51200
+    },
+    "encryption_required": false,
+    "encryption_enabled": true,
+    "sqlcipher": {
+      "enabled": false
+    },
+    "entity_map": {
+      "persist": true
+    },
+    "forecast": {
+      "enabled": true,
+      "warn_days": 14
+    },
+    "fsync_policy": "critical",
+    "lexical_path": "data/lexical.db",
+    "media_dir": "data/media",
+    "metadata_require_db": true,
+    "metadata_path": "data/metadata.db",
+    "state_tape_path": "data/state/state_tape.db",
+    "state_vector_path": "data/state/state_vector.db",
+    "audit_db_path": "data/audit/kernel_audit.db",
+    "retention": {
+      "evidence": "infinite",
+      "interval_s": 3600,
+      "max_delete_per_run": 500,
+      "record_batches": true
+    },
+    "spool_fsync": true,
+    "spool_dir": "data/spool",
+    "spool_overflow": {
+      "enabled": true,
+      "dir": "C:\\\\autocapture_spool_overflow",
+      "drain_interval_s": 2.0,
+      "max_drain_per_tick": 50
+    },
+    "spillover": {
+      "enabled": false,
+      "media_dirs": [],
+      "on_level": "soft"
+    },
+    "vector_path": "data/vector.db"
+  },
+  "time": {
+    "dst_tie_breaker": "earliest",
+    "relative_window_max_days": 30,
+    "timezone": "America/Denver"
   }
 }

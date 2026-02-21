@@ -19,8 +19,6 @@ class BackpressureController(PluginBase):
     def adjust(self, metrics: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
         cfg = self.context.config.get("backpressure", {})
         now = metrics.get("now", time.time())
-        if now - self._last_change < cfg.get("hysteresis_s", 10):
-            return current
 
         queue_depth = metrics.get("queue_depth", 0)
         min_fps = cfg.get("min_fps", 5)
@@ -39,6 +37,8 @@ class BackpressureController(PluginBase):
             bitrate = max(min_bitrate, bitrate - max_step_bitrate)
             self._last_change = now
         elif queue_depth == 0:
+            if now - self._last_change < cfg.get("hysteresis_s", 10):
+                return current
             fps = min(max_fps, fps + max_step_fps)
             bitrate = min(max_bitrate, bitrate + max_step_bitrate)
             self._last_change = now

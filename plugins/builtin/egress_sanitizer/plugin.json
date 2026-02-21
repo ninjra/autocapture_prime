@@ -1,28 +1,46 @@
 {
-  "plugin_id": "builtin.privacy.egress_sanitizer",
-  "version": "0.1.0",
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [],
   "enabled": true,
   "entrypoints": [
     {
-      "kind": "privacy.egress_sanitizer",
+      "callable": "create_plugin",
       "id": "default",
-      "path": "plugin.py",
-      "callable": "create_plugin"
+      "kind": "privacy.egress_sanitizer",
+      "path": "plugin.py"
     }
   ],
+  "filesystem_policy": {
+    "readwrite": [
+      "{keyring_dir}",
+      "{root_key_dir}"
+    ]
+  },
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
   "permissions": {
     "filesystem": "readwrite",
     "gpu": false,
-    "raw_input": false,
-    "network": false
+    "network": false,
+    "raw_input": false
   },
-  "compat": {
-    "requires_kernel": ">=0.1.0",
-    "requires_schema_versions": [1]
-  },
-  "depends_on": [],
-  "hash_lock": {
-    "manifest_sha256": "",
-    "artifact_sha256": ""
-  }
+  "plugin_id": "builtin.privacy.egress_sanitizer",
+  "provides": [
+    "privacy.egress_sanitizer"
+  ],
+  "required_capabilities": [
+    "storage.entity_map"
+  ],
+  "settings_paths": [
+    "privacy",
+    "storage"
+  ],
+  "version": "0.1.0"
 }

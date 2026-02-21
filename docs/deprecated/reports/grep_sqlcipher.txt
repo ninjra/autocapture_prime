@@ -1,0 +1,66 @@
+# rg -n /sqlcipher/
+./README.md:26:- To include SQLCipher support, set `AUTO_CAPTURE_EXTRAS=sqlcipher` before running.
+./pyproject.toml:33:sqlcipher = ["pysqlcipher3-binary>=1.0.4"]
+./tests/test_query.py:9:            import sqlcipher3  # noqa: F401
+./tests/test_query.py:11:            self.skipTest("sqlcipher3 not available")
+./docs/STATE.md:9:- Crypto dependency: cryptography (AES-GCM) + optional SQLCipher (pysqlcipher3)
+./docs/spec/autocapture_mx_spec.yaml:203:      - autocapture/storage/sqlcipher.py
+./docs/spec/autocapture_mx_spec.yaml:211:        target: tests/test_sqlcipher_roundtrip.py
+./contracts/ir_pins.json:137:      "id": "builtin.storage.sqlcipher"
+./tests/test_sqlcipher_store.py:6:from plugins.builtin.storage_sqlcipher.plugin import SQLCipherStoragePlugin
+./tests/test_sqlcipher_store.py:10:    def test_sqlcipher_put_get_or_skip(self):
+./tests/test_sqlcipher_roundtrip.py:6:from autocapture.storage.sqlcipher import open_metadata_store
+./docs/reports/repo_tooling_summary.md:19:- Optional extras: `sqlcipher` -> `pysqlcipher3-binary`
+./tests/test_key_rotation.py:31:                        "builtin.storage.sqlcipher": False,
+./docs/reports/grep_scheduler_governor.txt:28:./docs/autocapture_mx_implementation_plan.md:46:| B | MOD-006..011 | redaction + runtime governor/leases + storage v2 + capture spool/pipeline | tests/test_sanitizer_no_raw_pii.py; tests/test_governor_gating.py; tests/test_work_leases.py; tests/test_capture_spool_idempotent.py; tests/test_sqlcipher_roundtrip.py |
+./config/plugin_locks.json:96:    "builtin.storage.sqlcipher": {
+./config/default.json:118:      "builtin.storage.sqlcipher",
+./config/default.json:158:      "builtin.storage.sqlcipher",
+./config/default.json:202:      "builtin.storage.sqlcipher": false,
+./config/default.json:212:        "builtin.storage.sqlcipher",
+./docs/reports/grep_plugin_manifest.txt:178:./plugins/builtin/storage_sqlcipher/plugin.json:25:    "manifest_sha256": "",
+./docs/mx_gap_matrix.md:112:- Existing (NX): plugins/builtin/storage_encrypted/plugin.py; plugins/builtin/storage_sqlcipher/plugin.py; autocapture_nx/kernel/crypto.py; autocapture_nx/kernel/keyring.py; autocapture_nx/kernel/key_rotation.py
+./docs/mx_gap_matrix.md:113:- Missing (MX paths/tests): autocapture/storage/database.py; autocapture/storage/sqlcipher.py; autocapture/storage/keys.py; autocapture/storage/media_store.py; autocapture/storage/blob_store.py; tests/test_key_export_import_roundtrip.py; tests/test_sqlcipher_roundtrip.py; tests/test_blob_encryption_roundtrip.py
+./docs/mx_gap_matrix.md:115:  - Artifacts: autocapture/storage/database.py; autocapture/storage/sqlcipher.py; autocapture/storage/keys.py; autocapture/storage/media_store.py; autocapture/storage/blob_store.py
+./docs/mx_gap_matrix.md:116:  - Validators: unit_test tests/test_key_export_import_roundtrip.py; unit_test tests/test_sqlcipher_roundtrip.py; unit_test tests/test_blob_encryption_roundtrip.py
+./plugins/builtin/storage_sqlcipher/plugin.py:28:            import sqlcipher3
+./plugins/builtin/storage_sqlcipher/plugin.py:31:        conn = sqlcipher3.connect(self._db_path)
+./docs/mx_evidence_bundle.md:163:./plugins/builtin/storage_sqlcipher/plugin.py:50:            "INSERT OR REPLACE INTO metadata (id, payload) VALUES (?, ?)",
+./docs/mx_evidence_bundle.md:164:./plugins/builtin/storage_sqlcipher/plugin.py:73:            "INSERT OR REPLACE INTO entity_map (token, value, kind) VALUES (?, ?, ?)",
+./docs/reports/grep_capture_pipeline.txt:210:./docs/spec/autocapture_mx_spec.yaml:203:      - autocapture/storage/sqlcipher.py
+./docs/reports/grep_capture_pipeline.txt:316:./tests/test_sqlcipher_store.py:5:from autocapture_nx.plugin_system.api import PluginContext
+./docs/reports/grep_capture_pipeline.txt:328:./tests/test_sqlcipher_roundtrip.py:6:from autocapture.storage.sqlcipher import open_metadata_store
+./docs/reports/grep_capture_pipeline.txt:329:./tests/test_sqlcipher_roundtrip.py:7:from autocapture.config.load import load_config
+./docs/reports/grep_capture_pipeline.txt:330:./tests/test_sqlcipher_roundtrip.py:8:from autocapture.config.models import ConfigPaths
+./docs/reports/grep_capture_pipeline.txt:424:./docs/reports/grep_scheduler_governor.txt:28:./docs/autocapture_mx_implementation_plan.md:46:| B | MOD-006..011 | redaction + runtime governor/leases + storage v2 + capture spool/pipeline | tests/test_sanitizer_no_raw_pii.py; tests/test_governor_gating.py; tests/test_work_leases.py; tests/test_capture_spool_idempotent.py; tests/test_sqlcipher_roundtrip.py |
+./docs/reports/grep_capture_pipeline.txt:778:./docs/mx_gap_matrix.md:112:- Existing (NX): plugins/builtin/storage_encrypted/plugin.py; plugins/builtin/storage_sqlcipher/plugin.py; autocapture_nx/kernel/crypto.py; autocapture_nx/kernel/keyring.py; autocapture_nx/kernel/key_rotation.py
+./docs/reports/grep_capture_pipeline.txt:779:./docs/mx_gap_matrix.md:113:- Missing (MX paths/tests): autocapture/storage/database.py; autocapture/storage/sqlcipher.py; autocapture/storage/keys.py; autocapture/storage/media_store.py; autocapture/storage/blob_store.py; tests/test_key_export_import_roundtrip.py; tests/test_sqlcipher_roundtrip.py; tests/test_blob_encryption_roundtrip.py
+./docs/reports/grep_capture_pipeline.txt:780:./docs/mx_gap_matrix.md:115:  - Artifacts: autocapture/storage/database.py; autocapture/storage/sqlcipher.py; autocapture/storage/keys.py; autocapture/storage/media_store.py; autocapture/storage/blob_store.py
+./docs/reports/grep_capture_pipeline.txt:844:./plugins/builtin/storage_sqlcipher/plugin.py:9:from autocapture_nx.kernel.keyring import KeyRing
+./docs/reports/grep_capture_pipeline.txt:845:./plugins/builtin/storage_sqlcipher/plugin.py:10:from autocapture_nx.plugin_system.api import PluginBase, PluginContext
+./docs/reports/grep_capture_pipeline.txt:925:./docs/mx_equivalence_map.md:81:- Proof: `plugins/builtin/storage_encrypted/plugin.py` (encrypted metadata/blob/entity map); `autocapture_nx/kernel/keyring.py`; `autocapture_nx/kernel/key_rotation.py`; `tests/test_storage_encrypted.py`; `tests/test_key_rotation.py`; `plugins/builtin/storage_sqlcipher/plugin.py`; `tests/test_sqlcipher_store.py`
+./docs/reports/grep_capture_pipeline.txt:1453:./docs/reports/grep_derived.txt:90:./autocapture/storage/sqlcipher.py:23:        # For now, use encrypted store with derived keys.
+./docs/reports/grep_capture_pipeline.txt:1839:./docs/autocapture_mx_implementation_plan.md:46:| B | MOD-006..011 | redaction + runtime governor/leases + storage v2 + capture spool/pipeline | tests/test_sanitizer_no_raw_pii.py; tests/test_governor_gating.py; tests/test_work_leases.py; tests/test_capture_spool_idempotent.py; tests/test_sqlcipher_roundtrip.py |
+./docs/reports/grep_capture_pipeline.txt:1854:./docs/autocapture_mx_implementation_plan.md:73:| MX-STORE-0001 | tests/test_key_export_import_roundtrip.py; tests/test_sqlcipher_roundtrip.py; tests/test_blob_encryption_roundtrip.py | autocapture/storage/database.py; autocapture/storage/sqlcipher.py; autocapture/storage/keys.py; autocapture/storage/media_store.py; autocapture/storage/blob_store.py |
+./docs/reports/grep_capture_pipeline.txt:1897:./docs/autocapture_mx_implementation_plan.md:164:- Artifacts: autocapture/storage/database.py; autocapture/storage/sqlcipher.py; autocapture/storage/keys.py; autocapture/storage/media_store.py; autocapture/storage/blob_store.py
+./docs/reports/grep_capture_pipeline.txt:2009:./docs/autocapture_mx_blueprint.md:1072:      - autocapture/storage/sqlcipher.py
+./docs/reports/grep_capture_pipeline.txt:2331:./autocapture/storage/sqlcipher.py:8:from autocapture.storage.database import EncryptedMetadataStore
+./docs/reports/grep_capture_pipeline.txt:2332:./autocapture/storage/sqlcipher.py:9:from autocapture.storage.keys import load_keyring
+./docs/mx_equivalence_map.md:81:- Proof: `plugins/builtin/storage_encrypted/plugin.py` (encrypted metadata/blob/entity map); `autocapture_nx/kernel/keyring.py`; `autocapture_nx/kernel/key_rotation.py`; `tests/test_storage_encrypted.py`; `tests/test_key_rotation.py`; `plugins/builtin/storage_sqlcipher/plugin.py`; `tests/test_sqlcipher_store.py`
+./plugins/builtin/storage_sqlcipher/plugin.json:2:  "plugin_id": "builtin.storage.sqlcipher",
+./docs/autocapture_mx_implementation_plan.md:46:| B | MOD-006..011 | redaction + runtime governor/leases + storage v2 + capture spool/pipeline | tests/test_sanitizer_no_raw_pii.py; tests/test_governor_gating.py; tests/test_work_leases.py; tests/test_capture_spool_idempotent.py; tests/test_sqlcipher_roundtrip.py |
+./docs/autocapture_mx_implementation_plan.md:73:| MX-STORE-0001 | tests/test_key_export_import_roundtrip.py; tests/test_sqlcipher_roundtrip.py; tests/test_blob_encryption_roundtrip.py | autocapture/storage/database.py; autocapture/storage/sqlcipher.py; autocapture/storage/keys.py; autocapture/storage/media_store.py; autocapture/storage/blob_store.py |
+./docs/autocapture_mx_implementation_plan.md:164:- Artifacts: autocapture/storage/database.py; autocapture/storage/sqlcipher.py; autocapture/storage/keys.py; autocapture/storage/media_store.py; autocapture/storage/blob_store.py
+./docs/autocapture_mx_implementation_plan.md:165:- Validation: unit_test tests/test_key_export_import_roundtrip.py; tests/test_sqlcipher_roundtrip.py; tests/test_blob_encryption_roundtrip.py
+./docs/assumptions_checklist.md:98:8) SQLCipher metadata store requires `pysqlcipher3` and is not exercised in non-Windows tests.
+./docs/autocapture_mx_blueprint.md:148:    sqlcipher.py
+./docs/autocapture_mx_blueprint.md:1072:      - autocapture/storage/sqlcipher.py
+./docs/autocapture_mx_blueprint.md:1080:        target: tests/test_sqlcipher_roundtrip.py
+./docs/assumptions.md:31:8) SQLCipher metadata store requires `pysqlcipher3` and is not exercised in non-Windows tests.
+./docs/assumptions.md:32:   - Test coverage: `tests/test_sqlcipher_store.py` tolerates missing deps; Windows integration tests required.
+./docs/reports/grep_derived.txt:90:./autocapture/storage/sqlcipher.py:23:        # For now, use encrypted store with derived keys.
+./docs/blueprints/autocapture_nx_blueprint.md:234:  - CI matrix: extras[vision]/[embeddings]/[sqlcipher] enable corresponding plugins
+./docs/blueprints/autocapture_nx_blueprint.md:1176:  - config: `storage.metadata_backend=sqlcipher|encrypted_fs`
+./autocapture_nx/kernel/loader.py:89:            ok = any(pid in plugin_ids for pid in ("builtin.storage.encrypted", "builtin.storage.sqlcipher"))
+./autocapture/storage/__init__.py:4:from .sqlcipher import open_metadata_store
+./autocapture/storage/sqlcipher.py:21:        import pysqlcipher3  # type: ignore

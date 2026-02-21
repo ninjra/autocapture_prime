@@ -1,0 +1,35 @@
+schema_version: 1
+plugin_id: mx.core.llm_openai_compat
+version: 0.1.0
+display_name: MX LLM OpenAI-Compatible
+description: OpenAI-compatible LLM via gateway.
+extensions:
+  -
+    kind: llm.provider
+    factory: autocapture.gateway.router:create_openai_provider
+    name: openai_compat
+    version: 0.1.0
+    caps:
+      - llm.provider
+    pillars:
+      data_handling:
+        local_only: false
+        egress:
+          allow_cloud: true
+          allow_cloud_images: false
+          require_sanitizer: true
+          sanitizer_kind: egress.sanitizer
+      performance:
+        qos_class: interactive
+        cpu_budget_ms_p95: 200
+        io_budget_mb_s: 5
+      accuracy:
+        deterministic: true
+        validation_level: schema
+      security:
+        network_access: internet
+        secrets_access: read
+        sandbox: process
+      citable:
+        produces_citations: true
+        citation_granularity: claim

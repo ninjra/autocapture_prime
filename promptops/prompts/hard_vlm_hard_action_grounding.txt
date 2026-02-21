@@ -1,0 +1,11 @@
+Return strict JSON only with keys COMPLETE and VIEW_DETAILS, each as {x1,y1,x2,y2} normalized to [0,1] for the Outlook task card buttons COMPLETE and VIEW DETAILS. Use 4 decimal places. If you emit pixel coordinates, use keys px_x1,px_y1,px_x2,px_y2 inside each button object. Output only a single JSON object with no markdown fences and no extra text.
+
+Answer this exact question context when extracting: Action grounding: Provide screenshot-normalized bounding boxes (x1,y1,x2,y2 in [0,1]) for the two task-card buttons in Outlook: COMPLETE and VIEW DETAILS. Coordinates are relative to the full screenshot (2048x575).
+Use only visible evidence from the image.
+Supplemental extracted text hints (may be noisy; use only if visually consistent):
+Incident email extraction: subject, sender display, sender domain, and task-card action buttons. Observation: adv.incident.subject=A task was assigned to Open Invoice; adv.incident.sender_display=; adv.incident.sender_d…
+
+Answer policy:
+- Prefer correctness over speed.
+- Use only grounded evidence from provided context.
+- If evidence is insufficient, explicitly return indeterminate.

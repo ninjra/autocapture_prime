@@ -1,0 +1,98 @@
+{
+  "states": [
+    {
+      "record_type": "derived.sst.state",
+      "run_id": "run",
+      "artifact_id": "run/derived.sst.state/frame1",
+      "screen_state": {
+        "state_id": "state_frame1",
+        "frame_id": "frame1",
+        "frame_index": 0,
+        "ts_ms": 1000,
+        "phash": "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd",
+        "image_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "width": 320,
+        "height": 180,
+        "tokens": [
+          {
+            "token_id": "t1",
+            "text": "Alpha",
+            "norm_text": "alpha",
+            "bbox": [0, 0, 10, 10],
+            "confidence_bp": 9000
+          },
+          {
+            "token_id": "t2",
+            "text": "Notes",
+            "norm_text": "notes",
+            "bbox": [12, 0, 24, 10],
+            "confidence_bp": 9000
+          }
+        ],
+        "visible_apps": ["notes"],
+        "element_graph": {"elements": [], "edges": []},
+        "text_blocks": [],
+        "tables": [],
+        "spreadsheets": [],
+        "code_blocks": [],
+        "charts": []
+      }
+    },
+    {
+      "record_type": "derived.sst.state",
+      "run_id": "run",
+      "artifact_id": "run/derived.sst.state/frame2",
+      "screen_state": {
+        "state_id": "state_frame2",
+        "frame_id": "frame2",
+        "frame_index": 0,
+        "ts_ms": 7000,
+        "phash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "image_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "width": 320,
+        "height": 180,
+        "tokens": [
+          {
+            "token_id": "t1",
+            "text": "Blue",
+            "norm_text": "blue",
+            "bbox": [0, 0, 10, 10],
+            "confidence_bp": 9000
+          },
+          {
+            "token_id": "t2",
+            "text": "Apple",
+            "norm_text": "apple",
+            "bbox": [12, 0, 24, 10],
+            "confidence_bp": 9000
+          }
+        ],
+        "visible_apps": ["browser"],
+        "element_graph": {"elements": [], "edges": []},
+        "text_blocks": [],
+        "tables": [],
+        "spreadsheets": [],
+        "code_blocks": [],
+        "charts": []
+      }
+    }
+  ],
+  "cases": [
+    {
+      "id": "case_alpha",
+      "query": "alpha",
+      "expected_span_indices": [0],
+      "min_recall": 1.0,
+      "min_precision": 0.34,
+      "top_k": 3
+    },
+    {
+      "id": "case_blue_apple",
+      "query": "blue apple",
+      "expected_span_indices": [1],
+      "min_recall": 1.0,
+      "min_precision": 0.34,
+      "top_k": 3
+    }
+  ]
+}

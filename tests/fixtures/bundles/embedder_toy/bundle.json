@@ -1,0 +1,7 @@
+{
+  "bundle_id": "embedder.toy",
+  "version": "1.0.0",
+  "kind": "embedder",
+  "dims": 8,
+  "model_path": "toy_embedder.json"
+}

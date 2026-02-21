@@ -1,0 +1,53 @@
+{
+  "content_hash": "f5008e6db61c970275802455fb6f9042ed14a99b842e6bb2e184a59655316667",
+  "dependencies": [
+    "Pillow>=12.1.1",
+    "PyPDF2>=3.0.0",
+    "PyYAML>=6.0.1",
+    "cryptography>=46.0.5",
+    "fastapi>=0.110.0",
+    "httpx>=0.27.0",
+    "jsonschema>=4.19.0",
+    "mss>=9.0.1",
+    "mypy>=1.8.0",
+    "platformdirs",
+    "protobuf>=4.25.0",
+    "psutil>=5.9.0",
+    "pynput>=1.7.6",
+    "pywebview>=5.1",
+    "ruff>=0.6.0",
+    "sounddevice>=0.4.6",
+    "tzdata>=2024.1",
+    "uvicorn>=0.27.0",
+    "zstandard>=0.22.0"
+  ],
+  "generated_at": "2026-02-15T21:12:55.357671+00:00",
+  "optional_dependencies": {
+    "chronicle": [
+      "duckdb>=1.1.0",
+      "faiss-cpu>=1.8.0",
+      "pyarrow>=18.0.0"
+    ],
+    "dev": [
+      "mypy>=1.8.0",
+      "pip-audit>=2.7.0",
+      "ruff>=0.6.0"
+    ],
+    "embeddings": [
+      "sentence-transformers>=2.2.2",
+      "torch>=2.1.0"
+    ],
+    "ocr": [
+      "pytesseract>=0.3.10"
+    ],
+    "sqlcipher": [
+      "pysqlcipher3-binary>=1.0.4"
+    ],
+    "vision": [
+      "torch>=2.1.0",
+      "transformers>=4.38.0"
+    ]
+  },
+  "python": ">=3.10",
+  "version": 1
+}

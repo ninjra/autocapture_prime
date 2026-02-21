@@ -1,28 +1,46 @@
 {
-  "plugin_id": "builtin.citation.basic",
-  "version": "0.1.0",
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [],
   "enabled": true,
   "entrypoints": [
     {
-      "kind": "citation.validator",
+      "callable": "create_plugin",
       "id": "default",
-      "path": "plugin.py",
-      "callable": "create_plugin"
+      "kind": "citation.validator",
+      "path": "plugin.py"
     }
   ],
+  "filesystem_policy": {
+    "read": [
+      "{data_dir}",
+      "{anchor_dir}"
+    ]
+  },
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
   "permissions": {
     "filesystem": "read",
     "gpu": false,
-    "raw_input": false,
-    "network": false
+    "network": false,
+    "raw_input": false
   },
-  "compat": {
-    "requires_kernel": ">=0.1.0",
-    "requires_schema_versions": [1]
-  },
-  "depends_on": [],
-  "hash_lock": {
-    "manifest_sha256": "",
-    "artifact_sha256": ""
-  }
+  "plugin_id": "builtin.citation.basic",
+  "provides": [
+    "citation.validator"
+  ],
+  "required_capabilities": [
+    "storage.keyring",
+    "storage.metadata"
+  ],
+  "settings_paths": [
+    "storage"
+  ],
+  "version": "0.1.0"
 }

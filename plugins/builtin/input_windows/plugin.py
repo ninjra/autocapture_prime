@@ -1,13 +1,28 @@
-"""Windows input tracking plugin using pynput."""
+"""Windows input tracking plugin.
+
+Modes
+- raw: pynput listeners, raw key/mouse payloads (high sensitivity).
+- activity: pynput listeners, derived-only payloads (no raw key values).
+- win32_idle: low-overhead idle tracking via Win32 GetLastInputInfo (no pynput).
+- off: disabled.
+"""
 
 from __future__ import annotations
 
 import os
 import threading
+from collections import deque
 import time
+import math
 from datetime import datetime, timezone
 from typing import Any
 
+import json
+import hashlib
+import struct
+
+from autocapture_nx.kernel.hashing import sha256_canonical
+from autocapture_nx.kernel.ids import ensure_run_id, prefixed_id
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
 
 
@@ -17,6 +32,86 @@ class InputTrackerWindows(PluginBase):
         self._stop = threading.Event()
         self._listener = None
         self._last_event_ts = None
+        self._last_event_id = None
+        self._last_event_ts_utc = None
+        self._counts = {"key": 0, "mouse": 0}
+        self._last_cursor: dict[str, int] | None = None
+        self._lock = threading.Lock()
+        self._batcher = _InputBatcher()
+        self._flush_thread: threading.Thread | None = None
+        self._flush_interval_ms = 250
+        self._event_builder = None
+        self._batch_seq = 0
+        self._activity_events: deque[float] = deque(maxlen=128)
+        self._mode = "raw"
+        self._display_on: bool | None = None
+        self._display_last_change_ts: float | None = None
+        self._display_last_off_ts: float | None = None
+        self._display_last_poll: float | None = None
+        self._display_poll_interval_s = 1.0
+        self._display_idle_seconds = 300.0
+        self._display_enabled = True
+        self._screensaver_on: bool | None = None
+        self._screensaver_last_change_ts: float | None = None
+        self._screensaver_last_on_ts: float | None = None
+        self._screensaver_last_poll: float | None = None
+        self._screensaver_poll_interval_s = 1.0
+        self._screensaver_idle_seconds = 300.0
+        self._screensaver_enabled = False
+        self._screensaver_trigger_enabled = False
+        self._screensaver_trigger_idle_seconds = 300.0
+        self._screensaver_last_trigger_ts: float | None = None
+        self._screensaver_triggered_since_input = False
+
+    def _update_display_state(self, now: float) -> bool | None:
+        if not self._display_enabled:
+            return None
+        if self._display_last_poll is not None:
+            interval = max(0.2, float(self._display_poll_interval_s))
+            if now - self._display_last_poll < interval:
+                return self._display_on
+        self._display_last_poll = now
+        try:
+            from autocapture_nx.windows.power import monitor_power_state
+        except Exception:
+            return self._display_on
+        try:
+            state = monitor_power_state()
+        except Exception:
+            return self._display_on
+        if state is None:
+            return self._display_on
+        if self._display_on is None or state != self._display_on:
+            self._display_on = bool(state)
+            self._display_last_change_ts = now
+            if not self._display_on:
+                self._display_last_off_ts = now
+        return self._display_on
+
+    def _update_screensaver_state(self, now: float) -> bool | None:
+        if not self._screensaver_enabled:
+            return None
+        if self._screensaver_last_poll is not None:
+            interval = max(0.2, float(self._screensaver_poll_interval_s))
+            if now - self._screensaver_last_poll < interval:
+                return self._screensaver_on
+        self._screensaver_last_poll = now
+        try:
+            from autocapture_nx.windows.screensaver import screensaver_running
+        except Exception:
+            return self._screensaver_on
+        try:
+            state = screensaver_running()
+        except Exception:
+            return self._screensaver_on
+        if state is None:
+            return self._screensaver_on
+        if self._screensaver_on is None or state != self._screensaver_on:
+            self._screensaver_on = bool(state)
+            self._screensaver_last_change_ts = now
+            if self._screensaver_on:
+                self._screensaver_last_on_ts = now
+        return self._screensaver_on
 
     def capabilities(self) -> dict[str, Any]:
         return {"tracking.input": self}
@@ -25,57 +120,141 @@ class InputTrackerWindows(PluginBase):
         return self._last_event_ts
 
     def idle_seconds(self) -> float:
+        # win32_idle mode: compute directly from the OS, independent of pynput.
+        if self._mode == "win32_idle":
+            try:
+                from autocapture_nx.windows.win_idle import idle_seconds as _win_idle_seconds
+            except Exception:
+                _win_idle_seconds = None
+            if _win_idle_seconds is not None:
+                value = _win_idle_seconds()
+                if value is None:
+                    return float("inf")
+                return float(max(0.0, value))
+            return float("inf")
         if self._last_event_ts is None:
             return float("inf")
         return max(0.0, time.time() - self._last_event_ts)
 
+    def snapshot(self, reset: bool = False) -> dict[str, Any]:
+        with self._lock:
+            payload = {
+                "counts": dict(self._counts),
+                "last_event_id": self._last_event_id,
+                "last_ts_utc": self._last_event_ts_utc,
+            }
+            if self._last_cursor:
+                payload["cursor"] = dict(self._last_cursor)
+            if reset:
+                self._counts = {"key": 0, "mouse": 0}
+            return payload
+
+    def activity_signal(self) -> dict[str, Any]:
+        active_window_s = float(self.context.config.get("runtime", {}).get("active_window_s", 3))
+        window_s = max(5.0, active_window_s * 3.0)
+        now = time.time()
+        idle = self.idle_seconds()
+        with self._lock:
+            cutoff = now - window_s
+            while self._activity_events and self._activity_events[0] < cutoff:
+                self._activity_events.popleft()
+            events = list(self._activity_events)
+            last_event_ts = self._last_event_ts
+        screensaver_on = self._update_screensaver_state(now)
+        display_on = self._update_display_state(now)
+        screensaver_idle_seconds = None
+        if screensaver_on is True:
+            if self._screensaver_last_on_ts is not None:
+                screensaver_idle_seconds = max(0.0, now - self._screensaver_last_on_ts)
+            # Screensaver running is a strong signal of user inactivity.
+            idle = max(idle, screensaver_idle_seconds or 0.0, float(self._screensaver_idle_seconds))
+        display_idle_seconds = None
+        if display_on is False:
+            if self._display_last_off_ts is not None:
+                display_idle_seconds = max(0.0, now - self._display_last_off_ts)
+            # Display off is a strong signal of user inactivity.
+            idle = max(idle, display_idle_seconds or 0.0, float(self._display_idle_seconds))
+        rate_hz = (len(events) / window_s) if window_s > 0 else 0.0
+        if idle == float("inf"):
+            freshness = 0.0
+        else:
+            freshness = math.exp(-max(0.0, idle) / max(0.5, active_window_s))
+        target_rate = max(0.5, 6.0 / window_s)
+        rate_score = min(1.0, rate_hz / target_rate) if target_rate > 0 else 0.0
+        score = max(freshness, rate_score)
+        user_active = idle < active_window_s if idle != float("inf") else False
+        if screensaver_on is True:
+            user_active = False
+            score = 0.0
+        if screensaver_on is None and display_on is False:
+            user_active = False
+        return {
+            "idle_seconds": idle,
+            "user_active": user_active,
+            "activity_score": score,
+            "event_rate_hz": rate_hz,
+            "recent_activity": bool(events),
+            "last_event_ts": last_event_ts,
+            "screensaver_on": screensaver_on,
+            "screensaver_idle_seconds": screensaver_idle_seconds,
+            "display_on": display_on,
+            "display_idle_seconds": display_idle_seconds,
+        }
+
     def start(self) -> None:
         if os.name != "nt":
             raise RuntimeError("Input tracking supported on Windows only")
+
+        self._stop.clear()
+        self._batcher = _InputBatcher()
+        event_builder = self.context.get_capability("event.builder")
+        self._event_builder = event_builder
+        capture_cfg = self.context.config.get("capture", {}).get("input_tracking", {})
+        mode = str(capture_cfg.get("mode", "raw") or "raw").lower()
+        self._mode = mode
+        runtime_activity = self.context.config.get("runtime", {}).get("activity", {})
+        if isinstance(runtime_activity, dict):
+            self._display_enabled = bool(runtime_activity.get("display_power_enabled", True))
+            self._display_poll_interval_s = float(runtime_activity.get("display_poll_interval_s", 1.0) or 1.0)
+            self._display_idle_seconds = float(runtime_activity.get("display_idle_seconds", 300) or 300.0)
+            self._screensaver_enabled = bool(runtime_activity.get("screensaver_enabled", False))
+            self._screensaver_poll_interval_s = float(runtime_activity.get("screensaver_poll_interval_s", 1.0) or 1.0)
+            self._screensaver_idle_seconds = float(runtime_activity.get("screensaver_idle_seconds", 300) or 300.0)
+            self._screensaver_trigger_enabled = bool(runtime_activity.get("screensaver_trigger_enabled", False))
+            self._screensaver_trigger_idle_seconds = float(
+                runtime_activity.get("screensaver_trigger_idle_seconds", self._screensaver_idle_seconds) or self._screensaver_idle_seconds
+            )
+        self._batcher = _InputBatcher(store_events=(mode == "raw"))
+        self._flush_interval_ms = int(capture_cfg.get("flush_interval_ms", 250))
+        if mode == "off":
+            return
+        if mode == "win32_idle":
+            # No pynput listeners, no event batching. We still expose activity_signal()
+            # and incorporate display/screen-saver signals.
+            return
+
         try:
             from pynput import keyboard, mouse
         except Exception as exc:
             raise RuntimeError(f"Missing input dependency: {exc}")
 
-        journal = self.context.get_capability("journal.writer")
-        mode = self.context.config.get("capture", {}).get("input_tracking", {}).get("mode", "raw")
-        if mode == "off":
-            return
-        seq = {"val": 0}
-
         def on_key_press(key):
             ts = datetime.now(timezone.utc).isoformat()
-            self._last_event_ts = time.time()
-            journal.append(
-                {
-                    "schema_version": 1,
-                    "event_id": f"key_{seq['val']}",
-                    "sequence": seq["val"],
-                    "ts_utc": ts,
-                    "tzid": "UTC",
-                    "offset_minutes": 0,
-                    "event_type": "input.key",
-                    "payload": {"key": str(key), "action": "press"} if mode == "raw" else {"action": "press"},
-                }
-            )
-            seq["val"] += 1
+            payload = {"action": "press"}
+            if self._mode == "raw":
+                payload["key"] = str(key)
+            self._record_event("key", payload, ts)
 
         def on_click(x, y, button, pressed):
             ts = datetime.now(timezone.utc).isoformat()
-            self._last_event_ts = time.time()
-            journal.append(
-                {
-                    "schema_version": 1,
-                    "event_id": f"mouse_{seq['val']}",
-                    "sequence": seq["val"],
-                    "ts_utc": ts,
-                    "tzid": "UTC",
-                    "offset_minutes": 0,
-                    "event_type": "input.mouse",
-                    "payload": {"x": x, "y": y, "button": str(button), "pressed": pressed} if mode == "raw" else {"pressed": pressed},
-                }
-            )
-            seq["val"] += 1
+            payload = {"button": str(button), "pressed": pressed}
+            if self._mode == "raw":
+                payload["x"] = int(x)
+                payload["y"] = int(y)
+            self._record_event("mouse", payload, ts)
+            with self._lock:
+                if "x" in payload and "y" in payload:
+                    self._last_cursor = {"x": int(payload["x"]), "y": int(payload["y"])}
 
         self._listener = {
             "keyboard": keyboard.Listener(on_press=on_key_press),
@@ -83,13 +262,235 @@ class InputTrackerWindows(PluginBase):
         }
         self._listener["keyboard"].start()
         self._listener["mouse"].start()
+        self._last_event_ts = time.time()
+        self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
+        self._flush_thread.start()
 
     def stop(self) -> None:
         if self._listener:
             self._listener["keyboard"].stop()
             self._listener["mouse"].stop()
             self._listener = None
+        self._stop.set()
+        if self._flush_thread:
+            self._flush_thread.join(timeout=5)
+        self._flush_batch()
+
+    def _record_event(self, kind: str, payload: dict[str, Any], ts_utc: str) -> None:
+        event = {"kind": kind, "ts_utc": ts_utc}
+        if self._mode == "raw":
+            event.update(payload)
+        with self._lock:
+            self._batcher.add(event)
+            if kind in self._counts:
+                self._counts[kind] += 1
+            self._last_event_ts = time.time()
+            self._last_event_ts_utc = ts_utc
+            self._activity_events.append(self._last_event_ts)
+            self._screensaver_triggered_since_input = False
+
+    def _flush_loop(self) -> None:
+        interval_s = max(0.05, self._flush_interval_ms / 1000.0)
+        while not self._stop.is_set():
+            time.sleep(interval_s)
+            self._maybe_trigger_screensaver()
+            self._flush_batch()
+
+    def _maybe_trigger_screensaver(self) -> None:
+        if not self._screensaver_trigger_enabled:
+            return
+        now = time.time()
+        # Rate limit; don't hammer user32 in a tight loop.
+        if self._screensaver_last_trigger_ts is not None and (now - self._screensaver_last_trigger_ts) < 5.0:
+            return
+        idle = self.idle_seconds()
+        if idle == float("inf"):
+            return
+        if idle < float(self._screensaver_trigger_idle_seconds):
+            return
+        if self._screensaver_triggered_since_input:
+            return
+        try:
+            from autocapture_nx.windows.screensaver import screensaver_running, activate_screensaver
+        except Exception:
+            return
+        state = screensaver_running()
+        if state is True:
+            self._screensaver_triggered_since_input = True
+            return
+        if state is False:
+            ok = activate_screensaver()
+            self._screensaver_last_trigger_ts = now
+            if ok:
+                self._screensaver_triggered_since_input = True
+        return
+
+    def _flush_batch(self) -> None:
+        event_builder = self._event_builder
+        if event_builder is None:
+            return
+        with self._lock:
+            events, start_ts, end_ts, counts = self._batcher.drain()
+        total_events = sum(int(counts.get(kind, 0)) for kind in ("key", "mouse"))
+        if total_events <= 0:
+            return
+        payload = {
+            "start_ts_utc": start_ts,
+            "end_ts_utc": end_ts,
+            "events": events,
+            "counts": dict(counts),
+            "event_count": int(total_events),
+            "mode": self._mode,
+        }
+        event_id = event_builder.journal_event("input.batch", payload, ts_utc=end_ts)
+        with self._lock:
+            self._last_event_id = event_id
+        capture_cfg = self.context.config.get("capture", {}).get("input_tracking", {})
+        store_derived = bool(capture_cfg.get("store_derived", True))
+        if not store_derived:
+            return
+        try:
+            storage_media = self.context.get_capability("storage.media")
+            storage_meta = self.context.get_capability("storage.metadata")
+        except Exception:
+            return
+        if storage_media is None or storage_meta is None:
+            return
+        run_id = ensure_run_id(self.context.config)
+        seq = self._batch_seq
+        self._batch_seq += 1
+        log_id = None
+        log_id_failed = None
+        content_hash = None
+        log_error = None
+        if events:
+            log_id = prefixed_id(run_id, "derived.input.log", seq)
+            try:
+                encoded = _encode_input_log(events)
+                if hasattr(storage_media, "put_new"):
+                    storage_media.put_new(log_id, encoded, ts_utc=end_ts)
+                else:
+                    storage_media.put(log_id, encoded, ts_utc=end_ts)
+                content_hash = hashlib.sha256(encoded).hexdigest()
+            except Exception as exc:
+                log_error = str(exc)
+                log_id_failed = log_id
+                log_id = None
+                event_builder.failure_event(
+                    "input.derived_failed",
+                    stage="storage.media",
+                    error=exc,
+                    inputs=[event_id],
+                    outputs=[log_id_failed] if log_id_failed else [],
+                    payload={"record_id": log_id_failed, "mode": self._mode},
+                    ts_utc=end_ts,
+                    retryable=False,
+                )
+        summary_id = prefixed_id(run_id, "derived.input.summary", seq)
+        summary = {
+            "record_type": "derived.input.summary",
+            "run_id": run_id,
+            "ts_utc": end_ts,
+            "start_ts_utc": start_ts,
+            "end_ts_utc": end_ts,
+            "event_id": event_id,
+            "event_count": int(total_events),
+            "counts": payload["counts"],
+            "mode": self._mode,
+        }
+        if log_id:
+            summary["log_id"] = log_id
+        if content_hash:
+            summary["content_hash"] = content_hash
+        if log_id_failed:
+            summary["log_id_failed"] = log_id_failed
+        if log_error:
+            summary["log_error"] = log_error
+        summary["payload_hash"] = sha256_canonical({k: v for k, v in summary.items() if k != "payload_hash"})
+        try:
+            if hasattr(storage_meta, "put_new"):
+                storage_meta.put_new(summary_id, summary)
+            else:
+                storage_meta.put(summary_id, summary)
+            event_builder.ledger_entry(
+                "input.batch",
+                inputs=[event_id],
+                outputs=[summary_id] + ([log_id] if log_id else []),
+                payload=summary,
+                entry_id=summary_id,
+                ts_utc=end_ts,
+            )
+        except Exception as exc:
+            event_builder.failure_event(
+                "input.derived_failed",
+                stage="storage.metadata",
+                error=exc,
+                inputs=[event_id],
+                outputs=[summary_id],
+                payload={"record_id": summary_id, "mode": self._mode},
+                ts_utc=end_ts,
+                retryable=False,
+            )
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> InputTrackerWindows:
     return InputTrackerWindows(plugin_id, context)
+
+
+class _InputBatcher:
+    def __init__(self, *, store_events: bool = True) -> None:
+        self._events: deque[dict[str, Any]] = deque()
+        self._first_ts: str | None = None
+        self._last_ts: str | None = None
+        self._store_events = bool(store_events)
+        self._counts = {"key": 0, "mouse": 0}
+
+    def add(self, event: dict[str, Any]) -> None:
+        kind = str(event.get("kind", ""))
+        if kind in self._counts:
+            self._counts[kind] += 1
+        if self._store_events:
+            self._events.append(event)
+        ts = str(event.get("ts_utc", ""))
+        if self._first_ts is None:
+            self._first_ts = ts
+        self._last_ts = ts
+
+    def drain(self) -> tuple[list[dict[str, Any]], str | None, str | None, dict[str, int]]:
+        events = list(self._events)
+        self._events.clear()
+        start = self._first_ts
+        end = self._last_ts
+        counts = dict(self._counts)
+        self._first_ts = None
+        self._last_ts = None
+        self._counts = {"key": 0, "mouse": 0}
+        return events, start, end, counts
+
+
+def _encode_input_log(events: list[dict[str, Any]]) -> bytes:
+    payload = bytearray(b"INPT1")
+    for event in events:
+        data = json.dumps(event, sort_keys=True).encode("utf-8")
+        payload.extend(struct.pack(">I", len(data)))
+        payload.extend(data)
+    return bytes(payload)
+
+
+def _decode_input_log(payload: bytes) -> list[dict[str, Any]]:
+    if not payload.startswith(b"INPT1"):
+        raise ValueError("Invalid input log header")
+    offset = 5
+    events: list[dict[str, Any]] = []
+    length = len(payload)
+    while offset < length:
+        if offset + 4 > length:
+            raise ValueError("Truncated input log")
+        size = struct.unpack(">I", payload[offset : offset + 4])[0]
+        offset += 4
+        if offset + size > length:
+            raise ValueError("Truncated input log")
+        chunk = payload[offset : offset + size]
+        offset += size
+        events.append(json.loads(chunk.decode("utf-8")))
+    return events

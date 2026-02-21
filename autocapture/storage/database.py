@@ -1,0 +1,129 @@
+"""Encrypted metadata store built on SQLite."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from autocapture_nx.kernel.crypto import EncryptedBlob, decrypt_bytes, derive_key, encrypt_bytes
+from autocapture_nx.kernel.keyring import KeyRing
+
+
+@dataclass
+class EncryptedRecord:
+    record_id: str
+    nonce_b64: str
+    ciphertext_b64: str
+    key_id: str
+
+
+class EncryptedMetadataStore:
+    def __init__(self, path: str | Path, keyring: KeyRing) -> None:
+        self.path = Path(path)
+        self.keyring = keyring
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(self.path)
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS records (record_id TEXT PRIMARY KEY, nonce_b64 TEXT, ciphertext_b64 TEXT, key_id TEXT)"
+        )
+        self._conn.commit()
+
+    def _derive(self, key_id: str) -> bytes:
+        root = self.keyring.key_for("metadata", key_id)
+        return derive_key(root, "metadata_store")
+
+    def put(self, record_id: str, payload: dict[str, Any]) -> None:
+        existing = self.get(record_id, default=None)
+        if existing is not None:
+            if existing == payload:
+                return
+            raise ValueError(f"record already exists: {record_id}")
+
+        key_id, root = self.keyring.active_key("metadata")
+        key = derive_key(root, "metadata_store")
+        data = json.dumps(payload, sort_keys=True).encode("utf-8")
+        blob = encrypt_bytes(key, data, key_id=key_id)
+        try:
+            self._conn.execute(
+                "INSERT INTO records (record_id, nonce_b64, ciphertext_b64, key_id) VALUES (?, ?, ?, ?)",
+                (record_id, blob.nonce_b64, blob.ciphertext_b64, key_id),
+            )
+            self._conn.commit()
+        except sqlite3.IntegrityError:
+            existing = self.get(record_id, default=None)
+            if existing == payload:
+                return
+            raise
+
+    def put_new(self, record_id: str, payload: dict[str, Any]) -> None:
+        return self.put(record_id, payload)
+
+    def put_replace(self, record_id: str, payload: dict[str, Any]) -> None:
+        key_id, root = self.keyring.active_key("metadata")
+        key = derive_key(root, "metadata_store")
+        data = json.dumps(payload, sort_keys=True).encode("utf-8")
+        blob = encrypt_bytes(key, data, key_id=key_id)
+        self._conn.execute(
+            "INSERT OR REPLACE INTO records (record_id, nonce_b64, ciphertext_b64, key_id) VALUES (?, ?, ?, ?)",
+            (record_id, blob.nonce_b64, blob.ciphertext_b64, key_id),
+        )
+        self._conn.commit()
+
+    def put_batch(self, records: list[tuple[str, dict[str, Any]]]) -> list[str]:
+        if not records:
+            return []
+        inserted: list[str] = []
+        try:
+            self._conn.execute("BEGIN")
+            for record_id, payload in records:
+                existing = self.get(record_id, default=None)
+                if existing is not None:
+                    continue
+                key_id, root = self.keyring.active_key("metadata")
+                key = derive_key(root, "metadata_store")
+                data = json.dumps(payload, sort_keys=True).encode("utf-8")
+                blob = encrypt_bytes(key, data, key_id=key_id)
+                try:
+                    self._conn.execute(
+                        "INSERT INTO records (record_id, nonce_b64, ciphertext_b64, key_id) VALUES (?, ?, ?, ?)",
+                        (record_id, blob.nonce_b64, blob.ciphertext_b64, key_id),
+                    )
+                except sqlite3.IntegrityError:
+                    continue
+                inserted.append(record_id)
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+        return inserted
+
+    def get(self, record_id: str, default: Any | None = None) -> Any:
+        cur = self._conn.execute(
+            "SELECT nonce_b64, ciphertext_b64, key_id FROM records WHERE record_id = ?",
+            (record_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return default
+        blob = EncryptedBlob(nonce_b64=row[0], ciphertext_b64=row[1], key_id=row[2])
+        key = self._derive(row[2])
+        data = decrypt_bytes(key, blob)
+        return json.loads(data.decode("utf-8"))
+
+    def keys(self) -> list[str]:
+        cur = self._conn.execute("SELECT record_id FROM records")
+        return [row[0] for row in cur.fetchall()]
+
+    def count(self) -> int:
+        cur = self._conn.execute("SELECT COUNT(*) FROM records")
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+
+    def delete(self, record_id: str) -> bool:
+        before = self._conn.total_changes
+        self._conn.execute("DELETE FROM records WHERE record_id = ?", (record_id,))
+        self._conn.commit()
+        return self._conn.total_changes > before

@@ -1,0 +1,151 @@
+# rg -n /journal/
+./config/plugin_locks.json:48:    "builtin.journal.basic": {
+./config/default.json:65:      "journal.writer",
+./config/default.json:107:      "builtin.journal.basic",
+./config/default.json:150:      "builtin.journal.basic",
+./config/default.json:191:      "builtin.journal.basic": true,
+./config/default.json:215:        "builtin.journal.basic",
+./docs/STATE.md:25:- Contract surfaces pinned: plugin SDK, config schema, user surface, security, journal/ledger, reasoning packet, time intent.
+./contracts/plugin_sdk.md:44:- `journal.writer`
+./docs/mx_gap_matrix.md:120:- Existing (NX): plugins/builtin/ledger_basic/plugin.py (hash chain); plugins/builtin/journal_basic/plugin.py
+./docs/blueprints/autocapture_nx_blueprint.md:78:- [ ] **I001** (Phase 1) — [Eliminate floats from journal/ledger payloads](#i001)
+./docs/blueprints/autocapture_nx_blueprint.md:85:- [ ] **I008** (Phase 1) — [Make journal writing thread-safe; centralize sequences](#i008)
+./docs/blueprints/autocapture_nx_blueprint.md:122:- [ ] **I045** (Phase 5) — [Input tracker exposes activity signals (not only journal)](#i045)
+./docs/blueprints/autocapture_nx_blueprint.md:158:- [ ] **I081** (Phase 7) — [Alerts panel driven by journal events](#i081)
+./docs/blueprints/autocapture_nx_blueprint.md:166:- [ ] **I089** (Phase 0) — [Add canonical-json safety tests for journal/ledger payloads](#i089)
+./docs/blueprints/autocapture_nx_blueprint.md:167:- [ ] **I090** (Phase 0) — [Add concurrency tests for ledger/journal append correctness](#i090)
+./docs/blueprints/autocapture_nx_blueprint.md:176:- [ ] **I099** (Phase 1) — [Stamp every journal event with run_id](#i099)
+./docs/blueprints/autocapture_nx_blueprint.md:179:- [ ] **I102** (Phase 3) — [Track partial failures explicitly in journal/ledger](#i102)
+./docs/blueprints/autocapture_nx_blueprint.md:192:- [ ] **I115** (Phase 8) — [File activity capture plugin (USN journal / watcher)](#i115)
+./docs/blueprints/autocapture_nx_blueprint.md:318:### I089 — Add canonical-json safety tests for journal/ledger payloads
+./docs/blueprints/autocapture_nx_blueprint.md:335:### I090 — Add concurrency tests for ledger/journal append correctness
+./docs/blueprints/autocapture_nx_blueprint.md:340:  - Thread-safety tests for ledger/journal writers
+./docs/blueprints/autocapture_nx_blueprint.md:349:  - Ledger/journal remain valid under concurrent writes.
+./docs/blueprints/autocapture_nx_blueprint.md:469:### I001 — Eliminate floats from journal/ledger payloads
+./docs/blueprints/autocapture_nx_blueprint.md:499:  - Log changes as journal events (`capture.rate_change`).
+./docs/blueprints/autocapture_nx_blueprint.md:534:  - Writer batches writes into derived artifact blocks; ledger/journal at batch boundaries.
+./docs/blueprints/autocapture_nx_blueprint.md:589:### I008 — Make journal writing thread-safe; centralize sequences
+./docs/blueprints/autocapture_nx_blueprint.md:594:  - journal writer centralizes sequencing and timestamps
+./docs/blueprints/autocapture_nx_blueprint.md:598:  - Snapshot: journal schema stable and contains run_id
+./docs/blueprints/autocapture_nx_blueprint.md:759:  - All plugins use EventBuilder for journal/ledger payloads
+./docs/blueprints/autocapture_nx_blueprint.md:770:### I099 — Stamp every journal event with run_id
+./docs/blueprints/autocapture_nx_blueprint.md:777:  - Test: all journal events include run_id
+./docs/blueprints/autocapture_nx_blueprint.md:890:  - Test: drops are recorded in metadata and journal
+./docs/blueprints/autocapture_nx_blueprint.md:1305:  - Define fsync levels: journal+ledger always fsync; evidence seals fsync; bulk media optional.
+./docs/blueprints/autocapture_nx_blueprint.md:1326:### I102 — Track partial failures explicitly in journal/ledger
+./docs/blueprints/autocapture_nx_blueprint.md:1331:  - all failures emit typed journal/ledger events
+./docs/blueprints/autocapture_nx_blueprint.md:1362:  - writes recovery actions to ledger/journal
+./docs/blueprints/autocapture_nx_blueprint.md:1842:  - Test: IDLE mode allows bounded enrichment and records budgets in journal
+./docs/blueprints/autocapture_nx_blueprint.md:1851:### I045 — Input tracker exposes activity signals (not only journal)
+./docs/blueprints/autocapture_nx_blueprint.md:1923:  - Record budget usage in telemetry/journal for audit and tuning.
+./docs/blueprints/autocapture_nx_blueprint.md:2000:  - Define capability RPC endpoints for safe operations (storage, journal, ledger).
+./docs/blueprints/autocapture_nx_blueprint.md:2077:  - Surface errors via alerts and journal.
+./docs/blueprints/autocapture_nx_blueprint.md:2297:### I081 — Alerts panel driven by journal events
+./docs/blueprints/autocapture_nx_blueprint.md:2302:  - alerts derived from journal/telemetry streams
+./docs/blueprints/autocapture_nx_blueprint.md:2390:### I115 — File activity capture plugin (USN journal / watcher)
+./docs/blueprints/autocapture_nx_blueprint.md:2395:  - new file activity plugin (Windows USN journal or watcher)
+./docs/blueprints/autocapture_nx_blueprint.md:2399:  - Prefer USN journal for low-overhead file change timelines.
+./plugins/builtin/window_metadata_windows/plugin.py:43:        journal = self.context.get_capability("journal.writer")
+./plugins/builtin/window_metadata_windows/plugin.py:60:                journal.append(
+./docs/mx_equivalence_map.md:86:- Proof: `plugins/builtin/ledger_basic/plugin.py` (hash chain); `tests/test_ledger_journal.py`
+./docs/autocapture_nx_blueprint_final.md:147:### D3 Versioned journal and ledger schemas with canonical serialization
+./docs/autocapture_nx_blueprint_final.md:150:Define `journal_v1` and `ledger_v1` schemas and a strict `canonical_json` function used for hashing.
+./docs/autocapture_nx_blueprint_final.md:164:- Kernel-owned append-only writers: `journal.writer`, `ledger.writer`.
+./docs/autocapture_nx_blueprint_final.md:447:  - append-only journal files
+./docs/autocapture_nx_blueprint_final.md:470:- `journal.writer`
+./docs/autocapture_nx_blueprint_final.md:506:- `ACTIVE_CAPTURE_ONLY`: capture + minimal journaling only.
+./docs/autocapture_nx_blueprint_final.md:534:### Journal schema `journal_v1`
+./docs/autocapture_nx_blueprint_final.md:610:- Crash tolerance: on restart, journals and partially written segments are recoverable.
+./docs/autocapture_nx_blueprint_final.md:626:- Segment metadata is journaled:
+./docs/autocapture_nx_blueprint_final.md:707:- Soak: restart recovery from journals.
+./docs/autocapture_nx_blueprint_final.md:1104:- journal-first design with restart replay
+./plugins/builtin/journal_basic/plugin.py:17:        self._path = os.path.join(data_dir, "journal.ndjson")
+./plugins/builtin/journal_basic/plugin.py:20:        return {"journal.writer": self}
+./contracts/lock.json:5:    "contracts/journal_schema.json": "7f61751efbcd52bf1de755421fc1a1c3001c4b1c1477734b2a72d39f7ff4fdeb",
+./plugins/builtin/window_metadata_windows/plugin.json:23:  "depends_on": ["builtin.journal.basic"],
+./plugins/builtin/journal_basic/plugin.json:2:  "plugin_id": "builtin.journal.basic",
+./plugins/builtin/journal_basic/plugin.json:7:      "kind": "journal.writer",
+./contracts/ir_pins.json:10:    "journal.writer",
+./contracts/ir_pins.json:93:      "id": "builtin.journal.basic"
+./docs/reports/grep_ledger.txt:12:./tools/blueprint_items.json:45:    "title": "Add canonical-json safety tests for journal/ledger payloads",
+./docs/reports/grep_ledger.txt:13:./tools/blueprint_items.json:53:    "title": "Add concurrency tests for ledger/journal append correctness",
+./docs/reports/grep_ledger.txt:15:./tools/blueprint_items.json:109:    "title": "Eliminate floats from journal/ledger payloads",
+./docs/reports/grep_ledger.txt:20:./tools/blueprint_items.json:517:    "title": "Track partial failures explicitly in journal/ledger",
+./docs/reports/grep_ledger.txt:32:./docs/STATE.md:25:- Contract surfaces pinned: plugin SDK, config schema, user surface, security, journal/ledger, reasoning packet, time intent.
+./docs/reports/grep_ledger.txt:37:./plugins/builtin/capture_windows/plugin.py:64:                if not self._check_disk(logger, journal, ledger, anchor, warn_free, critical_free):
+./docs/reports/grep_ledger.txt:38:./plugins/builtin/capture_windows/plugin.py:67:                self._flush_segment(frames, storage_media, storage_meta, journal, ledger, anchor, sequence)
+./docs/reports/grep_ledger.txt:39:./plugins/builtin/capture_windows/plugin.py:76:    def _flush_segment(self, frames, storage_media, storage_meta, journal, ledger, anchor, sequence):
+./docs/reports/grep_ledger.txt:42:./plugins/builtin/capture_windows/plugin.py:120:    def _check_disk(self, logger, journal, ledger, anchor, warn_free, critical_free) -> bool:
+./docs/reports/grep_ledger.txt:63:./docs/mx_equivalence_map.md:86:- Proof: `plugins/builtin/ledger_basic/plugin.py` (hash chain); `tests/test_ledger_journal.py`
+./docs/reports/grep_ledger.txt:90:./docs/blueprints/autocapture_nx_blueprint.md:78:- [ ] **I001** (Phase 1) — [Eliminate floats from journal/ledger payloads](#i001)
+./docs/reports/grep_ledger.txt:95:./docs/blueprints/autocapture_nx_blueprint.md:166:- [ ] **I089** (Phase 0) — [Add canonical-json safety tests for journal/ledger payloads](#i089)
+./docs/reports/grep_ledger.txt:96:./docs/blueprints/autocapture_nx_blueprint.md:167:- [ ] **I090** (Phase 0) — [Add concurrency tests for ledger/journal append correctness](#i090)
+./docs/reports/grep_ledger.txt:98:./docs/blueprints/autocapture_nx_blueprint.md:179:- [ ] **I102** (Phase 3) — [Track partial failures explicitly in journal/ledger](#i102)
+./docs/reports/grep_ledger.txt:103:./docs/blueprints/autocapture_nx_blueprint.md:318:### I089 — Add canonical-json safety tests for journal/ledger payloads
+./docs/reports/grep_ledger.txt:104:./docs/blueprints/autocapture_nx_blueprint.md:335:### I090 — Add concurrency tests for ledger/journal append correctness
+./docs/reports/grep_ledger.txt:105:./docs/blueprints/autocapture_nx_blueprint.md:340:  - Thread-safety tests for ledger/journal writers
+./docs/reports/grep_ledger.txt:110:./docs/blueprints/autocapture_nx_blueprint.md:469:### I001 — Eliminate floats from journal/ledger payloads
+./docs/reports/grep_ledger.txt:111:./docs/blueprints/autocapture_nx_blueprint.md:534:  - Writer batches writes into derived artifact blocks; ledger/journal at batch boundaries.
+./docs/reports/grep_ledger.txt:114:./docs/blueprints/autocapture_nx_blueprint.md:759:  - All plugins use EventBuilder for journal/ledger payloads
+./docs/reports/grep_ledger.txt:128:./docs/blueprints/autocapture_nx_blueprint.md:1305:  - Define fsync levels: journal+ledger always fsync; evidence seals fsync; bulk media optional.
+./docs/reports/grep_ledger.txt:129:./docs/blueprints/autocapture_nx_blueprint.md:1326:### I102 — Track partial failures explicitly in journal/ledger
+./docs/reports/grep_ledger.txt:130:./docs/blueprints/autocapture_nx_blueprint.md:1331:  - all failures emit typed journal/ledger events
+./docs/reports/grep_ledger.txt:133:./docs/blueprints/autocapture_nx_blueprint.md:1362:  - writes recovery actions to ledger/journal
+./docs/reports/grep_ledger.txt:153:./docs/blueprints/autocapture_nx_blueprint.md:2000:  - Define capability RPC endpoints for safe operations (storage, journal, ledger).
+./docs/reports/grep_ledger.txt:166:./docs/autocapture_nx_blueprint_final.md:147:### D3 Versioned journal and ledger schemas with canonical serialization
+./docs/reports/grep_ledger.txt:167:./docs/autocapture_nx_blueprint_final.md:150:Define `journal_v1` and `ledger_v1` schemas and a strict `canonical_json` function used for hashing.
+./docs/reports/grep_ledger.txt:168:./docs/autocapture_nx_blueprint_final.md:164:- Kernel-owned append-only writers: `journal.writer`, `ledger.writer`.
+./docs/reports/grep_ledger.txt:187:./docs/reports/blueprint_items.md:12:| I089 | Phase 0: Scaffolding and gates | Add canonical-json safety tests for journal/ledger payloads |  |  |  |
+./docs/reports/grep_ledger.txt:188:./docs/reports/blueprint_items.md:13:| I090 | Phase 0: Scaffolding and gates | Add concurrency tests for ledger/journal append correctness |  |  |  |
+./docs/reports/grep_ledger.txt:190:./docs/reports/blueprint_items.md:20:| I001 | Phase 1: Correctness + immutability blockers | Eliminate floats from journal/ledger payloads |  |  |  |
+./docs/reports/grep_ledger.txt:195:./docs/reports/blueprint_items.md:71:| I102 | Phase 3: Storage scaling + durability | Track partial failures explicitly in journal/ledger |  |  |  |
+./docs/reports/grep_ledger.txt:201:./docs/mx_gap_matrix.md:120:- Existing (NX): plugins/builtin/ledger_basic/plugin.py (hash chain); plugins/builtin/journal_basic/plugin.py
+./docs/reports/grep_ledger.txt:216:./tests/test_ledger_journal.py:6:from plugins.builtin.ledger_basic.plugin import LedgerWriter
+./docs/reports/grep_ledger.txt:217:./tests/test_ledger_journal.py:11:    def test_ledger_requires_fields(self):
+./docs/reports/grep_ledger.txt:218:./tests/test_ledger_journal.py:14:            ledger = LedgerWriter("ledger", ctx)
+./docs/reports/grep_ledger.txt:219:./tests/test_ledger_journal.py:16:                ledger.append({"schema_version": 1})
+./docs/reports/grep_ledger.txt:220:./tests/test_ledger_journal.py:25:    def test_ledger_hash_chain(self):
+./docs/reports/grep_ledger.txt:221:./tests/test_ledger_journal.py:28:            ledger = LedgerWriter("ledger", ctx)
+./docs/reports/grep_ledger.txt:222:./tests/test_ledger_journal.py:38:            h1 = ledger.append(entry1)
+./docs/reports/grep_ledger.txt:223:./tests/test_ledger_journal.py:48:            h2 = ledger.append(entry2)
+./docs/reports/grep_ledger.txt:224:./tests/test_ledger_journal.py:50:            with open(f"{tmp}/ledger.ndjson", "r", encoding="utf-8") as handle:
+./docs/reports/grep_ledger.txt:243:./autocapture/tools/provenance_gate.py:19:    for rel in ("contracts/ledger_schema.json", "contracts/journal_schema.json"):
+./docs/reports/blueprint_items.md:12:| I089 | Phase 0: Scaffolding and gates | Add canonical-json safety tests for journal/ledger payloads |  |  |  |
+./docs/reports/blueprint_items.md:13:| I090 | Phase 0: Scaffolding and gates | Add concurrency tests for ledger/journal append correctness |  |  |  |
+./docs/reports/blueprint_items.md:20:| I001 | Phase 1: Correctness + immutability blockers | Eliminate floats from journal/ledger payloads |  |  |  |
+./docs/reports/blueprint_items.md:27:| I008 | Phase 1: Correctness + immutability blockers | Make journal writing thread-safe; centralize sequences |  |  |  |
+./docs/reports/blueprint_items.md:38:| I099 | Phase 1: Correctness + immutability blockers | Stamp every journal event with run_id |  |  |  |
+./docs/reports/blueprint_items.md:71:| I102 | Phase 3: Storage scaling + durability | Track partial failures explicitly in journal/ledger |  |  |  |
+./docs/reports/blueprint_items.md:103:| I045 | Phase 5: Scheduler/governor | Input tracker exposes activity signals (not only journal) |  |  |  |
+./docs/reports/blueprint_items.md:130:| I081 | Phase 7: FastAPI UX facade + Web Console | Alerts panel driven by journal events |  |  |  |
+./docs/reports/blueprint_items.md:135:| I115 | Phase 8: Optional expansion plugins | File activity capture plugin (USN journal / watcher) |  |  |  |
+./plugins/builtin/capture_windows/plugin.py:48:        journal = self.context.get_capability("journal.writer")
+./plugins/builtin/capture_windows/plugin.py:64:                if not self._check_disk(logger, journal, ledger, anchor, warn_free, critical_free):
+./plugins/builtin/capture_windows/plugin.py:67:                self._flush_segment(frames, storage_media, storage_meta, journal, ledger, anchor, sequence)
+./plugins/builtin/capture_windows/plugin.py:76:    def _flush_segment(self, frames, storage_media, storage_meta, journal, ledger, anchor, sequence):
+./plugins/builtin/capture_windows/plugin.py:94:        journal.append(
+./plugins/builtin/capture_windows/plugin.py:120:    def _check_disk(self, logger, journal, ledger, anchor, warn_free, critical_free) -> bool:
+./plugins/builtin/capture_windows/plugin.py:129:            journal.append(
+./plugins/builtin/input_windows/plugin.py:40:        journal = self.context.get_capability("journal.writer")
+./plugins/builtin/input_windows/plugin.py:49:            journal.append(
+./plugins/builtin/input_windows/plugin.py:66:            journal.append(
+./plugins/builtin/audio_windows/plugin.py:42:        journal = self.context.get_capability("journal.writer")
+./plugins/builtin/audio_windows/plugin.py:56:            journal.append(
+./tools/hypervisor/scripts/update_contract_lock.py:19:    "contracts/journal_schema.json",
+./plugins/builtin/capture_windows/plugin.json:24:    "builtin.journal.basic",
+./plugins/builtin/input_windows/plugin.json:23:  "depends_on": ["builtin.journal.basic"],
+./plugins/builtin/audio_windows/plugin.json:23:  "depends_on": ["builtin.journal.basic"],
+./tools/blueprint_items.json:45:    "title": "Add canonical-json safety tests for journal/ledger payloads",
+./tools/blueprint_items.json:53:    "title": "Add concurrency tests for ledger/journal append correctness",
+./tools/blueprint_items.json:109:    "title": "Eliminate floats from journal/ledger payloads",
+./tools/blueprint_items.json:165:    "title": "Make journal writing thread-safe; centralize sequences",
+./tools/blueprint_items.json:253:    "title": "Stamp every journal event with run_id",
+./tools/blueprint_items.json:517:    "title": "Track partial failures explicitly in journal/ledger",
+./tools/blueprint_items.json:773:    "title": "Input tracker exposes activity signals (not only journal)",
+./tools/blueprint_items.json:989:    "title": "Alerts panel driven by journal events",
+./tools/blueprint_items.json:1029:    "title": "File activity capture plugin (USN journal / watcher)",
+./tests/test_ledger_journal.py:7:from plugins.builtin.journal_basic.plugin import JournalWriter
+./tests/test_ledger_journal.py:18:    def test_journal_requires_fields(self):
+./tests/test_ledger_journal.py:21:            journal = JournalWriter("journal", ctx)
+./tests/test_ledger_journal.py:23:                journal.append({"schema_version": 1})
+./autocapture/tools/provenance_gate.py:19:    for rel in ("contracts/ledger_schema.json", "contracts/journal_schema.json"):

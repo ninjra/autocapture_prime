@@ -1,28 +1,42 @@
 {
-  "plugin_id": "builtin.retrieval.basic",
-  "version": "0.1.0",
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [],
   "enabled": true,
   "entrypoints": [
     {
-      "kind": "retrieval.strategy",
+      "callable": "create_plugin",
       "id": "default",
-      "path": "plugin.py",
-      "callable": "create_plugin"
+      "kind": "retrieval.strategy",
+      "path": "plugin.py"
     }
   ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
   "permissions": {
     "filesystem": "read",
     "gpu": false,
-    "raw_input": false,
-    "network": false
+    "network": false,
+    "raw_input": false
   },
-  "compat": {
-    "requires_kernel": ">=0.1.0",
-    "requires_schema_versions": [1]
-  },
-  "depends_on": [],
-  "hash_lock": {
-    "manifest_sha256": "",
-    "artifact_sha256": ""
-  }
+  "plugin_id": "builtin.retrieval.basic",
+  "provides": [
+    "retrieval.strategy"
+  ],
+  "required_capabilities": [
+    "storage.metadata",
+    "tracking.input"
+  ],
+  "settings_paths": [
+    "retrieval",
+    "indexing",
+    "runtime"
+  ],
+  "version": "0.1.0"
 }

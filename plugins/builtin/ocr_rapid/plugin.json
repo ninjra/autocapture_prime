@@ -1,0 +1,40 @@
+{
+  "compat": {
+    "requires_kernel": ">=0.1.0",
+    "requires_schema_versions": [
+      1
+    ]
+  },
+  "depends_on": [],
+  "enabled": false,
+  "entrypoints": [
+    {
+      "callable": "create_plugin",
+      "id": "default",
+      "kind": "ocr.engine",
+      "path": "plugin.py"
+    }
+  ],
+  "hash_lock": {
+    "artifact_sha256": "",
+    "manifest_sha256": ""
+  },
+  "optional_deps": [
+    "rapidocr-onnxruntime",
+    "onnxruntime",
+    "numpy",
+    "Pillow"
+  ],
+  "permissions": {
+    "filesystem": "read",
+    "gpu": true,
+    "network": false,
+    "raw_input": false
+  },
+  "plugin_id": "builtin.ocr.rapid",
+  "provides": [
+    "ocr.engine"
+  ],
+  "required_capabilities": [],
+  "version": "0.1.0"
+}

@@ -1,0 +1,157 @@
+# rg -n /evidence/
+./DEV_HARNESS.md:7:- Fail closed: do **not** guess commands. If a command cannot be inferred from repo evidence, the harness must stop with a clear action item.
+./DEV_HARNESS.md:14:## Repo evidence
+./config/default.json:82:    "allow_evidence": false,
+./config/default.json:325:      "evidence": "infinite"
+./contracts/config_schema.json:251:        "allow_evidence": {
+./contracts/config_schema.json:262:        "allow_evidence",
+./contracts/config_schema.json:699:            "evidence": {
+./contracts/config_schema.json:704:            "evidence"
+./docs/autocapture_mx_blueprint.md:40:- **P4 Citable**: deterministic evidence + claim-level citations, validation, and provenance ledger.
+./docs/autocapture_mx_blueprint.md:447:- tamper evidence,
+./docs/autocapture_mx_blueprint.md:593:- evidence count,
+./docs/autocapture_mx_blueprint.md:624:Each evidence item includes:
+./docs/autocapture_mx_blueprint.md:649:- `no_evidence` flag when applicable
+./docs/autocapture_mx_blueprint.md:676:If conflict detector finds contradictory evidence:
+./docs/assumptions_checklist.md:21:   - Pillars at risk: P1 (performance/overhead), P2 (accuracy/quality), P4 (citable evidence quality)
+./docs/assumptions_checklist.md:100:   - Pillars at risk: P3 (encryption at rest), P4 (ledger evidence storage)
+./docs/autocapture_nx_blueprint_final.md:39:**Invariant P2.1 Full-fidelity local evidence**  
+./docs/autocapture_nx_blueprint_final.md:40:Locally stored evidence must be exact and unredacted. No “privacy transformations” are applied to local capture, storage, or indexing.
+./docs/autocapture_nx_blueprint_final.md:46:If some evidence is not yet extracted/indexed, queries must trigger targeted on-demand extraction so recent activity remains searchable.
+./docs/autocapture_nx_blueprint_final.md:51:All persisted evidence (media + metadata) is encrypted by default.
+./docs/autocapture_nx_blueprint_final.md:56:**Invariant P3.2.1 No raw evidence to cloud by default**  
+./docs/autocapture_nx_blueprint_final.md:63:All significant actions affecting evidence, processing, retrieval, and egress are recorded in an append-only ledger.
+./docs/autocapture_nx_blueprint_final.md:68:Answers are emitted as claims with citations referencing immutable local evidence spans.
+./docs/autocapture_nx_blueprint_final.md:81:- Do not locally mask, filter, redact, replace, or delete evidence.  
+./docs/autocapture_nx_blueprint_final.md:94:Remove privacy sanitization and exclusion from capture/processing. Introduce a dedicated **privacy egress layer** that sanitizes outbound requests by tokenizing entities while preserving intent. Local evidence remains full-fidelity.
+./docs/autocapture_nx_blueprint_final.md:105:- P2 Accurate, P4 Citable: no local evidence loss; citations remain faithful.
+./docs/autocapture_nx_blueprint_final.md:120:- “Canary secret” tests: inject unique secrets into local evidence; verify they never appear in outbound payloads.
+./docs/autocapture_nx_blueprint_final.md:158:- P3 Secure: stronger tamper evidence.
+./docs/autocapture_nx_blueprint_final.md:245:### D7 No deletion of local evidence, only additive derivatives and egress views
+./docs/autocapture_nx_blueprint_final.md:248:Remove media TTL and deletion features for local evidence. Any “sanitization” is implemented as **derived egress/export views** that do not mutate or remove local evidence.
+./docs/autocapture_nx_blueprint_final.md:254:- P2 Accurate, P4 Citable: evidence remains available for verification.
+./docs/autocapture_nx_blueprint_final.md:262:- Retention manager is disabled for evidence stores.
+./docs/autocapture_nx_blueprint_final.md:266:- Tests: no retention job runs; no evidence file deletion events appear in ledger.
+./docs/autocapture_nx_blueprint_final.md:321:Introduce an observability data policy that forbids evidence text/pixels in logs/metrics by default and enforces attribute allowlists.
+./docs/autocapture_nx_blueprint_final.md:329:- P4 Citable: audit artifacts are shareable without exposing evidence.
+./docs/autocapture_nx_blueprint_final.md:376:- P4 Citable: reproducible evidence selection.
+./docs/autocapture_nx_blueprint_final.md:387:- Golden query suite with stable expected evidence sets.
+./docs/autocapture_nx_blueprint_final.md:399:- P2 Accurate: predictable evidence coverage (no silent failure).
+./docs/autocapture_nx_blueprint_final.md:416:Anchor ledger head hashes periodically in a second storage domain to improve tamper evidence.
+./docs/autocapture_nx_blueprint_final.md:422:- P4 Citable: stronger tamper evidence.
+./docs/autocapture_nx_blueprint_final.md:518:Local evidence is stored as immutable “atoms”. Derived artifacts are additive.
+./docs/autocapture_nx_blueprint_final.md:579:- P3 Secure: prevents raw evidence egress.
+./docs/autocapture_nx_blueprint_final.md:695:- P2 Accurate: preserves full raw evidence for later extraction.
+./docs/autocapture_nx_blueprint_final.md:856:Rule: the gateway rejects any outbound payload that contains raw evidence fields unless `allow_raw_egress=true`.
+./docs/autocapture_nx_blueprint_final.md:948:- No automatic deletion of evidence.
+./docs/autocapture_nx_blueprint_final.md:1051:- Metrics and traces avoid evidence payloads by default.
+./docs/autocapture_nx_blueprint_final.md:1118:- logs accidentally contain evidence
+./docs/autocapture_nx_blueprint_final.md:1277:    evidence: infinite
+./docs/mx_evidence_bundle.md:61:Test runner evidence
+./docs/blueprints/autocapture_nx_blueprint.md:8:- **P2 Accurate**: do not exceed evidence; no hidden assumptions; deterministic IDs/time handling; no lossy overwrite of evidence.
+./docs/blueprints/autocapture_nx_blueprint.md:10:- **P4 Citable**: every non-trivial output must be traceable to immutable evidence with verifiable provenance (hashes, ledger, anchors).
+./docs/blueprints/autocapture_nx_blueprint.md:17:- **Append-only evidence**: primary evidence is immutable; derived artifacts are separate records linked to parents.
+./docs/blueprints/autocapture_nx_blueprint.md:27:- Fields (minimum): `evidence_id`, `run_id`, `type`, `ts_start_utc`, `ts_end_utc`, `content_hash`, `locator`, `schema_version`.
+./docs/blueprints/autocapture_nx_blueprint.md:29:- Ledger entry written for: `evidence.write` (includes hashes + locator digest).
+./docs/blueprints/autocapture_nx_blueprint.md:33:- Derived record references `parent_evidence_id` and a precise `span_ref` (time/frame/offset).
+./docs/blueprints/autocapture_nx_blueprint.md:65:- **Phase 1: Correctness + immutability blockers** — Fix correctness/security breakers; establish run_id + ID discipline; stop evidence mutation.
+./docs/blueprints/autocapture_nx_blueprint.md:82:- [ ] **I005** (Phase 1) — [Stop mutating primary evidence metadata during query](#i005)
+./docs/blueprints/autocapture_nx_blueprint.md:118:- [ ] **I041** (Phase 4) — [Citations point to immutable evidence IDs + spans](#i041)
+./docs/blueprints/autocapture_nx_blueprint.md:139:- [ ] **I062** (Phase 6) — [Add verify commands (ledger/anchors/evidence)](#i062)
+./docs/blueprints/autocapture_nx_blueprint.md:142:- [ ] **I065** (Phase 4) — [Define canonical evidence model (EvidenceObject)](#i065)
+./docs/blueprints/autocapture_nx_blueprint.md:153:- [ ] **I076** (Phase 4) — [Proof bundles export (evidence + ledger slice + anchors)](#i076)
+./docs/blueprints/autocapture_nx_blueprint.md:456:Fix correctness/security breakers; establish run_id + ID discipline; stop evidence mutation.
+./docs/blueprints/autocapture_nx_blueprint.md:539:### I005 — Stop mutating primary evidence metadata during query
+./docs/blueprints/autocapture_nx_blueprint.md:545:  - metadata store API: forbid overwrites for primary evidence
+./docs/blueprints/autocapture_nx_blueprint.md:547:  - Gate-IMMUT: detect `put_replace` on evidence types
+./docs/blueprints/autocapture_nx_blueprint.md:550:  - Introduce evidence/derived record types; enforce immutability for evidence.
+./docs/blueprints/autocapture_nx_blueprint.md:553:  - No query path mutates primary evidence; citations remain stable over time.
+./docs/blueprints/autocapture_nx_blueprint.md:797:  - Store it in run manifest and reference it in evidence records.
+./docs/blueprints/autocapture_nx_blueprint.md:876:  - Stage 3 encrypts+writes atomically and emits evidence+ledger entries.
+./docs/blueprints/autocapture_nx_blueprint.md:904:  - media container format for primary capture evidence
+./docs/blueprints/autocapture_nx_blueprint.md:914:  - Primary capture evidence is efficient to store and seek deterministically.
+./docs/blueprints/autocapture_nx_blueprint.md:1021:  - Test: crash mid-write does not produce partially visible evidence
+./docs/blueprints/autocapture_nx_blueprint.md:1027:  - No partial evidence becomes 'valid' without explicit seal.
+./docs/blueprints/autocapture_nx_blueprint.md:1243:  - Gate-IMMUT: evidence types cannot call replace; tests enforce
+./docs/blueprints/autocapture_nx_blueprint.md:1245:  - Add mutability policy by record_type: evidence immutable; derived immutable;
+./docs/blueprints/autocapture_nx_blueprint.md:1305:  - Define fsync levels: journal+ledger always fsync; evidence seals fsync; bulk media optional.
+./docs/blueprints/autocapture_nx_blueprint.md:1320:  - Compute streaming SHA-256 on plaintext and store in metadata evidence record.
+./docs/blueprints/autocapture_nx_blueprint.md:1335:  - Standardize failure events: `evidence.write_failed`, `encode.failed`, etc.
+./docs/blueprints/autocapture_nx_blueprint.md:1350:  - Write evidence record(s) then seal with final hashes, durations, and counters.
+./docs/blueprints/autocapture_nx_blueprint.md:1366:  - Scan for temp files/unsealed evidence.
+./docs/blueprints/autocapture_nx_blueprint.md:1382:  - Link binary blob evidence to summary record via derivation graph (I73).
+./docs/blueprints/autocapture_nx_blueprint.md:1394:  - Test: migrate copies all evidence and manifests; verification passes
+./docs/blueprints/autocapture_nx_blueprint.md:1411:  - Track bytes/day for evidence and derived separately.
+./docs/blueprints/autocapture_nx_blueprint.md:1424:  - Gate-IMMUT: compaction never touches primary evidence
+./docs/blueprints/autocapture_nx_blueprint.md:1430:  - Storage is optimized without compromising evidence immutability or citations.
+./docs/blueprints/autocapture_nx_blueprint.md:1457:  - Accuracy: golden queries return expected evidence set deterministically
+./docs/blueprints/autocapture_nx_blueprint.md:1472:  - retrieval sorts by stable keys: time, record_type, evidence_id
+./docs/blueprints/autocapture_nx_blueprint.md:1509:  - Derived record fields: parent_evidence_id, span_ref, method (ocr/vlm),
+./docs/blueprints/autocapture_nx_blueprint.md:1525:  - candidate IDs, final cited evidence IDs.
+./docs/blueprints/autocapture_nx_blueprint.md:1545:### I041 — Citations point to immutable evidence IDs + spans
+./docs/blueprints/autocapture_nx_blueprint.md:1550:  - citation schema uses evidence_id + span_ref + hashes
+./docs/blueprints/autocapture_nx_blueprint.md:1554:  - Citations include: evidence_id, evidence_hash, span_kind/time offsets,
+./docs/blueprints/autocapture_nx_blueprint.md:1565:  - citation resolver service + CLI validates evidence and provenance
+./docs/blueprints/autocapture_nx_blueprint.md:1569:  - Resolver steps: load evidence, verify content_hash, verify ledger chain,
+./docs/blueprints/autocapture_nx_blueprint.md:1570:  - verify anchor, validate span exists in evidence.
+./docs/blueprints/autocapture_nx_blueprint.md:1582:  - Golden tests: unresolved citations produce `state=no_evidence` or `state=partial`
+./docs/blueprints/autocapture_nx_blueprint.md:1584:  - Define answer states: ok | partial | no_evidence | conflict.
+./docs/blueprints/autocapture_nx_blueprint.md:1590:### I065 — Define canonical evidence model (EvidenceObject)
+./docs/blueprints/autocapture_nx_blueprint.md:1595:  - contracts: evidence schema and versioning
+./docs/blueprints/autocapture_nx_blueprint.md:1598:  - Schema tests cover all evidence types and require minimal fields
+./docs/blueprints/autocapture_nx_blueprint.md:1618:  - Every evidence/derived object is hash-addressable and verifiable.
+./docs/blueprints/autocapture_nx_blueprint.md:1628:  - Gate: required event types appear for each run (start, evidence writes, stop/crash)
+./docs/blueprints/autocapture_nx_blueprint.md:1630:  - Define a required transition list per evidence type.
+./docs/blueprints/autocapture_nx_blueprint.md:1648:  - Ledger heads are periodically sealed for tamper evidence.
+./docs/blueprints/autocapture_nx_blueprint.md:1656:  - run manifest evidence record written early and finalized at end
+./docs/blueprints/autocapture_nx_blueprint.md:1671:  - citation schema: include evidence hash + ledger/anchor refs
+./docs/blueprints/autocapture_nx_blueprint.md:1703:  - Gate-IMMUT catches any overwrite on evidence/derived records
+./docs/blueprints/autocapture_nx_blueprint.md:1724:  - Any derived output can be traced back to its precise evidence parents.
+./docs/blueprints/autocapture_nx_blueprint.md:1758:### I076 — Proof bundles export (evidence + ledger slice + anchors)
+./docs/blueprints/autocapture_nx_blueprint.md:1767:  - Bundle includes: selected evidence blobs, their metadata, derivation edges,
+./docs/blueprints/autocapture_nx_blueprint.md:1937:  - Define checkpointing per job: last processed evidence_id/span.
+./docs/blueprints/autocapture_nx_blueprint.md:2154:  - Anchors provide tamper evidence independent of ledger storage.
+./docs/blueprints/autocapture_nx_blueprint.md:2157:### I062 — Add verify commands (ledger/anchors/evidence)
+./docs/blueprints/autocapture_nx_blueprint.md:2162:  - verify CLI/API: `verify ledger`, `verify anchors`, `verify evidence`
+./docs/blueprints/autocapture_nx_blueprint.md:2166:  - Ledger verify: recompute chain; anchor verify: verify signatures; evidence verify: hash checks.
+./docs/blueprints/autocapture_nx_blueprint.md:2384:  - Store clipboard content as evidence (Pattern A) locally encrypted.
+./docs/blueprints/autocapture_nx_blueprint.md:2400:  - Store as append-only evidence: file path (normalized), operation, timestamps.
+./docs/blueprints/autocapture_nx_blueprint.md:2403:  - File activity timeline can be correlated with other evidence by time.
+./docs/reports/blueprint_items.md:24:| I005 | Phase 1: Correctness + immutability blockers | Stop mutating primary evidence metadata during query |  |  |  |
+./docs/reports/blueprint_items.md:84:| I041 | Phase 4: Retrieval + provenance + citations | Citations point to immutable evidence IDs + spans |  |  |  |
+./docs/reports/blueprint_items.md:87:| I065 | Phase 4: Retrieval + provenance + citations | Define canonical evidence model (EvidenceObject) |  |  |  |
+./docs/reports/blueprint_items.md:98:| I076 | Phase 4: Retrieval + provenance + citations | Proof bundles export (evidence + ledger slice + anchors) |  |  |  |
+./docs/reports/blueprint_items.md:122:| I062 | Phase 6: Security + egress hardening | Add verify commands (ledger/anchors/evidence) |  |  |  |
+./docs/reports/grep_journal.txt:34:./docs/blueprints/autocapture_nx_blueprint.md:1305:  - Define fsync levels: journal+ledger always fsync; evidence seals fsync; bulk media optional.
+./docs/reports/grep_journal.txt:90:./docs/reports/grep_ledger.txt:128:./docs/blueprints/autocapture_nx_blueprint.md:1305:  - Define fsync levels: journal+ledger always fsync; evidence seals fsync; bulk media optional.
+./docs/reports/grep_ledger.txt:22:./tools/blueprint_items.json:733:    "title": "Proof bundles export (evidence + ledger slice + anchors)",
+./docs/reports/grep_ledger.txt:23:./tools/blueprint_items.json:925:    "title": "Add verify commands (ledger/anchors/evidence)",
+./docs/reports/grep_ledger.txt:66:./docs/autocapture_mx_blueprint.md:40:- **P4 Citable**: deterministic evidence + claim-level citations, validation, and provenance ledger.
+./docs/reports/grep_ledger.txt:80:./docs/assumptions_checklist.md:100:   - Pillars at risk: P3 (encryption at rest), P4 (ledger evidence storage)
+./docs/reports/grep_ledger.txt:86:./docs/blueprints/autocapture_nx_blueprint.md:10:- **P4 Citable**: every non-trivial output must be traceable to immutable evidence with verifiable provenance (hashes, ledger, anchors).
+./docs/reports/grep_ledger.txt:92:./docs/blueprints/autocapture_nx_blueprint.md:139:- [ ] **I062** (Phase 6) — [Add verify commands (ledger/anchors/evidence)](#i062)
+./docs/reports/grep_ledger.txt:94:./docs/blueprints/autocapture_nx_blueprint.md:153:- [ ] **I076** (Phase 4) — [Proof bundles export (evidence + ledger slice + anchors)](#i076)
+./docs/reports/grep_ledger.txt:125:./docs/blueprints/autocapture_nx_blueprint.md:876:  - Stage 3 encrypts+writes atomically and emits evidence+ledger entries.
+./docs/reports/grep_ledger.txt:128:./docs/blueprints/autocapture_nx_blueprint.md:1305:  - Define fsync levels: journal+ledger always fsync; evidence seals fsync; bulk media optional.
+./docs/reports/grep_ledger.txt:140:./docs/blueprints/autocapture_nx_blueprint.md:1569:  - Resolver steps: load evidence, verify content_hash, verify ledger chain,
+./docs/reports/grep_ledger.txt:146:./docs/blueprints/autocapture_nx_blueprint.md:1671:  - citation schema: include evidence hash + ledger/anchor refs
+./docs/reports/grep_ledger.txt:148:./docs/blueprints/autocapture_nx_blueprint.md:1758:### I076 — Proof bundles export (evidence + ledger slice + anchors)
+./docs/reports/grep_ledger.txt:155:./docs/blueprints/autocapture_nx_blueprint.md:2154:  - Anchors provide tamper evidence independent of ledger storage.
+./docs/reports/grep_ledger.txt:156:./docs/blueprints/autocapture_nx_blueprint.md:2157:### I062 — Add verify commands (ledger/anchors/evidence)
+./docs/reports/grep_ledger.txt:157:./docs/blueprints/autocapture_nx_blueprint.md:2162:  - verify CLI/API: `verify ledger`, `verify anchors`, `verify evidence`
+./docs/reports/grep_ledger.txt:164:./docs/autocapture_nx_blueprint_final.md:63:All significant actions affecting evidence, processing, retrieval, and egress are recorded in an append-only ledger.
+./docs/reports/grep_ledger.txt:170:./docs/autocapture_nx_blueprint_final.md:266:- Tests: no retention job runs; no evidence file deletion events appear in ledger.
+./docs/reports/grep_ledger.txt:172:./docs/autocapture_nx_blueprint_final.md:416:Anchor ledger head hashes periodically in a second storage domain to improve tamper evidence.
+./docs/reports/grep_ledger.txt:197:./docs/reports/blueprint_items.md:98:| I076 | Phase 4: Retrieval + provenance + citations | Proof bundles export (evidence + ledger slice + anchors) |  |  |  |
+./docs/reports/grep_ledger.txt:198:./docs/reports/blueprint_items.md:122:| I062 | Phase 6: Security + egress hardening | Add verify commands (ledger/anchors/evidence) |  |  |  |
+./docs/reports/grep_ledger.txt:207:./docs/mx_evidence_bundle.md:211:- Output: OK ledger_missing: data/ledger.ndjson
+./tools/blueprint_items.json:141:    "title": "Stop mutating primary evidence metadata during query",
+./tools/blueprint_items.json:621:    "title": "Citations point to immutable evidence IDs + spans",
+./tools/blueprint_items.json:645:    "title": "Define canonical evidence model (EvidenceObject)",
+./tools/blueprint_items.json:733:    "title": "Proof bundles export (evidence + ledger slice + anchors)",
+./tools/blueprint_items.json:925:    "title": "Add verify commands (ledger/anchors/evidence)",
+./tests/test_observability.py:14:                "observability": {"allow_evidence": False, "allowlist_keys": ["event", "message"]},
+./plugins/builtin/observability_basic/plugin.py:1:"""Observability logger with evidence redaction."""
+./plugins/builtin/observability_basic/plugin.py:25:        allow_evidence = obs_cfg.get("allow_evidence", False)
+./plugins/builtin/observability_basic/plugin.py:29:        if allow_evidence:
+./autocapture/ux/facade.py:49:                "text": f"Found {len(spans)} evidence items for query.",

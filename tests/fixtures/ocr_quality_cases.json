@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "perfect_terminal_line",
+      "expected_text": "PYTHONPATH=src /tmp/stat_harness_venv/bin/python -m pytest -q",
+      "observed_text": "PYTHONPATH=src /tmp/stat_harness_venv/bin/python -m pytest -q"
+    },
+    {
+      "id": "minor_spacing_noise",
+      "expected_text": "Task Set Up Open Invoice for Contractor Ricardo Lopez",
+      "observed_text": "Task Set Up Open  Invoice for Contractor Ricardo Lopez"
+    },
+    {
+      "id": "single_token_error",
+      "expected_text": "Record Activity",
+      "observed_text": "Record Activlty"
+    }
+  ]
+}

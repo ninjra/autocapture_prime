@@ -1,0 +1,62 @@
+{
+  "type": "object",
+  "required": [
+    "generated_utc",
+    "source_doc",
+    "items"
+  ],
+  "properties": {
+    "generated_utc": {
+      "type": "string"
+    },
+    "source_doc": {
+      "type": "string"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "status",
+          "evidence",
+          "validators"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Z]{2,6}-[0-9]{2}$"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "missing",
+              "partial",
+              "implemented"
+            ]
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "validators": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
+

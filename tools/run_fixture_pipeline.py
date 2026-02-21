@@ -1,0 +1,841 @@
+"""Run fixture screenshot through capture + processing + query pipeline."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from autocapture_nx.kernel.loader import Kernel, default_config_paths
+from autocapture_nx.kernel.paths import resolve_repo_path
+from autocapture_nx.plugin_system.registry import PluginRegistry
+from autocapture_nx.ux.fixture import (
+    audit_fixture_event,
+    build_query_specs,
+    build_user_config,
+    collect_plugin_load_report,
+    collect_plugin_trace,
+    evaluate_query,
+    load_manifest,
+    probe_plugins,
+    resolve_screenshots,
+    run_idle_processing,
+)
+
+
+def _utc_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _resolve_path(path: str | Path) -> Path:
+    raw = str(path)
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        return candidate
+    if ":" in raw[:3]:
+        return Path(raw)
+    return resolve_repo_path(candidate)
+
+
+def _collect_evidence(metadata) -> list[str]:
+    def _safe_attr(name: str):
+        try:
+            return getattr(metadata, name)
+        except Exception:
+            return None
+
+    def _safe_call(name: str, *args, **kwargs):
+        fn = _safe_attr(name)
+        if fn is None or not callable(fn):
+            return None
+        try:
+            return fn(*args, **kwargs)
+        except Exception:
+            return None
+
+    # Some capability providers may wrap the underlying store (fanout/fallback).
+    # Prefer a single primary provider if exposed (keeps downstream logic simple).
+    primary = _safe_call("primary")
+    if isinstance(primary, tuple) and len(primary) == 2:
+        _pid, provider = primary
+        if provider is not None:
+            metadata = provider
+
+    raw_ids = _safe_call("keys")
+    # If the provider is a fanout proxy, `keys()` can return per-provider results.
+    if isinstance(raw_ids, list) and raw_ids and all(isinstance(x, dict) for x in raw_ids):
+        flattened: list[str] = []
+        for item in raw_ids:
+            if not isinstance(item, dict):
+                continue
+            result = item.get("result")
+            if isinstance(result, list):
+                flattened.extend(str(v) for v in result)
+        raw_ids = flattened
+
+    # Fall back to a bounded time-window scan when `.keys()` is unavailable due to
+    # subprocess method allowlists / capability wrappers.
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raw_ids = _safe_call("query_time_window", None, None, 5000)
+
+    ids: list[str] = []
+    if not isinstance(raw_ids, list):
+        return ids
+
+    get_fn = _safe_attr("get")
+    if get_fn is None or not callable(get_fn):
+        return ids
+    for key in raw_ids:
+        try:
+            record = get_fn(key, {})
+        except Exception:
+            continue
+        if not isinstance(record, dict):
+            continue
+        record_type = str(record.get("record_type", ""))
+        if record_type.startswith("evidence.capture."):
+            ids.append(str(key))
+    return sorted(ids)
+
+
+def _wait_for_evidence(metadata, *, timeout_s: float = 10.0) -> list[str]:
+    start = time.monotonic()
+    while (time.monotonic() - start) <= timeout_s:
+        ids = _collect_evidence(metadata)
+        if ids:
+            return ids
+        time.sleep(0.1)
+    return []
+
+
+def _debug_storage_metadata(metadata) -> dict[str, Any]:
+    payload: dict[str, Any] = {"type": type(metadata).__name__}
+    for name in ("keys", "get", "query_time_window", "primary"):
+        try:
+            attr = getattr(metadata, name)
+            payload[f"has_{name}"] = True
+            payload[f"{name}_callable"] = bool(callable(attr))
+        except Exception as exc:
+            payload[f"has_{name}"] = False
+            payload[f"{name}_error"] = f"{type(exc).__name__}: {exc}"
+    try:
+        if callable(getattr(metadata, "keys", None)):
+            keys = metadata.keys()
+            payload["keys_type"] = type(keys).__name__
+            payload["keys_len"] = len(keys) if hasattr(keys, "__len__") else None
+            if isinstance(keys, list):
+                payload["keys_sample"] = [str(x) for x in keys[:3]]
+    except Exception as exc:
+        payload["keys_call_error"] = f"{type(exc).__name__}: {exc}"
+    return payload
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _load_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _replace_placeholder(value: Any, placeholder: str, replacement: str) -> Any:
+    if isinstance(value, dict):
+        return {k: _replace_placeholder(v, placeholder, replacement) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_replace_placeholder(v, placeholder, replacement) for v in value]
+    if isinstance(value, str):
+        return value.replace(placeholder, replacement)
+    return value
+
+
+def _ocr_report(system) -> dict:
+    report = {"provider_ids": []}
+    try:
+        for plugin in getattr(system, "plugins", []):
+            if not getattr(plugin, "capabilities", None):
+                continue
+            if "ocr.engine" in plugin.capabilities:
+                report["provider_ids"].append(str(plugin.plugin_id))
+    except Exception:
+        pass
+    cfg = getattr(system, "config", {}) if system is not None else {}
+    models_cfg = cfg.get("models", {}) if isinstance(cfg, dict) else {}
+    report["ocr_path"] = models_cfg.get("ocr_path")
+    try:
+        import pytesseract  # type: ignore
+
+        try:
+            ver = pytesseract.get_tesseract_version()
+        except Exception:
+            ver = None
+        report["tesseract_available"] = bool(ver)
+        report["tesseract_version"] = str(ver) if ver else None
+    except Exception:
+        report["tesseract_available"] = False
+    try:
+        import rapidocr_onnxruntime  # noqa: F401
+
+        report["rapidocr_available"] = True
+    except Exception:
+        report["rapidocr_available"] = False
+    if report.get("tesseract_available"):
+        report["selected_backend"] = "tesseract"
+    elif report.get("rapidocr_available"):
+        report["selected_backend"] = "rapidocr_unconfigured"
+    else:
+        report["selected_backend"] = "basic"
+    return report
+
+
+def _validate_localhost(user_config: dict) -> tuple[bool, str]:
+    web_cfg = user_config.get("web", {}) if isinstance(user_config, dict) else {}
+    bind_host = str(web_cfg.get("bind_host", "") or "")
+    allow_remote = bool(web_cfg.get("allow_remote", False))
+    if allow_remote:
+        return False, "web.allow_remote must be false"
+    if bind_host and bind_host != "127.0.0.1":
+        return False, f"web.bind_host must be 127.0.0.1 (got {bind_host})"
+    return True, ""
+
+
+def _validate_storage_policy(user_config: dict) -> tuple[bool, str]:
+    storage_cfg = user_config.get("storage", {}) if isinstance(user_config, dict) else {}
+    if not bool(storage_cfg.get("no_deletion_mode", False)):
+        return False, "storage.no_deletion_mode must be true"
+    if not bool(storage_cfg.get("raw_first_local", False)):
+        return False, "storage.raw_first_local must be true"
+    return True, ""
+
+
+def _discover_plugins(base_config: dict) -> list[dict[str, Any]]:
+    registry = PluginRegistry(base_config, safe_mode=False)
+    manifests = []
+    for manifest_path in registry.discover_manifest_paths():
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        plugin_id = str(payload.get("plugin_id") or "").strip()
+        if not plugin_id:
+            continue
+        manifests.append(
+            {
+                "plugin_id": plugin_id,
+                "manifest_path": str(manifest_path),
+                "enabled_default": bool(payload.get("enabled", True)),
+                "permissions": payload.get("permissions", {}),
+            }
+        )
+    manifests.sort(key=lambda item: item["plugin_id"])
+    return manifests
+
+
+def _build_plugin_status(
+    *,
+    manifests: list[dict[str, Any]],
+    load_report: dict[str, Any],
+    probe_results: list[dict[str, Any]],
+    trace: dict[str, Any],
+    expected_plugin_ids: set[str] | None = None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    loaded = set(load_report.get("loaded", []) if isinstance(load_report, dict) else [])
+    failed = set(load_report.get("failed", []) if isinstance(load_report, dict) else [])
+    skipped = set(load_report.get("skipped", []) if isinstance(load_report, dict) else [])
+    errors = load_report.get("errors", []) if isinstance(load_report, dict) else []
+    error_map: dict[str, list[dict[str, Any]]] = {}
+    for err in errors:
+        if not isinstance(err, dict):
+            continue
+        pid = str(err.get("plugin_id") or "").strip()
+        if not pid:
+            continue
+        error_map.setdefault(pid, []).append(err)
+
+    trace_summary = trace.get("summary", {}) if isinstance(trace, dict) else {}
+    trace_plugins = trace_summary.get("plugins", {}) if isinstance(trace_summary, dict) else {}
+    probe_by_plugin: dict[str, list[dict[str, Any]]] = {}
+    for entry in probe_results:
+        if not isinstance(entry, dict):
+            continue
+        pid = str(entry.get("provider_id") or "").strip()
+        if not pid:
+            continue
+        probe_by_plugin.setdefault(pid, []).append(entry)
+
+    statuses: list[dict[str, Any]] = []
+    skipped_without_reason: list[str] = []
+    expected = set(expected_plugin_ids or [])
+    for item in manifests:
+        pid = item["plugin_id"]
+        if expected and pid not in expected:
+            continue
+        status = "unknown"
+        if pid in loaded:
+            status = "loaded"
+        elif pid in failed:
+            status = "failed"
+        elif pid in skipped:
+            status = "skipped"
+        reasons = error_map.get(pid, [])
+        probe = probe_by_plugin.get(pid, [])
+        trace_info = trace_plugins.get(pid, {"calls": 0, "errors": 0})
+        if status == "skipped" and not reasons:
+            skipped_without_reason.append(pid)
+        if status == "unknown":
+            skipped_without_reason.append(pid)
+        statuses.append(
+            {
+                "plugin_id": pid,
+                "status": status,
+                "errors": reasons,
+                "probe": probe,
+                "trace": trace_info,
+            }
+        )
+    return statuses, skipped_without_reason
+
+
+def _expected_plugin_ids(user_config: dict[str, Any]) -> set[str]:
+    plugins_cfg = user_config.get("plugins", {}) if isinstance(user_config, dict) else {}
+    if not isinstance(plugins_cfg, dict):
+        return set()
+    if bool(plugins_cfg.get("safe_mode", False)):
+        raw = plugins_cfg.get("default_pack", [])
+        if isinstance(raw, list):
+            return {str(pid).strip() for pid in raw if str(pid).strip()}
+        return set()
+    enabled = plugins_cfg.get("enabled", {})
+    if not isinstance(enabled, dict):
+        return set()
+    return {str(pid).strip() for pid, on in enabled.items() if bool(on) and str(pid).strip()}
+
+
+def _percentile(values: list[int], pct: float) -> int | None:
+    if not values:
+        return None
+    values = sorted(values)
+    if len(values) == 1:
+        return int(values[0])
+    pct = max(0.0, min(100.0, float(pct)))
+    rank = (pct / 100.0) * (len(values) - 1)
+    low = int(rank)
+    high = min(low + 1, len(values) - 1)
+    frac = rank - low
+    return int(round(values[low] + (values[high] - values[low]) * frac))
+
+
+def _plugin_timing_summary(trace: dict[str, Any]) -> dict[str, Any]:
+    events = trace.get("events", []) if isinstance(trace.get("events", []), list) else []
+    by_key: dict[tuple[str, str, str], list[int]] = {}
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        pid = str(ev.get("plugin_id") or "")
+        cap = str(ev.get("capability") or "")
+        method = str(ev.get("method") or "")
+        if not pid or not cap or not method:
+            continue
+        try:
+            dur = int(ev.get("duration_ms") or 0)
+        except Exception:
+            dur = 0
+        by_key.setdefault((pid, cap, method), []).append(max(0, dur))
+    rows: list[dict[str, Any]] = []
+    for (pid, cap, method), durs in sorted(by_key.items()):
+        durs_sorted = sorted(durs)
+        rows.append(
+            {
+                "plugin_id": pid,
+                "capability": cap,
+                "method": method,
+                "calls": len(durs_sorted),
+                "total_ms": int(sum(durs_sorted)),
+                "p50_ms": _percentile(durs_sorted, 50.0),
+                "p95_ms": _percentile(durs_sorted, 95.0),
+                "max_ms": int(durs_sorted[-1]) if durs_sorted else None,
+            }
+        )
+    return {"rows": rows, "unique_keys": len(rows), "events": len(events)}
+
+
+def _env_bool(name: str, *, default: bool = False) -> bool:
+    raw = str(os.environ.get(name, "") or "").strip().casefold()
+    if not raw:
+        return bool(default)
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _safe_component(value: str) -> str:
+    text = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip())
+    text = text.strip("._-")
+    return text[:96] if text else ""
+
+
+def _emit_log(log_json: bool, event: str, **fields: Any) -> None:
+    if bool(log_json):
+        payload: dict[str, Any] = {
+            "ts_utc": datetime.now(timezone.utc).isoformat(),
+            "event": str(event),
+        }
+        for key, value in fields.items():
+            payload[str(key)] = value
+        print(json.dumps(payload, sort_keys=True), flush=True)
+        return
+    if fields:
+        extras = " ".join(f"{k}={v}" for k, v in fields.items())
+        print(f"[fixture] {event} {extras}".rstrip())
+    else:
+        print(f"[fixture] {event}")
+    sys.stdout.flush()
+
+
+def _write_ready_file(path: str, payload: dict[str, Any]) -> None:
+    if not path:
+        return
+    ready_path = _resolve_path(path)
+    ready_path.parent.mkdir(parents=True, exist_ok=True)
+    ready_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def main(argv: list[str] | None = None) -> int:
+    if not os.environ.get("AUTOCAPTURE_PYTHON_EXE"):
+        os.environ["AUTOCAPTURE_PYTHON_EXE"] = sys.executable
+    # Fixture runs must stay WSL-stable: force in-process plugin hosting to avoid
+    # spawning many subprocess plugin hosts (each with a large RSS).
+    os.environ.setdefault("AUTOCAPTURE_PLUGINS_HOSTING_MODE", "inproc")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--manifest", default="docs/test sample/fixture_manifest.json")
+    parser.add_argument("--output-dir", "--out", dest="output_dir", default=os.environ.get("AP_OUT_DIR", "artifacts/fixture_runs"))
+    parser.add_argument("--run-id", default=os.environ.get("AP_RUN_ID", ""))
+    parser.add_argument("--data-root", default=os.environ.get("AP_DATA_ROOT", ""))
+    parser.add_argument("--no-network", action="store_true", default=_env_bool("AP_NO_NETWORK", default=False))
+    parser.add_argument("--ready-file", default=os.environ.get("AP_READY_FILE", ""))
+    parser.add_argument("--log-json", action="store_true", default=_env_bool("AP_LOG_JSON", default=False))
+    parser.add_argument("--config-template", default="tools/fixture_config_template.json")
+    parser.add_argument("--capture-timeout-s", type=float, default=10.0)
+    parser.add_argument("--idle-timeout-s", type=float, default=60.0)
+    parser.add_argument("--idle-max-steps", type=int, default=20)
+    parser.add_argument("--input-dir", default="")
+    parser.add_argument("--force-idle", action="store_true")
+    parser.add_argument(
+        "--capture-container",
+        default="",
+        help="Override capture.video.container (e.g. zip, avi_mjpeg, ffmpeg_mp4)",
+    )
+    parser.add_argument(
+        "--stub-frame-format",
+        default="",
+        help="Override capture.stub.frame_format (e.g. png, jpeg)",
+    )
+    parser.add_argument(
+        "--video-frame-format",
+        default="",
+        help="Override capture.video.frame_format (e.g. png, jpeg, rgb)",
+    )
+    args = parser.parse_args(argv)
+
+    manifest_path = _resolve_path(args.manifest)
+    manifest = load_manifest(manifest_path)
+    screenshots = resolve_screenshots(manifest)
+    if not screenshots:
+        print("ERROR: no screenshots listed in manifest")
+        return 2
+    if args.input_dir:
+        frames_dir = _resolve_path(args.input_dir)
+    else:
+        frames_dir = screenshots[0].parent
+    if not frames_dir.exists():
+        print(f"ERROR: frames_dir not found: {frames_dir}")
+        return 2
+    frame_files = [p for p in sorted(frames_dir.iterdir()) if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp"}]
+    if not frame_files:
+        print(f"ERROR: no frames found in {frames_dir}")
+        return 2
+
+    run_id_override = str(args.run_id or "").strip()
+    run_token = _safe_component(run_id_override) if run_id_override else _utc_stamp()
+    run_dir = _resolve_path(args.output_dir) / run_token
+    config_dir = run_dir / "config"
+    if str(args.data_root or "").strip():
+        data_dir = _resolve_path(str(args.data_root).strip()) / run_token
+    else:
+        data_dir = run_dir / "data"
+    run_id = run_id_override if run_id_override else f"fixture_{run_dir.name}"
+
+    user_config = build_user_config(
+        args.config_template,
+        frames_dir=frames_dir,
+        max_frames=len(frame_files),
+        run_id=run_id,
+    )
+    if isinstance(user_config, dict):
+        capture_cfg = user_config.setdefault("capture", {})
+        if isinstance(capture_cfg, dict):
+            if args.stub_frame_format:
+                stub_cfg = capture_cfg.setdefault("stub", {})
+                if isinstance(stub_cfg, dict):
+                    stub_cfg["frame_format"] = str(args.stub_frame_format).strip()
+            video_cfg = capture_cfg.setdefault("video", {})
+            if isinstance(video_cfg, dict):
+                if args.capture_container:
+                    video_cfg["container"] = str(args.capture_container).strip()
+                if args.video_frame_format:
+                    video_cfg["frame_format"] = str(args.video_frame_format).strip()
+    if isinstance(user_config, dict):
+        storage_cfg = user_config.setdefault("storage", {})
+        if isinstance(storage_cfg, dict):
+            storage_cfg["data_dir"] = str(data_dir)
+            if bool(args.no_network):
+                storage_cfg["network_disabled"] = True
+        plugins_cfg = user_config.setdefault("plugins", {})
+        if isinstance(plugins_cfg, dict):
+            if bool(args.no_network):
+                enabled_cfg = plugins_cfg.setdefault("enabled", {})
+                if isinstance(enabled_cfg, dict):
+                    enabled_cfg["builtin.egress.gateway"] = False
+                    enabled_cfg["builtin.privacy.egress_sanitizer"] = False
+            settings_cfg = plugins_cfg.setdefault("settings", {})
+            if isinstance(settings_cfg, dict):
+                jepa_cfg = settings_cfg.setdefault("builtin.state.jepa.training", {})
+                if isinstance(jepa_cfg, dict):
+                    storage_cfg = jepa_cfg.setdefault("storage", {})
+                    if isinstance(storage_cfg, dict):
+                        storage_cfg["data_dir"] = str(data_dir)
+        if bool(args.no_network):
+            privacy_cfg = user_config.setdefault("privacy", {})
+            if isinstance(privacy_cfg, dict):
+                egress_cfg = privacy_cfg.setdefault("egress", {})
+                if isinstance(egress_cfg, dict):
+                    egress_cfg["enabled"] = False
+                cloud_cfg = privacy_cfg.setdefault("cloud", {})
+                if isinstance(cloud_cfg, dict):
+                    cloud_cfg["enabled"] = False
+        user_config = _replace_placeholder(user_config, "{data_dir}", str(data_dir))
+    if args.force_idle and isinstance(user_config, dict):
+        runtime_cfg = user_config.setdefault("runtime", {})
+        if isinstance(runtime_cfg, dict):
+            enforce_cfg = runtime_cfg.setdefault("mode_enforcement", {})
+            if isinstance(enforce_cfg, dict):
+                enforce_cfg["fixture_override"] = True
+                enforce_cfg["fixture_override_reason"] = "fixture_force_idle"
+
+    ok_localhost, err_localhost = _validate_localhost(user_config)
+    if not ok_localhost:
+        print(f"ERROR: {err_localhost}")
+        return 2
+    ok_storage, err_storage = _validate_storage_policy(user_config)
+    if not ok_storage:
+        print(f"ERROR: {err_storage}")
+        return 2
+    base_config = _load_json(resolve_repo_path("config/default.json"))
+    manifests = _discover_plugins(base_config)
+    plugin_ids = [item["plugin_id"] for item in manifests]
+    plugins_cfg = user_config.setdefault("plugins", {})
+    if isinstance(plugins_cfg, dict):
+        plugins_cfg["allowlist"] = list(plugin_ids)
+        # Keep the fixture template's explicit enable/disable set to avoid loading
+        # every plugin in the repo (WSL RAM blowups + noisy failures).
+        enabled_cfg = plugins_cfg.get("enabled")
+        if not isinstance(enabled_cfg, dict):
+            plugins_cfg["enabled"] = {}
+    config_dir.mkdir(parents=True, exist_ok=True)
+    user_path = (config_dir / "user.json")
+    user_path.write_text(json.dumps(user_config, indent=2, sort_keys=True), encoding="utf-8")
+    config_hash = _sha256_text(user_path.read_text(encoding="utf-8"))
+
+    audit_fixture_event(
+        "fixture.config.override",
+        outcome="ok",
+        details={
+            "manifest": str(manifest_path),
+            "frames_dir": str(frames_dir),
+            "run_id": run_id,
+            "config_hash": config_hash,
+        },
+    )
+    if args.force_idle:
+        audit_fixture_event(
+            "fixture.force_idle",
+            outcome="ok",
+            details={
+                "run_id": run_id,
+                "config_hash": config_hash,
+            },
+        )
+
+    original_config = os.environ.get("AUTOCAPTURE_CONFIG_DIR")
+    original_data = os.environ.get("AUTOCAPTURE_DATA_DIR")
+    os.environ["AUTOCAPTURE_CONFIG_DIR"] = str(config_dir)
+    os.environ["AUTOCAPTURE_DATA_DIR"] = str(data_dir)
+
+    report: dict[str, object] = {
+        "manifest": str(manifest_path),
+        "run_dir": str(run_dir),
+        "config_dir": str(config_dir),
+        "data_dir": str(data_dir),
+        "config_template": str(_resolve_path(args.config_template)),
+        "frames_dir": str(frames_dir),
+        "frame_count": len(frame_files),
+        "run_id": run_id,
+        "config_hash": config_hash,
+        "no_network": bool(args.no_network),
+        "log_json": bool(args.log_json),
+        "ready_file": str(args.ready_file or ""),
+        "started_utc": datetime.now(timezone.utc).isoformat(),
+    }
+
+    exit_code = 0
+    kernel = None
+    try:
+        if bool(args.no_network):
+            os.environ["AUTO_CAPTURE_ALLOW_NETWORK"] = "0"
+            os.environ["AUTOCAPTURE_NO_NETWORK"] = "1"
+        _emit_log(bool(args.log_json), "run.start", run_dir=str(run_dir), run_id=run_id)
+        audit_fixture_event(
+            "fixture.run.start",
+            outcome="ok",
+            details={
+                "manifest": str(manifest_path),
+                "frames_dir": str(frames_dir),
+                "run_id": run_id,
+                "config_hash": config_hash,
+            },
+        )
+        t0 = time.monotonic()
+        import faulthandler
+
+        # If boot stalls (e.g., lock hashing or plugin init), emit a traceback for
+        # stepwise debugging without attaching a debugger.
+        faulthandler.dump_traceback_later(30.0, repeat=False, file=sys.stderr)
+        kernel = Kernel(default_config_paths(), safe_mode=False)
+        # Fixture validation is a one-shot CLI workflow. Avoid heavy boot steps
+        # (recovery/integrity sweeps, conductor wiring) to keep WSL stable and
+        # reduce wall-clock time.
+        system = kernel.boot(start_conductor=False, fast_boot=True)
+        faulthandler.cancel_dump_traceback_later()
+        report["boot_elapsed_s"] = round(time.monotonic() - t0, 3)
+        _emit_log(bool(args.log_json), "boot.done", boot_elapsed_s=report["boot_elapsed_s"])
+        report["ocr"] = _ocr_report(system)
+        report["plugins"] = {"load_report": collect_plugin_load_report(system)}
+        if str(args.ready_file or "").strip():
+            _write_ready_file(
+                str(args.ready_file),
+                {
+                    "schema_version": 1,
+                    "status": "ready",
+                    "run_id": run_id,
+                    "run_dir": str(run_dir),
+                    "config_dir": str(config_dir),
+                    "data_dir": str(data_dir),
+                    "ts_utc": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+
+        capture = system.get("capture.source") if system and hasattr(system, "get") else None
+        if capture is None or not hasattr(capture, "start"):
+            print("ERROR: capture.source unavailable")
+            return 2
+        t_cap = time.monotonic()
+        capture.start()
+        metadata = system.get("storage.metadata")
+        if metadata is None:
+            print("ERROR: storage.metadata unavailable")
+            return 2
+        evidence_ids = _wait_for_evidence(metadata, timeout_s=float(args.capture_timeout_s))
+        if not evidence_ids:
+            print("ERROR: no evidence captured")
+            try:
+                report["debug"] = dict(report.get("debug", {}) if isinstance(report.get("debug", {}), dict) else {})
+                report["debug"]["storage_metadata"] = _debug_storage_metadata(metadata)
+                # Cross-check filesystem state (metadata is raw-first on disk).
+                try:
+                    meta_root = Path(str(data_dir)) / "metadata"
+                    report["debug"]["metadata_file_count"] = (
+                        len(list(meta_root.rglob("*.json"))) if meta_root.exists() else 0
+                    )
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            exit_code = 3
+        capture.stop()
+        report["capture_elapsed_s"] = round(time.monotonic() - t_cap, 3)
+        _emit_log(
+            bool(args.log_json),
+            "capture.done",
+            capture_elapsed_s=report["capture_elapsed_s"],
+            evidence_count=len(evidence_ids),
+        )
+        evidence_sample = None
+        if evidence_ids and hasattr(metadata, "get"):
+            try:
+                rec = metadata.get(evidence_ids[0], {})
+                if isinstance(rec, dict):
+                    container = rec.get("container", {}) if isinstance(rec.get("container", {}), dict) else {}
+                    evidence_sample = {
+                        "record_id": evidence_ids[0],
+                        "record_type": rec.get("record_type"),
+                        "container_type": container.get("type"),
+                    }
+            except Exception:
+                evidence_sample = None
+        report["evidence"] = {"count": len(evidence_ids), "record_ids": evidence_ids[:20], "sample": evidence_sample}
+        # Avoid re-running heavy OCR/VLM work just for "probe_plugins" bookkeeping.
+        # Probes should validate wiring and sandboxing, not burn cycles on real media.
+        sample_frame: bytes | None = b""
+
+        if exit_code == 0:
+            t_idle = time.monotonic()
+            import faulthandler
+            # If idle processing stalls (OCR/model hangs), emit a traceback for debugging.
+            faulthandler.dump_traceback_later(max(10.0, float(args.idle_timeout_s) + 5.0), repeat=False, file=sys.stderr)
+            idle_result = run_idle_processing(
+                system,
+                max_steps=int(args.idle_max_steps),
+                timeout_s=float(args.idle_timeout_s),
+            )
+            faulthandler.cancel_dump_traceback_later()
+            report["idle_elapsed_s"] = round(time.monotonic() - t_idle, 3)
+            report["idle"] = idle_result
+            _emit_log(
+                bool(args.log_json),
+                "idle.done",
+                idle_elapsed_s=report["idle_elapsed_s"],
+                done=bool(idle_result.get("done")),
+                blocked=bool(idle_result.get("blocked")),
+            )
+            if not idle_result.get("done") and idle_result.get("blocked"):
+                exit_code = 4
+
+        if exit_code == 0:
+            t_queries = time.monotonic()
+            specs = build_query_specs(manifest, metadata)
+            query_results = []
+            failures = 0
+            if not specs:
+                report["queries"] = {"count": 0, "failures": 1, "results": []}
+                exit_code = 5
+            else:
+                for spec in specs:
+                    result = evaluate_query(system, spec)
+                    if not result.get("ok"):
+                        failures += 1
+                    query_results.append(result)
+                report["queries"] = {"count": len(specs), "failures": failures, "results": query_results}
+                if failures:
+                    exit_code = 5
+            report["queries_elapsed_s"] = round(time.monotonic() - t_queries, 3)
+            _emit_log(
+                bool(args.log_json),
+                "queries.done",
+                queries_elapsed_s=report["queries_elapsed_s"],
+                count=report["queries"]["count"],
+                failures=report["queries"]["failures"],
+            )
+        t_probe = time.monotonic()
+        report["plugin_probe"] = probe_plugins(
+            system,
+            sample_frame=sample_frame,
+            sample_record_id=(evidence_ids[0] if evidence_ids else None),
+        )
+        report["probe_elapsed_s"] = round(time.monotonic() - t_probe, 3)
+        _emit_log(bool(args.log_json), "probe.done", probe_elapsed_s=report["probe_elapsed_s"])
+        t_trace = time.monotonic()
+        report["plugin_trace"] = collect_plugin_trace(system)
+        report["trace_elapsed_s"] = round(time.monotonic() - t_trace, 3)
+        report["plugin_timing"] = _plugin_timing_summary(report["plugin_trace"] if isinstance(report.get("plugin_trace"), dict) else {})
+        _emit_log(bool(args.log_json), "trace.done", trace_elapsed_s=report["trace_elapsed_s"])
+        plugin_status, skipped_without_reason = _build_plugin_status(
+            manifests=manifests,
+            load_report=report["plugins"]["load_report"],
+            probe_results=report["plugin_probe"],
+            trace=report["plugin_trace"],
+            expected_plugin_ids=_expected_plugin_ids(user_config) if isinstance(user_config, dict) else None,
+        )
+        report["plugin_status"] = plugin_status
+        report["skipped_without_reason"] = skipped_without_reason
+        if skipped_without_reason and exit_code == 0:
+            exit_code = 6
+
+    except Exception as exc:
+        report["error"] = f"{type(exc).__name__}: {exc}"
+        exit_code = 1
+    finally:
+        report["finished_utc"] = datetime.now(timezone.utc).isoformat()
+        try:
+            run_dir.mkdir(parents=True, exist_ok=True)
+            output_path = run_dir / "fixture_report.json"
+            output_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+            report["report_path"] = str(output_path)
+            _emit_log(bool(args.log_json), "report.written", report_path=str(output_path))
+        except Exception:
+            pass
+        if kernel is not None:
+            try:
+                kernel.shutdown()
+            except Exception:
+                pass
+        if original_config is None:
+            os.environ.pop("AUTOCAPTURE_CONFIG_DIR", None)
+        else:
+            os.environ["AUTOCAPTURE_CONFIG_DIR"] = original_config
+        if original_data is None:
+            os.environ.pop("AUTOCAPTURE_DATA_DIR", None)
+        else:
+            os.environ["AUTOCAPTURE_DATA_DIR"] = original_data
+
+    audit_fixture_event(
+        "fixture.run.finish",
+        outcome="ok" if exit_code == 0 else "error",
+        details={
+            "manifest": str(manifest_path),
+            "run_id": run_id,
+            "exit_code": exit_code,
+            "run_dir": str(run_dir),
+        },
+    )
+    if str(args.ready_file or "").strip():
+        _write_ready_file(
+            str(args.ready_file),
+            {
+                "schema_version": 1,
+                "status": "ok" if exit_code == 0 else "error",
+                "run_id": run_id,
+                "run_dir": str(run_dir),
+                "exit_code": int(exit_code),
+                "report_path": str(report.get("report_path") or ""),
+                "ts_utc": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    if report.get("plugin_status"):
+        print("PLUGIN STATUS:")
+        for entry in report.get("plugin_status", []):
+            if not isinstance(entry, dict):
+                continue
+            pid = entry.get("plugin_id")
+            status = entry.get("status")
+            errors = entry.get("errors") or []
+            msg = f"- {pid}: {status}"
+            if errors:
+                msg += f" ({len(errors)} errors)"
+            print(msg)
+
+    if exit_code == 0:
+        _emit_log(bool(args.log_json), "run.finish", outcome="ok", exit_code=0)
+        print("OK: fixture pipeline")
+    else:
+        _emit_log(bool(args.log_json), "run.finish", outcome="error", exit_code=int(exit_code))
+        print(f"FAIL: fixture pipeline (code {exit_code})")
+    return exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

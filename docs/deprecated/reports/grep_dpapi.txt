@@ -1,0 +1,21 @@
+# rg -n /dpapi/
+./config/default.json:304:      "use_dpapi": true
+./contracts/config_schema.json:620:            "use_dpapi": {
+./contracts/config_schema.json:626:            "use_dpapi"
+./plugins/builtin/anchor_basic/plugin.py:20:        self._use_dpapi = bool(anchor_cfg.get("use_dpapi", os.name == "nt"))
+./plugins/builtin/anchor_basic/plugin.py:40:        if self._use_dpapi and os.name == "nt":
+./plugins/builtin/anchor_basic/plugin.py:42:                from autocapture_nx.windows.dpapi import protect
+./autocapture_nx/kernel/crypto.py:33:                from autocapture_nx.windows.dpapi import unprotect
+./autocapture_nx/kernel/crypto.py:43:            from autocapture_nx.windows.dpapi import protect
+./autocapture_nx/kernel/keyring.py:26:        from autocapture_nx.windows.dpapi import protect
+./autocapture_nx/kernel/keyring.py:39:        from autocapture_nx.windows.dpapi import unprotect
+./docs/reports/grep_anchor.txt:12:./docs/configuration.md:30:- `storage.anchor.use_dpapi` toggles DPAPI protection for anchor entries on Windows.
+./docs/reports/grep_anchor.txt:183:./plugins/builtin/anchor_basic/plugin.py:20:        self._use_dpapi = bool(anchor_cfg.get("use_dpapi", os.name == "nt"))
+./docs/reports/grep_anchor.txt:199:./tests/test_anchor.py:13:            config = {"storage": {"data_dir": tmp, "anchor": {"path": anchor_path, "use_dpapi": False}}}
+./docs/configuration.md:30:- `storage.anchor.use_dpapi` toggles DPAPI protection for anchor entries on Windows.
+./docs/reports/grep_capture_pipeline.txt:2339:./autocapture_nx/kernel/crypto.py:33:                from autocapture_nx.windows.dpapi import unprotect
+./docs/reports/grep_capture_pipeline.txt:2340:./autocapture_nx/kernel/crypto.py:43:            from autocapture_nx.windows.dpapi import protect
+./docs/reports/grep_capture_pipeline.txt:2380:./plugins/builtin/anchor_basic/plugin.py:42:                from autocapture_nx.windows.dpapi import protect
+./docs/reports/grep_capture_pipeline.txt:2391:./autocapture_nx/kernel/keyring.py:26:        from autocapture_nx.windows.dpapi import protect
+./docs/reports/grep_capture_pipeline.txt:2392:./autocapture_nx/kernel/keyring.py:39:        from autocapture_nx.windows.dpapi import unprotect
+./tests/test_anchor.py:13:            config = {"storage": {"data_dir": tmp, "anchor": {"path": anchor_path, "use_dpapi": False}}}

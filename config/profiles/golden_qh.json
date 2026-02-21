@@ -1,0 +1,55 @@
+{
+  "runtime": {
+    "golden_qh": {
+      "enabled": true,
+      "profile_id": "golden_qh_v1",
+      "required_plugins": [
+        "builtin.storage.sqlcipher",
+        "builtin.ocr.basic",
+        "builtin.processing.sst.pipeline",
+        "builtin.processing.sst.ui_vlm",
+        "builtin.vlm.vllm_localhost",
+        "builtin.observation.graph"
+      ]
+    }
+  },
+  "plugins": {
+    "capabilities": {
+      "processing.stage.hooks": {
+        "fanout": true,
+        "max_providers": 64,
+        "mode": "multi",
+        "preferred": [],
+        "provider_ids": []
+      }
+    },
+    "enabled": {
+      "builtin.sst.qa.answers": false,
+      "builtin.processing.sst.pipeline": true,
+      "builtin.processing.sst.ui_vlm": true,
+      "builtin.vlm.vllm_localhost": true,
+      "builtin.observation.graph": true
+    }
+  },
+  "processing": {
+    "on_query": {
+      "allow_decode_extract": false,
+      "extractors": {
+        "ocr": false,
+        "vlm": false
+      },
+      "require_idle": true
+    }
+  },
+  "storage": {
+    "no_deletion_mode": false,
+    "retention": {
+      "evidence": "6d",
+      "images_only": true,
+      "interval_s": 86400,
+      "max_delete_per_run": 5000,
+      "processed_only": true,
+      "record_batches": true
+    }
+  }
+}

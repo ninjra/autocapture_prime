@@ -1,0 +1,35 @@
+schema_version: 1
+plugin_id: mx.core.ocr_local
+version: 0.1.0
+display_name: MX OCR Local
+description: Local OCR engine.
+extensions:
+  -
+    kind: ocr.engine
+    factory: autocapture.ingest.normalizer:create_ocr_engine
+    name: tesseract
+    version: 0.1.0
+    caps:
+      - ocr.engine
+    pillars:
+      data_handling:
+        local_only: true
+        egress:
+          allow_cloud: false
+          allow_cloud_images: false
+          require_sanitizer: false
+          sanitizer_kind: egress.sanitizer
+      performance:
+        qos_class: background
+        cpu_budget_ms_p95: 200
+        io_budget_mb_s: 30
+      accuracy:
+        deterministic: true
+        validation_level: schema
+      security:
+        network_access: none
+        secrets_access: none
+        sandbox: process
+      citable:
+        produces_citations: true
+        citation_granularity: span

@@ -1,57 +1,331 @@
-"""Local VLM plugin placeholder using BLIP/LLava style models (optional)."""
+"""Local VLM plugin with deterministic fallback and optional model inference."""
 
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 from typing import Any
 
+try:
+    from PIL import Image
+    _PIL_AVAILABLE = True
+except Exception:  # pragma: no cover - optional dependency guard
+    Image = None  # type: ignore[assignment]
+    _PIL_AVAILABLE = False
+
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
+from autocapture_nx.kernel.ids import encode_record_id_component
+from autocapture_nx.processing.sst.extract import (
+    extract_charts,
+    extract_code_blocks,
+    extract_spreadsheets,
+    extract_tables,
+    parse_ui_elements,
+)
+from autocapture_nx.processing.sst.layout import assemble_layout
+from autocapture_nx.processing.sst.utils import norm_text
+
+from autocapture.ingest.ocr_basic import ocr_tokens_from_bytes
+from autocapture.models.bundles import select_bundle, BundleInfo
 
 
 class VLMStub(PluginBase):
     def __init__(self, plugin_id: str, context: PluginContext) -> None:
         super().__init__(plugin_id, context)
+        cfg = context.config if isinstance(context.config, dict) else {}
+        models_cfg = cfg.get("models", {}) if isinstance(cfg.get("models", {}), dict) else {}
+        self._model_path = models_cfg.get("vlm_path")
+        self._bundle: BundleInfo | None = None
+        if not self._model_path:
+            self._bundle = select_bundle("vlm")
+            if self._bundle is not None and self._bundle.config.get("model_path"):
+                raw = str(self._bundle.config.get("model_path"))
+                self._model_path = self._resolve_bundle_path(self._bundle.path, raw)
+        self._prompt = str(models_cfg.get("vlm_prompt") or "Describe the screen contents concisely.")
+        self._max_new_tokens = int(models_cfg.get("vlm_max_new_tokens") or 160)
+        self._backend = "heuristic"
+        self._pipeline = None
+        self._processor = None
         self._model = None
+        self._toy_caption: str | None = None
+        self._toy_tags: list[str] = []
+        self._toy_payload: dict[str, Any] | None = None
+        self._model_error: str | None = None
+        self._model_loaded = False
 
     def capabilities(self) -> dict[str, Any]:
         return {"vision.extractor": self}
 
-    def _load(self):
-        if self._model is not None:
-            return self._model
-        try:
-            from transformers import AutoProcessor, AutoModelForVision2Seq
-        except Exception as exc:
-            raise RuntimeError(f"Missing VLM dependency: {exc}")
-        model_path = os.path.join("D:\\autocapture", "models", "vlm")
-        if not os.path.isdir(model_path):
-            raise RuntimeError(f"Missing VLM model files at {model_path}")
-        try:
-            processor = AutoProcessor.from_pretrained(model_path)
-            model = AutoModelForVision2Seq.from_pretrained(model_path)
-        except Exception as exc:
-            raise RuntimeError(f"Failed to load VLM model at {model_path}: {exc}")
-        self._model = (processor, model)
-        return self._model
-
     def extract(self, image_bytes: bytes) -> dict[str, Any]:
         if not image_bytes:
-            raise RuntimeError("Missing VLM input bytes")
-        processor, model = self._load()
-        from io import BytesIO
-        from PIL import Image
-        import torch
-
+            return {"text": json.dumps({"elements": [], "edges": []})}
+        if not _PIL_AVAILABLE:
+            return {"text": json.dumps({"elements": [], "edges": []})}
         try:
-            image = Image.open(BytesIO(image_bytes)).convert("RGB")
+            image = Image.open(_as_bytes_io(image_bytes)).convert("RGB")
+        except Exception:
+            return {"text": json.dumps({"elements": [], "edges": []})}
+
+        layout = _heuristic_layout(image_bytes, image)
+        payload: dict[str, Any] = {"text": json.dumps(layout), "layout": layout, "backend": self._backend}
+        caption = self._caption_from_model(image)
+        # `_caption_from_model()` may load a bundle-backed toy model or a local
+        # transformers pipeline, which mutates `self._backend`. Ensure the
+        # emitted payload reflects the backend that actually produced captioning.
+        payload["backend"] = self._backend
+        if caption:
+            payload["caption"] = caption
+            payload["text_plain"] = caption
+        if self._toy_tags:
+            payload["tags"] = list(self._toy_tags)
+        if self._model_path:
+            payload["model_id"] = str(self._model_path)
+        if self._bundle is not None:
+            payload["bundle_id"] = self._bundle.bundle_id
+            payload["bundle_version"] = self._bundle.version
+            payload["bundle_path"] = str(self._bundle.path)
+        if self._toy_payload is not None:
+            payload["toy_model"] = dict(self._toy_payload)
+        if self._model_error:
+            payload["model_error"] = self._model_error
+        return payload
+
+    def _caption_from_model(self, image: "Image.Image") -> str:
+        self._load_model()
+        if self._toy_caption is not None:
+            return self._toy_caption
+        if self._pipeline is not None:
+            try:
+                result = self._pipeline(image, max_new_tokens=self._max_new_tokens)
+            except Exception as exc:
+                self._model_error = f"vlm_pipeline_error:{exc}"
+                return ""
+            if isinstance(result, list) and result:
+                text = result[0].get("generated_text") or result[0].get("text")
+                return str(text or "").strip()
+            return ""
+        if self._model is None or self._processor is None:
+            return ""
+        try:
+            inputs = self._processor(images=image, text=self._prompt, return_tensors="pt")
+            device = next(self._model.parameters()).device
+            inputs = {k: v.to(device) if hasattr(v, "to") else v for k, v in inputs.items()}
+            generated = self._model.generate(
+                **inputs,
+                max_new_tokens=self._max_new_tokens,
+                do_sample=False,
+            )
+            text = self._processor.batch_decode(generated, skip_special_tokens=True)
+            return str(text[0]).strip() if text else ""
         except Exception as exc:
-            raise RuntimeError(f"Invalid VLM image bytes: {exc}")
-        inputs = processor(images=image, return_tensors="pt")
-        with torch.no_grad():
-            output = model.generate(**inputs, max_new_tokens=128)
-        text = processor.batch_decode(output, skip_special_tokens=True)[0]
-        return {"text": text, "layout": []}
+            self._model_error = f"vlm_generate_failed:{exc}"
+            return ""
+
+    def _load_model(self) -> None:
+        if self._model_loaded:
+            return
+        self._model_loaded = True
+        if not self._model_path:
+            return
+        handled = self._load_toy_model()
+        if handled:
+            return
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+        os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+        try:
+            from transformers import pipeline
+        except Exception as exc:
+            self._model_error = f"vlm_transformers_missing:{exc}"
+            return
+        try:
+            self._pipeline = pipeline("image-to-text", model=self._model_path, local_files_only=True)
+            self._backend = "transformers.pipeline"
+            return
+        except Exception:
+            self._pipeline = None
+        try:
+            from transformers import AutoProcessor, AutoModelForVision2Seq
+        except Exception:
+            AutoProcessor = None
+            AutoModelForVision2Seq = None
+        try:
+            from transformers import AutoModelForCausalLM
+        except Exception:
+            AutoModelForCausalLM = None
+        try:
+            import torch
+        except Exception as exc:
+            self._model_error = f"vlm_torch_missing:{exc}"
+            return
+        processor = None
+        if AutoProcessor is not None:
+            try:
+                processor = AutoProcessor.from_pretrained(self._model_path, local_files_only=True)
+            except Exception:
+                processor = None
+        model = None
+        if AutoModelForVision2Seq is not None:
+            try:
+                model = AutoModelForVision2Seq.from_pretrained(self._model_path, local_files_only=True)
+            except Exception:
+                model = None
+        if model is None and AutoModelForCausalLM is not None:
+            try:
+                model = AutoModelForCausalLM.from_pretrained(self._model_path, local_files_only=True)
+            except Exception:
+                model = None
+        if model is None or processor is None:
+            self._model_error = "vlm_model_load_failed"
+            return
+        try:
+            model.eval()
+        except Exception:
+            pass
+        try:
+            torch.manual_seed(0)
+            torch.set_grad_enabled(False)
+            if hasattr(torch, "use_deterministic_algorithms"):
+                torch.use_deterministic_algorithms(True)
+        except Exception:
+            pass
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        try:
+            model.to(device)
+        except Exception:
+            pass
+        self._processor = processor
+        self._model = model
+        self._backend = "transformers.vision2seq"
+
+    def _load_toy_model(self) -> bool:
+        if not self._model_path:
+            return False
+        path = str(self._model_path)
+        candidate = Path(os.path.expanduser(path))
+        if not candidate.exists() or candidate.is_dir():
+            return False
+        try:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception:
+            return False
+        kind = str(payload.get("kind", "")).strip().lower()
+        if kind not in {"toy-vlm", "toy_vlm"}:
+            return False
+        caption = str(payload.get("caption", "")).strip()
+        tags = payload.get("tags", [])
+        if isinstance(tags, list):
+            self._toy_tags = [str(tag) for tag in tags if str(tag).strip()]
+        else:
+            self._toy_tags = []
+        if not caption and self._toy_tags:
+            caption = ", ".join(self._toy_tags)
+        self._toy_caption = caption
+        self._toy_payload = payload if isinstance(payload, dict) else None
+        self._backend = "toy.vlm"
+        return True
+
+    @staticmethod
+    def _resolve_bundle_path(bundle_root: "os.PathLike[str]", model_path: str) -> str:
+        candidate = os.fspath(model_path)
+        if os.path.isabs(candidate):
+            return candidate
+        return os.fspath(os.path.join(os.fspath(bundle_root), candidate))
 
 
 def create_plugin(plugin_id: str, context: PluginContext) -> VLMStub:
     return VLMStub(plugin_id, context)
+
+
+def _heuristic_layout(image_bytes: bytes, image: "Image.Image") -> dict[str, Any]:
+    width, height = image.size
+    tokens = _tokenize(image_bytes, width, height)
+    lines, blocks = assemble_layout(
+        tokens,
+        line_y_threshold_px=12,
+        block_gap_px=16,
+        align_tolerance_px=12,
+    )
+    tables = extract_tables(
+        tokens=tokens,
+        state_id="vlm",
+        min_rows=2,
+        min_cols=2,
+        max_cells=500,
+        row_gap_px=10,
+        col_gap_px=16,
+    )
+    spreadsheets = extract_spreadsheets(tokens=tokens, tables=tables, state_id="vlm", header_scan_rows=2)
+    code_blocks = extract_code_blocks(
+        tokens=tokens,
+        text_lines=lines,
+        state_id="vlm",
+        min_keywords=2,
+        image_rgb=None,
+        detect_caret=False,
+        detect_selection=False,
+    )
+    charts = extract_charts(tokens=tokens, state_id="vlm", min_ticks=2)
+    element_graph = parse_ui_elements(
+        state_id="vlm",
+        frame_bbox=(0, 0, width, height),
+        tokens=tokens,
+        text_blocks=blocks,
+        tables=tables,
+        spreadsheets=spreadsheets,
+        code_blocks=code_blocks,
+        charts=charts,
+    )
+    elements = []
+    for element in element_graph.get("elements", []):
+        if element.get("type") == "window":
+            continue
+        elements.append(
+            {
+                "type": element.get("type", "unknown"),
+                "bbox": element.get("bbox"),
+                "text": element.get("label"),
+                "interactable": bool(element.get("interactable", False)),
+                "state": element.get("state", {}) if isinstance(element.get("state", {}), dict) else {},
+            }
+        )
+    return {"elements": elements, "edges": []}
+
+
+def _tokenize(image_bytes: bytes, width: int, height: int) -> list[dict[str, Any]]:
+    tokens = []
+    for idx, token in enumerate(ocr_tokens_from_bytes(image_bytes)):
+        token_id = encode_record_id_component(f"vlm-tok-{idx:05d}")
+        bbox = _clamp_bbox(token.bbox, width, height)
+        text = token.text
+        tokens.append(
+            {
+                "token_id": token_id,
+                "text": text,
+                "norm_text": norm_text(text),
+                "bbox": bbox,
+                "confidence_bp": int(token.confidence * 10000),
+                "source": "vlm",
+            }
+        )
+    return tokens
+
+
+def _clamp_bbox(bbox: tuple[int, int, int, int], width: int, height: int) -> tuple[int, int, int, int]:
+    x0, y0, x1, y1 = bbox
+    x0 = max(0, min(int(x0), width))
+    y0 = max(0, min(int(y0), height))
+    x1 = max(0, min(int(x1), width))
+    y1 = max(0, min(int(y1), height))
+    if x1 < x0:
+        x0, x1 = x1, x0
+    if y1 < y0:
+        y0, y1 = y1, y0
+    return x0, y0, x1, y1
+
+
+def _as_bytes_io(data: bytes):
+    from io import BytesIO
+
+    return BytesIO(data)

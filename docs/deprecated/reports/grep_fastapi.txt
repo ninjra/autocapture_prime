@@ -1,0 +1,29 @@
+# rg -n /fastapi/
+./pyproject.toml:14:  "fastapi>=0.110.0",
+./fastapi/__init__.py:15:def _load_real_fastapi():
+./fastapi/__init__.py:28:    spec = importlib.machinery.PathFinder.find_spec("fastapi", search_paths)
+./fastapi/__init__.py:39:_real_fastapi = _load_real_fastapi()
+./fastapi/__init__.py:40:if _real_fastapi:
+./fastapi/__init__.py:41:    globals().update(_real_fastapi.__dict__)
+./fastapi/testclient.py:1:"""TestClient shim for fastapi compatibility."""
+./fastapi/testclient.py:24:    spec = importlib.machinery.PathFinder.find_spec("fastapi.testclient", search_paths)
+./fastapi/testclient.py:39:    from fastapi import TestClient  # noqa: F401
+./autocapture/web/routes/settings.py:5:from fastapi import APIRouter, Request
+./autocapture/web/routes/query.py:5:from fastapi import APIRouter, Request
+./autocapture/web/routes/plugins.py:5:from fastapi import APIRouter, Request
+./docs/reports/repo_tooling_summary.md:22:- Core deps include: `cryptography`, `fastapi`, `httpx`, `mss`, `Pillow`, `pynput`, `sounddevice`, `PyYAML`, `PyPDF2`, `pytesseract`, `sentence-transformers`, `transformers`, `torch`, `tzdata`
+./autocapture/web/routes/metrics.py:6:from fastapi import APIRouter
+./autocapture/web/routes/health.py:5:from fastapi import APIRouter, Request
+./autocapture/web/routes/citations.py:5:from fastapi import APIRouter
+./autocapture/web/api.py:5:from fastapi import FastAPI
+./tests/test_metrics_endpoint_exposes_counters.py:3:from fastapi.testclient import TestClient
+./autocapture/gateway/router.py:6:from fastapi import APIRouter, HTTPException
+./autocapture/gateway/app.py:5:from fastapi import FastAPI
+./tests/test_gateway_schema_enforced.py:3:from fastapi.testclient import TestClient
+./tests/test_gateway_policy_block_cloud_default.py:3:from fastapi.testclient import TestClient
+./tests/test_citation_overlay_contract.py:3:from fastapi.testclient import TestClient
+./autocapture/codex/validators.py:108:def _load_fastapi_app():
+./autocapture/codex/validators.py:109:    from fastapi import FastAPI
+./autocapture/codex/validators.py:127:        app = _load_fastapi_app()
+./autocapture/codex/validators.py:142:        app = _load_fastapi_app()
+./autocapture/codex/validators.py:143:        from fastapi.testclient import TestClient

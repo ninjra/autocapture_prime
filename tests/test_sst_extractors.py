@@ -1,0 +1,109 @@
+import unittest
+
+try:
+    from PIL import Image, ImageDraw
+except Exception:  # pragma: no cover - optional dependency guard
+    Image = None
+    ImageDraw = None
+
+from autocapture_nx.processing.sst.extract import extract_charts, extract_code_blocks, extract_spreadsheets, extract_tables
+from autocapture_nx.processing.sst.layout import assemble_layout
+
+
+def _token(token_id: str, text: str, bbox: tuple[int, int, int, int]) -> dict:
+    return {
+        "token_id": token_id,
+        "text": text,
+        "norm_text": text.strip(),
+        "bbox": bbox,
+        "confidence_bp": 9000,
+        "source": "ocr",
+        "flags": {"monospace_likely": False, "is_number": text.isdigit()},
+    }
+
+
+class SSTExtractorTests(unittest.TestCase):
+    def test_code_blocks_strip_line_numbers(self) -> None:
+        tokens = [
+            _token("t1", "1", (0, 0, 8, 10)),
+            _token("t2", "SELECT", (20, 0, 80, 10)),
+            _token("t3", "2", (0, 20, 8, 30)),
+            _token("t4", "FROM", (20, 20, 60, 30)),
+        ]
+        lines, _blocks = assemble_layout(tokens, line_y_threshold_px=12, block_gap_px=24, align_tolerance_px=20)
+        code_blocks = extract_code_blocks(tokens=tokens, text_lines=lines, state_id="s1", min_keywords=1)
+        self.assertTrue(code_blocks)
+        code = code_blocks[0]
+        self.assertEqual(tuple(line.lstrip() for line in code["lines"]), ("SELECT", "FROM"))
+        self.assertEqual(code["line_numbers"], ("1", "2"))
+
+    def test_spreadsheet_active_cell_and_formula_bar(self) -> None:
+        tokens = [
+            _token("fx", "fx", (10, 0, 20, 10)),
+            _token("colA", "A", (30, 0, 40, 10)),
+            _token("colB", "B", (60, 0, 70, 10)),
+            _token("row1", "1", (0, 20, 10, 30)),
+            _token("row2", "2", (0, 40, 10, 50)),
+            _token("a1", "alpha", (30, 20, 50, 30)),
+            _token("b1", "beta", (60, 20, 80, 30)),
+            _token("a2", "gamma", (30, 40, 50, 50)),
+            _token("b2", "delta", (60, 40, 80, 50)),
+            _token("ref", "A1", (5, 5, 20, 15)),
+        ]
+        tables = extract_tables(tokens=tokens, state_id="s1", min_rows=2, min_cols=2, max_cells=50, row_gap_px=12, col_gap_px=24)
+        self.assertTrue(tables)
+        self.assertIn("tsv", tables[0])
+        sheets = extract_spreadsheets(tokens=tokens, tables=tables, state_id="s1", header_scan_rows=1)
+        self.assertTrue(sheets)
+        sheet = sheets[0]
+        self.assertIsNotNone(sheet.get("active_cell"))
+        self.assertIsNotNone(sheet.get("formula_bar"))
+        self.assertIn("A", sheet.get("header_map", {}).values())
+
+    def test_chart_series_fallback(self) -> None:
+        tokens = [
+            _token("y1", "0", (0, 0, 10, 10)),
+            _token("y2", "10", (0, 50, 10, 60)),
+            _token("x1", "1", (20, 90, 30, 100)),
+            _token("x2", "2", (60, 90, 70, 100)),
+            _token("lbl1", "Jan", (20, 80, 40, 90)),
+            _token("lbl2", "Feb", (60, 80, 80, 90)),
+            _token("v1", "5", (25, 40, 35, 50)),
+            _token("v2", "7", (65, 30, 75, 40)),
+        ]
+        charts = extract_charts(tokens=tokens, state_id="s1", min_ticks=2)
+        self.assertTrue(charts)
+        chart = charts[0]
+        self.assertIn(chart["chart_type"], {"bar", "line", "unknown"})
+        self.assertTrue(chart.get("series"))
+
+    @unittest.skipIf(Image is None, "Pillow is required for caret detection")
+    def test_code_caret_and_selection_detection(self) -> None:
+        assert Image is not None and ImageDraw is not None
+        img = Image.new("RGB", (200, 100), (180, 180, 180))
+        draw = ImageDraw.Draw(img)
+        draw.line((80, 10, 80, 70), fill=(0, 0, 0), width=1)
+        draw.rectangle((20, 20, 120, 40), fill=(50, 100, 200))
+
+        tokens = [
+            _token("t1", "SELECT", (20, 12, 70, 24)),
+            _token("t2", "FROM", (20, 32, 60, 44)),
+        ]
+        lines, _blocks = assemble_layout(tokens, line_y_threshold_px=12, block_gap_px=24, align_tolerance_px=20)
+        code_blocks = extract_code_blocks(
+            tokens=tokens,
+            text_lines=lines,
+            state_id="s1",
+            min_keywords=1,
+            image_rgb=img,
+            detect_caret=True,
+            detect_selection=True,
+        )
+        self.assertTrue(code_blocks)
+        code = code_blocks[0]
+        self.assertIsNotNone(code.get("caret"))
+        self.assertIsNotNone(code.get("selection"))
+
+
+if __name__ == "__main__":
+    unittest.main()

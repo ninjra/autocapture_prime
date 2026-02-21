@@ -1,0 +1,59 @@
+# rg -n /run_id/
+./contracts/user_surface.md:24:  - Runs the diffusion harness and writes artifacts under `tools/hypervisor/runs/<run_id>/`.
+./contracts/user_surface.md:26:  - Runs AST/IR analysis and writes artifacts under `tools/hypervisor/runs/<run_id>/`.
+./tools/blueprint_items.json:253:    "title": "Stamp every journal event with run_id",
+./tools/blueprint_items.json:445:    "title": "Add DB indexes on ts_utc, record_type, run_id",
+./tools/hypervisor/hypervisor.py:99:    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+./tools/hypervisor/hypervisor.py:100:    run_dir = Path("tools") / "hypervisor" / "runs" / run_id
+./tools/hypervisor/hypervisor.py:104:        "run_id": run_id,
+./tools/hypervisor/hypervisor.py:133:        "run_id": run_id,
+./tests/test_training_manifest_schema.py:15:            run_id="run1",
+./docs/devtools.md:6:- Artifacts: `tools/hypervisor/runs/<run_id>/run.json` and scorecards
+./docs/devtools.md:18:Artifacts are stored under `tools/hypervisor/runs/<run_id>/ast_ir.json`.
+./docs/blueprints/autocapture_nx_blueprint.md:27:- Fields (minimum): `evidence_id`, `run_id`, `type`, `ts_start_utc`, `ts_end_utc`, `content_hash`, `locator`, `schema_version`.
+./docs/blueprints/autocapture_nx_blueprint.md:65:- **Phase 1: Correctness + immutability blockers** — Fix correctness/security breakers; establish run_id + ID discipline; stop evidence mutation.
+./docs/blueprints/autocapture_nx_blueprint.md:104:- [ ] **I027** (Phase 3) — [Add DB indexes on ts_utc, record_type, run_id](#i027)
+./docs/blueprints/autocapture_nx_blueprint.md:176:- [ ] **I099** (Phase 1) — [Stamp every journal event with run_id](#i099)
+./docs/blueprints/autocapture_nx_blueprint.md:456:Fix correctness/security breakers; establish run_id + ID discipline; stop evidence mutation.
+./docs/blueprints/autocapture_nx_blueprint.md:561:  - kernel run manager (new): run_id creation and propagation
+./docs/blueprints/autocapture_nx_blueprint.md:562:  - all plugins include run_id in IDs and events
+./docs/blueprints/autocapture_nx_blueprint.md:567:  - Create `run_id` as ULID/UUIDv7 at boot or capture start.
+./docs/blueprints/autocapture_nx_blueprint.md:568:  - Prefix all record IDs with `run_id/` and use monotonic seq per type.
+./docs/blueprints/autocapture_nx_blueprint.md:569:  - Store run manifest linking run_id to config/locks hashes.
+./docs/blueprints/autocapture_nx_blueprint.md:598:  - Snapshot: journal schema stable and contains run_id
+./docs/blueprints/autocapture_nx_blueprint.md:765:  - Centralize: run_id, timestamps, schema_version, record_type.
+./docs/blueprints/autocapture_nx_blueprint.md:770:### I099 — Stamp every journal event with run_id
+./docs/blueprints/autocapture_nx_blueprint.md:775:  - JournalWriter automatically inserts run_id (from run manager)
+./docs/blueprints/autocapture_nx_blueprint.md:777:  - Test: all journal events include run_id
+./docs/blueprints/autocapture_nx_blueprint.md:779:  - JournalWriter reads current run_id from kernel context.
+./docs/blueprints/autocapture_nx_blueprint.md:780:  - Reject event appends if run_id is missing (unless in bootstrap mode).
+./docs/blueprints/autocapture_nx_blueprint.md:782:  - Journal is always partitionable by run_id.
+./docs/blueprints/autocapture_nx_blueprint.md:1188:### I027 — Add DB indexes on ts_utc, record_type, run_id
+./docs/blueprints/autocapture_nx_blueprint.md:1193:  - SQLCipher schema: indexes on `ts_utc`, `record_type`, `run_id`
+./docs/blueprints/autocapture_nx_blueprint.md:1275:  - Directory schema: `media/{run_id}/{type}/{yyyy-mm-dd}/...` etc.
+./docs/blueprints/autocapture_nx_blueprint.md:1290:  - Manifest includes: run_id, start/stop timestamps, config hash, locks hashes,
+./docs/reports/grep_journal.txt:17:./docs/blueprints/autocapture_nx_blueprint.md:176:- [ ] **I099** (Phase 1) — [Stamp every journal event with run_id](#i099)
+./docs/reports/grep_journal.txt:29:./docs/blueprints/autocapture_nx_blueprint.md:598:  - Snapshot: journal schema stable and contains run_id
+./docs/reports/grep_journal.txt:31:./docs/blueprints/autocapture_nx_blueprint.md:770:### I099 — Stamp every journal event with run_id
+./docs/reports/grep_journal.txt:32:./docs/blueprints/autocapture_nx_blueprint.md:777:  - Test: all journal events include run_id
+./docs/reports/grep_journal.txt:117:./docs/reports/blueprint_items.md:38:| I099 | Phase 1: Correctness + immutability blockers | Stamp every journal event with run_id |  |  |  |
+./docs/reports/grep_journal.txt:142:./tools/blueprint_items.json:253:    "title": "Stamp every journal event with run_id",
+./docs/reports/grep_evidence.txt:54:./docs/blueprints/autocapture_nx_blueprint.md:27:- Fields (minimum): `evidence_id`, `run_id`, `type`, `ts_start_utc`, `ts_end_utc`, `content_hash`, `locator`, `schema_version`.
+./docs/reports/grep_evidence.txt:57:./docs/blueprints/autocapture_nx_blueprint.md:65:- **Phase 1: Correctness + immutability blockers** — Fix correctness/security breakers; establish run_id + ID discipline; stop evidence mutation.
+./docs/reports/grep_evidence.txt:63:./docs/blueprints/autocapture_nx_blueprint.md:456:Fix correctness/security breakers; establish run_id + ID discipline; stop evidence mutation.
+./docs/reports/blueprint_items.md:38:| I099 | Phase 1: Correctness + immutability blockers | Stamp every journal event with run_id |  |  |  |
+./docs/reports/blueprint_items.md:62:| I027 | Phase 3: Storage scaling + durability | Add DB indexes on ts_utc, record_type, run_id |  |  |  |
+./plugins/builtin/devtools_ast_ir/plugin.py:76:        run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+./plugins/builtin/devtools_ast_ir/plugin.py:77:        run_dir = Path("tools") / "hypervisor" / "runs" / run_id
+./plugins/builtin/devtools_ast_ir/plugin.py:89:            "run_id": run_id,
+./autocapture/training/pipelines.py:22:        run_id: str | None = None,
+./autocapture/training/pipelines.py:32:                run_id=run_id,
+./autocapture/training/pipelines.py:40:            run_id=run_id,
+./autocapture/training/lora.py:41:    run_id: str | None = None,
+./autocapture/training/lora.py:46:    run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+./autocapture/training/lora.py:48:    output_dir = Path(output_dir) / run_id
+./autocapture/training/lora.py:58:        "run_id": run_id,
+./autocapture/training/dpo.py:41:    run_id: str | None = None,
+./autocapture/training/dpo.py:46:    run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+./autocapture/training/dpo.py:48:    output_dir = Path(output_dir) / run_id
+./autocapture/training/dpo.py:58:        "run_id": run_id,

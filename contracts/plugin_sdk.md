@@ -11,6 +11,13 @@ Each plugin ships a `plugin.json` with fields:
 - `enabled` (bool)
 - `entrypoints[]`: `{ kind, id, path, callable }`
 - `permissions`: `{ filesystem, gpu, raw_input, network }`
+- `required_capabilities[]` (capability strings)
+- `filesystem_policy` (optional): `{ read[], readwrite[] }`
+- `settings_paths` (optional): list of dot-paths into the effective config to expose as plugin settings
+- `settings_schema` (optional): JSON schema describing plugin-specific settings UI
+- `io_contracts` (optional): per-capability input/output JSON schema (inline or via schema paths)
+- `capability_tags` (optional): freeform tags to aid capability selection and reporting
+- `default_settings` (optional): default settings merged before config slices and user overrides
 - `compat`: `{ requires_kernel, requires_schema_versions[] }`
 - `depends_on[]` (plugin_id strings)
 - `hash_lock`: `{ manifest_sha256, artifact_sha256 }`
@@ -57,7 +64,11 @@ Capabilities are namespaced strings (examples):
 ## Permissions
 - Network is denied by default.
 - Only `builtin.egress.gateway` may request `network: true`.
-- Filesystem/gpu/raw_input are declared but enforced by policy and host sandbox.
+- Filesystem/gpu/raw_input are declared and enforced by policy + host sandbox.
+- `filesystem_policy` supports templated roots: `{run_dir}`, `{metadata_db_path}`, `{media_dir}`, `{audit_db_path}`,
+  `{data_dir}`, `{cache_dir}`, `{config_dir}`, `{plugin_dir}`, `{repo_root}`, `{spool_dir}`, `{blob_dir}`,
+  `{lexical_db_path}`, `{vector_db_path}`, `{anchor_path}`, `{anchor_dir}`, `{keyring_path}`, `{root_key_path}`,
+  `{keyring_dir}`, `{root_key_dir}`.
 
 ## Safe mode
 If `plugins.safe_mode` is true, only `plugins.default_pack` may load.
@@ -66,6 +77,18 @@ Any user overrides are ignored.
 ## Hosting
 `plugins.hosting.mode` controls default hosting (`subprocess` or `inproc`).
 `plugins.hosting.inproc_allowlist` enumerates audited in-proc plugins.
+
+## Plugin settings
+Plugins receive a settings subtree derived from:
+1) `default_settings` from the manifest
+2) config slices listed in `settings_paths`
+3) user overrides under `plugins.settings.<plugin_id>`
+
+Only the derived settings subtree is passed to plugins as `context.config`.
+
+## I/O contracts
+Use `io_contracts` to declare JSON schemas for capability inputs/outputs. Contracts are enforced at runtime for
+deterministic, citeable plugin outputs (invalid payloads fail closed for that call).
 
 ## Hash locking
 `config/plugin_locks.json` is the authoritative lockfile.

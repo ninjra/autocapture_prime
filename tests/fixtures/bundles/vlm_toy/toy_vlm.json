@@ -1,0 +1,6 @@
+{
+  "kind": "toy-vlm",
+  "caption": "Toy caption: overview of the screen contents.",
+  "tags": ["toy", "screen", "overview"],
+  "notes": "Deterministic toy model for offline tests."
+}

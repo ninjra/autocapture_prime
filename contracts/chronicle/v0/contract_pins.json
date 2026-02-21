@@ -1,0 +1,7 @@
+{
+  "files": {
+    "contracts/chronicle/v0/chronicle.proto": "cc3ea48b074dc0b18b36618e3251f6a00d7feaf61d9323fb0d8c19378e94a8f1",
+    "contracts/chronicle/v0/spool_format.md": "a6bb6ed46de7ab45be8db61795ebdb0a73a3451cdad5639950f0710d13fad043"
+  },
+  "version": 1
+}

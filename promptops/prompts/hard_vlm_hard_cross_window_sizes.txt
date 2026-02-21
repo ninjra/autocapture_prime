@@ -1,0 +1,9 @@
+Return strict JSON only with keys slack_numbers (int[2]), inferred_parameter, example_queries (string[2]), rationale. Use Slack message mentioning new converter at two sizes and map to query parameter. The two sizes must be exact numbers read from visible text; never use placeholders like 1234/5678 or query1/query2. If the two numbers are unreadable, return slack_numbers as an empty list. Output only a single JSON object with no markdown fences and no extra text.
+
+Answer this exact question context when extracting: Cross-window reasoning: Slack mentions running a "new converter" at two sizes. Identify those two numbers from Slack, then infer the best-matching parameter in the dev note (k vs dimension). Finally, produce two example GET query strings using k=64 and those two values as the inferred parameter.
+Use only visible evidence from the image.
+
+Answer policy:
+- Prefer correctness over speed.
+- Use only grounded evidence from provided context.
+- If evidence is insufficient, explicitly return indeterminate.

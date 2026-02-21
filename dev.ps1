@@ -243,12 +243,18 @@ function Local-Doctor {
     Check-File (Join-Path $repoRoot "ops\dev\common.env.example") "ops/dev/common.env.example present"
     Check-File (Join-Path $repoRoot "ops\dev\ports.env.example") "ops/dev/ports.env.example present"
 
-    $python = Get-Command python -ErrorAction SilentlyContinue
-    if (-not $python) {
+    $venvPython = Join-Path $repoRoot ".venv\\Scripts\\python.exe"
+    if (Test-Path $venvPython) {
+        $pythonExe = $venvPython
+    } else {
+        $python = Get-Command python -ErrorAction SilentlyContinue
+        $pythonExe = if ($python) { $python.Path } else { $null }
+    }
+    if (-not $pythonExe) {
         Write-Host "FAIL python not found (required for this repo)"
         $fails++
     } else {
-        $ver = & python -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
+        $ver = & $pythonExe -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
         $parts = $ver.Split(".")
         if ([int]$parts[0] -gt 3 -or ([int]$parts[0] -eq 3 -and [int]$parts[1] -ge 10)) {
             Write-Host "PASS python >= 3.10 ($ver)"

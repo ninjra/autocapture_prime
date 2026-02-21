@@ -1,0 +1,190 @@
+syntax = "proto3";
+package chronicle.v0;
+
+// NOTE: v0 is intentionally simple and append-only.
+// Do not reuse field numbers. Add new fields with new numbers.
+// When removing fields, mark them reserved.
+
+message RectI32 {
+  int32 x = 1;  // left in desktop pixels
+  int32 y = 2;  // top in desktop pixels
+  int32 w = 3;  // width in pixels
+  int32 h = 4;  // height in pixels
+}
+
+enum PixelFormat {
+  PIXEL_FORMAT_UNSPECIFIED = 0;
+  BGRA8 = 1;    // 4 bytes/pixel, typical Windows capture surface
+  NV12 = 2;     // common video encode/decode interchange
+}
+
+message DpiInfo {
+  // Desktop/monitor scaling; used to normalize coordinates across DPI.
+  float scale_x = 1;
+  float scale_y = 2;
+  uint32 dpi_x = 3;
+  uint32 dpi_y = 4;
+  string monitor_id = 5; // stable per-monitor identifier if available
+}
+
+message SessionManifest {
+  string schema_version = 1; // must be "chronicle/v0"
+  string session_id = 2;     // UUID string
+  string host_id = 3;        // stable anonymized host identifier
+  int64 qpc_frequency_hz = 4;
+
+  // Start/end are optional until session closes; qpc is primary timeline.
+  int64 start_qpc_ticks = 5;
+  int64 end_qpc_ticks = 6;
+
+  // Wall clock is best-effort and may be absent/zero if policy forbids.
+  int64 start_unix_ns = 7;
+  int64 end_unix_ns = 8;
+
+  uint32 desktop_width = 9;
+  uint32 desktop_height = 10;
+
+  // Capture method identifier ("wgc", "dxgi", etc.)
+  string capture_backend = 11;
+
+  // Free-form JSON string for configuration snapshot (redacted as needed).
+  string config_json = 12;
+}
+
+message FrameMeta {
+  string session_id = 1;
+  uint64 frame_index = 2;
+
+  // Primary timebase
+  int64 qpc_ticks = 3;
+
+  // Optional wallclock
+  int64 unix_ns = 4;
+
+  uint32 width = 5;
+  uint32 height = 6;
+  PixelFormat pixel_format = 7;
+
+  // Absolute desktop location of the captured content
+  RectI32 desktop_rect = 8;
+
+  // Dirty rectangles when provided by backend
+  repeated RectI32 dirty_rects = 9;
+
+  DpiInfo dpi = 10;
+
+  // Relative path within session directory (e.g., "frames/frame_000123.png")
+  string artifact_path = 11;
+
+  // Optional integrity
+  bytes sha256 = 12;
+}
+
+message FrameMetaBatch {
+  repeated FrameMeta items = 1;
+}
+
+// IMPORTANT SAFETY NOTE:
+// This contract intentionally omits system-wide keyboard telemetry.
+// If you later decide to log keystrokes, treat that as a separate, explicit,
+// opt-in feature with strong compliance controls.
+
+enum InputEventType {
+  INPUT_EVENT_UNSPECIFIED = 0;
+  MOUSE = 1;
+
+  // High-level, non-text control events (e.g., "start_capture", "stop_capture").
+  CONTROL = 2;
+
+  // Generic HID payloads for specific devices only when explicitly allowed.
+  GENERIC_HID = 3;
+}
+
+message MouseEvent {
+  // Absolute pointer position in desktop pixels
+  int32 x = 1;
+  int32 y = 2;
+
+  // Relative movement since last event (device reported)
+  int32 delta_x = 3;
+  int32 delta_y = 4;
+
+  // Bitmask of pressed buttons (implementation-defined but stable)
+  uint32 buttons = 5;
+
+  // Wheel delta (WHEEL_DELTA units)
+  int32 wheel_delta = 6;
+}
+
+message ControlEvent {
+  // Examples: "start_capture", "stop_capture", "bookmark".
+  string action = 1;
+
+  // Optional free-form JSON payload (append-only).
+  string payload_json = 2;
+}
+
+message GenericHidEvent {
+  // Minimal shape; include opaque payload only if policy allows.
+  uint32 usage_page = 1;
+  uint32 usage = 2;
+  bytes payload = 3;
+}
+
+message InputEvent {
+  string session_id = 1;
+  uint64 event_index = 2;
+
+  // Primary timebase
+  int64 qpc_ticks = 3;
+
+  // Optional wallclock
+  int64 unix_ns = 4;
+
+  // Device identifier MUST be anonymized (hash) unless policy allows raw.
+  string device_id = 5;
+
+  InputEventType type = 6;
+
+  oneof payload {
+    MouseEvent mouse = 10;
+    ControlEvent control = 11;
+    GenericHidEvent generic_hid = 12;
+  }
+}
+
+message InputEventBatch {
+  repeated InputEvent items = 1;
+}
+
+enum UiElementType {
+  UI_ELEMENT_UNSPECIFIED = 0;
+  WINDOW = 1;
+  PANE = 2;
+  TAB = 3;
+  BUTTON = 4;
+  TEXT = 5;
+  ICON = 6;
+  INPUT = 7;
+}
+
+message UiElement {
+  string element_id = 1;   // stable within session if possible
+  UiElementType type = 2;
+  RectI32 bbox = 3;        // desktop pixels
+  float confidence = 4;    // 0..1
+  string label = 5;        // classifier label (optional)
+  string text = 6;         // OCR text for element (optional)
+  string parent_id = 7;    // containment (optional)
+}
+
+message DetectionFrame {
+  string session_id = 1;
+  uint64 frame_index = 2;
+  int64 qpc_ticks = 3;
+  repeated UiElement elements = 4;
+}
+
+message DetectionBatch {
+  repeated DetectionFrame items = 1;
+}

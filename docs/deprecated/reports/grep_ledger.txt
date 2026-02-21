@@ -1,0 +1,257 @@
+# rg -n /ledger/
+./contracts/user_surface.md:28:  - Rotates root keys, rewraps storage, and writes a ledger + anchor entry.
+./config/plugin_locks.json:52:    "builtin.ledger.basic": {
+./config/default.json:64:      "ledger.writer",
+./config/default.json:108:      "builtin.ledger.basic",
+./config/default.json:151:      "builtin.ledger.basic",
+./config/default.json:192:      "builtin.ledger.basic": true,
+./config/default.json:214:        "builtin.ledger.basic",
+./contracts/security.md:21:- Journal and ledger writers are append-only.
+./contracts/security.md:23:- Anchor writer records ledger head hashes in a separate anchor store.
+./contracts/security.md:28:- `autocapture keys rotate` records a ledger entry and rewraps stores.
+./tools/blueprint_items.json:45:    "title": "Add canonical-json safety tests for journal/ledger payloads",
+./tools/blueprint_items.json:53:    "title": "Add concurrency tests for ledger/journal append correctness",
+./tools/blueprint_items.json:61:    "title": "Add golden chain test: ledger verify + anchor verify",
+./tools/blueprint_items.json:109:    "title": "Eliminate floats from journal/ledger payloads",
+./tools/blueprint_items.json:157:    "title": "Make ledger writing thread-safe",
+./tools/blueprint_items.json:269:    "title": "Write kernel boot ledger entry system.start",
+./tools/blueprint_items.json:277:    "title": "Write kernel shutdown ledger entry system.stop",
+./tools/blueprint_items.json:285:    "title": "Write crash ledger entry on next startup",
+./tools/blueprint_items.json:517:    "title": "Track partial failures explicitly in journal/ledger",
+./tools/blueprint_items.json:525:    "title": "Add segment sealing ledger entry after successful write",
+./tools/blueprint_items.json:733:    "title": "Proof bundles export (evidence + ledger slice + anchors)",
+./tools/blueprint_items.json:925:    "title": "Add verify commands (ledger/anchors/evidence)",
+./tools/blueprint_items.json:933:    "title": "Audit security events in ledger (key rotations, lock updates, config)",
+./contracts/plugin_sdk.md:45:- `ledger.writer`
+./contracts/ir_pins.json:11:    "ledger.writer",
+./contracts/ir_pins.json:97:      "id": "builtin.ledger.basic"
+./contracts/lock.json:6:    "contracts/ledger_schema.json": "911b2bab3e236ff77921b9a28f6a9808f05c38188e07aa1f4cc011f4bbf2eddf",
+./plugins/builtin/ledger_basic/plugin.py:19:        self._path = os.path.join(data_dir, "ledger.ndjson")
+./plugins/builtin/ledger_basic/plugin.py:41:        return {"ledger.writer": self}
+./docs/STATE.md:22:- Keyring + rotation implemented via `autocapture keys rotate` with ledger + anchor entries.
+./docs/STATE.md:25:- Contract surfaces pinned: plugin SDK, config schema, user surface, security, journal/ledger, reasoning packet, time intent.
+./plugins/builtin/ledger_basic/plugin.json:2:  "plugin_id": "builtin.ledger.basic",
+./plugins/builtin/ledger_basic/plugin.json:7:      "kind": "ledger.writer",
+./tools/hypervisor/scripts/update_contract_lock.py:20:    "contracts/ledger_schema.json",
+./plugins/builtin/capture_windows/plugin.py:49:        ledger = self.context.get_capability("ledger.writer")
+./plugins/builtin/capture_windows/plugin.py:64:                if not self._check_disk(logger, journal, ledger, anchor, warn_free, critical_free):
+./plugins/builtin/capture_windows/plugin.py:67:                self._flush_segment(frames, storage_media, storage_meta, journal, ledger, anchor, sequence)
+./plugins/builtin/capture_windows/plugin.py:76:    def _flush_segment(self, frames, storage_media, storage_meta, journal, ledger, anchor, sequence):
+./plugins/builtin/capture_windows/plugin.py:106:        ledger_hash = ledger.append(
+./plugins/builtin/capture_windows/plugin.py:118:        anchor.anchor(ledger_hash)
+./plugins/builtin/capture_windows/plugin.py:120:    def _check_disk(self, logger, journal, ledger, anchor, warn_free, critical_free) -> bool:
+./plugins/builtin/capture_windows/plugin.py:141:            ledger_hash = ledger.append(
+./plugins/builtin/capture_windows/plugin.py:153:            anchor.anchor(ledger_hash)
+./tools/hypervisor/DECISIONS.md:29:- Rationale: satisfies key hierarchy + rotation invariants with auditable ledger entries.
+./plugins/builtin/capture_windows/plugin.json:25:    "builtin.ledger.basic",
+./autocapture_nx/cli.py:231:    from autocapture.pillars.citable import verify_ledger
+./autocapture_nx/cli.py:234:        ledger_path = Path(args.path)
+./autocapture_nx/cli.py:238:        ledger_path = data_dir / "ledger.ndjson"
+./autocapture_nx/cli.py:240:    if not ledger_path.exists():
+./autocapture_nx/cli.py:241:        print(f"OK ledger_missing: {ledger_path}")
+./autocapture_nx/cli.py:244:    ok, errors = verify_ledger(ledger_path)
+./autocapture_nx/cli.py:246:        print("OK ledger_verified")
+./autocapture_nx/cli.py:248:    _print_json({"ok": False, "errors": errors, "path": str(ledger_path)})
+./docs/spec/autocapture_mx_spec.yaml:216:    title: Provenance ledger hash chain + verification CLI
+./docs/spec/autocapture_mx_spec.yaml:231:    title: Append-only rules ledger with state rebuild and query integration
+./docs/spec/autocapture_mx_spec.yaml:234:      - autocapture/rules/ledger.py
+./docs/spec/autocapture_mx_spec.yaml:240:        target: tests/test_rules_ledger_append_only.py
+./plugins/builtin/anchor_basic/plugin.py:1:"""Anchor writer plugin for ledger head hashes."""
+./plugins/builtin/anchor_basic/plugin.py:33:    def anchor(self, ledger_head_hash: str) -> dict[str, Any]:
+./plugins/builtin/anchor_basic/plugin.py:37:            "ledger_head_hash": ledger_head_hash,
+./plugins/builtin/anchor_basic/plugin.json:23:  "depends_on": ["builtin.ledger.basic"],
+./docs/mx_equivalence_map.md:86:- Proof: `plugins/builtin/ledger_basic/plugin.py` (hash chain); `tests/test_ledger_journal.py`
+./docs/mx_equivalence_map.md:91:- Proof: no rules ledger/store modules in NX.
+./docs/mx_equivalence_map.md:92:- Gap to MX: implement rules ledger + tests.
+./docs/autocapture_mx_blueprint.md:40:- **P4 Citable**: deterministic evidence + claim-level citations, validation, and provenance ledger.
+./docs/autocapture_mx_blueprint.md:174:    ledger.py
+./docs/autocapture_mx_blueprint.md:434:### 6.3 Provenance ledger (append-only)
+./docs/autocapture_mx_blueprint.md:493:- appended to ledger,
+./docs/autocapture_mx_blueprint.md:637:Sanitization is performed by `egress.sanitizer` plugin and recorded in ledger with a stable run id.
+./docs/autocapture_mx_blueprint.md:650:- `provenance`: ledger ids for query and answer
+./docs/autocapture_mx_blueprint.md:693:- per-request provenance ledger entries.
+./docs/autocapture_mx_blueprint.md:740:Every export appends a ledger entry.
+./docs/autocapture_mx_blueprint.md:776:These are stored locally and optionally appended to the repo ledger (.memory) for development traceability.
+./docs/autocapture_mx_blueprint.md:1085:    title: Provenance ledger hash chain + verification CLI
+./docs/autocapture_mx_blueprint.md:1100:    title: Append-only rules ledger with state rebuild and query integration
+./docs/autocapture_mx_blueprint.md:1103:      - autocapture/rules/ledger.py
+./docs/autocapture_mx_blueprint.md:1109:        target: tests/test_rules_ledger_append_only.py
+./docs/assumptions_checklist.md:45:   - Pillars at risk: P1 (runtime impact), P3 (key hygiene), P4 (ledger continuity)
+./docs/assumptions_checklist.md:100:   - Pillars at risk: P3 (encryption at rest), P4 (ledger evidence storage)
+./docs/autocapture_mx_implementation_plan.md:75:| MX-RULES-0001 | tests/test_rules_ledger_append_only.py; tests/test_rules_state_rebuild.py | autocapture/rules/ledger.py; autocapture/rules/store.py; autocapture/rules/schema.py; autocapture/rules/cli.py |
+./docs/autocapture_mx_implementation_plan.md:171:- Minimal implementation: ledger append with hash chaining; CLI verify.
+./docs/autocapture_mx_implementation_plan.md:174:- Artifacts: autocapture/rules/ledger.py; autocapture/rules/store.py; autocapture/rules/schema.py; autocapture/rules/cli.py
+./docs/autocapture_mx_implementation_plan.md:175:- Validation: unit_test tests/test_rules_ledger_append_only.py; tests/test_rules_state_rebuild.py
+./docs/autocapture_mx_implementation_plan.md:176:- Minimal implementation: append-only rules ledger, rebuildable state, query integration hook.
+./docs/blueprints/autocapture_nx_blueprint.md:10:- **P4 Citable**: every non-trivial output must be traceable to immutable evidence with verifiable provenance (hashes, ledger, anchors).
+./docs/blueprints/autocapture_nx_blueprint.md:18:- **Deterministic, verifiable provenance**: hash-chained ledger + anchors + verification CLI.
+./docs/blueprints/autocapture_nx_blueprint.md:40:- Anchors are periodic signed/HMAC heads of the ledger to enable tamper detection.
+./docs/blueprints/autocapture_nx_blueprint.md:70:- **Phase 6: Security + egress hardening** — Least privilege plugins, subprocess sandbox, key separation/rotation, egress ledgering.
+./docs/blueprints/autocapture_nx_blueprint.md:78:- [ ] **I001** (Phase 1) — [Eliminate floats from journal/ledger payloads](#i001)
+./docs/blueprints/autocapture_nx_blueprint.md:84:- [ ] **I007** (Phase 1) — [Make ledger writing thread-safe](#i007)
+./docs/blueprints/autocapture_nx_blueprint.md:139:- [ ] **I062** (Phase 6) — [Add verify commands (ledger/anchors/evidence)](#i062)
+./docs/blueprints/autocapture_nx_blueprint.md:140:- [ ] **I063** (Phase 6) — [Audit security events in ledger (key rotations, lock updates, config)](#i063)
+./docs/blueprints/autocapture_nx_blueprint.md:153:- [ ] **I076** (Phase 4) — [Proof bundles export (evidence + ledger slice + anchors)](#i076)
+./docs/blueprints/autocapture_nx_blueprint.md:166:- [ ] **I089** (Phase 0) — [Add canonical-json safety tests for journal/ledger payloads](#i089)
+./docs/blueprints/autocapture_nx_blueprint.md:167:- [ ] **I090** (Phase 0) — [Add concurrency tests for ledger/journal append correctness](#i090)
+./docs/blueprints/autocapture_nx_blueprint.md:168:- [ ] **I091** (Phase 0) — [Add golden chain test: ledger verify + anchor verify](#i091)
+./docs/blueprints/autocapture_nx_blueprint.md:179:- [ ] **I102** (Phase 3) — [Track partial failures explicitly in journal/ledger](#i102)
+./docs/blueprints/autocapture_nx_blueprint.md:180:- [ ] **I103** (Phase 3) — [Add segment sealing ledger entry after successful write](#i103)
+./docs/blueprints/autocapture_nx_blueprint.md:200:- [ ] **I123** (Phase 1) — [Write kernel boot ledger entry system.start](#i123)
+./docs/blueprints/autocapture_nx_blueprint.md:201:- [ ] **I124** (Phase 1) — [Write kernel shutdown ledger entry system.stop](#i124)
+./docs/blueprints/autocapture_nx_blueprint.md:202:- [ ] **I125** (Phase 1) — [Write crash ledger entry on next startup](#i125)
+./docs/blueprints/autocapture_nx_blueprint.md:318:### I089 — Add canonical-json safety tests for journal/ledger payloads
+./docs/blueprints/autocapture_nx_blueprint.md:335:### I090 — Add concurrency tests for ledger/journal append correctness
+./docs/blueprints/autocapture_nx_blueprint.md:340:  - Thread-safety tests for ledger/journal writers
+./docs/blueprints/autocapture_nx_blueprint.md:352:### I091 — Add golden chain test: ledger verify + anchor verify
+./docs/blueprints/autocapture_nx_blueprint.md:357:  - Golden test corpus for ledger chain + anchors
+./docs/blueprints/autocapture_nx_blueprint.md:358:  - Gate: `tools/gate_ledger.py` verifies replay
+./docs/blueprints/autocapture_nx_blueprint.md:364:  - Commit small golden ledgers in `tests/golden/`.
+./docs/blueprints/autocapture_nx_blueprint.md:469:### I001 — Eliminate floats from journal/ledger payloads
+./docs/blueprints/autocapture_nx_blueprint.md:534:  - Writer batches writes into derived artifact blocks; ledger/journal at batch boundaries.
+./docs/blueprints/autocapture_nx_blueprint.md:574:### I007 — Make ledger writing thread-safe
+./docs/blueprints/autocapture_nx_blueprint.md:579:  - ledger writer: single-writer lock + atomic append semantics
+./docs/blueprints/autocapture_nx_blueprint.md:759:  - All plugins use EventBuilder for journal/ledger payloads
+./docs/blueprints/autocapture_nx_blueprint.md:802:### I123 — Write kernel boot ledger entry system.start
+./docs/blueprints/autocapture_nx_blueprint.md:807:  - kernel boot sequence writes `system.start` ledger entry
+./docs/blueprints/autocapture_nx_blueprint.md:809:  - Golden ledger test includes start entry
+./docs/blueprints/autocapture_nx_blueprint.md:812:  - At boot/capture start, write ledger entry including hashes:
+./docs/blueprints/autocapture_nx_blueprint.md:815:  - Every run has a verifiable origin entry in the ledger.
+./docs/blueprints/autocapture_nx_blueprint.md:818:### I124 — Write kernel shutdown ledger entry system.stop
+./docs/blueprints/autocapture_nx_blueprint.md:823:  - kernel shutdown writes `system.stop` ledger entry with final head hash
+./docs/blueprints/autocapture_nx_blueprint.md:827:  - On controlled shutdown, write final ledger entry referencing last head.
+./docs/blueprints/autocapture_nx_blueprint.md:833:### I125 — Write crash ledger entry on next startup
+./docs/blueprints/autocapture_nx_blueprint.md:843:  - Link to last known ledger head and recovery actions taken (I104).
+./docs/blueprints/autocapture_nx_blueprint.md:876:  - Stage 3 encrypts+writes atomically and emits evidence+ledger entries.
+./docs/blueprints/autocapture_nx_blueprint.md:1104:  - Treat audio as derived artifact if sourced from callback stream; ledger derivation.
+./docs/blueprints/autocapture_nx_blueprint.md:1286:  - per-run manifest records (Pattern A) stored and ledgered
+./docs/blueprints/autocapture_nx_blueprint.md:1305:  - Define fsync levels: journal+ledger always fsync; evidence seals fsync; bulk media optional.
+./docs/blueprints/autocapture_nx_blueprint.md:1326:### I102 — Track partial failures explicitly in journal/ledger
+./docs/blueprints/autocapture_nx_blueprint.md:1331:  - all failures emit typed journal/ledger events
+./docs/blueprints/autocapture_nx_blueprint.md:1341:### I103 — Add segment sealing ledger entry after successful write
+./docs/blueprints/autocapture_nx_blueprint.md:1346:  - segment lifecycle includes explicit `segment.sealed` ledger entry
+./docs/blueprints/autocapture_nx_blueprint.md:1362:  - writes recovery actions to ledger/journal
+./docs/blueprints/autocapture_nx_blueprint.md:1520:  - query execution writes ledger entry: inputs + retrieval plan + outputs
+./docs/blueprints/autocapture_nx_blueprint.md:1522:  - Golden: query ledger entry reproducible for fixed corpus
+./docs/blueprints/autocapture_nx_blueprint.md:1527:  - Every answer can be tied to a ledgered query execution record.
+./docs/blueprints/autocapture_nx_blueprint.md:1535:  - extraction writes ledger entry linking inputs/outputs
+./docs/blueprints/autocapture_nx_blueprint.md:1537:  - Test: derived artifacts have corresponding ledger derivation entries
+./docs/blueprints/autocapture_nx_blueprint.md:1555:  - span_start/end, ledger_head_ref, anchor_ref.
+./docs/blueprints/autocapture_nx_blueprint.md:1569:  - Resolver steps: load evidence, verify content_hash, verify ledger chain,
+./docs/blueprints/autocapture_nx_blueprint.md:1615:  - Compute hashes at write time and store in metadata and ledger.
+./docs/blueprints/autocapture_nx_blueprint.md:1626:  - ledger coverage expanded across all plugins and transitions
+./docs/blueprints/autocapture_nx_blueprint.md:1641:  - anchor plugin anchors ledger head on schedule
+./docs/blueprints/autocapture_nx_blueprint.md:1646:  - Anchor includes timestamp, ledger head hash, and signature/HMAC (I61).
+./docs/blueprints/autocapture_nx_blueprint.md:1660:  - Manifest initial write at start; finalize at stop with counters and last ledger head.
+./docs/blueprints/autocapture_nx_blueprint.md:1671:  - citation schema: include evidence hash + ledger/anchor refs
+./docs/blueprints/autocapture_nx_blueprint.md:1717:  - ledger entries reference derivation edges
+./docs/blueprints/autocapture_nx_blueprint.md:1758:### I076 — Proof bundles export (evidence + ledger slice + anchors)
+./docs/blueprints/autocapture_nx_blueprint.md:1768:  - ledger slice covering them, relevant anchors, and verification reports.
+./docs/blueprints/autocapture_nx_blueprint.md:1793:  - indexes record version/digest in manifest and query ledger entries
+./docs/blueprints/autocapture_nx_blueprint.md:1938:  - Persist checkpoints in derived store; ledger transitions record progress.
+./docs/blueprints/autocapture_nx_blueprint.md:1945:Least privilege plugins, subprocess sandbox, key separation/rotation, egress ledgering.
+./docs/blueprints/autocapture_nx_blueprint.md:2000:  - Define capability RPC endpoints for safe operations (storage, journal, ledger).
+./docs/blueprints/autocapture_nx_blueprint.md:2147:  - anchor plugin uses HMAC/signature over ledger head
+./docs/blueprints/autocapture_nx_blueprint.md:2154:  - Anchors provide tamper evidence independent of ledger storage.
+./docs/blueprints/autocapture_nx_blueprint.md:2157:### I062 — Add verify commands (ledger/anchors/evidence)
+./docs/blueprints/autocapture_nx_blueprint.md:2162:  - verify CLI/API: `verify ledger`, `verify anchors`, `verify evidence`
+./docs/blueprints/autocapture_nx_blueprint.md:2172:### I063 — Audit security events in ledger (key rotations, lock updates, config)
+./docs/blueprints/autocapture_nx_blueprint.md:2177:  - ledger event types for security-relevant operations
+./docs/blueprints/autocapture_nx_blueprint.md:2179:  - Test: key rotation and lock updates emit ledger entries
+./docs/blueprints/autocapture_nx_blueprint.md:2222:  - egress gateway writes ledger entry for each sanitized outbound packet
+./docs/blueprints/autocapture_nx_blueprint.md:2224:  - Test: egress attempt emits `egress.packet` ledger entry with hash + schema version
+./docs/blueprints/autocapture_nx_blueprint.md:2380:  - Test: disabled by default; when enabled, records are append-only and ledgered
+./docs/autocapture_nx_blueprint_final.md:63:All significant actions affecting evidence, processing, retrieval, and egress are recorded in an append-only ledger.
+./docs/autocapture_nx_blueprint_final.md:71:All pipeline actions are recorded in a hash-chained ledger with periodic anchoring.
+./docs/autocapture_nx_blueprint_final.md:147:### D3 Versioned journal and ledger schemas with canonical serialization
+./docs/autocapture_nx_blueprint_final.md:150:Define `journal_v1` and `ledger_v1` schemas and a strict `canonical_json` function used for hashing.
+./docs/autocapture_nx_blueprint_final.md:164:- Kernel-owned append-only writers: `journal.writer`, `ledger.writer`.
+./docs/autocapture_nx_blueprint_final.md:222:Define a key hierarchy with separation between stores, deterministic derivation, and rotation recorded in the ledger.
+./docs/autocapture_nx_blueprint_final.md:266:- Tests: no retention job runs; no evidence file deletion events appear in ledger.
+./docs/autocapture_nx_blueprint_final.md:364:- Gate: config write without ledger entry fails.
+./docs/autocapture_nx_blueprint_final.md:416:Anchor ledger head hashes periodically in a second storage domain to improve tamper evidence.
+./docs/autocapture_nx_blueprint_final.md:419:- **INFERENCE:** Local hash chain alone is weaker if an attacker can rewrite both data and ledger.
+./docs/autocapture_nx_blueprint_final.md:433:- Tamper simulation tests: rewrite DB+ledger but not anchor → detection triggers.
+./docs/autocapture_nx_blueprint_final.md:434:- Gate: citation emission requires ledger+anchor verification.
+./docs/autocapture_nx_blueprint_final.md:448:  - append-only ledger files
+./docs/autocapture_nx_blueprint_final.md:471:- `ledger.writer`
+./docs/autocapture_nx_blueprint_final.md:548:### Ledger schema `ledger_v1`
+./docs/autocapture_nx_blueprint_final.md:911:6. Emit ledger entry of type `egress.sanitize` with hashes only.
+./docs/autocapture_nx_blueprint_final.md:974:- Anchor store records periodic `(ts_utc, ledger_head_hash, anchor_seq)` entries in a second domain.
+./docs/autocapture_nx_blueprint_final.md:1019:- Rotation events are recorded in the ledger and anchored.
+./docs/autocapture_nx_blueprint_final.md:1047:- Config changes always recorded to ledger.
+./docs/autocapture_nx_blueprint_final.md:1060:- ledger integrity + anchor verification
+./docs/autocapture_nx_blueprint_final.md:1146:- ledger rewrite
+./docs/autocapture_nx_blueprint_final.md:1150:- hash-chained ledger
+./docs/autocapture_nx_blueprint_final.md:1180:- periodic snapshots hashed into the ledger
+./docs/reports/blueprint_items.md:12:| I089 | Phase 0: Scaffolding and gates | Add canonical-json safety tests for journal/ledger payloads |  |  |  |
+./docs/reports/blueprint_items.md:13:| I090 | Phase 0: Scaffolding and gates | Add concurrency tests for ledger/journal append correctness |  |  |  |
+./docs/reports/blueprint_items.md:14:| I091 | Phase 0: Scaffolding and gates | Add golden chain test: ledger verify + anchor verify |  |  |  |
+./docs/reports/blueprint_items.md:20:| I001 | Phase 1: Correctness + immutability blockers | Eliminate floats from journal/ledger payloads |  |  |  |
+./docs/reports/blueprint_items.md:26:| I007 | Phase 1: Correctness + immutability blockers | Make ledger writing thread-safe |  |  |  |
+./docs/reports/blueprint_items.md:40:| I123 | Phase 1: Correctness + immutability blockers | Write kernel boot ledger entry system.start |  |  |  |
+./docs/reports/blueprint_items.md:41:| I124 | Phase 1: Correctness + immutability blockers | Write kernel shutdown ledger entry system.stop |  |  |  |
+./docs/reports/blueprint_items.md:42:| I125 | Phase 1: Correctness + immutability blockers | Write crash ledger entry on next startup |  |  |  |
+./docs/reports/blueprint_items.md:71:| I102 | Phase 3: Storage scaling + durability | Track partial failures explicitly in journal/ledger |  |  |  |
+./docs/reports/blueprint_items.md:72:| I103 | Phase 3: Storage scaling + durability | Add segment sealing ledger entry after successful write |  |  |  |
+./docs/reports/blueprint_items.md:98:| I076 | Phase 4: Retrieval + provenance + citations | Proof bundles export (evidence + ledger slice + anchors) |  |  |  |
+./docs/reports/blueprint_items.md:122:| I062 | Phase 6: Security + egress hardening | Add verify commands (ledger/anchors/evidence) |  |  |  |
+./docs/reports/blueprint_items.md:123:| I063 | Phase 6: Security + egress hardening | Audit security events in ledger (key rotations, lock updates, config) |  |  |  |
+./docs/mx_gap_matrix.md:118:### MX-LEDGER-0001 — Provenance ledger hash chain + verification CLI
+./docs/mx_gap_matrix.md:120:- Existing (NX): plugins/builtin/ledger_basic/plugin.py (hash chain); plugins/builtin/journal_basic/plugin.py
+./docs/mx_gap_matrix.md:126:### MX-RULES-0001 — Append-only rules ledger with state rebuild and query integration
+./docs/mx_gap_matrix.md:128:- Existing (NX): no rules ledger identified
+./docs/mx_gap_matrix.md:129:- Missing (MX paths/tests): autocapture/rules/ledger.py; autocapture/rules/store.py; autocapture/rules/schema.py; autocapture/rules/cli.py; tests/test_rules_ledger_append_only.py; tests/test_rules_state_rebuild.py
+./docs/mx_gap_matrix.md:131:  - Artifacts: autocapture/rules/ledger.py; autocapture/rules/store.py; autocapture/rules/schema.py; autocapture/rules/cli.py
+./docs/mx_gap_matrix.md:132:  - Validators: unit_test tests/test_rules_ledger_append_only.py; unit_test tests/test_rules_state_rebuild.py
+./docs/mx_evidence_bundle.md:211:- Output: OK ledger_missing: data/ledger.ndjson
+./tests/test_anchor.py:17:            self.assertEqual(record["ledger_head_hash"], "deadbeef")
+./tests/test_provenance_chain.py:6:from autocapture.pillars.citable import Ledger, verify_ledger
+./tests/test_provenance_chain.py:10:    def test_ledger_hash_chain(self) -> None:
+./tests/test_provenance_chain.py:12:            path = Path(tmp) / "ledger.ndjson"
+./tests/test_provenance_chain.py:13:            ledger = Ledger(path)
+./tests/test_provenance_chain.py:23:            ledger.append(entry)
+./tests/test_provenance_chain.py:26:            ledger.append(entry2)
+./tests/test_provenance_chain.py:27:            ok, errors = verify_ledger(path)
+./tests/test_ledger_journal.py:6:from plugins.builtin.ledger_basic.plugin import LedgerWriter
+./tests/test_ledger_journal.py:11:    def test_ledger_requires_fields(self):
+./tests/test_ledger_journal.py:14:            ledger = LedgerWriter("ledger", ctx)
+./tests/test_ledger_journal.py:16:                ledger.append({"schema_version": 1})
+./tests/test_ledger_journal.py:25:    def test_ledger_hash_chain(self):
+./tests/test_ledger_journal.py:28:            ledger = LedgerWriter("ledger", ctx)
+./tests/test_ledger_journal.py:38:            h1 = ledger.append(entry1)
+./tests/test_ledger_journal.py:48:            h2 = ledger.append(entry2)
+./tests/test_ledger_journal.py:50:            with open(f"{tmp}/ledger.ndjson", "r", encoding="utf-8") as handle:
+./tests/test_rules_state_rebuild.py:6:from autocapture.rules.ledger import RulesLedger
+./tests/test_rules_state_rebuild.py:13:            ledger = RulesLedger(Path(tmp) / "rules.ndjson")
+./tests/test_rules_state_rebuild.py:15:            ledger.append({"rule_id": "r1", "action": "add", "payload": {"value": 1}, "ts_utc": now})
+./tests/test_rules_state_rebuild.py:16:            ledger.append({"rule_id": "r1", "action": "update", "payload": {"value": 2}, "ts_utc": now})
+./tests/test_rules_state_rebuild.py:17:            store = RulesStore(ledger)
+./tests/test_rules_ledger_append_only.py:6:from autocapture.rules.ledger import RulesLedger
+./tests/test_rules_ledger_append_only.py:12:            ledger = RulesLedger(Path(tmp) / "rules.ndjson")
+./tests/test_rules_ledger_append_only.py:19:            ledger.append(entry)
+./tests/test_rules_ledger_append_only.py:20:            entries = list(ledger.iter_entries())
+./tests/test_rules_ledger_append_only.py:22:            ledger.append({**entry, "rule_id": "r2"})
+./tests/test_rules_ledger_append_only.py:23:            entries2 = list(ledger.iter_entries())
+./autocapture/rules/__init__.py:3:from .ledger import RulesLedger
+./autocapture/rules/store.py:1:"""Rules store rebuilt from ledger."""
+./autocapture/rules/store.py:7:from autocapture.rules.ledger import RulesLedger
+./autocapture/rules/store.py:11:    def __init__(self, ledger: RulesLedger) -> None:
+./autocapture/rules/store.py:12:        self.ledger = ledger
+./autocapture/rules/store.py:16:        for entry in self.ledger.iter_entries():
+./autocapture/tools/provenance_gate.py:1:"""Provenance gate for schema + ledger integrity prerequisites."""
+./autocapture/tools/provenance_gate.py:19:    for rel in ("contracts/ledger_schema.json", "contracts/journal_schema.json"):
+./autocapture/rules/ledger.py:1:"""Append-only rules ledger."""
+./autocapture/rules/cli.py:10:from autocapture.rules.ledger import RulesLedger
+./autocapture/rules/cli.py:16:    parser.add_argument("--ledger", default="data/rules.ndjson")
+./autocapture/rules/cli.py:26:    ledger = RulesLedger(Path(args.ledger))
+./autocapture/rules/cli.py:36:        ledger.append(entry)
+./autocapture/rules/cli.py:40:        store = RulesStore(ledger)
+./autocapture_nx/kernel/key_rotation.py:35:    ledger = system.get("ledger.writer")
+./autocapture_nx/kernel/key_rotation.py:45:    ledger_hash = ledger.append(entry)
+./autocapture_nx/kernel/key_rotation.py:47:    anchor.anchor(ledger_hash)
+./autocapture_nx/kernel/key_rotation.py:53:        "ledger_hash": ledger_hash,
+./autocapture/pillars/__init__.py:3:from .citable import Ledger, verify_ledger
+./autocapture/pillars/__init__.py:5:__all__ = ["Ledger", "verify_ledger"]
+./autocapture/pillars/citable.py:1:"""Citable ledger utilities."""
+./autocapture/pillars/citable.py:56:def verify_ledger(path: str | Path) -> tuple[bool, list[str]]:
