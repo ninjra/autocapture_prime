@@ -31,6 +31,7 @@ from autocapture_nx.kernel.activity_signal import is_activity_signal_fresh, load
 from autocapture_nx.kernel.logging import JsonlLogger
 from autocapture_nx.plugin_system.manager import PluginManager
 from autocapture_nx.processing.idle import _extract_frame, _get_media_blob
+from autocapture_nx.storage.stage1_derived_store import build_stage1_overlay_store
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -2198,11 +2199,16 @@ class UXFacade:
                 logger = system.get("observability.logger") if hasattr(system, "get") else None
             except Exception:
                 logger = None
+            stage1_store, _stage1_derived = build_stage1_overlay_store(
+                config=system.config if hasattr(system, "config") else {},
+                metadata=metadata,
+                logger=logger,
+            )
 
             def _mark_stage1_retention(reason: str) -> dict[str, Any] | None:
                 try:
                     return mark_stage1_and_retention(
-                        metadata,
+                        stage1_store,
                         record_id,
                         record if isinstance(record, dict) else {},
                         ts_utc=(record.get("ts_utc") if isinstance(record, dict) else None),

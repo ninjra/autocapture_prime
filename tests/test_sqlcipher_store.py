@@ -5,7 +5,19 @@ import unittest
 from unittest.mock import patch
 
 from autocapture_nx.plugin_system.api import PluginContext
-from plugins.builtin.storage_sqlcipher.plugin import PlainSQLiteStore, SQLCipherStoragePlugin
+from plugins.builtin.storage_sqlcipher.plugin import (
+    EncryptedSQLiteStore,
+    PlainSQLiteStore,
+    SQLCipherStoragePlugin,
+)
+
+
+class _TestProvider:
+    def active(self):
+        return "k1", b"x" * 32
+
+    def candidates(self, key_id=None):  # noqa: ARG002
+        return [b"x" * 32]
 
 
 class SQLCipherStoreTests(unittest.TestCase):
@@ -80,6 +92,50 @@ class SQLCipherStoreTests(unittest.TestCase):
                 self.assertIn("k_read", keys)
                 store.put_new("k_skip", {"v": 2})
                 self.assertIsNone(store.get("k_skip"))
+
+    def test_plain_sqlite_init_failure_resets_connection_for_retry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "metadata.db")
+            store = PlainSQLiteStore(db_path, "run1", "none")
+            original = PlainSQLiteStore._init_schema
+            calls = {"n": 0}
+
+            def flaky_init(inst):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise sqlite3.OperationalError("disk I/O error")
+                return original(inst)
+
+            with patch.object(PlainSQLiteStore, "_init_schema", new=flaky_init):
+                with self.assertRaises(sqlite3.OperationalError):
+                    store.count()
+                self.assertIsNone(store._conn)
+                self.assertEqual(store.count(), 0)
+
+    def test_encrypted_sqlite_init_failure_resets_connection_for_retry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "metadata.db")
+            store = EncryptedSQLiteStore(
+                db_path,
+                _TestProvider(),
+                _TestProvider(),
+                "run1",
+                "none",
+            )
+            original = EncryptedSQLiteStore._init_schema
+            calls = {"n": 0}
+
+            def flaky_init(inst):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise sqlite3.OperationalError("disk I/O error")
+                return original(inst)
+
+            with patch.object(EncryptedSQLiteStore, "_init_schema", new=flaky_init):
+                with self.assertRaises(sqlite3.OperationalError):
+                    store.count()
+                self.assertIsNone(store._conn)
+                self.assertEqual(store.count(), 0)
 
     def test_encrypted_sqlite_fallback_migrates_legacy_metadata_schema(self):
         with tempfile.TemporaryDirectory() as tmp:

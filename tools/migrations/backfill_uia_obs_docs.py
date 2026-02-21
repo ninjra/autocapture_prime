@@ -16,6 +16,7 @@ from autocapture_nx.ingest.uia_obs_docs import _frame_uia_expected_ids
 from autocapture_nx.ingest.uia_obs_docs import _uia_extract_snapshot_dict
 from autocapture_nx.ingest.uia_obs_docs import _ensure_frame_uia_docs
 from autocapture_nx.kernel.sqlite_reads import open_sqlite_reader
+from autocapture_nx.storage.stage1_derived_store import Stage1DerivedSqliteStore
 
 
 def _decode_payload(payload_text: str | None) -> dict[str, Any] | None:
@@ -123,6 +124,7 @@ def backfill_uia_obs_docs(
     db_path: Path,
     *,
     dataroot: str,
+    derived_db_path: Path | None = None,
     dry_run: bool = False,
     limit: int | None = None,
     snapshot_read: bool = True,
@@ -134,7 +136,9 @@ def backfill_uia_obs_docs(
     )
     conn: sqlite3.Connection | None = None
     write_mode = "dry_run_no_write" if dry_run else "live"
-    if not dry_run:
+    if isinstance(derived_db_path, Path):
+        write_mode = "derived_db_dry_run" if dry_run else "derived_db"
+    if (not dry_run) and (not isinstance(derived_db_path, Path)):
         conn = sqlite3.connect(str(db_path), timeout=5.0)
         conn.row_factory = sqlite3.Row
     summary = {
@@ -159,7 +163,10 @@ def backfill_uia_obs_docs(
             raise RuntimeError("metadata id column not found")
         read_adapter = _SqliteMetadataAdapter(source_conn, source_table, source_cols)
         metadata: Any = read_adapter
-        if not dry_run:
+        if isinstance(derived_db_path, Path):
+            derived_store = Stage1DerivedSqliteStore(derived_db_path)
+            metadata = _ReadWriteMetadataAdapter(read_adapter=read_adapter, write_adapter=derived_store)
+        elif not dry_run:
             if conn is None:
                 raise RuntimeError("write_connection_missing")
             write_table = _choose_source_table(conn)
@@ -195,6 +202,7 @@ def backfill_uia_obs_docs(
                     source_record_id=record_id,
                     record=payload,
                     dataroot=dataroot,
+                    snapshot_metadata=read_adapter,
                 )
             summary["inserted_docs"] += int(status.get("inserted", 0) or 0)
             if bool(status.get("required", False)):
@@ -287,6 +295,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--snapshot-read", dest="snapshot_read", action="store_true", help="Allow direct read with snapshot fallback.")
     parser.add_argument("--no-snapshot-read", dest="snapshot_read", action="store_false", help="Disable snapshot fallback and read DB directly.")
     parser.set_defaults(snapshot_read=True)
+    parser.add_argument("--derived-db", default="", help="Optional stage1 derived DB path (writes obs.uia.* here instead of metadata.db).")
     parser.add_argument("--wait-stable-seconds", type=float, default=0.0, help="Wait until metadata.db is unchanged for this duration.")
     parser.add_argument("--wait-timeout-seconds", type=float, default=0.0, help="Max wait budget for --wait-stable-seconds (0 = no timeout).")
     parser.add_argument("--poll-interval-ms", type=int, default=250, help="Polling interval for stability wait.")
@@ -325,6 +334,7 @@ def main() -> int:
         summary = backfill_uia_obs_docs(
             db_path=db_path,
             dataroot=str(args.dataroot),
+            derived_db_path=Path(str(args.derived_db)).expanduser() if str(args.derived_db or "").strip() else None,
             dry_run=bool(args.dry_run),
             limit=int(args.limit) if int(args.limit) > 0 else None,
             snapshot_read=bool(args.snapshot_read),

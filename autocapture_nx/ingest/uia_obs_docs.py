@@ -57,6 +57,7 @@ def _ensure_frame_uia_docs(
     source_record_id: str,
     record: dict[str, Any],
     dataroot: str,
+    snapshot_metadata: Any | None = None,
 ) -> dict[str, Any]:
     if not isinstance(record, dict):
         return {"required": False, "ok": True, "inserted": 0, "reason": "invalid_record"}
@@ -74,7 +75,8 @@ def _ensure_frame_uia_docs(
     if all(existing_by_kind.values()):
         return {"required": True, "ok": True, "inserted": 0, "reason": "already_present"}
 
-    snapshot_value = metadata.get(uia_record_id, None) if hasattr(metadata, "get") else None
+    snapshot_source = snapshot_metadata if snapshot_metadata is not None else metadata
+    snapshot_value = snapshot_source.get(uia_record_id, None) if hasattr(snapshot_source, "get") else None
     snapshot = _uia_extract_snapshot_dict(snapshot_value)
     if not isinstance(snapshot, dict):
         return {"required": True, "ok": False, "inserted": 0, "reason": "snapshot_missing"}

@@ -90,9 +90,22 @@ def build_health_snapshot(rows: list[dict[str, Any]], *, tail: int = 30) -> dict
     }
 
 
+def resolve_manifests_path(raw_path: str) -> Path:
+    text = str(raw_path or "").strip()
+    if text:
+        return Path(text).expanduser()
+    preferred = Path("/mnt/d/autocapture/facts/landscape_manifests.ndjson")
+    legacy = Path("/mnt/d/autocapture/landscape_manifests.ndjson")
+    return preferred if preferred.exists() else legacy
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Summarize processing health from landscape manifests NDJSON.")
-    parser.add_argument("--manifests", default="/mnt/d/autocapture/landscape_manifests.ndjson", help="Path to landscape manifests NDJSON.")
+    parser.add_argument(
+        "--manifests",
+        default="",
+        help="Path to landscape manifests NDJSON (default resolves to /mnt/d/autocapture/facts/landscape_manifests.ndjson).",
+    )
     parser.add_argument("--tail", type=int, default=30, help="How many latest rows to include.")
     parser.add_argument("--output", default="", help="Optional JSON output path.")
     return parser
@@ -101,7 +114,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
-    path = Path(str(args.manifests)).expanduser()
+    path = resolve_manifests_path(str(args.manifests or ""))
     rows = _load_ndjson(path)
     payload = build_health_snapshot(rows, tail=int(args.tail))
     payload["manifests_path"] = str(path)

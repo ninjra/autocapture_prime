@@ -154,6 +154,45 @@ class BackfillUIAObsDocsMigrationTests(unittest.TestCase):
             self.assertEqual(_count(db_path, "obs.uia.context"), 0)
             self.assertEqual(_count(db_path, "obs.uia.operable"), 0)
 
+    def test_backfill_writes_to_derived_db_when_configured(self) -> None:
+        mod = _load_module("tools/migrations/backfill_uia_obs_docs.py", "backfill_uia_obs_docs_derived")
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "metadata.db"
+            derived_db = Path(tmp) / "derived" / "stage1_derived.db"
+            _init_db(db_path)
+            frame_id = "run1/evidence.capture.frame/3"
+            snapshot_id = "run1/evidence.uia.snapshot/3"
+            _put(
+                db_path,
+                frame_id,
+                {
+                    "schema_version": 1,
+                    "record_type": "evidence.capture.frame",
+                    "run_id": "run1",
+                    "ts_utc": "2026-02-20T00:00:00Z",
+                    "width": 320,
+                    "height": 180,
+                    "uia_ref": {"record_id": snapshot_id, "content_hash": "uia_hash_3"},
+                },
+            )
+            _put(db_path, snapshot_id, _snapshot(snapshot_id, "uia_hash_3"))
+
+            summary = mod.backfill_uia_obs_docs(
+                db_path,
+                dataroot=tmp,
+                derived_db_path=derived_db,
+                dry_run=False,
+            )
+
+            self.assertEqual(int(summary.get("required_frames") or 0), 1)
+            self.assertEqual(int(summary.get("ok_frames") or 0), 1)
+            self.assertEqual(_count(db_path, "obs.uia.focus"), 0)
+            self.assertEqual(_count(db_path, "obs.uia.context"), 0)
+            self.assertEqual(_count(db_path, "obs.uia.operable"), 0)
+            self.assertEqual(_count(derived_db, "obs.uia.focus"), 1)
+            self.assertEqual(_count(derived_db, "obs.uia.context"), 1)
+            self.assertEqual(_count(derived_db, "obs.uia.operable"), 1)
+
     def test_wait_for_db_stability_succeeds_for_static_file(self) -> None:
         mod = _load_module("tools/migrations/backfill_uia_obs_docs.py", "backfill_uia_obs_docs_wait_ok")
         with tempfile.TemporaryDirectory() as tmp:

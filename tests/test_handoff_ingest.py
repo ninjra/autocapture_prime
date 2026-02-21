@@ -41,8 +41,16 @@ def _write_handoff_metadata(path: Path, rows: list[tuple[str, dict]]) -> None:
 
 
 def _count_dest_records(db_path: Path, record_type: str) -> int:
+    if not db_path.exists():
+        return 0
     conn = sqlite3.connect(str(db_path))
     try:
+        cur = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='metadata'"
+        )
+        has_table = cur.fetchone()
+        if not has_table or int(has_table[0] or 0) <= 0:
+            return 0
         cur = conn.execute("SELECT COUNT(*) FROM metadata WHERE record_type = ?", (record_type,))
         row = cur.fetchone()
         return int(row[0]) if row else 0
@@ -117,11 +125,11 @@ class HandoffIngestTests(unittest.TestCase):
             self.assertEqual(int(marker.get("counts", {}).get("stage1_complete_records", 0)), 1)
             self.assertEqual(int(marker.get("counts", {}).get("stage1_retention_marked_records", 0)), 1)
             self.assertEqual(_count_dest_records(dest / "metadata.db", "evidence.capture.frame"), 1)
-            self.assertEqual(_count_dest_records(dest / "metadata.db", "derived.ingest.stage1.complete"), 1)
-            self.assertEqual(_count_dest_records(dest / "metadata.db", "retention.eligible"), 1)
-            self.assertEqual(_count_dest_records(dest / "metadata.db", "obs.uia.focus"), 1)
-            self.assertEqual(_count_dest_records(dest / "metadata.db", "obs.uia.context"), 1)
-            self.assertEqual(_count_dest_records(dest / "metadata.db", "obs.uia.operable"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "derived.ingest.stage1.complete"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "retention.eligible"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.focus"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.context"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.operable"), 1)
             self.assertEqual(_count_dest_records(dest / "metadata.db", "system.ingest.handoff.completed"), 1)
 
             second = ingestor.ingest_handoff_dir(handoff)
@@ -130,11 +138,11 @@ class HandoffIngestTests(unittest.TestCase):
             self.assertEqual(second.stage1_complete_records, 1)
             self.assertEqual(second.stage1_retention_marked_records, 1)
             self.assertEqual(_count_dest_records(dest / "metadata.db", "evidence.capture.frame"), 1)
-            self.assertEqual(_count_dest_records(dest / "metadata.db", "derived.ingest.stage1.complete"), 1)
-            self.assertEqual(_count_dest_records(dest / "metadata.db", "retention.eligible"), 1)
-            self.assertEqual(_count_dest_records(dest / "metadata.db", "obs.uia.focus"), 1)
-            self.assertEqual(_count_dest_records(dest / "metadata.db", "obs.uia.context"), 1)
-            self.assertEqual(_count_dest_records(dest / "metadata.db", "obs.uia.operable"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "derived.ingest.stage1.complete"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "retention.eligible"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.focus"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.context"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.operable"), 1)
             self.assertEqual(_count_dest_records(dest / "metadata.db", "system.ingest.handoff.completed"), 1)
 
     def test_handoff_ingest_missing_media_fails_no_marker(self) -> None:
@@ -233,11 +241,11 @@ class HandoffIngestTests(unittest.TestCase):
             self.assertEqual(int(first.get("processed", 0)), 1)
             self.assertEqual(int(first.get("stage1_complete_records", 0)), 1)
             self.assertEqual(int(first.get("stage1_retention_marked_records", 0)), 1)
-            self.assertEqual(_count_dest_records(dest / "metadata.db", "derived.ingest.stage1.complete"), 1)
-            self.assertEqual(_count_dest_records(dest / "metadata.db", "retention.eligible"), 1)
-            self.assertEqual(_count_dest_records(dest / "metadata.db", "obs.uia.focus"), 1)
-            self.assertEqual(_count_dest_records(dest / "metadata.db", "obs.uia.context"), 1)
-            self.assertEqual(_count_dest_records(dest / "metadata.db", "obs.uia.operable"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "derived.ingest.stage1.complete"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "retention.eligible"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.focus"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.context"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.operable"), 1)
 
             second = auto_drain_handoff_spool(cfg)
             self.assertTrue(bool(second.get("ok", False)))
@@ -272,8 +280,8 @@ class HandoffIngestTests(unittest.TestCase):
             self.assertEqual(result.stage1_retention_marked_records, 0)
             self.assertEqual(result.stage1_missing_retention_marker_count, 1)
             self.assertEqual(result.stage1_uia_frames_missing_count, 1)
-            self.assertEqual(_count_dest_records(dest / "metadata.db", "derived.ingest.stage1.complete"), 0)
-            self.assertEqual(_count_dest_records(dest / "metadata.db", "retention.eligible"), 0)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "derived.ingest.stage1.complete"), 0)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "retention.eligible"), 0)
 
 
 if __name__ == "__main__":

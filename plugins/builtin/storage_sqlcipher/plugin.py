@@ -180,8 +180,17 @@ class SQLCipherStore:
 
     def _ensure(self) -> None:
         if self._conn is None:
-            self._conn = self._connect()
-            self._init_schema()
+            conn = self._connect()
+            self._conn = conn
+            try:
+                self._init_schema()
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                self._conn = None
+                raise
 
     def _connect(self):
         try:
@@ -454,18 +463,24 @@ class PlainSQLiteStore:
 
     def _ensure(self) -> None:
         if self._conn is None:
-            self._conn = self._connect()
+            conn = self._connect()
+            self._conn = conn
             try:
                 self._init_schema()
             except Exception as exc:
                 if self._is_readonly_error(exc):
                     self._read_only = True
                     try:
-                        self._conn.close()
+                        conn.close()
                     except Exception:
                         pass
                     self._conn = self._connect_read_only()
                     return
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                self._conn = None
                 raise
 
     def _connect_read_only(self) -> sqlite3.Connection:
@@ -1053,9 +1068,18 @@ class EncryptedSQLiteStore:
 
     def _ensure(self) -> None:
         if self._conn is None:
-            self._conn = sqlite3.connect(self._db_path)
-            self._apply_fsync_policy(self._conn)
-            self._init_schema()
+            conn = sqlite3.connect(self._db_path)
+            self._conn = conn
+            try:
+                self._apply_fsync_policy(conn)
+                self._init_schema()
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                self._conn = None
+                raise
 
     def _apply_fsync_policy(self, conn: sqlite3.Connection) -> None:
         policy = self._fsync_policy

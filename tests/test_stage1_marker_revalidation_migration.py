@@ -148,6 +148,48 @@ class Stage1MarkerRevalidationMigrationTests(unittest.TestCase):
             self.assertFalse(bool(marker.get("stage1_contract_validated", False)))
             self.assertFalse(bool(marker.get("quarantine_pending", False)))
 
+    def test_seeds_from_source_db_into_derived_db(self) -> None:
+        mod = _load_module("tools/migrations/revalidate_stage1_markers.py", "stage1_marker_revalidate_4")
+        with tempfile.TemporaryDirectory() as tmp:
+            source_db = Path(tmp) / "metadata.db"
+            derived_db = Path(tmp) / "derived" / "stage1_derived.db"
+            derived_db.parent.mkdir(parents=True, exist_ok=True)
+            _init_db(source_db)
+            _init_db(derived_db)
+            frame_id = "run1/evidence.capture.frame/21"
+            stage1_id = stage1_complete_record_id(frame_id)
+            marker_id = "run1/retention.eligible/legacy21"
+            _insert_record(
+                source_db,
+                stage1_id,
+                {
+                    "record_type": "derived.ingest.stage1.complete",
+                    "run_id": "run1",
+                    "source_record_id": frame_id,
+                    "source_record_type": "evidence.capture.frame",
+                    "complete": True,
+                },
+            )
+            _insert_record(
+                source_db,
+                marker_id,
+                {
+                    "record_type": "retention.eligible",
+                    "run_id": "run1",
+                    "source_record_id": frame_id,
+                    "source_record_type": "evidence.capture.frame",
+                    "eligible": True,
+                },
+            )
+
+            summary = mod.revalidate_stage1_markers(derived_db, source_db_path=source_db, dry_run=False)
+
+            self.assertEqual(int(summary.get("seeded_stage1") or 0), 1)
+            self.assertEqual(int(summary.get("seeded_retention") or 0), 1)
+            marker = _get_record(derived_db, marker_id)
+            self.assertTrue(bool(marker.get("stage1_contract_validated", False)))
+            self.assertFalse(bool(marker.get("quarantine_pending", False)))
+
 
 if __name__ == "__main__":
     unittest.main()

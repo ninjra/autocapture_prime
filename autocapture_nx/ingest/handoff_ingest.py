@@ -17,6 +17,9 @@ from autocapture_nx.kernel.hashing import sha256_file
 from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.kernel.instance_lock import acquire_instance_lock
 from autocapture_nx.ingest.uia_obs_docs import _ensure_frame_uia_docs
+from autocapture_nx.storage.stage1_derived_store import Stage1DerivedSqliteStore
+from autocapture_nx.storage.stage1_derived_store import Stage1OverlayStore
+from autocapture_nx.storage.stage1_derived_store import default_stage1_derived_db_path
 from autocapture.storage.stage1 import mark_stage1_and_retention
 
 _REAP_MARKER = "reap_eligible.json"
@@ -418,15 +421,26 @@ class HandoffIngestor:
                 elif self._strict and refs:
                     raise FileNotFoundError(f"handoff media directory missing: {source_media_root}")
 
-                stage1_store = _SqliteMetadataAdapter(dst_conn, dest_table, dest_cols)
+                stage1_read_store = _SqliteMetadataAdapter(dst_conn, dest_table, dest_cols)
+                stage1_store: Any | None = None
+                try:
+                    derived_path = default_stage1_derived_db_path(self._dest_data_root)
+                    derived_store = Stage1DerivedSqliteStore(derived_path)
+                    stage1_store = Stage1OverlayStore(metadata_read=stage1_read_store, derived_write=derived_store)
+                except Exception as exc:
+                    errors.append(f"stage1_derived_store_error:{type(exc).__name__}:{exc}")
                 for source_record_id, source_payload in stage1_candidates:
                     if str(source_payload.get("record_type") or "") != "evidence.capture.frame":
+                        continue
+                    if stage1_store is None:
+                        stage1_missing_retention_marker_count += 1
                         continue
                     uia_status = _ensure_frame_uia_docs(
                         stage1_store,
                         source_record_id=source_record_id,
                         record=source_payload,
                         dataroot=str(self._dest_data_root),
+                        snapshot_metadata=stage1_read_store,
                     )
                     stage1_uia_docs_inserted += _safe_int(uia_status.get("inserted", 0))
                     if bool(uia_status.get("required", False)) and not bool(uia_status.get("ok", False)):

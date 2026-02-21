@@ -37,6 +37,7 @@ from autocapture_nx.ingest.uia_obs_docs import (
     _frame_uia_expected_ids,
     _uia_extract_snapshot_dict,
 )
+from autocapture_nx.storage.stage1_derived_store import build_stage1_overlay_store
 from autocapture_nx.storage.facts_ndjson import append_fact_line
 from autocapture.storage.retention import retention_eligibility_record_id
 from autocapture.storage.stage1 import mark_stage1_and_retention, stage1_complete_record_id
@@ -361,6 +362,11 @@ class IdleProcessor:
         self._pipeline = self._cap("processing.pipeline")
         self._events = self._cap("event.builder")
         self._logger = self._cap("observability.logger")
+        self._stage1_store, self._stage1_derived = build_stage1_overlay_store(
+            config=self._config,
+            metadata=self._metadata,
+            logger=self._logger,
+        )
         self._lexical = None
         self._vector = None
         self._indexes_ready = False
@@ -565,7 +571,7 @@ class IdleProcessor:
         return self._state_processor
 
     def _mark_stage1_retention(self, record_id: str, record: dict[str, Any], *, reason: str, stats: IdleProcessStats) -> None:
-        if self._metadata is None:
+        if self._stage1_store is None:
             return
         try:
             self._ensure_stage1_uia_docs(record_id, record, stats=stats)
@@ -574,7 +580,7 @@ class IdleProcessor:
             pass
         try:
             result = mark_stage1_and_retention(
-                self._metadata,
+                self._stage1_store,
                 record_id,
                 record if isinstance(record, dict) else {},
                 reason=reason,
@@ -591,7 +597,7 @@ class IdleProcessor:
             pass
 
     def _ensure_stage1_uia_docs(self, record_id: str, record: dict[str, Any], *, stats: IdleProcessStats) -> None:
-        if self._metadata is None:
+        if self._stage1_store is None:
             return
         if not isinstance(record, dict):
             return
@@ -604,17 +610,18 @@ class IdleProcessor:
         if not dataroot:
             dataroot = "data"
         status = _ensure_frame_uia_docs(
-            self._metadata,
+            self._stage1_store,
             source_record_id=str(record_id),
             record=record,
             dataroot=str(dataroot),
+            snapshot_metadata=self._metadata,
         )
         stats.stage1_uia_docs_inserted += int(status.get("inserted", 0) or 0)
         if bool(status.get("required", False)) and not bool(status.get("ok", False)):
             stats.stage1_uia_frames_missing_count += 1
 
     def _has_stage1_uia_docs(self, record: dict[str, Any]) -> bool:
-        if self._metadata is None:
+        if self._stage1_store is None:
             return True
         if not isinstance(record, dict):
             return True
@@ -627,7 +634,7 @@ class IdleProcessor:
         expected_ids = _frame_uia_expected_ids(uia_record_id)
         missing = False
         for kind, doc_id in expected_ids.items():
-            row = self._metadata.get(doc_id, None)
+            row = self._stage1_store.get(doc_id, None)
             if not (isinstance(row, dict) and str(row.get("record_type") or "") == kind):
                 missing = True
                 break
@@ -641,10 +648,10 @@ class IdleProcessor:
         return False
 
     def _has_stage1_and_retention_markers(self, record_id: str) -> bool:
-        if self._metadata is None:
+        if self._stage1_store is None:
             return False
-        stage1_marker = self._metadata.get(stage1_complete_record_id(record_id), None)
-        retention_marker = self._metadata.get(retention_eligibility_record_id(record_id), None)
+        stage1_marker = self._stage1_store.get(stage1_complete_record_id(record_id), None)
+        retention_marker = self._stage1_store.get(retention_eligibility_record_id(record_id), None)
         if _is_missing_metadata_record(stage1_marker):
             return False
         if _is_missing_metadata_record(retention_marker):
