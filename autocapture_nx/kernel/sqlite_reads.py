@@ -53,6 +53,10 @@ def create_sqlite_read_snapshot(db_path: str | Path, *, snapshot_root: str | Pat
             dst_conn.close()
         if src_conn is not None:
             src_conn.close()
+    try:
+        snapshot_path.chmod(0o600)
+    except Exception:
+        pass
     return snapshot_path
 
 
