@@ -84,6 +84,7 @@ class PromptOpsAPI:
         error: str = "",
         metadata: dict[str, Any] | None = None,
         context: dict[str, Any] | None = None,
+        allow_review: bool = True,
     ) -> dict[str, Any]:
         prompt_id = self._resolve_prompt_id(task_class, context)
         return self._layer.record_model_interaction(
@@ -97,6 +98,7 @@ class PromptOpsAPI:
             latency_ms=float(latency_ms),
             error=str(error or ""),
             metadata=metadata if isinstance(metadata, dict) else None,
+            allow_review=bool(allow_review),
         )
 
     def recommend_template(self, task_class: str, raw_prompt: str, context: dict[str, Any] | None = None) -> dict[str, Any]:

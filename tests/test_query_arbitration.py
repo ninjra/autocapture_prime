@@ -98,6 +98,21 @@ class QueryArbitrationTests(unittest.TestCase):
         append_metric.assert_called()
         self.assertEqual(append_metric.call_args.kwargs.get("method"), "classic_arbitrated")
 
+    def test_metadata_only_skips_secondary_path(self) -> None:
+        system = _System()
+        weak_state = _result("", state="no_evidence", coverage=0.0)
+        with (
+            mock.patch.dict("os.environ", {"AUTOCAPTURE_QUERY_METADATA_ONLY": "1"}, clear=False),
+            mock.patch.object(query_mod, "run_state_query", return_value=weak_state),
+            mock.patch.object(query_mod, "run_query_without_state") as run_classic,
+            mock.patch.object(query_mod, "_append_query_metric"),
+        ):
+            out = query_mod.run_query(system, "summarize current work session")
+        arb = out.get("processing", {}).get("arbitration", {})
+        self.assertFalse(bool(arb.get("secondary_executed", True)))
+        self.assertEqual(str(arb.get("secondary_reason") or ""), "metadata_only_skip_secondary")
+        self.assertLessEqual(int(run_classic.call_count), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

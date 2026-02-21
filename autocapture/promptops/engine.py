@@ -26,9 +26,28 @@ def _safe_name(value: str) -> str:
 
 
 def _data_root(config: dict[str, Any]) -> Path:
+    env_override = str(os.getenv("AUTOCAPTURE_DATA_DIR", "")).strip()
+    if env_override:
+        return Path(env_override).expanduser().resolve()
     paths = config.get("paths", {}) if isinstance(config, dict) else {}
     data_dir = paths.get("data_dir") or config.get("storage", {}).get("data_dir", "data")
-    return Path(data_dir)
+    candidate = Path(str(data_dir)).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    try:
+        from autocapture_nx.kernel.paths import repo_root
+
+        return (repo_root() / candidate).resolve()
+    except Exception:
+        return candidate.resolve()
+
+
+def _resolve_data_path(config: dict[str, Any], raw: Any, fallback_rel: str) -> Path:
+    root = _data_root(config)
+    candidate = Path(str(raw)).expanduser() if str(raw or "").strip() else Path(str(fallback_rel))
+    if candidate.is_absolute():
+        return candidate
+    return root / candidate
 
 
 @dataclass
@@ -105,13 +124,11 @@ class PromptOpsLayer:
 
     def _prompt_dir(self) -> Path:
         cfg = self._prompt_cfg()
-        root = _data_root(self._config)
-        return Path(cfg.get("prompt_dir") or root / "promptops" / "prompts")
+        return _resolve_data_path(self._config, cfg.get("prompt_dir"), "promptops/prompts")
 
     def _history_dir(self) -> Path:
         cfg = self._prompt_cfg()
-        root = _data_root(self._config)
-        return Path(cfg.get("history_dir") or root / "promptops" / "history")
+        return _resolve_data_path(self._config, cfg.get("history_dir"), "promptops/history")
 
     def _metrics_cfg(self) -> dict[str, Any]:
         cfg = self._prompt_cfg()
@@ -121,10 +138,7 @@ class PromptOpsLayer:
     def _metrics_path(self) -> Path:
         metrics_cfg = self._metrics_cfg()
         raw = metrics_cfg.get("output_path")
-        if raw:
-            return Path(str(raw))
-        root = _data_root(self._config)
-        return root / "promptops" / "metrics.jsonl"
+        return _resolve_data_path(self._config, raw, "promptops/metrics.jsonl")
 
     def _append_metric(self, payload: dict[str, Any]) -> None:
         metrics_cfg = self._metrics_cfg()
@@ -149,7 +163,7 @@ class PromptOpsLayer:
         raw = cfg.get("bundle_root")
         if not raw:
             return None
-        return Path(str(raw))
+        return _resolve_data_path(self._config, raw, "promptops/sources")
 
     def _bundle_plugin_id(self) -> str:
         name = self._bundle_name().strip()
@@ -258,7 +272,10 @@ class PromptOpsLayer:
         examples_path = str(cfg.get("examples_path") or "").strip()
         if examples_path:
             try:
-                rows = load_examples_file(Path(examples_path), prompt_id=str(prompt_id))
+                rows = load_examples_file(
+                    _resolve_data_path(self._config, examples_path, "promptops/examples.json"),
+                    prompt_id=str(prompt_id),
+                )
                 if rows:
                     return rows
             except Exception:
@@ -293,6 +310,7 @@ class PromptOpsLayer:
         persist: bool | None = None,
         strategy: str | None = None,
         prefer_stored_prompt: bool = True,
+        skip_snapshot: bool = False,
     ) -> PromptOpsResult:
         start = time.perf_counter()
         cfg = self._prompt_cfg()
@@ -330,9 +348,13 @@ class PromptOpsLayer:
             )
 
         sources = list(cfg.get("sources", []) if sources is None else sources)
-        stage_start = time.perf_counter()
-        snapshot = self._snapshot(sources)
-        trace["stages_ms"]["snapshot"] = round((time.perf_counter() - stage_start) * 1000.0, 3)
+        if bool(skip_snapshot):
+            snapshot = {"sources": [], "combined_hash": ""}
+            trace["stages_ms"]["snapshot"] = 0.0
+        else:
+            stage_start = time.perf_counter()
+            snapshot = self._snapshot(sources)
+            trace["stages_ms"]["snapshot"] = round((time.perf_counter() - stage_start) * 1000.0, 3)
         snapshot_sources_list = list(snapshot.get("sources", []))
         self._record_template_mapping(prompt_id, snapshot)
         if strategy is None:
@@ -471,15 +493,18 @@ class PromptOpsLayer:
         cfg = self._prompt_cfg()
         strategy = str(cfg.get("query_strategy", "none"))
         persist_query = bool(cfg.get("persist_query_prompts", False))
+        effective_sources = list(cfg.get("sources", []) if sources is None else sources)
+        skip_snapshot = strategy in {"none", "normalize_query"} and not effective_sources
         return self.prepare_prompt(
             query,
             prompt_id=prompt_id,
-            sources=sources,
+            sources=effective_sources,
             persist=persist_query,
             strategy=strategy,
             # Query rewriting must always start from the live user query to avoid
             # stale prompt reuse across different questions.
             prefer_stored_prompt=False,
+            skip_snapshot=skip_snapshot,
         )
 
     def record_model_interaction(
@@ -495,6 +520,7 @@ class PromptOpsLayer:
         latency_ms: float,
         error: str = "",
         metadata: dict[str, Any] | None = None,
+        allow_review: bool = True,
     ) -> dict[str, Any]:
         cfg = self._prompt_cfg()
         metrics_cfg = self._metrics_cfg()
@@ -529,6 +555,8 @@ class PromptOpsLayer:
         if isinstance(metadata, dict) and metadata:
             payload["meta"] = metadata
         self._append_metric(payload)
+        if not bool(allow_review):
+            return {"reviewed": False, "updated": False}
 
         review_cfg = cfg.get("review", {})
         if not isinstance(review_cfg, dict) or not bool(review_cfg.get("enabled", False)):

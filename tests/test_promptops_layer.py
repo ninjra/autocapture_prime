@@ -76,6 +76,17 @@ class PromptOpsLayerTests(unittest.TestCase):
             result = layer.prepare_query("pls help w/ q", prompt_id="query")
             self.assertEqual(result.prompt, "please help with q?")
 
+    def test_prepare_query_normalize_query_skips_snapshot_when_no_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _base_config(tmp)
+            config["promptops"]["query_strategy"] = "normalize_query"
+            layer = PromptOpsLayer(config)
+            with mock.patch.object(layer, "_snapshot", wraps=layer._snapshot) as snapshot:
+                result = layer.prepare_query("pls help w/ q", prompt_id="query")
+            snapshot.assert_not_called()
+            stages = result.trace.get("stages_ms", {})
+            self.assertEqual(float(stages.get("snapshot", -1.0)), 0.0)
+
     def test_prepare_query_does_not_reuse_stored_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _base_config(tmp)
@@ -140,6 +151,80 @@ class PromptOpsLayerTests(unittest.TestCase):
             self.assertFalse(row.get("success"))
             self.assertEqual(row.get("prompt_input_text"), "what song is playing")
             self.assertEqual(row.get("prompt_effective_text"), "what song is playing?")
+
+    def test_record_model_interaction_allow_review_false_skips_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            metrics_path = Path(tmp) / "metrics.jsonl"
+            config = _base_config(tmp)
+            config["promptops"]["metrics"]["output_path"] = str(metrics_path)
+            config["promptops"]["review"] = {
+                "enabled": True,
+                "on_failure_only": True,
+                "persist_prompts": True,
+                "auto_approve": True,
+                "base_url": "http://127.0.0.1:8000",
+                "model": "internvl3_5_8b",
+                "timeout_s": 5.0,
+                "max_tokens": 64,
+            }
+            layer = PromptOpsLayer(config)
+            with mock.patch.object(layer, "_review_with_model") as review:
+                out = layer.record_model_interaction(
+                    prompt_id="query",
+                    provider_id="query.classic",
+                    model="",
+                    prompt_input="hello",
+                    prompt_effective="hello",
+                    response_text="",
+                    success=False,
+                    latency_ms=5.0,
+                    error="failed",
+                    allow_review=False,
+                )
+            self.assertEqual(out, {"reviewed": False, "updated": False})
+            review.assert_not_called()
+            rows = [json.loads(line) for line in metrics_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].get("type"), "promptops.model_interaction")
+
+    def test_relative_metrics_output_path_resolves_under_data_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _base_config(tmp)
+            config["promptops"]["metrics"]["output_path"] = "promptops/metrics.jsonl"
+            layer = PromptOpsLayer(config)
+            _ = layer.record_model_interaction(
+                prompt_id="query",
+                provider_id="query.classic",
+                model="",
+                prompt_input="hello",
+                prompt_effective="hello",
+                response_text="ok",
+                success=True,
+                latency_ms=1.2,
+            )
+            expected = Path(tmp) / "promptops" / "metrics.jsonl"
+            self.assertTrue(expected.exists())
+
+    def test_relative_metrics_output_path_uses_env_data_root_override(self) -> None:
+        with tempfile.TemporaryDirectory() as cfg_tmp, tempfile.TemporaryDirectory() as env_tmp:
+            config = _base_config(cfg_tmp)
+            config["paths"]["data_dir"] = "data"
+            config["storage"]["data_dir"] = "data"
+            config["promptops"]["metrics"]["output_path"] = "promptops/metrics.jsonl"
+            with mock.patch.dict("os.environ", {"AUTOCAPTURE_DATA_DIR": env_tmp}, clear=False):
+                layer = PromptOpsLayer(config)
+                _ = layer.record_model_interaction(
+                    prompt_id="query",
+                    provider_id="query.classic",
+                    model="",
+                    prompt_input="hello",
+                    prompt_effective="hello",
+                    response_text="ok",
+                    success=True,
+                    latency_ms=1.2,
+                )
+            expected = Path(env_tmp) / "promptops" / "metrics.jsonl"
+            self.assertTrue(expected.exists())
 
     def test_prepare_prompt_metrics_include_trace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

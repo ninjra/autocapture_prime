@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import time
 from typing import Any
@@ -58,6 +59,13 @@ def _safe_bool(value: Any) -> bool:
     return text in {"1", "true", "yes", "on"}
 
 
+def _resolve_data_path(root: Path, raw: Any, fallback_rel: str) -> Path:
+    candidate = Path(str(raw)).expanduser() if str(raw or "").strip() else Path(str(fallback_rel))
+    if candidate.is_absolute():
+        return candidate
+    return root / candidate
+
+
 def _load_jsonl(path: Path, *, max_rows: int) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -105,39 +113,42 @@ class PromptOpsOptimizer:
         return cfg if isinstance(cfg, dict) else {}
 
     def _data_root(self) -> Path:
+        env_override = str(os.getenv("AUTOCAPTURE_DATA_DIR", "")).strip()
+        if env_override:
+            return Path(env_override).expanduser().resolve()
         paths = self._config.get("paths", {}) if isinstance(self._config, dict) else {}
         storage = self._config.get("storage", {}) if isinstance(self._config, dict) else {}
         data_dir = paths.get("data_dir") or storage.get("data_dir") or "data"
-        return Path(str(data_dir))
+        candidate = Path(str(data_dir)).expanduser()
+        if candidate.is_absolute():
+            return candidate
+        try:
+            from autocapture_nx.kernel.paths import repo_root
+
+            return (repo_root() / candidate).resolve()
+        except Exception:
+            return candidate.resolve()
 
     def _metrics_path(self) -> Path:
         promptops = self._promptops_cfg()
         metrics = promptops.get("metrics", {}) if isinstance(promptops, dict) else {}
         out = str(metrics.get("output_path") or "").strip()
-        if out:
-            return Path(out)
-        return self._data_root() / "promptops" / "metrics.jsonl"
+        return _resolve_data_path(self._data_root(), out, "promptops/metrics.jsonl")
 
     def _trace_path(self) -> Path:
         cfg = self._optimizer_cfg()
         raw = str(cfg.get("query_trace_path") or "").strip()
-        if raw:
-            return Path(raw)
-        return self._data_root() / "facts" / "query_trace.ndjson"
+        return _resolve_data_path(self._data_root(), raw, "facts/query_trace.ndjson")
 
     def _examples_path(self) -> Path:
         promptops = self._promptops_cfg()
         raw = str(promptops.get("examples_path") or "").strip()
-        if raw:
-            return Path(raw)
-        return self._data_root() / "promptops" / "examples.json"
+        return _resolve_data_path(self._data_root(), raw, "promptops/examples.json")
 
     def _report_path(self) -> Path:
         cfg = self._optimizer_cfg()
         out = str(cfg.get("output_path") or "").strip()
-        if out:
-            return Path(out)
-        return Path("artifacts/promptops/optimizer_latest.json")
+        return _resolve_data_path(self._data_root(), out, "artifacts/promptops/optimizer_latest.json")
 
     def _enabled(self) -> bool:
         return bool(self._optimizer_cfg().get("enabled", False))

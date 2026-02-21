@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from autocapture.promptops.optimizer import PromptOpsOptimizer
 
@@ -88,6 +89,37 @@ class PromptOpsOptimizerTests(unittest.TestCase):
             anchor = float(optimizer._last_run_monotonic or 0.0)  # noqa: SLF001
             self.assertFalse(optimizer.due(now_monotonic=anchor + 0.2))
             self.assertTrue(optimizer.due(now_monotonic=anchor + 2.0))
+
+    def test_relative_paths_resolve_to_data_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = _config(tmp)
+            cfg["promptops"]["metrics"]["output_path"] = "promptops/metrics.jsonl"
+            cfg["promptops"]["examples_path"] = "promptops/examples.json"
+            cfg["promptops"]["optimizer"]["query_trace_path"] = "facts/query_trace.ndjson"
+            cfg["promptops"]["optimizer"]["output_path"] = "artifacts/promptops/optimizer_latest.json"
+            optimizer = PromptOpsOptimizer(cfg)
+            data_root = Path(cfg["paths"]["data_dir"])
+            self.assertEqual(optimizer._metrics_path(), data_root / "promptops" / "metrics.jsonl")  # noqa: SLF001
+            self.assertEqual(optimizer._examples_path(), data_root / "promptops" / "examples.json")  # noqa: SLF001
+            self.assertEqual(optimizer._trace_path(), data_root / "facts" / "query_trace.ndjson")  # noqa: SLF001
+            self.assertEqual(optimizer._report_path(), data_root / "artifacts" / "promptops" / "optimizer_latest.json")  # noqa: SLF001
+
+    def test_relative_paths_use_env_data_root_override(self) -> None:
+        with tempfile.TemporaryDirectory() as cfg_tmp, tempfile.TemporaryDirectory() as env_tmp:
+            cfg = _config(cfg_tmp)
+            cfg["paths"]["data_dir"] = "data"
+            cfg["storage"]["data_dir"] = "data"
+            cfg["promptops"]["metrics"]["output_path"] = "promptops/metrics.jsonl"
+            cfg["promptops"]["examples_path"] = "promptops/examples.json"
+            cfg["promptops"]["optimizer"]["query_trace_path"] = "facts/query_trace.ndjson"
+            cfg["promptops"]["optimizer"]["output_path"] = "artifacts/promptops/optimizer_latest.json"
+            with mock.patch.dict("os.environ", {"AUTOCAPTURE_DATA_DIR": env_tmp}, clear=False):
+                optimizer = PromptOpsOptimizer(cfg)
+                data_root = Path(env_tmp)
+                self.assertEqual(optimizer._metrics_path(), data_root / "promptops" / "metrics.jsonl")  # noqa: SLF001
+                self.assertEqual(optimizer._examples_path(), data_root / "promptops" / "examples.json")  # noqa: SLF001
+                self.assertEqual(optimizer._trace_path(), data_root / "facts" / "query_trace.ndjson")  # noqa: SLF001
+                self.assertEqual(optimizer._report_path(), data_root / "artifacts" / "promptops" / "optimizer_latest.json")  # noqa: SLF001
 
     def test_skips_when_user_active(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

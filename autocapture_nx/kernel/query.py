@@ -45,6 +45,19 @@ from autocapture_nx.inference.openai_compat import OpenAICompatClient, image_byt
 _QUERY_FAST_CACHE: dict[str, dict[str, Any]] = {}
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = str(os.environ.get(name) or "").strip().casefold()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _metadata_only_query_enabled() -> bool:
+    return _env_flag("AUTOCAPTURE_QUERY_METADATA_ONLY", default=False)
+
+
 def _parse_ts(ts: str | None) -> datetime | None:
     if not ts:
         return None
@@ -268,6 +281,17 @@ def _get_promptops_api(system: Any) -> Any | None:
         return get_promptops_api(system.config if isinstance(system.config, dict) else {})
     except Exception:
         return None
+
+
+def _promptops_allow_query_review(system: Any) -> bool:
+    cfg = getattr(system, "config", {}) if hasattr(system, "config") else {}
+    promptops_cfg = cfg.get("promptops", {}) if isinstance(cfg, dict) else {}
+    review_cfg = promptops_cfg.get("review", {}) if isinstance(promptops_cfg, dict) else {}
+    allow_cfg = bool(review_cfg.get("allow_on_query", False)) if isinstance(review_cfg, dict) else False
+    allow = _env_flag("AUTOCAPTURE_PROMPTOPS_REVIEW_ON_QUERY", default=allow_cfg)
+    if _metadata_only_query_enabled():
+        return False
+    return bool(allow)
 
 
 def _citation_locator(
@@ -1082,6 +1106,7 @@ def run_state_query(system, query: str) -> dict[str, Any]:
                     "promptops_trace": dict(promptops_result.trace) if promptops_result and isinstance(promptops_result.trace, dict) else None,
                 },
                 context={"prompt_id": "state_query"},
+                allow_review=_promptops_allow_query_review(system),
             )
     except Exception:
         pass
@@ -1744,6 +1769,7 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
                     "promptops_trace": dict(promptops_result.trace) if promptops_result and isinstance(promptops_result.trace, dict) else None,
                 },
                 context={"prompt_id": "query"},
+                allow_review=_promptops_allow_query_review(system),
             )
     except Exception:
         pass
@@ -5476,6 +5502,7 @@ def _hard_vlm_extract(system: Any, result: dict[str, Any], topic: str, query_tex
                     "promptops_mode": str(promptops_mode),
                 },
                 context={"prompt_id": f"hard_vlm.{topic}"},
+                allow_review=_promptops_allow_query_review(system),
             )
     except Exception:
         pass
@@ -7597,12 +7624,7 @@ def _apply_answer_display(
     intent_obj = query_intent if isinstance(query_intent, dict) else _query_intent(query)
     query_topic = str(intent_obj.get("topic") or _query_topic(query))
     display_sources = _augment_claim_sources_for_display(query_topic, claim_sources, metadata)
-    metadata_only_query = str(os.environ.get("AUTOCAPTURE_QUERY_METADATA_ONLY") or "").strip().casefold() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    metadata_only_query = _metadata_only_query_enabled()
     metadata_only_allow_hard_vlm = (
         metadata_only_query
         and str(os.environ.get("AUTOCAPTURE_QUERY_METADATA_ONLY_ALLOW_HARD_VLM") or "").strip().casefold()
@@ -8032,6 +8054,9 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
             primary_result=primary_result,
             primary_score=primary_score,
         )
+        if needs_secondary and _metadata_only_query_enabled():
+            needs_secondary = False
+            secondary_reason = "metadata_only_skip_secondary"
 
         if needs_secondary:
             secondary_method = "state" if primary_method == "classic" else "classic"
