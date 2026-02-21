@@ -83,6 +83,43 @@ class RuntimeBatchAdaptiveParallelismTests(unittest.TestCase):
         self.assertEqual(config["processing"]["idle"]["max_items_per_run"], 40)
         self.assertEqual(snapshot["action"], "hold")
 
+    def test_scale_up_when_queue_backlog_high_and_latency_healthy(self) -> None:
+        config = self._base_config()
+        snapshot = _apply_adaptive_idle_parallelism(
+            config,
+            signals={"cpu_utilization": 0.35, "ram_utilization": 0.30},
+            recent_steps=[
+                {
+                    "consumed_ms": 500,
+                    "idle_stats": {"pending_records": 1200, "records_completed": 30},
+                    "sla": {"pending_records": 1200},
+                }
+            ],
+        )
+        self.assertIsInstance(snapshot, dict)
+        self.assertEqual(snapshot["action"], "scale_up")
+        self.assertEqual(str(snapshot.get("reason") or ""), "queue_high")
+        self.assertEqual(config["processing"]["idle"]["max_concurrency_cpu"], 3)
+
+    def test_scale_down_when_latency_p95_exceeds_hard_cap(self) -> None:
+        config = self._base_config()
+        config["processing"]["idle"]["max_concurrency_cpu"] = 4
+        config["processing"]["idle"]["batch_size"] = 12
+        config["processing"]["idle"]["max_items_per_run"] = 80
+        snapshot = _apply_adaptive_idle_parallelism(
+            config,
+            signals={"cpu_utilization": 0.35, "ram_utilization": 0.30},
+            recent_steps=[
+                {"consumed_ms": 4500, "idle_stats": {"pending_records": 200}},
+                {"consumed_ms": 4200, "idle_stats": {"pending_records": 180}},
+                {"consumed_ms": 4600, "idle_stats": {"pending_records": 160}},
+            ],
+        )
+        self.assertIsInstance(snapshot, dict)
+        self.assertEqual(snapshot["action"], "scale_down")
+        self.assertEqual(str(snapshot.get("reason") or ""), "latency_p95_hard_cap")
+        self.assertEqual(config["processing"]["idle"]["max_concurrency_cpu"], 2)
+
     def test_disabled_tuning_is_noop(self) -> None:
         config = self._base_config()
         config["processing"]["idle"]["adaptive_parallelism"]["enabled"] = False
@@ -113,6 +150,7 @@ class RuntimeBatchAdaptiveParallelismTests(unittest.TestCase):
         self.assertTrue(snapshot["retention_risk"])
         self.assertEqual(snapshot["pending_records"], 200)
         self.assertEqual(snapshot["throughput_records_per_s"], 0.0)
+        self.assertGreater(int(snapshot.get("loop_latency_p95_ms") or 0), 0)
 
     def test_sla_pressure_scales_up_when_risky(self) -> None:
         config = self._base_config()
@@ -232,6 +270,7 @@ class RuntimeBatchAdaptiveParallelismTests(unittest.TestCase):
         self.assertEqual(int(out.get("loops") or 0), 0)
         guard = out.get("metadata_db_guard", {}) if isinstance(out.get("metadata_db_guard", {}), dict) else {}
         self.assertFalse(bool(guard.get("ok", True)))
+        self.assertIn("metadata_db_unstable", [str(x) for x in (out.get("slo_alerts") or [])])
 
 
 if __name__ == "__main__":

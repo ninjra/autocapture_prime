@@ -46,6 +46,71 @@ def is_stage1_complete_record(record_id: str, record: dict[str, Any]) -> bool:
     return has_hid_link
 
 
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return 0
+
+
+def _frame_uia_expected_ids(uia_record_id: str) -> dict[str, str]:
+    from plugins.builtin.processing_sst_uia_context.plugin import _uia_doc_id as plugin_uia_doc_id
+
+    return {
+        "obs.uia.focus": plugin_uia_doc_id(str(uia_record_id), "focus", 0),
+        "obs.uia.context": plugin_uia_doc_id(str(uia_record_id), "context", 0),
+        "obs.uia.operable": plugin_uia_doc_id(str(uia_record_id), "operable", 0),
+    }
+
+
+def _valid_bbox_list(value: Any) -> bool:
+    if not isinstance(value, list) or not value:
+        return False
+    for row in value:
+        if not isinstance(row, (list, tuple)) or len(row) != 4:
+            return False
+        try:
+            left = float(row[0])
+            top = float(row[1])
+            right = float(row[2])
+            bottom = float(row[3])
+        except Exception:
+            return False
+        if right < left or bottom < top:
+            return False
+    return True
+
+
+def _frame_stage1_contract_ready(metadata: Any, record: dict[str, Any]) -> bool:
+    if metadata is None:
+        return False
+    uia_ref = record.get("uia_ref") if isinstance(record.get("uia_ref"), dict) else {}
+    uia_record_id = str(uia_ref.get("record_id") or "").strip()
+    uia_content_hash = str(uia_ref.get("content_hash") or "").strip()
+    if not uia_record_id or not uia_content_hash:
+        return False
+    expected = _frame_uia_expected_ids(uia_record_id)
+    for record_type, rid in expected.items():
+        row = metadata.get(rid, None) if hasattr(metadata, "get") else None
+        if not isinstance(row, dict):
+            return False
+        if str(row.get("record_type") or "") != str(record_type):
+            return False
+        if str(row.get("uia_record_id") or "").strip() != uia_record_id:
+            return False
+        if str(row.get("uia_content_hash") or "").strip() != uia_content_hash:
+            return False
+        if not str(row.get("hwnd") or "").strip():
+            return False
+        if not str(row.get("window_title") or "").strip():
+            return False
+        if _safe_int(row.get("window_pid")) <= 0:
+            return False
+        if not _valid_bbox_list(row.get("bboxes")):
+            return False
+    return True
+
+
 def mark_stage1_complete(
     metadata: Any,
     record_id: str,
@@ -137,7 +202,10 @@ def mark_stage1_and_retention(
         logger=logger,
     )
     retention_id: str | None = None
-    retention_reason = "stage1_complete" if stage1_id else str(reason or "idle_processed")
+    stage1_contract_validated = bool(stage1_id)
+    if is_frame and stage1_contract_validated:
+        stage1_contract_validated = _frame_stage1_contract_ready(metadata, record)
+    retention_reason = "stage1_complete" if stage1_contract_validated else str(reason or "idle_processed")
     # Fail closed for frame evidence: no retention marker unless Stage1 contract is complete.
     if (not is_frame) or bool(stage1_id):
         retention_id = mark_evidence_retention_eligible(
@@ -145,8 +213,8 @@ def mark_stage1_and_retention(
             record_id,
             record,
             reason=retention_reason,
-            stage1_contract_validated=bool(stage1_id),
-            quarantine_pending=bool(is_frame and not stage1_id),
+            stage1_contract_validated=bool(stage1_contract_validated),
+            quarantine_pending=bool(is_frame and not stage1_contract_validated),
             ts_utc=ts_utc,
             event_builder=event_builder,
             logger=logger,

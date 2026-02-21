@@ -32,6 +32,7 @@ def build_health_snapshot(rows: list[dict[str, Any]], *, tail: int = 30) -> dict
     lag_series: list[float] = []
     retention_risk_events = 0
     metadata_db_unstable_events = 0
+    throughput_zero_backlog_events = 0
     for row in scoped:
         if not isinstance(row, dict):
             continue
@@ -51,6 +52,9 @@ def build_health_snapshot(rows: list[dict[str, Any]], *, tail: int = 30) -> dict
         guard = row.get("metadata_db_guard") if isinstance(row.get("metadata_db_guard"), dict) else {}
         if guard and not bool(guard.get("ok", True)):
             metadata_db_unstable_events += 1
+        slo_alerts = [str(x) for x in (row.get("slo_alerts") or []) if str(x)]
+        if "throughput_zero_with_backlog" in slo_alerts:
+            throughput_zero_backlog_events += 1
 
     latest_pending = pending_series[-1] if pending_series else 0
     latest_completed = completed_series[-1] if completed_series else 0
@@ -63,6 +67,8 @@ def build_health_snapshot(rows: list[dict[str, Any]], *, tail: int = 30) -> dict
     if metadata_db_unstable_events > 0:
         alerts.append("metadata_db_unstable")
     if latest_pending > 0 and latest_throughput <= 0.0:
+        alerts.append("throughput_zero_with_backlog")
+    elif throughput_zero_backlog_events > 0:
         alerts.append("throughput_zero_with_backlog")
 
     return {
@@ -78,6 +84,7 @@ def build_health_snapshot(rows: list[dict[str, Any]], *, tail: int = 30) -> dict
         "events": {
             "retention_risk": int(retention_risk_events),
             "metadata_db_unstable": int(metadata_db_unstable_events),
+            "throughput_zero_with_backlog": int(throughput_zero_backlog_events),
         },
         "alerts": alerts,
     }

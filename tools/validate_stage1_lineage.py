@@ -10,6 +10,7 @@ from typing import Any
 from autocapture.storage.retention import retention_eligibility_record_id
 from autocapture.storage.stage1 import stage1_complete_record_id
 from autocapture_nx.ingest.uia_obs_docs import _frame_uia_expected_ids
+from autocapture_nx.kernel.sqlite_reads import open_sqlite_reader
 
 
 def _parse_payload(raw: Any) -> dict[str, Any] | None:
@@ -50,9 +51,13 @@ def validate_stage1_lineage(
     limit: int | None = None,
     sample_count: int = 3,
     strict: bool = False,
+    snapshot_read: bool = True,
 ) -> dict[str, Any]:
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
+    conn, read_info = open_sqlite_reader(
+        db_path,
+        prefer_snapshot=bool(snapshot_read),
+        force_snapshot=False,
+    )
     summary: dict[str, Any] = {
         "frames_scanned": 0,
         "frames_with_uia_ref": 0,
@@ -194,6 +199,7 @@ def validate_stage1_lineage(
     return {
         "ok": ok,
         "strict": bool(strict),
+        "db_read": read_info,
         "summary": summary,
         "samples": samples,
         "fail_reasons": fail_reasons,
@@ -206,6 +212,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, default=0, help="Optional max frame rows to scan (0 = all).")
     parser.add_argument("--samples", type=int, default=3, help="How many lineage sample rows to emit.")
     parser.add_argument("--strict", action="store_true", help="Fail when any uia_ref lineage is incomplete.")
+    parser.add_argument("--snapshot-read", dest="snapshot_read", action="store_true", help="Allow direct read with snapshot fallback.")
+    parser.add_argument("--no-snapshot-read", dest="snapshot_read", action="store_false", help="Disable snapshot fallback and read DB directly.")
+    parser.set_defaults(snapshot_read=True)
     parser.add_argument("--output", default="", help="Optional JSON output path.")
     return parser
 
@@ -224,6 +233,7 @@ def main() -> int:
             limit=int(args.limit) if int(args.limit) > 0 else None,
             sample_count=int(args.samples),
             strict=bool(args.strict),
+            snapshot_read=bool(args.snapshot_read),
         )
     except Exception as exc:
         out = {"ok": False, "error": f"{type(exc).__name__}:{exc}", "db": str(db_path)}

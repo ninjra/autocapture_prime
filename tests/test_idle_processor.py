@@ -373,6 +373,7 @@ class IdleProcessorTests(unittest.TestCase):
         }
         metadata = _MetadataStore()
         frame_id = "run1/evidence.capture.frame/0"
+        uia_id = "run1/evidence.uia.snapshot/0"
         metadata.put(
             frame_id,
             {
@@ -381,9 +382,27 @@ class IdleProcessorTests(unittest.TestCase):
                 "ts_utc": "2024-01-01T00:00:00+00:00",
                 "blob_path": "media/frame0.png",
                 "content_hash": "hash_frame_0",
-                "uia_ref": {"record_id": "run1/evidence.uia.snapshot/0", "content_hash": "uia_hash_0"},
+                "uia_ref": {"record_id": uia_id, "content_hash": "uia_hash_0"},
                 "input_ref": {"record_id": "run1/evidence.input.batch/0"},
                 "content_type": "image/png",
+                "desktop_rect": [0, 0, 1920, 1080],
+            },
+        )
+        metadata.put(
+            uia_id,
+            {
+                "record_type": "evidence.uia.snapshot",
+                "record_id": uia_id,
+                "run_id": "run1",
+                "ts_utc": "2024-01-01T00:00:00+00:00",
+                "unix_ms_utc": 1704067200000,
+                "hwnd": "101",
+                "window": {"title": "Outlook", "process_path": "outlook.exe", "pid": 1234},
+                "focus_path": [{"eid": "n1", "role": "button", "name": "Complete", "rect": [10, 10, 80, 30], "enabled": True, "offscreen": False}],
+                "context_peers": [],
+                "operables": [{"eid": "n2", "role": "button", "name": "View", "rect": [90, 10, 150, 30], "enabled": True, "offscreen": False}],
+                "stats": {"walk_ms": 2, "nodes_emitted": 2, "failures": 0},
+                "content_hash": "uia_hash_0",
             },
         )
         checkpoint_id = "system/derived.idle.checkpoint"
@@ -446,6 +465,7 @@ class IdleProcessorTests(unittest.TestCase):
         }
         metadata = _MetadataStore()
         frame_id = "run1/evidence.capture.frame/0"
+        uia_id = "run1/evidence.uia.snapshot/0"
         metadata.put(
             frame_id,
             {
@@ -454,9 +474,27 @@ class IdleProcessorTests(unittest.TestCase):
                 "ts_utc": "2024-01-01T00:00:00+00:00",
                 "blob_path": "media/frame0.png",
                 "content_hash": "hash_frame_0",
-                "uia_ref": {"record_id": "run1/evidence.uia.snapshot/0", "content_hash": "uia_hash_0"},
+                "uia_ref": {"record_id": uia_id, "content_hash": "uia_hash_0"},
                 "input_ref": {"record_id": "run1/evidence.input.batch/0"},
                 "content_type": "image/png",
+                "desktop_rect": [0, 0, 1920, 1080],
+            },
+        )
+        metadata.put(
+            uia_id,
+            {
+                "record_type": "evidence.uia.snapshot",
+                "record_id": uia_id,
+                "run_id": "run1",
+                "ts_utc": "2024-01-01T00:00:00+00:00",
+                "unix_ms_utc": 1704067200000,
+                "hwnd": "101",
+                "window": {"title": "Outlook", "process_path": "outlook.exe", "pid": 1234},
+                "focus_path": [{"eid": "n1", "role": "button", "name": "Complete", "rect": [10, 10, 80, 30], "enabled": True, "offscreen": False}],
+                "context_peers": [],
+                "operables": [{"eid": "n2", "role": "button", "name": "View", "rect": [90, 10, 150, 30], "enabled": True, "offscreen": False}],
+                "stats": {"walk_ms": 2, "nodes_emitted": 2, "failures": 0},
+                "content_hash": "uia_hash_0",
             },
         )
         checkpoint_id = "system/derived.idle.checkpoint"

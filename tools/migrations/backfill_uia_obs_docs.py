@@ -13,6 +13,7 @@ from autocapture_nx.ingest.handoff_ingest import _SqliteMetadataAdapter
 from autocapture_nx.ingest.handoff_ingest import _choose_source_table
 from autocapture_nx.ingest.handoff_ingest import _table_columns
 from autocapture_nx.ingest.uia_obs_docs import _ensure_frame_uia_docs
+from autocapture_nx.kernel.sqlite_reads import open_sqlite_reader
 
 
 def _decode_payload(payload_text: str | None) -> dict[str, Any] | None:
@@ -25,14 +26,46 @@ def _decode_payload(payload_text: str | None) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+class _ReadWriteMetadataAdapter:
+    """Read-through adapter: writes to live DB, reads fallback from snapshot."""
+
+    def __init__(self, *, read_adapter: Any, write_adapter: Any) -> None:
+        self._read = read_adapter
+        self._write = write_adapter
+
+    def get(self, record_id: str, default: Any = None) -> Any:
+        primary = self._write.get(record_id, None)
+        if isinstance(primary, dict):
+            return primary
+        return self._read.get(record_id, default)
+
+    def put_new(self, record_id: str, value: dict[str, Any]) -> None:
+        self._write.put_new(record_id, value)
+
+    def put(self, record_id: str, value: dict[str, Any]) -> None:
+        self._write.put(record_id, value)
+
+    def put_replace(self, record_id: str, value: dict[str, Any]) -> None:
+        if hasattr(self._write, "put_replace"):
+            self._write.put_replace(record_id, value)
+            return
+        self._write.put(record_id, value)
+
+
 def backfill_uia_obs_docs(
     db_path: Path,
     *,
     dataroot: str,
     dry_run: bool = False,
     limit: int | None = None,
+    snapshot_read: bool = True,
 ) -> dict[str, Any]:
-    conn = sqlite3.connect(str(db_path))
+    source_conn, source_read = open_sqlite_reader(
+        db_path,
+        prefer_snapshot=bool(snapshot_read),
+        force_snapshot=False,
+    )
+    conn = sqlite3.connect(str(db_path), timeout=5.0)
     conn.row_factory = sqlite3.Row
     summary = {
         "scanned_frames": 0,
@@ -41,27 +74,32 @@ def backfill_uia_obs_docs(
         "missing_frames": 0,
         "inserted_docs": 0,
         "invalid_payload_frames": 0,
+        "source_read": source_read,
     }
     try:
-        table = _choose_source_table(conn)
-        summary["source_table"] = str(table)
-        cols = set(_table_columns(conn, table))
-        metadata = _SqliteMetadataAdapter(conn, table, cols)
-        payload_col = "payload" if "payload" in cols else ("payload_json" if "payload_json" in cols else "")
+        source_table = _choose_source_table(source_conn)
+        summary["source_table"] = str(source_table)
+        source_cols = set(_table_columns(source_conn, source_table))
+        payload_col = "payload" if "payload" in source_cols else ("payload_json" if "payload_json" in source_cols else "")
         if not payload_col:
             raise RuntimeError("metadata payload column not found")
-        id_col = "id" if "id" in cols else ("record_id" if "record_id" in cols else "")
+        id_col = "id" if "id" in source_cols else ("record_id" if "record_id" in source_cols else "")
         if not id_col:
             raise RuntimeError("metadata id column not found")
+        write_table = _choose_source_table(conn)
+        write_cols = set(_table_columns(conn, write_table))
+        read_adapter = _SqliteMetadataAdapter(source_conn, source_table, source_cols)
+        write_adapter = _SqliteMetadataAdapter(conn, write_table, write_cols)
+        metadata = _ReadWriteMetadataAdapter(read_adapter=read_adapter, write_adapter=write_adapter)
 
-        sql = f"SELECT {id_col}, {payload_col} FROM {table} WHERE record_type = ? ORDER BY {id_col}"
+        sql = f"SELECT {id_col}, {payload_col} FROM {source_table} WHERE record_type = ? ORDER BY {id_col}"
         params: list[Any] = ["evidence.capture.frame"]
         if limit is not None and int(limit) > 0:
             sql += " LIMIT ?"
             params.append(int(limit))
 
         conn.execute("BEGIN")
-        for row in conn.execute(sql, tuple(params)):
+        for row in source_conn.execute(sql, tuple(params)):
             summary["scanned_frames"] += 1
             record_id = str(row[id_col] or "")
             payload = _decode_payload(row[payload_col])
@@ -86,6 +124,7 @@ def backfill_uia_obs_docs(
         else:
             conn.commit()
     finally:
+        source_conn.close()
         conn.close()
     return summary
 
@@ -162,6 +201,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataroot", default="/mnt/d/autocapture", help="Autocapture data root")
     parser.add_argument("--dry-run", action="store_true", help="Analyze and rollback without writing")
     parser.add_argument("--limit", type=int, default=0, help="Optional max frame rows to scan (0 = all)")
+    parser.add_argument("--snapshot-read", dest="snapshot_read", action="store_true", help="Allow direct read with snapshot fallback.")
+    parser.add_argument("--no-snapshot-read", dest="snapshot_read", action="store_false", help="Disable snapshot fallback and read DB directly.")
+    parser.set_defaults(snapshot_read=True)
     parser.add_argument("--wait-stable-seconds", type=float, default=0.0, help="Wait until metadata.db is unchanged for this duration.")
     parser.add_argument("--wait-timeout-seconds", type=float, default=0.0, help="Max wait budget for --wait-stable-seconds (0 = no timeout).")
     parser.add_argument("--poll-interval-ms", type=int, default=250, help="Polling interval for stability wait.")
@@ -202,6 +244,7 @@ def main() -> int:
             dataroot=str(args.dataroot),
             dry_run=bool(args.dry_run),
             limit=int(args.limit) if int(args.limit) > 0 else None,
+            snapshot_read=bool(args.snapshot_read),
         )
     except Exception as exc:
         print(json.dumps({"ok": False, "error": f"{type(exc).__name__}:{exc}", "db": str(db_path)}))

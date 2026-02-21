@@ -7,6 +7,7 @@ processing until completion or until foreground gating / budgets prevent work.
 from __future__ import annotations
 
 import time
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -92,6 +93,7 @@ def _build_landscape_manifest(
         payload["sla"] = dict(sla)
     if isinstance(metadata_db_guard, dict):
         payload["metadata_db_guard"] = dict(metadata_db_guard)
+    payload["slo_alerts"] = _derive_slo_alerts(sla=sla, metadata_db_guard=metadata_db_guard)
     payload = _canonical_safe(payload)
     payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
     return payload
@@ -135,6 +137,7 @@ def _apply_adaptive_idle_parallelism(
     config: dict[str, Any],
     *,
     signals: dict[str, Any],
+    recent_steps: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     if not isinstance(config, dict):
         return None
@@ -208,6 +211,10 @@ def _apply_adaptive_idle_parallelism(
     high_watermark = _clamp_float(adaptive_cfg.get("high_watermark", 0.9), minimum=0.1, maximum=1.5, fallback=0.9)
     if high_watermark <= low_watermark:
         high_watermark = min(1.5, low_watermark + 0.1)
+    queue_low = _clamp_int(adaptive_cfg.get("queue_low_watermark", 64), minimum=0, maximum=2_000_000, fallback=64)
+    queue_high = _clamp_int(adaptive_cfg.get("queue_high_watermark", 512), minimum=max(1, queue_low + 1), maximum=2_000_000, fallback=512)
+    latency_target_ms = _clamp_int(adaptive_cfg.get("latency_p95_target_ms", 1200), minimum=50, maximum=60_000, fallback=1200)
+    latency_hard_ms = _clamp_int(adaptive_cfg.get("latency_p95_hard_cap_ms", 4000), minimum=latency_target_ms, maximum=120_000, fallback=4000)
 
     cpu_util = _to_float(signals.get("cpu_utilization"))
     ram_util = _to_float(signals.get("ram_utilization"))
@@ -218,15 +225,61 @@ def _apply_adaptive_idle_parallelism(
         ratios.append(ram_util / ram_limit)
     pressure_ratio = max(ratios) if ratios else None
 
+    history = [row for row in (recent_steps or []) if isinstance(row, dict)]
+    pending_records = 0
+    if history:
+        latest = history[-1]
+        idle_stats = latest.get("idle_stats") if isinstance(latest.get("idle_stats"), dict) else {}
+        pending_records = int(idle_stats.get("pending_records", 0) or 0)
+        if pending_records <= 0:
+            sla_latest = latest.get("sla") if isinstance(latest.get("sla"), dict) else {}
+            pending_records = int(sla_latest.get("pending_records", 0) or 0)
+    consumed_values = [
+        int(row.get("consumed_ms", 0) or 0)
+        for row in history[-32:]
+        if isinstance(row, dict) and int(row.get("consumed_ms", 0) or 0) > 0
+    ]
+    loop_latency_p95_ms = 0
+    if consumed_values:
+        ordered = sorted(consumed_values)
+        idx = max(0, int(math.ceil(0.95 * float(len(ordered)))) - 1)
+        loop_latency_p95_ms = int(ordered[min(idx, len(ordered) - 1)])
+
     action = "hold"
+    reason = "pressure_mid"
     next_cpu = current_cpu
     if pressure_ratio is not None:
         if pressure_ratio >= high_watermark:
             action = "scale_down"
+            reason = "pressure_high"
             next_cpu = max(cpu_min, current_cpu - cpu_step_down)
         elif pressure_ratio <= low_watermark:
             action = "scale_up"
+            reason = "pressure_low"
             next_cpu = min(cpu_max, current_cpu + cpu_step_up)
+    if action == "hold" and loop_latency_p95_ms >= latency_hard_ms and current_cpu > cpu_min:
+        action = "scale_down"
+        reason = "latency_p95_hard_cap"
+        next_cpu = max(cpu_min, current_cpu - max(cpu_step_down, 2))
+    elif action == "hold" and loop_latency_p95_ms > latency_target_ms and current_cpu > cpu_min:
+        action = "scale_down"
+        reason = "latency_p95_target_exceeded"
+        next_cpu = max(cpu_min, current_cpu - cpu_step_down)
+    elif action == "hold" and pending_records >= queue_high and current_cpu < cpu_max and loop_latency_p95_ms <= latency_target_ms:
+        action = "scale_up"
+        reason = "queue_high"
+        next_cpu = min(cpu_max, current_cpu + cpu_step_up)
+    elif (
+        action == "hold"
+        and bool(history)
+        and pending_records <= queue_low
+        and current_cpu > cpu_min
+        and pressure_ratio is not None
+        and pressure_ratio >= low_watermark
+    ):
+        action = "scale_down"
+        reason = "queue_low"
+        next_cpu = max(cpu_min, current_cpu - cpu_step_down)
     next_batch = _clamp_int(next_cpu * batch_per_worker, minimum=batch_min, maximum=batch_max, fallback=current_batch)
     next_items = _clamp_int(next_cpu * items_per_worker, minimum=items_min, maximum=items_max, fallback=current_items)
 
@@ -240,9 +293,16 @@ def _apply_adaptive_idle_parallelism(
     return {
         "enabled": True,
         "action": action,
+        "reason": reason,
         "pressure_ratio": pressure_ratio,
         "cpu_utilization": cpu_util,
         "ram_utilization": ram_util,
+        "pending_records": int(pending_records),
+        "loop_latency_p95_ms": int(loop_latency_p95_ms),
+        "queue_low_watermark": int(queue_low),
+        "queue_high_watermark": int(queue_high),
+        "latency_p95_target_ms": int(latency_target_ms),
+        "latency_p95_hard_cap_ms": int(latency_hard_ms),
         "cpu_limit": cpu_limit,
         "ram_limit": ram_limit,
         "max_concurrency_cpu": int(idle_cfg.get("max_concurrency_cpu", current_cpu)),
@@ -298,10 +358,13 @@ def _estimate_sla_snapshot(config: dict[str, Any], *, steps: list[dict[str, Any]
     completed_records = 0
     consumed_ms = 0
     pending_records = 0
+    latencies_ms: list[int] = []
     for row in steps:
         if not isinstance(row, dict):
             continue
         consumed_ms += int(row.get("consumed_ms", 0) or 0)
+        if int(row.get("consumed_ms", 0) or 0) > 0:
+            latencies_ms.append(int(row.get("consumed_ms", 0) or 0))
         idle_stats = row.get("idle_stats") if isinstance(row.get("idle_stats"), dict) else {}
         completed_records += int(idle_stats.get("records_completed", 0) or 0)
         pending_records = int(idle_stats.get("pending_records", pending_records) or pending_records)
@@ -323,15 +386,39 @@ def _estimate_sla_snapshot(config: dict[str, Any], *, steps: list[dict[str, Any]
             or projected_lag_hours > float(retention_horizon_hours) * float(warn_ratio)
         )
     )
+    latency_p95_ms = 0
+    if latencies_ms:
+        ordered = sorted(latencies_ms)
+        idx = max(0, int(math.ceil(0.95 * float(len(ordered)))) - 1)
+        latency_p95_ms = int(ordered[min(idx, len(ordered) - 1)])
     return {
         "enabled": enabled,
         "pending_records": int(pending_records),
         "completed_records": int(completed_records),
         "throughput_records_per_s": throughput_records_per_s,
         "projected_lag_hours": projected_lag_hours,
+        "loop_latency_p95_ms": int(latency_p95_ms),
         "retention_horizon_hours": float(retention_horizon_hours),
         "retention_risk": retention_risk,
     }
+
+
+def _derive_slo_alerts(
+    *,
+    sla: dict[str, Any] | None,
+    metadata_db_guard: dict[str, Any] | None,
+) -> list[str]:
+    alerts: list[str] = []
+    row = sla if isinstance(sla, dict) else {}
+    pending_records = int(row.get("pending_records", 0) or 0)
+    throughput = float(row.get("throughput_records_per_s", 0.0) or 0.0)
+    if bool(row.get("retention_risk", False)):
+        alerts.append("retention_risk")
+    if pending_records > 0 and throughput <= 0.0:
+        alerts.append("throughput_zero_with_backlog")
+    if isinstance(metadata_db_guard, dict) and not bool(metadata_db_guard.get("ok", True)):
+        alerts.append("metadata_db_unstable")
+    return alerts
 
 
 def _apply_retention_sla_pressure(config: dict[str, Any], *, previous_sla: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -430,7 +517,7 @@ def run_processing_batch(
             break
         signals = conductor._signals()  # pylint: disable=protected-access
         sla_pressure = _apply_retention_sla_pressure(config, previous_sla=previous_sla)
-        adaptive_idle = _apply_adaptive_idle_parallelism(config, signals=signals)
+        adaptive_idle = _apply_adaptive_idle_parallelism(config, signals=signals, recent_steps=loop_stats)
         decision = governor.decide(signals)
         if require_idle and decision.mode != "IDLE_DRAIN":
             blocked_reason = decision.reason or decision.mode
@@ -499,6 +586,7 @@ def run_processing_batch(
             time.sleep(max(0.01, min(5.0, float(sleep_ms) / 1000.0)))
 
     sla_snapshot = _estimate_sla_snapshot(config, steps=loop_stats)
+    slo_alerts = _derive_slo_alerts(sla=sla_snapshot, metadata_db_guard=metadata_db_guard)
     manifest = _build_landscape_manifest(
         config,
         stats=loop_stats,
@@ -537,6 +625,7 @@ def run_processing_batch(
         "done": bool(done),
         "blocked_reason": blocked_reason,
         "metadata_db_guard": metadata_db_guard,
+        "slo_alerts": list(slo_alerts),
         "loops": len(loop_stats),
         "sla": sla_snapshot,
         "manifest": manifest,

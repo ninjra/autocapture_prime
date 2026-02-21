@@ -568,6 +568,11 @@ class IdleProcessor:
         if self._metadata is None:
             return
         try:
+            self._ensure_stage1_uia_docs(record_id, record, stats=stats)
+        except Exception:
+            # Fail-open: stage1 marker pass will quarantine until docs are valid.
+            pass
+        try:
             result = mark_stage1_and_retention(
                 self._metadata,
                 record_id,
@@ -584,10 +589,6 @@ class IdleProcessor:
                     stats.stage1_retention_marked_records += 1
         except Exception:
             pass
-        try:
-            self._ensure_stage1_uia_docs(record_id, record, stats=stats)
-        except Exception:
-            return
 
     def _ensure_stage1_uia_docs(self, record_id: str, record: dict[str, Any], *, stats: IdleProcessStats) -> None:
         if self._metadata is None:

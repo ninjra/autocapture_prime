@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import copy
 import hashlib
 import json
 import os
@@ -34,11 +35,14 @@ from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.kernel.providers import capability_providers
 from autocapture_nx.kernel.schema_registry import SchemaRegistry
 from autocapture_nx.kernel.telemetry import record_telemetry
+from autocapture_nx.kernel.sqlite_reads import open_sqlite_reader
 from autocapture_nx.storage.facts_ndjson import append_fact_line
 from autocapture_nx.state_layer.policy_gate import StatePolicyGate, normalize_state_policy_decision
 from autocapture_nx.state_layer.evidence_compiler import EvidenceCompiler
 from autocapture_nx.kernel.activity_signal import load_activity_signal
 from autocapture_nx.inference.openai_compat import OpenAICompatClient, image_bytes_to_data_url
+
+_QUERY_FAST_CACHE: dict[str, dict[str, Any]] = {}
 
 
 def _parse_ts(ts: str | None) -> datetime | None:
@@ -72,6 +76,73 @@ def _ts_value(ts: str | None) -> float:
     if parsed is None:
         return 0.0
     return float(parsed.timestamp())
+
+
+def _query_fast_cache_settings(system: Any) -> tuple[bool, float, int]:
+    config = getattr(system, "config", {}) if hasattr(system, "config") else {}
+    query_cfg = config.get("query", {}) if isinstance(config, dict) else {}
+    cache_cfg = query_cfg.get("fast_cache", {}) if isinstance(query_cfg, dict) else {}
+    if not isinstance(cache_cfg, dict):
+        cache_cfg = {}
+    enabled = bool(cache_cfg.get("enabled", False))
+    try:
+        ttl_s = float(cache_cfg.get("ttl_s", 2.0) or 2.0)
+    except Exception:
+        ttl_s = 2.0
+    try:
+        max_entries = int(cache_cfg.get("max_entries", 128) or 128)
+    except Exception:
+        max_entries = 128
+    return enabled, max(0.0, ttl_s), max(1, max_entries)
+
+
+def _query_fast_cache_key(system: Any, *, query_text: str, time_window: dict[str, Any] | None) -> str:
+    config = getattr(system, "config", {}) if hasattr(system, "config") else {}
+    run_id = ""
+    if isinstance(config, dict):
+        run_id = str(config.get("runtime", {}).get("run_id") or "")
+    payload = {
+        "run_id": run_id,
+        "query_text": str(query_text or ""),
+        "time_window": time_window if isinstance(time_window, dict) else {},
+    }
+    return sha256_canonical(payload)
+
+
+def _query_fast_cache_get(cache_key: str, *, ttl_s: float) -> dict[str, Any] | None:
+    entry = _QUERY_FAST_CACHE.get(str(cache_key))
+    if not isinstance(entry, dict):
+        return None
+    try:
+        ts = float(entry.get("ts_monotonic", 0.0) or 0.0)
+    except Exception:
+        ts = 0.0
+    if ttl_s > 0.0 and (time.monotonic() - ts) > ttl_s:
+        _QUERY_FAST_CACHE.pop(str(cache_key), None)
+        return None
+    payload = entry.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    return copy.deepcopy(payload)
+
+
+def _query_fast_cache_put(cache_key: str, payload: dict[str, Any], *, max_entries: int) -> None:
+    _QUERY_FAST_CACHE[str(cache_key)] = {
+        "ts_monotonic": float(time.monotonic()),
+        "payload": copy.deepcopy(payload),
+    }
+    if len(_QUERY_FAST_CACHE) <= max(1, int(max_entries)):
+        return
+    ordered = sorted(
+        (
+            (str(key), float((value if isinstance(value, dict) else {}).get("ts_monotonic", 0.0) or 0.0))
+            for key, value in _QUERY_FAST_CACHE.items()
+        ),
+        key=lambda row: (row[1], row[0]),
+    )
+    while len(_QUERY_FAST_CACHE) > max(1, int(max_entries)) and ordered:
+        oldest_key, _ts = ordered.pop(0)
+        _QUERY_FAST_CACHE.pop(oldest_key, None)
 
 
 def _evidence_candidates(metadata: Any, time_window: dict[str, Any] | None, limit: int) -> list[str]:
@@ -145,7 +216,7 @@ def _evidence_candidates(metadata: Any, time_window: dict[str, Any] | None, limi
         db_path = None
     if isinstance(db_path, str) and db_path:
         try:
-            con = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)
+            con, _read_info = open_sqlite_reader(db_path, prefer_snapshot=True, force_snapshot=False)
             try:
                 cur = con.execute(
                     "SELECT id, ts_utc FROM metadata WHERE record_type LIKE 'evidence.capture.%' ORDER BY ts_utc DESC, id DESC LIMIT ?",
@@ -1135,6 +1206,16 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
 
     intent = parser.parse(query_text)
     time_window = intent.get("time_window")
+    cache_enabled, cache_ttl_s, cache_max_entries = _query_fast_cache_settings(system)
+    cache_key = _query_fast_cache_key(system, query_text=str(query_text), time_window=time_window)
+    if cache_enabled and not bool(schedule_extract):
+        cached = _query_fast_cache_get(cache_key, ttl_s=cache_ttl_s)
+        if isinstance(cached, dict):
+            processing = cached.get("processing", {}) if isinstance(cached.get("processing"), dict) else {}
+            processing = dict(processing)
+            processing["query_cache"] = {"hit": True, "ttl_s": float(cache_ttl_s)}
+            cached["processing"] = processing
+            return cached
     metadata = system.get("storage.metadata")
     stale_map: dict[str, str] = {}
     try:
@@ -1748,7 +1829,7 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
             "error": str(promptops_error or ""),
         }
 
-    return {
+    output = {
         "provenance": {
             "schema_version": 1,
             "run_id": run_id,
@@ -1777,6 +1858,13 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
         },
         "scheduled_extract_job_id": scheduled_job_id,
     }
+    if cache_enabled and not bool(schedule_extract):
+        processing_out = output.get("processing", {}) if isinstance(output.get("processing"), dict) else {}
+        processing_out = dict(processing_out)
+        processing_out["query_cache"] = {"hit": False, "ttl_s": float(cache_ttl_s)}
+        output["processing"] = processing_out
+        _query_fast_cache_put(cache_key, output, max_entries=cache_max_entries)
+    return output
 
 
 def _source_run_id(results: list[dict[str, Any]], candidate_ids: list[str]) -> str:
