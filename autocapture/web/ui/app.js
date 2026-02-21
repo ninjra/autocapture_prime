@@ -537,6 +537,7 @@ const SETTINGS_GROUPS = [
     summary: [
       "runtime.idle_window_s",
       "runtime.mode_enforcement.suspend_workers",
+      "runtime.mode_enforcement.allow_query_heavy",
       "runtime.telemetry.enabled",
       "performance.startup_ms",
     ],

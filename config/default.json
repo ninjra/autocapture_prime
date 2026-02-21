@@ -1650,6 +1650,7 @@
   "mode_enforcement": {
     "idle_resume_budget_ms": 3000,
     "suspend_deadline_ms": 500,
+    "allow_query_heavy": true,
     "fixture_override": false,
     "fixture_override_reason": "",
     "suspend_workers": true

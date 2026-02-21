@@ -260,6 +260,7 @@ PLUGIN_OPTION_PATHS: dict[str, list[str]] = {
         "runtime.idle_window_s",
         "runtime.mode_enforcement.suspend_workers",
         "runtime.mode_enforcement.suspend_deadline_ms",
+        "runtime.mode_enforcement.allow_query_heavy",
         "runtime.budgets.window_s",
         "runtime.budgets.window_budget_ms",
         "runtime.budgets.per_job_max_ms",

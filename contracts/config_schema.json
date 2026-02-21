@@ -3125,6 +3125,9 @@
         "mode_enforcement": {
           "additionalProperties": false,
           "properties": {
+            "allow_query_heavy": {
+              "type": "boolean"
+            },
             "fixture_override": {
               "type": "boolean"
             },
