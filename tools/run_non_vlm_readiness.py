@@ -6,9 +6,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -175,6 +178,113 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _http_preflight(url: str, *, timeout_s: float) -> dict[str, Any]:
+    target = str(url or "").strip()
+    if not target:
+        return {"ok": False, "url": target, "status": 0, "error": "missing_url"}
+    try:
+        req = urllib.request.Request(target, method="GET")
+        with urllib.request.urlopen(req, timeout=max(0.2, float(timeout_s))) as resp:  # noqa: S310 - localhost only
+            code = int(getattr(resp, "status", 200) or 200)
+            body_raw = resp.read(512)
+            body = body_raw.decode("utf-8", errors="replace").strip()
+        return {"ok": 200 <= code < 300, "url": target, "status": code, "body": body}
+    except urllib.error.HTTPError as exc:
+        return {"ok": False, "url": target, "status": int(exc.code), "error": f"http_error:{exc.reason}"}
+    except Exception as exc:
+        return {"ok": False, "url": target, "status": 0, "error": f"{type(exc).__name__}:{exc}"}
+
+
+def _metadata_db_preflight(path: Path) -> dict[str, Any]:
+    target = Path(path)
+    if not target.exists():
+        return {"ok": False, "path": str(target), "error": "missing"}
+    try:
+        conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True, timeout=1.0)
+        cur = conn.cursor()
+        count = int(cur.execute("select count(*) from metadata").fetchone()[0])
+        conn.close()
+        return {"ok": True, "path": str(target), "record_count": count}
+    except Exception as exc:
+        return {"ok": False, "path": str(target), "error": f"{type(exc).__name__}:{exc}"}
+
+
+def _run_preflight(
+    *,
+    db_path: Path,
+    sidecar_url: str,
+    vlm_url: str,
+    timeout_s: float,
+) -> dict[str, Any]:
+    sidecar = _http_preflight(sidecar_url, timeout_s=timeout_s)
+    vlm = _http_preflight(vlm_url, timeout_s=timeout_s)
+    metadata = _metadata_db_preflight(db_path)
+    ok = bool(sidecar.get("ok", False) and vlm.get("ok", False) and metadata.get("ok", False))
+    return {"ok": ok, "sidecar_7411": sidecar, "vlm_8000": vlm, "metadata_db": metadata}
+
+
+def _load_json_object(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _build_query_eval_env(*, base_env: dict[str, str], run_dir: Path, dataroot: Path) -> dict[str, str]:
+    env = dict(base_env)
+    query_data_dir = run_dir / "query_eval_data"
+    query_data_dir.mkdir(parents=True, exist_ok=True)
+    query_cfg_dir = run_dir / "query_eval_config"
+    query_cfg_dir.mkdir(parents=True, exist_ok=True)
+
+    base_cfg_dir = Path(str(base_env.get("AUTOCAPTURE_CONFIG_DIR") or "")).expanduser()
+    base_user = _load_json_object(base_cfg_dir / "user.json") if str(base_cfg_dir).strip() else {}
+    user_cfg = dict(base_user)
+    storage_cfg = user_cfg.get("storage")
+    if not isinstance(storage_cfg, dict):
+        storage_cfg = {}
+    storage_cfg["data_dir"] = str(query_data_dir)
+    storage_cfg["metadata_path"] = str(dataroot / "metadata.db")
+    if not str(storage_cfg.get("lexical_path") or "").strip():
+        storage_cfg["lexical_path"] = str(dataroot / "lexical.db")
+    if not str(storage_cfg.get("vector_path") or "").strip():
+        storage_cfg["vector_path"] = str(dataroot / "vector.db")
+    if not str(storage_cfg.get("media_dir") or "").strip():
+        storage_cfg["media_dir"] = str(dataroot / "media")
+    user_cfg["storage"] = storage_cfg
+    plugins_cfg = user_cfg.get("plugins")
+    if not isinstance(plugins_cfg, dict):
+        plugins_cfg = {}
+    locks_cfg = plugins_cfg.get("locks")
+    if not isinstance(locks_cfg, dict):
+        locks_cfg = {}
+    # Readiness-only query harness: avoid lockfile drift from blocking metadata checks.
+    locks_cfg["enforce"] = False
+    plugins_cfg["locks"] = locks_cfg
+    user_cfg["plugins"] = plugins_cfg
+    (query_cfg_dir / "user.json").write_text(json.dumps(user_cfg, indent=2, sort_keys=True), encoding="utf-8")
+
+    env["AUTOCAPTURE_CONFIG_DIR"] = str(query_cfg_dir)
+    env["AUTOCAPTURE_DATA_DIR"] = str(query_data_dir)
+    env["AUTOCAPTURE_QUERY_METADATA_ONLY"] = "1"
+    env["AUTOCAPTURE_PROMPTOPS_REVIEW_ON_QUERY"] = "0"
+    env["AUTOCAPTURE_SKIP_VLM_UNSTABLE"] = "1"
+    return env
+
+
+def _is_retryable_query_step_error(step: dict[str, Any]) -> bool:
+    text = "\n".join(
+        [
+            str(step.get("stdout_tail") or ""),
+            str(step.get("stderr_tail") or ""),
+            json.dumps(step.get("stdout_json"), sort_keys=True),
+        ]
+    )
+    markers = ("instance_lock_held", "missing_capability:storage.metadata")
+    return any(marker in text for marker in markers) or _is_transient_db_error(step)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run non-VLM readiness checks for Stage1 + metadata-only query path.")
     parser.add_argument("--dataroot", default="/mnt/d/autocapture")
@@ -185,10 +295,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-pytest", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--run-gates", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--run-query-eval", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--run-synthetic-gauntlet", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--require-query-pass", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--revalidate-markers", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--strict-all-frames", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--timeout-s", type=int, default=1200)
+    parser.add_argument("--require-preflight", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--preflight-timeout-s", type=float, default=2.5)
+    parser.add_argument("--preflight-sidecar-url", default="http://127.0.0.1:7411/health")
+    parser.add_argument("--preflight-vlm-url", default="http://127.0.0.1:8000/health")
     args = parser.parse_args(argv)
 
     root = _repo_root()
@@ -201,9 +316,11 @@ def main(argv: list[str] | None = None) -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
 
     lineage_json = run_dir / "lineage.json"
+    stage1_audit_json = run_dir / "stage1_completeness_audit.json"
     health_json = run_dir / "processing_health.json"
     bench_json = run_dir / "batch_knob_bench.json"
     query_eval_json = run_dir / "query_eval_generic20.json"
+    synthetic_gauntlet_json = run_dir / "synthetic_gauntlet_80.json"
 
     base_env = os.environ.copy()
     base_env["PYTHONPATH"] = str(root)
@@ -213,10 +330,7 @@ def main(argv: list[str] | None = None) -> int:
     elif (dataroot / "config").exists():
         base_env["AUTOCAPTURE_CONFIG_DIR"] = str(dataroot / "config")
 
-    query_eval_env = dict(base_env)
-    query_eval_env["AUTOCAPTURE_QUERY_METADATA_ONLY"] = "1"
-    query_eval_env["AUTOCAPTURE_PROMPTOPS_REVIEW_ON_QUERY"] = "0"
-    query_eval_env["AUTOCAPTURE_SKIP_VLM_UNSTABLE"] = "1"
+    query_eval_env = _build_query_eval_env(base_env=base_env, run_dir=run_dir, dataroot=dataroot)
 
     steps: list[dict[str, Any]] = []
 
@@ -232,6 +346,26 @@ def main(argv: list[str] | None = None) -> int:
         out_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         print(json.dumps(payload, sort_keys=True))
         return 2
+
+    preflight = _run_preflight(
+        db_path=db_path,
+        sidecar_url=str(args.preflight_sidecar_url),
+        vlm_url=str(args.preflight_vlm_url),
+        timeout_s=float(args.preflight_timeout_s),
+    )
+    if bool(args.require_preflight) and not bool(preflight.get("ok", False)):
+        payload = {
+            "ok": False,
+            "error": "preflight_failed",
+            "db": str(db_path),
+            "dataroot": str(dataroot),
+            "preflight": preflight,
+        }
+        out_path = root / str(args.output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        print(json.dumps(payload, sort_keys=True))
+        return 3
 
     if bool(args.revalidate_markers):
         steps.append(
@@ -339,6 +473,30 @@ def main(argv: list[str] | None = None) -> int:
             retry_delay_s=2,
         )
     )
+    steps.append(
+        _run_step_with_retry(
+            step_id="stage1_completeness_audit",
+            cmd=[
+                py,
+                "tools/soak/stage1_completeness_audit.py",
+                "--db",
+                str(db_path),
+                "--derived-db",
+                str(derived_db_path),
+                "--gap-seconds",
+                "120",
+                "--samples",
+                "20",
+                "--output",
+                str(stage1_audit_json),
+            ],
+            cwd=root,
+            env=base_env,
+            timeout_s=int(args.timeout_s),
+            retries=2,
+            retry_delay_s=2,
+        )
+    )
 
     steps.append(
         _run_step(
@@ -371,7 +529,10 @@ def main(argv: list[str] | None = None) -> int:
                     "tests/test_validate_stage1_lineage_tool.py",
                     "tests/test_stage1_marker_revalidation_migration.py",
                     "tests/test_processing_health_snapshot_tool.py",
+                    "tests/test_stage1_completeness_audit_tool.py",
                     "tests/test_query_arbitration.py",
+                    "tests/test_query_eval_suite_exact.py",
+                    "tests/test_run_synthetic_gauntlet_tool.py",
                     "tests/test_schedule_extract_from_query.py",
                     "tests/test_runtime_batch_adaptive_parallelism.py",
                     "tests/test_stage1_no_vlm_profile.py",
@@ -399,13 +560,25 @@ def main(argv: list[str] | None = None) -> int:
             )
 
     if bool(args.run_query_eval):
-        eval_step = _run_step(
+        eval_step = _run_step_with_retry(
             step_id="query_eval_suite_generic20_metadata_only",
             cmd=[py, "tools/query_eval_suite.py", "--cases", str(args.cases), "--safe-mode"],
             cwd=root,
             env=query_eval_env,
             timeout_s=int(args.timeout_s),
+            retries=2,
+            retry_delay_s=2,
         )
+        if not bool(eval_step.get("ok", False)) and _is_retryable_query_step_error(eval_step):
+            eval_step = _run_step_with_retry(
+                step_id="query_eval_suite_generic20_metadata_only",
+                cmd=[py, "tools/query_eval_suite.py", "--cases", str(args.cases), "--safe-mode"],
+                cwd=root,
+                env=query_eval_env,
+                timeout_s=int(args.timeout_s),
+                retries=3,
+                retry_delay_s=3,
+            )
         try:
             summary = eval_step.get("stdout_json")
             if isinstance(summary, dict):
@@ -415,12 +588,60 @@ def main(argv: list[str] | None = None) -> int:
             pass
         steps.append(eval_step)
 
+    if bool(args.run_synthetic_gauntlet):
+        gauntlet_step = _run_step_with_retry(
+            step_id="synthetic_gauntlet_80_metadata_only",
+            cmd=[
+                py,
+                "tools/run_synthetic_gauntlet.py",
+                "--metadata-only",
+                "--safe-mode",
+                "--output",
+                str(synthetic_gauntlet_json),
+            ],
+            cwd=root,
+            env=query_eval_env,
+            timeout_s=int(args.timeout_s),
+            retries=2,
+            retry_delay_s=2,
+        )
+        if not bool(gauntlet_step.get("ok", False)) and _is_retryable_query_step_error(gauntlet_step):
+            gauntlet_step = _run_step_with_retry(
+                step_id="synthetic_gauntlet_80_metadata_only",
+                cmd=[
+                    py,
+                    "tools/run_synthetic_gauntlet.py",
+                    "--metadata-only",
+                    "--safe-mode",
+                    "--output",
+                    str(synthetic_gauntlet_json),
+                ],
+                cwd=root,
+                env=query_eval_env,
+                timeout_s=int(args.timeout_s),
+                retries=3,
+                retry_delay_s=3,
+            )
+        try:
+            summary = gauntlet_step.get("stdout_json")
+            if isinstance(summary, dict):
+                metrics = summary.get("summary", {}) if isinstance(summary.get("summary"), dict) else {}
+                gauntlet_step["strict_evaluated"] = int(metrics.get("strict_evaluated", 0) or 0)
+                gauntlet_step["strict_failed"] = int(metrics.get("strict_failed", 0) or 0)
+                gauntlet_step["output"] = str(synthetic_gauntlet_json)
+        except Exception:
+            pass
+        steps.append(gauntlet_step)
+
     required_failures: list[str] = []
     optional_failures: list[str] = []
     optional_skipped: list[str] = []
     for step in steps:
         step_id = str(step.get("id") or "")
-        is_optional = step_id == "query_eval_suite_generic20_metadata_only" and not bool(args.require_query_pass)
+        is_optional = step_id in {
+            "query_eval_suite_generic20_metadata_only",
+            "synthetic_gauntlet_80_metadata_only",
+        } and not bool(args.require_query_pass)
         if not bool(step.get("ok", False)):
             if is_optional and _is_dpapi_windows_failure(step):
                 step["skipped"] = True
@@ -436,6 +657,10 @@ def main(argv: list[str] | None = None) -> int:
             row = step.get("stdout_json")
             if isinstance(row, dict) and not bool(row.get("ok", False)):
                 required_failures.append(step_id)
+        if step_id == "synthetic_gauntlet_80_metadata_only" and bool(args.require_query_pass):
+            row = step.get("stdout_json")
+            if isinstance(row, dict) and not bool(row.get("ok", False)):
+                required_failures.append(step_id)
 
     payload = {
         "schema_version": 1,
@@ -447,15 +672,18 @@ def main(argv: list[str] | None = None) -> int:
         "python": str(py),
         "strict_all_frames": bool(args.strict_all_frames),
         "require_query_pass": bool(args.require_query_pass),
+        "preflight": preflight,
         "steps": steps,
         "failed_steps": required_failures,
         "optional_failed_steps": optional_failures,
         "optional_skipped_steps": optional_skipped,
         "artifacts": {
             "lineage": str(lineage_json),
+            "stage1_completeness_audit": str(stage1_audit_json),
             "processing_health": str(health_json),
             "batch_knob_bench": str(bench_json),
             "query_eval": str(query_eval_json),
+            "synthetic_gauntlet": str(synthetic_gauntlet_json),
         },
     }
     out_path = root / str(args.output)

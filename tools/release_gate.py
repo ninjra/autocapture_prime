@@ -72,6 +72,15 @@ def _default_manifest(py: str) -> list[GateStep]:
         ),
         GateStep("run_mod021_low_resource", ["bash", "tools/run_mod021_low_resource.sh"], None),
     ]
+    q40_report = os.environ.get("Q40_STRICT_REPORT", "").strip()
+    if q40_report:
+        steps.append(
+            GateStep(
+                "gate_q40_strict",
+                [py, "tools/gate_q40_strict.py", "--report", q40_report],
+                "artifacts/q40/gate_q40_strict.json",
+            )
+        )
     return steps
 
 

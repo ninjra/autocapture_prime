@@ -81,6 +81,26 @@ class QueryEvalSuiteExactTests(unittest.TestCase):
         self.assertFalse(out.passed)
         self.assertIn("citations_ok=False", out.detail)
 
+    def test_run_case_accepts_question_field_as_query_fallback(self) -> None:
+        mod = _load_module()
+        case = {
+            "id": "fallback",
+            "question": "what app is focused",
+            "require_citations": False,
+        }
+        result = {
+            "answer": {
+                "claims": [{"text": "Focused app: terminal", "citations": []}],
+                "state": "ok",
+                "errors": [],
+            }
+        }
+        with mock.patch.object(mod, "run_query", return_value=result):
+            out = mod._run_case(object(), case)
+        self.assertEqual(out.query, "what app is focused")
+        self.assertTrue(out.passed)
+        self.assertGreaterEqual(float(out.latency_ms), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

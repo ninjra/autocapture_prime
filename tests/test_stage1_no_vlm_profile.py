@@ -25,3 +25,10 @@ def test_stage1_no_vlm_profile_contract() -> None:
     assert bool(on_query.get("extractors", {}).get("ocr", True)) is False
     assert bool(on_query.get("extractors", {}).get("vlm", True)) is False
     assert bool(on_query.get("require_idle", False)) is True
+    arbitration = profile.get("processing", {}).get("state_layer", {}).get("arbitration", {})
+    assert bool(arbitration.get("skip_secondary_when_read_only", False)) is True
+
+    fast_cache = profile.get("query", {}).get("fast_cache", {})
+    assert bool(fast_cache.get("enabled", False)) is True
+    assert float(fast_cache.get("ttl_s", 0.0) or 0.0) >= 1.0
+    assert int(fast_cache.get("max_entries", 0) or 0) >= 128

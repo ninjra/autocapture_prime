@@ -327,22 +327,30 @@ def _metadata_keys(metadata: Any) -> list[str]:
 
 def _collect_uia_docs(metadata: Any, *, run_id: str) -> dict[str, Any]:
     prefix = f"{run_id}/derived.sst.text/extra/"
-    doc_ids: list[str] = []
-    counts: dict[str, int] = {"obs.uia.focus": 0, "obs.uia.context": 0, "obs.uia.operable": 0}
+    counts_template: dict[str, int] = {"obs.uia.focus": 0, "obs.uia.context": 0, "obs.uia.operable": 0}
+    all_docs: list[tuple[str, str]] = []
+    scoped_docs: list[tuple[str, str]] = []
     for record_id in _metadata_keys(metadata):
-        if not str(record_id).startswith(prefix):
-            continue
+        rid = str(record_id)
         try:
-            payload = _safe_call(metadata, "get", str(record_id), None)
+            payload = _safe_call(metadata, "get", rid, None)
         except Exception:
             continue
         if not isinstance(payload, dict):
             continue
         kind = str(payload.get("doc_kind") or "").strip()
-        if kind not in counts:
+        if kind not in counts_template:
             continue
+        item = (rid, kind)
+        all_docs.append(item)
+        if rid.startswith(prefix):
+            scoped_docs.append(item)
+    selected = scoped_docs if scoped_docs else all_docs
+    counts = dict(counts_template)
+    doc_ids: list[str] = []
+    for rid, kind in selected:
         counts[kind] = int(counts.get(kind, 0)) + 1
-        doc_ids.append(str(record_id))
+        doc_ids.append(rid)
     return {
         "count_by_kind": counts,
         "doc_ids": sorted(doc_ids),

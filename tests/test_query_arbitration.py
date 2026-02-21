@@ -113,6 +113,21 @@ class QueryArbitrationTests(unittest.TestCase):
         self.assertEqual(str(arb.get("secondary_reason") or ""), "metadata_only_skip_secondary")
         self.assertLessEqual(int(run_classic.call_count), 1)
 
+    def test_read_only_skip_secondary_when_arbitration_flag_enabled(self) -> None:
+        system = _System()
+        system.config["processing"]["state_layer"]["arbitration"] = {"skip_secondary_when_read_only": True}
+        weak_state = _result("", state="no_evidence", coverage=0.0)
+        with (
+            mock.patch.object(query_mod, "run_state_query", return_value=weak_state),
+            mock.patch.object(query_mod, "run_query_without_state") as run_classic,
+            mock.patch.object(query_mod, "_append_query_metric"),
+        ):
+            out = query_mod.run_query(system, "summarize current work session", schedule_extract=False)
+        arb = out.get("processing", {}).get("arbitration", {})
+        self.assertFalse(bool(arb.get("secondary_executed", True)))
+        self.assertEqual(str(arb.get("secondary_reason") or ""), "read_only_skip_secondary")
+        self.assertLessEqual(int(run_classic.call_count), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

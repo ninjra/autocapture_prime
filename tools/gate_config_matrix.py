@@ -13,6 +13,55 @@ from autocapture_nx.kernel.loader import default_config_paths
 from autocapture_nx.inference.vllm_endpoint import EXTERNAL_VLLM_EXPECTED_MODEL
 
 
+CAPTURE_DEPRECATED_PLUGIN_IDS = (
+    "builtin.capture.audio.windows",
+    "builtin.capture.screenshot.windows",
+    "builtin.capture.basic",
+    "builtin.capture.windows",
+)
+
+# Plugins that require localhost :8000 service and must remain off in non-8000
+# default operation.
+REQUIRES_8000_PLUGIN_IDS = (
+    "builtin.processing.sst.ui_vlm",
+    "builtin.vlm.vllm_localhost",
+    "builtin.embedder.vllm_localhost",
+    "builtin.answer.synth_vllm_localhost",
+)
+
+# Processing/query contributors that should be enabled by default without any
+# dependency on localhost :8000.
+NON8000_DEFAULT_REQUIRED_PLUGIN_IDS = (
+    "builtin.processing.sst.pipeline",
+    "builtin.processing.sst.uia_context",
+    "builtin.runtime.governor",
+    "builtin.runtime.scheduler",
+    "builtin.sst.preprocess.normalize",
+    "builtin.sst.preprocess.tile",
+    "builtin.sst.ocr.onnx",
+    "builtin.sst.ui.parse",
+    "builtin.sst.layout.assemble",
+    "builtin.sst.extract.table",
+    "builtin.sst.extract.spreadsheet",
+    "builtin.sst.extract.code",
+    "builtin.sst.extract.chart",
+    "builtin.sst.track.cursor",
+    "builtin.sst.build.state",
+    "builtin.sst.match.ids",
+    "builtin.sst.temporal.segment",
+    "builtin.sst.build.delta",
+    "builtin.sst.infer.action",
+    "builtin.sst.compliance.redact",
+    "builtin.sst.persist",
+    "builtin.sst.index",
+    "builtin.sst.qa.answers",
+    "builtin.state.vector.linear",
+    "builtin.state.workflow.miner",
+    "builtin.state.anomaly",
+    "builtin.state.jepa.training",
+)
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -89,6 +138,55 @@ def validate_config_matrix(default_cfg: dict[str, Any], safe_cfg: dict[str, Any]
     checks.append({"name": "research_plugin_disabled", "ok": not bool(enabled.get("builtin.research.default", True))})
 
     checks.append({"name": "safe_mode_forced_in_safe_cfg", "ok": bool(safe_plugins.get("safe_mode", False))})
+
+    enabled_set = {pid for pid, is_on in enabled.items() if bool(is_on)}
+    enabled_capture = sorted(pid for pid in CAPTURE_DEPRECATED_PLUGIN_IDS if pid in enabled_set)
+    checks.append(
+        {
+            "name": "capture_plugins_deprecated",
+            "ok": len(enabled_capture) == 0,
+            "value": enabled_capture,
+        }
+    )
+
+    missing_non8000 = sorted(pid for pid in NON8000_DEFAULT_REQUIRED_PLUGIN_IDS if pid not in enabled_set)
+    checks.append(
+        {
+            "name": "non8000_required_plugins_enabled",
+            "ok": len(missing_non8000) == 0,
+            "value": missing_non8000,
+        }
+    )
+
+    enabled_requires_8000 = sorted(pid for pid in REQUIRES_8000_PLUGIN_IDS if pid in enabled_set)
+    checks.append(
+        {
+            "name": "requires_8000_plugins_disabled",
+            "ok": len(enabled_requires_8000) == 0,
+            "value": enabled_requires_8000,
+        }
+    )
+
+    processing = default_cfg.get("processing", {}) if isinstance(default_cfg, dict) else {}
+    idle = processing.get("idle", {}) if isinstance(processing, dict) else {}
+    idle_extractors = idle.get("extractors", {}) if isinstance(idle, dict) else {}
+    checks.append(
+        {
+            "name": "idle_vlm_extractor_disabled_non8000",
+            "ok": not bool(idle_extractors.get("vlm", False)),
+            "value": bool(idle_extractors.get("vlm", False)),
+        }
+    )
+    sst = processing.get("sst", {}) if isinstance(processing, dict) else {}
+    ui_vlm = sst.get("ui_vlm", {}) if isinstance(sst, dict) else {}
+    checks.append(
+        {
+            "name": "sst_ui_vlm_disabled_non8000",
+            "ok": not bool(ui_vlm.get("enabled", False)),
+            "value": bool(ui_vlm.get("enabled", False)),
+        }
+    )
+
     return checks
 
 
@@ -100,12 +198,23 @@ def main() -> int:
     ok = all(bool(item.get("ok", False)) for item in checks)
     out = root / "artifacts" / "config" / "gate_config_matrix.json"
     out.parent.mkdir(parents=True, exist_ok=True)
+    plugins = default_cfg.get("plugins", {}) if isinstance(default_cfg, dict) else {}
+    enabled = plugins.get("enabled", {}) if isinstance(plugins, dict) else {}
+    enabled_set = {pid for pid, is_on in enabled.items() if bool(is_on)}
+    plugin_stack_non8000 = {
+        "capture_deprecated": sorted(CAPTURE_DEPRECATED_PLUGIN_IDS),
+        "requires_8000": sorted(REQUIRES_8000_PLUGIN_IDS),
+        "required_non8000_enabled": sorted(NON8000_DEFAULT_REQUIRED_PLUGIN_IDS),
+        "missing_required_non8000": sorted(pid for pid in NON8000_DEFAULT_REQUIRED_PLUGIN_IDS if pid not in enabled_set),
+        "enabled_requires_8000": sorted(pid for pid in REQUIRES_8000_PLUGIN_IDS if pid in enabled_set),
+    }
     out.write_text(
         json.dumps(
             {
                 "schema_version": 1,
                 "ok": bool(ok),
                 "checks": checks,
+                "plugin_stack_non8000": plugin_stack_non8000,
             },
             indent=2,
             sort_keys=True,

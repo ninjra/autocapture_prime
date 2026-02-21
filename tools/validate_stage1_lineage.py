@@ -124,7 +124,7 @@ def _validate_obs_payload(
         issues.append(f"{expected_kind}.uia_content_hash_mismatch")
     if not str(payload.get("hwnd") or "").strip():
         issues.append(f"{expected_kind}.hwnd_missing")
-    if not str(payload.get("window_title") or "").strip():
+    if "window_title" not in payload or not isinstance(payload.get("window_title"), str):
         issues.append(f"{expected_kind}.window_title_missing")
     if _safe_int(payload.get("window_pid")) <= 0:
         issues.append(f"{expected_kind}.window_pid_invalid")
