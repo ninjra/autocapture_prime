@@ -22,6 +22,22 @@ REQUIRED_PLUGIN_IDS = [
 ]
 
 
+def _is_non8000_mode(config: dict[str, Any]) -> bool:
+    plugins = config.get("plugins", {}) if isinstance(config, dict) else {}
+    enabled = plugins.get("enabled", {}) if isinstance(plugins, dict) else {}
+    processing = config.get("processing", {}) if isinstance(config, dict) else {}
+    idle = processing.get("idle", {}) if isinstance(processing, dict) else {}
+    idle_extractors = idle.get("extractors", {}) if isinstance(idle, dict) else {}
+    sst = processing.get("sst", {}) if isinstance(processing, dict) else {}
+    ui_vlm_cfg = sst.get("ui_vlm", {}) if isinstance(sst, dict) else {}
+    return (
+        not bool(enabled.get("builtin.vlm.vllm_localhost", False))
+        and not bool(enabled.get("builtin.processing.sst.ui_vlm", False))
+        and not bool(idle_extractors.get("vlm", False))
+        and not bool(ui_vlm_cfg.get("enabled", False))
+    )
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -37,6 +53,7 @@ def validate_promptops_policy(
     allowlist = plugins.get("allowlist", []) if isinstance(plugins, dict) else []
     enabled = plugins.get("enabled", {}) if isinstance(plugins, dict) else {}
     locks_map = lock_payload.get("plugins", {}) if isinstance(lock_payload, dict) else {}
+    non8000_mode = _is_non8000_mode(config)
     review = promptops.get("review", {}) if isinstance(promptops, dict) else {}
     optimizer = promptops.get("optimizer", {}) if isinstance(promptops, dict) else {}
     review_base = str(review.get("base_url") or "").strip()
@@ -122,12 +139,23 @@ def validate_promptops_policy(
                 "ok": plugin_id in allowlist,
             }
         )
-        checks.append(
-            {
-                "name": f"enabled_contains:{plugin_id}",
-                "ok": bool(enabled.get(plugin_id, False)),
-            }
-        )
+        if plugin_id == "builtin.processing.sst.ui_vlm":
+            expected_enabled = not non8000_mode
+            checks.append(
+                {
+                    "name": f"enabled_matches_mode:{plugin_id}",
+                    "ok": bool(enabled.get(plugin_id, False)) == bool(expected_enabled),
+                    "expected": bool(expected_enabled),
+                    "value": bool(enabled.get(plugin_id, False)),
+                }
+            )
+        else:
+            checks.append(
+                {
+                    "name": f"enabled_contains:{plugin_id}",
+                    "ok": bool(enabled.get(plugin_id, False)),
+                }
+            )
         checks.append(
             {
                 "name": f"lock_contains:{plugin_id}",

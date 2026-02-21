@@ -16,5 +16,7 @@ Source: `docs/autocapture_prime_4pillars_optimization.md`
 | CAP-001 | complete | `config/profiles/personal_4090.json`; `autocapture_nx/cli.py` (`setup`) | 4090-oriented profile + setup command implemented. |
 | AUD-001 | complete | `plugins/builtin/audio_windows/plugin.py`; `tests/test_audio_fingerprint.py` | Audio capture now emits deterministic `derived.audio.fingerprint` records with provenance and stable feature hashes. |
 | INP-001 | complete | `plugins/builtin/input_windows/plugin.py`; `plugins/builtin/cursor_windows/plugin.py`; `tests/test_input_batching.py`; `tests/test_cursor_timeline_plugin.py` | Canonical activity timeline records are persisted (input batch + cursor timeline). |
+| CFG-002 | complete | `config/default.json`; `tools/gate_config_matrix.py`; `tests/test_gate_config_matrix.py`; `docs/contracts/plugin-stack-non8000-contract.md` | Processing-only non-`8000` contract is enforced: capture plugins deprecated, `:8000` plugins default-off, non-`8000` processing/state plugins default-on. |
+| EVAL-003 | complete | `tools/gate_q40_strict.py`; `tests/test_gate_q40_strict.py`; `tools/release_gate.py` | Strict Q40 gate added (`evaluated=40`, `skipped=0`, `failed=0`) with optional release-gate integration via `Q40_STRICT_REPORT`. |
 
 Observation-graph gate: `builtin.observation.graph` is required in golden profiles and enforced fail-closed when required plugin gates run.

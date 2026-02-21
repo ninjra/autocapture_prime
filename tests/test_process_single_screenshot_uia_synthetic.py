@@ -103,6 +103,27 @@ class ProcessSingleScreenshotUIASyntheticTests(unittest.TestCase):
         self.assertEqual(summary["count_by_kind"]["obs.uia.operable"], 1)
         self.assertEqual(summary["total"], 3)
 
+    def test_collect_uia_docs_falls_back_when_prefix_differs(self) -> None:
+        mod = _load_module()
+        meta = _Meta()
+        meta.put(
+            "run_other/derived.sst.text/extra/a",
+            {"doc_kind": "obs.uia.focus"},
+        )
+        meta.put(
+            "run_other/derived.sst.text/extra/b",
+            {"doc_kind": "obs.uia.context"},
+        )
+        meta.put(
+            "run_other/derived.sst.text/extra/c",
+            {"doc_kind": "obs.uia.operable"},
+        )
+        summary = mod._collect_uia_docs(meta, run_id="run_c")
+        self.assertEqual(summary["count_by_kind"]["obs.uia.focus"], 1)
+        self.assertEqual(summary["count_by_kind"]["obs.uia.context"], 1)
+        self.assertEqual(summary["count_by_kind"]["obs.uia.operable"], 1)
+        self.assertEqual(summary["total"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()

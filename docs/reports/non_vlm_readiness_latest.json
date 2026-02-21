@@ -1,0 +1,703 @@
+{
+  "artifacts": {
+    "batch_knob_bench": "/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/batch_knob_bench.json",
+    "lineage": "/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/lineage.json",
+    "processing_health": "/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/processing_health.json",
+    "query_eval": "/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/query_eval_generic20.json",
+    "stage1_completeness_audit": "/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/stage1_completeness_audit.json",
+    "synthetic_gauntlet": "/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/synthetic_gauntlet_80.json"
+  },
+  "dataroot": "/mnt/d/autocapture",
+  "db": "/mnt/d/autocapture/metadata.db",
+  "derived_db": "/mnt/d/autocapture/derived/stage1_derived.db",
+  "failed_steps": [],
+  "ok": true,
+  "optional_failed_steps": [
+    "query_eval_suite_generic20_metadata_only",
+    "synthetic_gauntlet_80_metadata_only"
+  ],
+  "optional_skipped_steps": [],
+  "python": "/mnt/d/projects/autocapture_prime/.venv/bin/python",
+  "require_query_pass": false,
+  "schema_version": 1,
+  "steps": [
+    {
+      "attempt": 1,
+      "attempts_total": 4,
+      "cmd": [
+        "/mnt/d/projects/autocapture_prime/.venv/bin/python",
+        "tools/migrations/backfill_uia_obs_docs.py",
+        "--db",
+        "/mnt/d/autocapture/metadata.db",
+        "--derived-db",
+        "/mnt/d/autocapture/derived/stage1_derived.db",
+        "--dataroot",
+        "/mnt/d/autocapture",
+        "--wait-stable-seconds",
+        "2",
+        "--wait-timeout-seconds",
+        "120"
+      ],
+      "elapsed_ms": 7358,
+      "id": "backfill_uia_obs_docs",
+      "ok": true,
+      "retried": false,
+      "returncode": 0,
+      "stderr_tail": "",
+      "stdout_json": {
+        "db": "/mnt/d/autocapture/metadata.db",
+        "dry_run": false,
+        "inserted_docs": 0,
+        "invalid_payload_frames": 0,
+        "missing_frames": 0,
+        "ok": true,
+        "ok_frames": 1524,
+        "required_frames": 1524,
+        "scanned_frames": 1524,
+        "source_read": {
+          "mode": "direct_ro",
+          "snapshot_path": "",
+          "source_path": "/mnt/d/autocapture/metadata.db"
+        },
+        "source_table": "metadata",
+        "wait": {
+          "reason": "stable",
+          "samples": 9,
+          "signature": {
+            "inode": 3659174697393081,
+            "mtime_ns": 1771698420600632500,
+            "size": 18305024
+          },
+          "stable": true,
+          "waited_seconds": 2.023
+        },
+        "write_mode": "derived_db"
+      },
+      "stdout_tail": "{\"db\": \"/mnt/d/autocapture/metadata.db\", \"dry_run\": false, \"inserted_docs\": 0, \"invalid_payload_frames\": 0, \"missing_frames\": 0, \"ok\": true, \"ok_frames\": 1524, \"required_frames\": 1524, \"scanned_frames\": 1524, \"source_read\": {\"mode\": \"direct_ro\", \"snapshot_path\": \"\", \"source_path\": \"/mnt/d/autocapture/metadata.db\"}, \"source_table\": \"metadata\", \"wait\": {\"reason\": \"stable\", \"samples\": 9, \"signature\": {\"inode\": 3659174697393081, \"mtime_ns\": 1771698420600632500, \"size\": 18305024}, \"stable\": true, \"waited_seconds\": 2.023}, \"write_mode\": \"derived_db\"}\n"
+    },
+    {
+      "attempt": 1,
+      "attempts_total": 4,
+      "cmd": [
+        "/mnt/d/projects/autocapture_prime/.venv/bin/python",
+        "tools/migrations/revalidate_stage1_markers.py",
+        "--db",
+        "/mnt/d/autocapture/metadata.db",
+        "--derived-db",
+        "/mnt/d/autocapture/derived/stage1_derived.db"
+      ],
+      "elapsed_ms": 884,
+      "id": "revalidate_stage1_markers",
+      "ok": true,
+      "retried": false,
+      "returncode": 0,
+      "stderr_tail": "",
+      "stdout_json": {
+        "db": "/mnt/d/autocapture/derived/stage1_derived.db",
+        "dry_run": false,
+        "frame_markers": 1524,
+        "malformed_markers": 0,
+        "missing_source": 0,
+        "non_frame_skipped": 0,
+        "ok": true,
+        "quarantined": 0,
+        "scanned": 1524,
+        "seeded_retention": 0,
+        "seeded_stage1": 0,
+        "source_db": "/mnt/d/autocapture/metadata.db",
+        "updated": 0,
+        "validated_ready": 1524
+      },
+      "stdout_tail": "{\"db\": \"/mnt/d/autocapture/derived/stage1_derived.db\", \"dry_run\": false, \"frame_markers\": 1524, \"malformed_markers\": 0, \"missing_source\": 0, \"non_frame_skipped\": 0, \"ok\": true, \"quarantined\": 0, \"scanned\": 1524, \"seeded_retention\": 0, \"seeded_stage1\": 0, \"source_db\": \"/mnt/d/autocapture/metadata.db\", \"updated\": 0, \"validated_ready\": 1524}\n"
+    },
+    {
+      "attempt": 1,
+      "attempts_total": 3,
+      "cmd": [
+        "/mnt/d/projects/autocapture_prime/.venv/bin/python",
+        "tools/validate_stage1_lineage.py",
+        "--db",
+        "/mnt/d/autocapture/metadata.db",
+        "--derived-db",
+        "/mnt/d/autocapture/derived/stage1_derived.db",
+        "--strict",
+        "--output",
+        "/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/lineage.json",
+        "--strict-all-frames"
+      ],
+      "elapsed_ms": 7028,
+      "id": "validate_stage1_lineage",
+      "ok": true,
+      "retried": false,
+      "returncode": 0,
+      "stderr_tail": "",
+      "stdout_json": {
+        "db": "/mnt/d/autocapture/metadata.db",
+        "db_read": {
+          "mode": "direct_ro",
+          "snapshot_path": "",
+          "source_path": "/mnt/d/autocapture/metadata.db"
+        },
+        "derived_db": "/mnt/d/autocapture/derived/stage1_derived.db",
+        "fail_reasons": [],
+        "ok": true,
+        "output": "/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/lineage.json",
+        "samples": [
+          {
+            "frame_id": "run_20260221T161612Z_41864/evidence.capture.frame/1771690933023",
+            "issues": [],
+            "obs_ids": {
+              "obs.uia.context": "run_20260221T161612Z_41864/derived.sst.text/extra/rid_dWlhLXJ1bl8yMDI2MDIyMVQxNjE2MTJaXzQxODY0L2V2aWRlbmNlLnVpYS5zbmFwc2hvdC8xNzcxNjkwOTMzMTU4LWNvbnRleHQtMA",
+              "obs.uia.focus": "run_20260221T161612Z_41864/derived.sst.text/extra/rid_dWlhLXJ1bl8yMDI2MDIyMVQxNjE2MTJaXzQxODY0L2V2aWRlbmNlLnVpYS5zbmFwc2hvdC8xNzcxNjkwOTMzMTU4LWZvY3VzLTA",
+              "obs.uia.operable": "run_20260221T161612Z_41864/derived.sst.text/extra/rid_dWlhLXJ1bl8yMDI2MDIyMVQxNjE2MTJaXzQxODY0L2V2aWRlbmNlLnVpYS5zbmFwc2hvdC8xNzcxNjkwOTMzMTU4LW9wZXJhYmxlLTA"
+            },
+            "retention_id": "run_20260221T161612Z_41864/retention.eligible/rid_cnVuXzIwMjYwMjIxVDE2MTYxMlpfNDE4NjQvZXZpZGVuY2UuY2FwdHVyZS5mcmFtZS8xNzcxNjkwOTMzMDIz",
+            "stage1_id": "run_20260221T161612Z_41864/derived.ingest.stage1.complete/rid_cnVuXzIwMjYwMjIxVDE2MTYxMlpfNDE4NjQvZXZpZGVuY2UuY2FwdHVyZS5mcmFtZS8xNzcxNjkwOTMzMDIz",
+            "uia_record_id": "run_20260221T161612Z_41864/evidence.uia.snapshot/1771690933158"
+          },
+          {
+            "frame_id": "run_20260221T161612Z_41864/evidence.capture.frame/1771690933824",
+            "issues": [],
+            "obs_ids": {
+              "obs.uia.context": "run_20260221T161612Z_41864/derived.sst.text/extra/rid_dWlhLXJ1bl8yMDI2MDIyMVQxNjE2MTJaXzQxODY0L2V2aWRlbmNlLnVpYS5zbmFwc2hvdC8xNzcxNjkwOTMzMTU4LWNvbnRleHQtMA",
+              "obs.uia.focus": "run_20260221T161612Z_41864/derived.sst.text/extra/rid_dWlhLXJ1bl8yMDI2MDIyMVQxNjE2MTJaXzQxODY0L2V2aWRlbmNlLnVpYS5zbmFwc2hvdC8xNzcxNjkwOTMzMTU4LWZvY3VzLTA",
+              "obs.uia.operable": "run_20260221T161612Z_41864/derived.sst.text/extra/rid_dWlhLXJ1bl8yMDI2MDIyMVQxNjE2MTJaXzQxODY0L2V2aWRlbmNlLnVpYS5zbmFwc2hvdC8xNzcxNjkwOTMzMTU4LW9wZXJhYmxlLTA"
+            },
+            "retention_id": "run_20260221T161612Z_41864/retention.eligible/rid_cnVuXzIwMjYwMjIxVDE2MTYxMlpfNDE4NjQvZXZpZGVuY2UuY2FwdHVyZS5mcmFtZS8xNzcxNjkwOTMzODI0",
+            "stage1_id": "run_20260221T161612Z_41864/derived.ingest.stage1.complete/rid_cnVuXzIwMjYwMjIxVDE2MTYxMlpfNDE4NjQvZXZpZGVuY2UuY2FwdHVyZS5mcmFtZS8xNzcxNjkwOTMzODI0",
+            "uia_record_id": "run_20260221T161612Z_41864/evidence.uia.snapshot/1771690933158"
+          },
+          {
+            "frame_id": "run_20260221T161612Z_41864/evidence.capture.frame/1771690935136",
+            "issues": [],
+            "obs_ids": {
+              "obs.uia.context": "run_20260221T161612Z_41864/derived.sst.text/extra/rid_dWlhLXJ1bl8yMDI2MDIyMVQxNjE2MTJaXzQxODY0L2V2aWRlbmNlLnVpYS5zbmFwc2hvdC8xNzcxNjkwOTM1MjAxLWNvbnRleHQtMA",
+              "obs.uia.focus": "run_20260221T161612Z_41864/derived.sst.text/extra/rid_dWlhLXJ1bl8yMDI2MDIyMVQxNjE2MTJaXzQxODY0L2V2aWRlbmNlLnVpYS5zbmFwc2hvdC8xNzcxNjkwOTM1MjAxLWZvY3VzLTA",
+              "obs.uia.operable": "run_20260221T161612Z_41864/derived.sst.text/extra/rid_dWlhLXJ1bl8yMDI2MDIyMVQxNjE2MTJaXzQxODY0L2V2aWRlbmNlLnVpYS5zbmFwc2hvdC8xNzcxNjkwOTM1MjAxLW9wZXJhYmxlLTA"
+            },
+            "retention_id": "run_20260221T161612Z_41864/retention.eligible/rid_cnVuXzIwMjYwMjIxVDE2MTYxMlpfNDE4NjQvZXZpZGVuY2UuY2FwdHVyZS5mcmFtZS8xNzcxNjkwOTM1MTM2",
+            "stage1_id": "run_20260221T161612Z_41864/derived.ingest.stage1.complete/rid_cnVuXzIwMjYwMjIxVDE2MTYxMlpfNDE4NjQvZXZpZGVuY2UuY2FwdHVyZS5mcmFtZS8xNzcxNjkwOTM1MTM2",
+            "uia_record_id": "run_20260221T161612Z_41864/evidence.uia.snapshot/1771690935201"
+          }
+        ],
+        "strict": true,
+        "strict_all_frames": true,
+        "summary": {
+          "all_frames_complete": 1524,
+          "all_frames_incomplete": 0,
+          "all_frames_missing_retention": 0,
+          "all_frames_missing_stage1": 0,
+          "all_frames_missing_uia_ref": 0,
+          "all_frames_retention_not_validated": 0,
+          "frames_scanned": 1524,
+          "frames_with_uia_ref": 1524,
+          "invalid_obs_payload": 0,
+          "invalid_retention_payload": 0,
+          "invalid_stage1_payload": 0,
+          "lineage_complete": 1524,
+          "lineage_incomplete": 0,
+          "missing_obs_docs": 0,
+          "missing_retention": 0,
+          "missing_snapshot": 0,
+          "missing_stage1": 0,
+          "record_counts": {
+            "derived.ingest.stage1.complete": 1524,
+            "evidence.capture.frame": 1524,
+            "evidence.uia.snapshot": 1877,
+            "obs.uia.context": 991,
+            "obs.uia.focus": 991,
+            "obs.uia.operable": 991,
+            "retention.eligible": 1524
+          },
+          "retention_not_validated": 0,
+          "stage1_prereq_missing_counts": {}
+        }
+      },
+      "stdout_tail": "{\"db\": \"/mnt/d/autocapture/metadata.db\", \"db_read\": {\"mode\": \"direct_ro\", \"snapshot_path\": \"\", \"source_path\": \"/mnt/d/autocapture/metadata.db\"}, \"derived_db\": \"/mnt/d/autocapture/derived/stage1_derived.db\", \"fail_reasons\": [], \"ok\": true, \"output\": \"/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/lineage.json\", \"samples\": [{\"frame_id\": \"run_20260221T161612Z_41864/evidence.capture.frame/1771690933023\", \"issues\": [], \"obs_ids\": {\"obs.uia.context\": \"run_20260221T161612Z_41864/derived.sst.text/extra/rid_dWlhLXJ1bl8yMDI2MDIyMVQxNjE2MTJaXzQxODY0L2V2aWRlbmNlLnVpYS5zbmFwc2hvdC8xNzcxNjkwOTMzMTU4LWNvbnRleHQtMA\", \"obs.uia.focus\": \"run_20260221T161612Z_41864/derived.sst.text/extra/rid_dWlhLXJ1bl8yMDI2MDIyMVQxNjE2MTJaXzQxODY0L2V2aWRlbmNlLnVpYS5zbmFwc2hvdC8xNzcxNjkwOTMzMTU4LWZvY3VzLTA\", \"obs.uia.operable\": \"run_20260221T161612Z_41864/derived.sst.text/extra/rid_dWlhLXJ1bl8yMDI2MDIyMVQxNjE2MTJaXzQxODY0L2V2aWRlbmNlLnVpYS5zbmFwc2hvdC8xNzcxNjkwOTMzMTU4LW9wZXJhYmxlLTA\"}, \"retention_id\": \"run_20260221T161612Z_41864/retention.eligible/rid_cnVuXzIwMjYwMjIxVDE2MTYxMlpfNDE4NjQvZXZpZGVuY2UuY2FwdHVyZS5mcmFtZS8xNzcxNjkwOTMzMDIz\", \"stage1_id\": \"run_20260221T161612Z_41864/derived.ingest.stage1.complete/rid_cnVuXzIwMjYwMjIxVDE2MTYxMlpfNDE4NjQvZXZpZGVuY2UuY2FwdHVyZS5mcmFtZS8xNzcxNjkwOTMzMDIz\", \"uia_record_id\": \"run_20260221T161612Z_41864/evidence.uia.snapshot/1771690933158\"}, {\"frame_id\": \"run_20260221T161612Z_41864/evidence.capture.frame/1771690933824\", \"issues\": [], \"obs_ids\": {\"obs.uia.context\": \"run_20260221T161612Z_41864/derived.sst.text/extra/rid_dWlhLXJ1bl8yMDI2MDIyMVQxNjE2MTJaXzQxODY0L2V2aWRlbmNlLnVpYS5zbmFwc2hvdC8xNzcxNjkwOTMzMTU4LWNvbnRleHQtMA\", \"obs.uia.focus\": \"run_20260221T161612Z_41864/derived.sst.text/extra/rid_dWlhLXJ1bl8yMDI2MDIyMVQxNjE2MTJaXzQxODY0L2V2aWRlbmNlLnVpYS5zbmFwc2hvdC8xNzcxNjkwOTMzMTU4LWZvY3VzLTA\", \"obs.uia.operable\": \"run_20260221T161612Z_41864/derived.sst.text/extra/rid_dWlhLXJ1bl8yMDI2MDIyMVQxNjE2MTJaXzQxODY0L2V2aWRlbmNlLnVpYS5zbmFwc2hvdC8xNzcxNjkwOTMzMTU4LW9wZXJhYmxlLTA\"}, \"retention_id\": \"run_20260221T161612Z_41864/retention.eligible/rid_cnVuXzIwMjYwMjIxVDE2MTYxMlpfNDE4NjQvZXZpZGVuY2UuY2FwdHVyZS5mcmFtZS8xNzcxNjkwOTMzODI0\", \"stage1_id\": \"run_20260221T161612Z_41864/derived.ingest.stage1.complete/rid_cnVuXzIwMjYwMjIxVDE2MTYxMlpfNDE4NjQvZXZpZGVuY2UuY2FwdHVyZS5mcmFtZS8xNzcxNjkwOTMzODI0\", \"uia_record_id\": \"run_20260221T161612Z_41864/evidence.uia.snapshot/1771690933158\"}, {\"frame_id\": \"run_20260221T161612Z_41864/evidence.capture.frame/1771690935136\", \"issues\": [], \"obs_ids\": {\"obs.uia.context\": \"run_20260221T161612Z_41864/derived.sst.text/extra/rid_dWlhLXJ1bl8yMDI2MDIyMVQxNjE2MTJaXzQxODY0L2V2aWRlbmNlLnVpYS5zbmFwc2hvdC8xNzcxNjkwOTM1MjAxLWNvbnRleHQtMA\", \"obs.uia.focus\": \"run_20260221T161612Z_41864/derived.sst.text/extra/rid_dWlhLXJ1bl8yMDI2MDIyMVQxNjE2MTJaXzQxODY0L2V2aWRlbmNlLnVpYS5zbmFwc2hvdC8xNzcxNjkwOTM1MjAxLWZvY3VzLTA\", \"obs.uia.operable\": \"run_20260221T161612Z_41864/derived.sst.text/extra/rid_dWlhLXJ1bl8yMDI2MDIyMVQxNjE2MTJaXzQxODY0L2V2aWRlbmNlLnVpYS5zbmFwc2hvdC8xNzcxNjkwOTM1MjAxLW9wZXJhYmxlLTA\"}, \"retention_id\": \"run_20260221T161612Z_41864/retention.eligible/rid_cnVuXzIwMjYwMjIxVDE2MTYxMlpfNDE4NjQvZXZpZGVuY2UuY2FwdHVyZS5mcmFtZS8xNzcxNjkwOTM1MTM2\", \"stage1_id\": \"run_20260221T161612Z_41864/derived.ingest.stage1.complete/rid_cnVuXzIwMjYwMjIxVDE2MTYxMlpfNDE4NjQvZXZpZGVuY2UuY2FwdHVyZS5mcmFtZS8xNzcxNjkwOTM1MTM2\", \"uia_record_id\": \"run_20260221T161612Z_41864/evidence.uia.snapshot/1771690935201\"}], \"strict\": true, \"strict_all_frames\": true, \"summary\": {\"all_frames_complete\": 1524, \"all_frames_incomplete\": 0, \"all_frames_missing_retention\": 0, \"all_frames_missing_stage1\": 0, \"all_frames_missing_uia_ref\": 0, \"all_frames_retention_not_validated\": 0, \"frames_scanned\": 1524, \"frames_with_uia_ref\": 1524, \"invalid_obs_payload\": 0, \"invalid_retention_payload\": 0, \"invalid_stage1_payload\": 0, \"lineage_complete\": 1524, \"lineage_incomplete\": 0, \"missing_obs_docs\": 0, \"missing_retention\": 0, \"missing_snapshot\": 0, \"missing_stage1\": 0, \"record_counts\": {\"derived.ingest.stage1.complete\": 1524, \"evidence.capture.frame\": 1524, \"evidence.uia.snapshot\": 1877, \"obs.uia.context\": 991, \"obs.uia.focus\": 991, \"obs.uia.operable\": 991, \"retention.eligible\": 1524}, \"retention_not_validated\": 0, \"stage1_prereq_missing_counts\": {}}}\n"
+    },
+    {
+      "attempt": 1,
+      "attempts_total": 3,
+      "cmd": [
+        "/mnt/d/projects/autocapture_prime/.venv/bin/python",
+        "tools/soak/stage1_completeness_audit.py",
+        "--db",
+        "/mnt/d/autocapture/metadata.db",
+        "--derived-db",
+        "/mnt/d/autocapture/derived/stage1_derived.db",
+        "--gap-seconds",
+        "120",
+        "--samples",
+        "20",
+        "--output",
+        "/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/stage1_completeness_audit.json"
+      ],
+      "elapsed_ms": 7342,
+      "id": "stage1_completeness_audit",
+      "ok": true,
+      "retried": false,
+      "returncode": 0,
+      "stderr_tail": "",
+      "stdout_json": {
+        "db": "/mnt/d/autocapture/metadata.db",
+        "derived_db": "/mnt/d/autocapture/derived/stage1_derived.db",
+        "issue_counts": {},
+        "ok": true,
+        "output": "/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/stage1_completeness_audit.json",
+        "plugin_completion": {
+          "obs_uia_context": {
+            "ok": 1524,
+            "required": 1524
+          },
+          "obs_uia_focus": {
+            "ok": 1524,
+            "required": 1524
+          },
+          "obs_uia_operable": {
+            "ok": 1524,
+            "required": 1524
+          },
+          "retention_eligible": {
+            "ok": 1524,
+            "required": 1524
+          },
+          "stage1_complete": {
+            "ok": 1524,
+            "required": 1524
+          },
+          "uia_snapshot": {
+            "ok": 1524,
+            "required": 1524
+          }
+        },
+        "queryable_windows": [
+          {
+            "duration_s": 65.692,
+            "end_utc": "2026-02-21T16:23:18.715000Z",
+            "first_frame_id": "run_20260221T161612Z_41864/evidence.capture.frame/1771690933023",
+            "frame_count": 82,
+            "last_frame_id": "run_20260221T161612Z_41864/evidence.capture.frame/1771690998715",
+            "start_utc": "2026-02-21T16:22:13.023000Z"
+          },
+          {
+            "duration_s": 1346.656,
+            "end_utc": "2026-02-21T16:58:41.009000Z",
+            "first_frame_id": "run_20260221T163335Z_23228/evidence.capture.frame/1771691774353",
+            "frame_count": 1442,
+            "last_frame_id": "run_20260221T163335Z_23228/evidence.capture.frame/1771693121009",
+            "start_utc": "2026-02-21T16:36:14.353000Z"
+          }
+        ],
+        "record_counts": {
+          "derived.ingest.stage1.complete": 1524,
+          "evidence.capture.frame": 1524,
+          "evidence.uia.snapshot": 1877,
+          "obs.uia.context": 991,
+          "obs.uia.focus": 991,
+          "obs.uia.operable": 991,
+          "retention.eligible": 1524
+        },
+        "sample_blocked_frames": [],
+        "schema_version": 1,
+        "summary": {
+          "contiguous_queryable_windows": 2,
+          "frames_blocked": 0,
+          "frames_queryable": 1524,
+          "frames_total": 1524
+        }
+      },
+      "stdout_tail": "{\"db\": \"/mnt/d/autocapture/metadata.db\", \"derived_db\": \"/mnt/d/autocapture/derived/stage1_derived.db\", \"issue_counts\": {}, \"ok\": true, \"output\": \"/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/stage1_completeness_audit.json\", \"plugin_completion\": {\"obs_uia_context\": {\"ok\": 1524, \"required\": 1524}, \"obs_uia_focus\": {\"ok\": 1524, \"required\": 1524}, \"obs_uia_operable\": {\"ok\": 1524, \"required\": 1524}, \"retention_eligible\": {\"ok\": 1524, \"required\": 1524}, \"stage1_complete\": {\"ok\": 1524, \"required\": 1524}, \"uia_snapshot\": {\"ok\": 1524, \"required\": 1524}}, \"queryable_windows\": [{\"duration_s\": 65.692, \"end_utc\": \"2026-02-21T16:23:18.715000Z\", \"first_frame_id\": \"run_20260221T161612Z_41864/evidence.capture.frame/1771690933023\", \"frame_count\": 82, \"last_frame_id\": \"run_20260221T161612Z_41864/evidence.capture.frame/1771690998715\", \"start_utc\": \"2026-02-21T16:22:13.023000Z\"}, {\"duration_s\": 1346.656, \"end_utc\": \"2026-02-21T16:58:41.009000Z\", \"first_frame_id\": \"run_20260221T163335Z_23228/evidence.capture.frame/1771691774353\", \"frame_count\": 1442, \"last_frame_id\": \"run_20260221T163335Z_23228/evidence.capture.frame/1771693121009\", \"start_utc\": \"2026-02-21T16:36:14.353000Z\"}], \"record_counts\": {\"derived.ingest.stage1.complete\": 1524, \"evidence.capture.frame\": 1524, \"evidence.uia.snapshot\": 1877, \"obs.uia.context\": 991, \"obs.uia.focus\": 991, \"obs.uia.operable\": 991, \"retention.eligible\": 1524}, \"sample_blocked_frames\": [], \"schema_version\": 1, \"summary\": {\"contiguous_queryable_windows\": 2, \"frames_blocked\": 0, \"frames_queryable\": 1524, \"frames_total\": 1524}}\n"
+    },
+    {
+      "cmd": [
+        "/mnt/d/projects/autocapture_prime/.venv/bin/python",
+        "tools/soak/processing_health_snapshot.py",
+        "--manifests",
+        "/mnt/d/autocapture/facts/landscape_manifests.ndjson",
+        "--tail",
+        "120",
+        "--output",
+        "/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/processing_health.json"
+      ],
+      "elapsed_ms": 108,
+      "id": "processing_health_snapshot",
+      "ok": true,
+      "returncode": 0,
+      "stderr_tail": "",
+      "stdout_json": {
+        "alerts": [
+          "retention_risk"
+        ],
+        "events": {
+          "metadata_db_unstable": 0,
+          "retention_risk": 2,
+          "throughput_zero_with_backlog": 0
+        },
+        "exists": true,
+        "latest": {
+          "completed_records": 0,
+          "pending_records": 0,
+          "projected_lag_hours": 0.0,
+          "throughput_records_per_s": 0.0
+        },
+        "manifests_path": "/mnt/d/autocapture/facts/landscape_manifests.ndjson",
+        "ok": true,
+        "output": "/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/processing_health.json",
+        "samples": 16,
+        "schema_version": 1
+      },
+      "stdout_tail": "{\"alerts\": [\"retention_risk\"], \"events\": {\"metadata_db_unstable\": 0, \"retention_risk\": 2, \"throughput_zero_with_backlog\": 0}, \"exists\": true, \"latest\": {\"completed_records\": 0, \"pending_records\": 0, \"projected_lag_hours\": 0.0, \"throughput_records_per_s\": 0.0}, \"manifests_path\": \"/mnt/d/autocapture/facts/landscape_manifests.ndjson\", \"ok\": true, \"output\": \"/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/processing_health.json\", \"samples\": 16, \"schema_version\": 1}\n"
+    },
+    {
+      "cmd": [
+        "/mnt/d/projects/autocapture_prime/.venv/bin/python",
+        "tools/bench_batch_knobs_synthetic.py",
+        "--workers",
+        "1,2,4,6",
+        "--output",
+        "/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/batch_knob_bench.json"
+      ],
+      "elapsed_ms": 1093,
+      "id": "bench_batch_knobs_synthetic",
+      "ok": true,
+      "returncode": 0,
+      "stderr_tail": "",
+      "stdout_json": {
+        "ok": true,
+        "output": "/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/batch_knob_bench.json",
+        "scenarios": [
+          {
+            "adaptive_high_signal": {
+              "action": "scale_down",
+              "batch_size": 3,
+              "cpu_limit": 0.5,
+              "cpu_utilization": 0.49,
+              "enabled": true,
+              "latency_p95_hard_cap_ms": 4000,
+              "latency_p95_target_ms": 1200,
+              "loop_latency_p95_ms": 0,
+              "max_concurrency_cpu": 1,
+              "max_items_per_run": 20,
+              "pending_records": 0,
+              "pressure_ratio": 0.98,
+              "queue_high_watermark": 512,
+              "queue_low_watermark": 64,
+              "ram_limit": 0.5,
+              "ram_utilization": 0.49,
+              "reason": "pressure_high"
+            },
+            "adaptive_low_signal": {
+              "action": "scale_up",
+              "batch_size": 6,
+              "cpu_limit": 0.5,
+              "cpu_utilization": 0.05,
+              "enabled": true,
+              "latency_p95_hard_cap_ms": 4000,
+              "latency_p95_target_ms": 1200,
+              "loop_latency_p95_ms": 0,
+              "max_concurrency_cpu": 2,
+              "max_items_per_run": 40,
+              "pending_records": 0,
+              "pressure_ratio": 0.1,
+              "queue_high_watermark": 512,
+              "queue_low_watermark": 64,
+              "ram_limit": 0.5,
+              "ram_utilization": 0.05,
+              "reason": "pressure_low"
+            },
+            "eval_median_us": 7.182,
+            "sla": {
+              "completed_records": 1500,
+              "enabled": true,
+              "loop_latency_p95_ms": 1000,
+              "pending_records": 8500,
+              "projected_lag_hours": 0.04722222222222222,
+              "retention_horizon_hours": 144.0,
+              "retention_risk": false,
+              "throughput_records_per_s": 50.0
+            },
+            "workers": 1
+          },
+          {
+            "adaptive_high_signal": {
+              "action": "scale_down",
+              "batch_size": 6,
+              "cpu_limit": 0.5,
+              "cpu_utilization": 0.49,
+              "enabled": true,
+              "latency_p95_hard_cap_ms": 4000,
+              "latency_p95_target_ms": 1200,
+              "loop_latency_p95_ms": 0,
+              "max_concurrency_cpu": 2,
+              "max_items_per_run": 40,
+              "pending_records": 0,
+              "pressure_ratio": 0.98,
+              "queue_high_watermark": 512,
+              "queue_low_watermark": 64,
+              "ram_limit": 0.5,
+              "ram_utilization": 0.49,
+              "reason": "pressure_high"
+            },
+            "adaptive_low_signal": {
+              "action": "scale_up",
+              "batch_size": 9,
+              "cpu_limit": 0.5,
+              "cpu_utilization": 0.05,
+              "enabled": true,
+              "latency_p95_hard_cap_ms": 4000,
+              "latency_p95_target_ms": 1200,
+              "loop_latency_p95_ms": 0,
+              "max_concurrency_cpu": 3,
+              "max_items_per_run": 60,
+              "pending_records": 0,
+              "pressure_ratio": 0.1,
+              "queue_high_watermark": 512,
+              "queue_low_watermark": 64,
+              "ram_limit": 0.5,
+              "ram_utilization": 0.05,
+              "reason": "pressure_low"
+            },
+            "eval_median_us": 7.265,
+            "sla": {
+              "completed_records": 3000,
+              "enabled": true,
+              "loop_latency_p95_ms": 1000,
+              "pending_records": 7000,
+              "projected_lag_hours": 0.019444444444444445,
+              "retention_horizon_hours": 144.0,
+              "retention_risk": false,
+              "throughput_records_per_s": 100.0
+            },
+            "workers": 2
+          },
+          {
+            "adaptive_high_signal": {
+              "action": "scale_down",
+              "batch_size": 12,
+              "cpu_limit": 0.5,
+              "cpu_utilization": 0.49,
+              "enabled": true,
+              "latency_p95_hard_cap_ms": 4000,
+              "latency_p95_target_ms": 1200,
+              "loop_latency_p95_ms": 0,
+              "max_concurrency_cpu": 4,
+              "max_items_per_run": 80,
+              "pending_records": 0,
+              "pressure_ratio": 0.98,
+              "queue_high_watermark": 512,
+              "queue_low_watermark": 64,
+              "ram_limit": 0.5,
+              "ram_utilization": 0.49,
+              "reason": "pressure_high"
+            },
+            "adaptive_low_signal": {
+              "action": "scale_up",
+              "batch_size": 15,
+              "cpu_limit": 0.5,
+              "cpu_utilization": 0.05,
+              "enabled": true,
+              "latency_p95_hard_cap_ms": 4000,
+              "latency_p95_target_ms": 1200,
+              "loop_latency_p95_ms": 0,
+              "max_concurrency_cpu": 5,
+              "max_items_per_run": 100,
+              "pending_records": 0,
+              "pressure_ratio": 0.1,
+              "queue_high_watermark": 512,
+              "queue_low_watermark": 64,
+              "ram_limit": 0.5,
+              "ram_utilization": 0.05,
+              "reason": "pressure_low"
+            },
+            "eval_median_us": 7.152,
+            "sla": {
+              "completed_records": 6000,
+              "enabled": true,
+              "loop_latency_p95_ms": 1000,
+              "pending_records": 4000,
+              "projected_lag_hours": 0.005555555555555556,
+              "retention_horizon_hours": 144.0,
+              "retention_risk": false,
+              "throughput_records_per_s": 200.0
+            },
+            "workers": 4
+          },
+          {
+            "adaptive_high_signal": {
+              "action": "scale_down",
+              "batch_size": 18,
+              "cpu_limit": 0.5,
+              "cpu_utilization": 0.49,
+              "enabled": true,
+              "latency_p95_hard_cap_ms": 4000,
+              "latency_p95_target_ms": 1200,
+              "loop_latency_p95_ms": 0,
+              "max_concurrency_cpu": 6,
+              "max_items_per_run": 120,
+              "pending_records": 0,
+              "pressure_ratio": 0.98,
+              "queue_high_watermark": 512,
+              "queue_low_watermark": 64,
+              "ram_limit": 0.5,
+              "ram_utilization": 0.49,
+              "reason": "pressure_high"
+            },
+            "adaptive_low_signal": {
+              "action": "scale_up",
+              "batch_size": 21,
+              "cpu_limit": 0.5,
+              "cpu_utilization": 0.05,
+              "enabled": true,
+              "latency_p95_hard_cap_ms": 4000,
+              "latency_p95_target_ms": 1200,
+              "loop_latency_p95_ms": 0,
+              "max_concurrency_cpu": 7,
+              "max_items_per_run": 140,
+              "pending_records": 0,
+              "pressure_ratio": 0.1,
+              "queue_high_watermark": 512,
+              "queue_low_watermark": 64,
+              "ram_limit": 0.5,
+              "ram_utilization": 0.05,
+              "reason": "pressure_low"
+            },
+            "eval_median_us": 7.28,
+            "sla": {
+              "completed_records": 9000,
+              "enabled": true,
+              "loop_latency_p95_ms": 1000,
+              "pending_records": 1000,
+              "projected_lag_hours": 0.000925925925925926,
+              "retention_horizon_hours": 144.0,
+              "retention_risk": false,
+              "throughput_records_per_s": 300.0
+            },
+            "workers": 6
+          }
+        ],
+        "schema_version": 1
+      },
+      "stdout_tail": "{\"ok\": true, \"output\": \"/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/batch_knob_bench.json\", \"scenarios\": [{\"adaptive_high_signal\": {\"action\": \"scale_down\", \"batch_size\": 3, \"cpu_limit\": 0.5, \"cpu_utilization\": 0.49, \"enabled\": true, \"latency_p95_hard_cap_ms\": 4000, \"latency_p95_target_ms\": 1200, \"loop_latency_p95_ms\": 0, \"max_concurrency_cpu\": 1, \"max_items_per_run\": 20, \"pending_records\": 0, \"pressure_ratio\": 0.98, \"queue_high_watermark\": 512, \"queue_low_watermark\": 64, \"ram_limit\": 0.5, \"ram_utilization\": 0.49, \"reason\": \"pressure_high\"}, \"adaptive_low_signal\": {\"action\": \"scale_up\", \"batch_size\": 6, \"cpu_limit\": 0.5, \"cpu_utilization\": 0.05, \"enabled\": true, \"latency_p95_hard_cap_ms\": 4000, \"latency_p95_target_ms\": 1200, \"loop_latency_p95_ms\": 0, \"max_concurrency_cpu\": 2, \"max_items_per_run\": 40, \"pending_records\": 0, \"pressure_ratio\": 0.1, \"queue_high_watermark\": 512, \"queue_low_watermark\": 64, \"ram_limit\": 0.5, \"ram_utilization\": 0.05, \"reason\": \"pressure_low\"}, \"eval_median_us\": 7.182, \"sla\": {\"completed_records\": 1500, \"enabled\": true, \"loop_latency_p95_ms\": 1000, \"pending_records\": 8500, \"projected_lag_hours\": 0.04722222222222222, \"retention_horizon_hours\": 144.0, \"retention_risk\": false, \"throughput_records_per_s\": 50.0}, \"workers\": 1}, {\"adaptive_high_signal\": {\"action\": \"scale_down\", \"batch_size\": 6, \"cpu_limit\": 0.5, \"cpu_utilization\": 0.49, \"enabled\": true, \"latency_p95_hard_cap_ms\": 4000, \"latency_p95_target_ms\": 1200, \"loop_latency_p95_ms\": 0, \"max_concurrency_cpu\": 2, \"max_items_per_run\": 40, \"pending_records\": 0, \"pressure_ratio\": 0.98, \"queue_high_watermark\": 512, \"queue_low_watermark\": 64, \"ram_limit\": 0.5, \"ram_utilization\": 0.49, \"reason\": \"pressure_high\"}, \"adaptive_low_signal\": {\"action\": \"scale_up\", \"batch_size\": 9, \"cpu_limit\": 0.5, \"cpu_utilization\": 0.05, \"enabled\": true, \"latency_p95_hard_cap_ms\": 4000, \"latency_p95_target_ms\": 1200, \"loop_latency_p95_ms\": 0, \"max_concurrency_cpu\": 3, \"max_items_per_run\": 60, \"pending_records\": 0, \"pressure_ratio\": 0.1, \"queue_high_watermark\": 512, \"queue_low_watermark\": 64, \"ram_limit\": 0.5, \"ram_utilization\": 0.05, \"reason\": \"pressure_low\"}, \"eval_median_us\": 7.265, \"sla\": {\"completed_records\": 3000, \"enabled\": true, \"loop_latency_p95_ms\": 1000, \"pending_records\": 7000, \"projected_lag_hours\": 0.019444444444444445, \"retention_horizon_hours\": 144.0, \"retention_risk\": false, \"throughput_records_per_s\": 100.0}, \"workers\": 2}, {\"adaptive_high_signal\": {\"action\": \"scale_down\", \"batch_size\": 12, \"cpu_limit\": 0.5, \"cpu_utilization\": 0.49, \"enabled\": true, \"latency_p95_hard_cap_ms\": 4000, \"latency_p95_target_ms\": 1200, \"loop_latency_p95_ms\": 0, \"max_concurrency_cpu\": 4, \"max_items_per_run\": 80, \"pending_records\": 0, \"pressure_ratio\": 0.98, \"queue_high_watermark\": 512, \"queue_low_watermark\": 64, \"ram_limit\": 0.5, \"ram_utilization\": 0.49, \"reason\": \"pressure_high\"}, \"adaptive_low_signal\": {\"action\": \"scale_up\", \"batch_size\": 15, \"cpu_limit\": 0.5, \"cpu_utilization\": 0.05, \"enabled\": true, \"latency_p95_hard_cap_ms\": 4000, \"latency_p95_target_ms\": 1200, \"loop_latency_p95_ms\": 0, \"max_concurrency_cpu\": 5, \"max_items_per_run\": 100, \"pending_records\": 0, \"pressure_ratio\": 0.1, \"queue_high_watermark\": 512, \"queue_low_watermark\": 64, \"ram_limit\": 0.5, \"ram_utilization\": 0.05, \"reason\": \"pressure_low\"}, \"eval_median_us\": 7.152, \"sla\": {\"completed_records\": 6000, \"enabled\": true, \"loop_latency_p95_ms\": 1000, \"pending_records\": 4000, \"projected_lag_hours\": 0.005555555555555556, \"retention_horizon_hours\": 144.0, \"retention_risk\": false, \"throughput_records_per_s\": 200.0}, \"workers\": 4}, {\"adaptive_high_signal\": {\"action\": \"scale_down\", \"batch_size\": 18, \"cpu_limit\": 0.5, \"cpu_utilization\": 0.49, \"enabled\": true, \"latency_p95_hard_cap_ms\": 4000, \"latency_p95_target_ms\": 1200, \"loop_latency_p95_ms\": 0, \"max_concurrency_cpu\": 6, \"max_items_per_run\": 120, \"pending_records\": 0, \"pressure_ratio\": 0.98, \"queue_high_watermark\": 512, \"queue_low_watermark\": 64, \"ram_limit\": 0.5, \"ram_utilization\": 0.49, \"reason\": \"pressure_high\"}, \"adaptive_low_signal\": {\"action\": \"scale_up\", \"batch_size\": 21, \"cpu_limit\": 0.5, \"cpu_utilization\": 0.05, \"enabled\": true, \"latency_p95_hard_cap_ms\": 4000, \"latency_p95_target_ms\": 1200, \"loop_latency_p95_ms\": 0, \"max_concurrency_cpu\": 7, \"max_items_per_run\": 140, \"pending_records\": 0, \"pressure_ratio\": 0.1, \"queue_high_watermark\": 512, \"queue_low_watermark\": 64, \"ram_limit\": 0.5, \"ram_utilization\": 0.05, \"reason\": \"pressure_low\"}, \"eval_median_us\": 7.28, \"sla\": {\"completed_records\": 9000, \"enabled\": true, \"loop_latency_p95_ms\": 1000, \"pending_records\": 1000, \"projected_lag_hours\": 0.000925925925925926, \"retention_horizon_hours\": 144.0, \"retention_risk\": false, \"throughput_records_per_s\": 300.0}, \"workers\": 6}], \"schema_version\": 1}\n"
+    },
+    {
+      "cmd": [
+        "/mnt/d/projects/autocapture_prime/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_validate_stage1_lineage_tool.py",
+        "tests/test_stage1_marker_revalidation_migration.py",
+        "tests/test_processing_health_snapshot_tool.py",
+        "tests/test_stage1_completeness_audit_tool.py",
+        "tests/test_query_arbitration.py",
+        "tests/test_query_eval_suite_exact.py",
+        "tests/test_run_synthetic_gauntlet_tool.py",
+        "tests/test_schedule_extract_from_query.py",
+        "tests/test_runtime_batch_adaptive_parallelism.py",
+        "tests/test_stage1_no_vlm_profile.py"
+      ],
+      "elapsed_ms": 17491,
+      "id": "pytest_non_vlm_subset",
+      "ok": true,
+      "returncode": 0,
+      "stderr_tail": "",
+      "stdout_json": null,
+      "stdout_tail": "..........................................                               [100%]\n42 passed in 14.93s\n"
+    },
+    {
+      "cmd": [
+        "/mnt/d/projects/autocapture_prime/.venv/bin/python",
+        "tools/gate_ledger.py"
+      ],
+      "elapsed_ms": 527,
+      "id": "gate_ledger",
+      "ok": true,
+      "returncode": 0,
+      "stderr_tail": "----------------------------------------------------------------------\nRan 1 test in 0.007s\n\nOK\n",
+      "stdout_json": null,
+      "stdout_tail": ""
+    },
+    {
+      "cmd": [
+        "/mnt/d/projects/autocapture_prime/.venv/bin/python",
+        "tools/gate_security.py"
+      ],
+      "elapsed_ms": 36724,
+      "id": "gate_security",
+      "ok": true,
+      "returncode": 0,
+      "stderr_tail": "",
+      "stdout_json": null,
+      "stdout_tail": "..\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n.\n----------------------------------------------------------------------\nRan 1 test in 2.726s\n\nOK\n.\n----------------------------------------------------------------------\nRan 1 test in 0.021s\n\nOK\n.\n----------------------------------------------------------------------\nRan 1 test in 0.033s\n\nOK\n...\n----------------------------------------------------------------------\nRan 3 tests in 0.000s\n\nOK\n.\n----------------------------------------------------------------------\nRan 1 test in 0.092s\n\nOK\n..\n----------------------------------------------------------------------\nRan 2 tests in 0.001s\n\nOK\n.\n----------------------------------------------------------------------\nRan 1 test in 19.582s\n\nOK\n"
+    },
+    {
+      "cmd": [
+        "/mnt/d/projects/autocapture_prime/.venv/bin/python",
+        "tools/gate_promptops_policy.py"
+      ],
+      "elapsed_ms": 851,
+      "id": "gate_promptops_policy",
+      "ok": true,
+      "returncode": 0,
+      "stderr_tail": "",
+      "stdout_json": null,
+      "stdout_tail": "OK: promptops policy gate\n"
+    },
+    {
+      "attempt": 1,
+      "attempts_total": 4,
+      "cmd": [
+        "/mnt/d/projects/autocapture_prime/.venv/bin/python",
+        "tools/query_eval_suite.py",
+        "--cases",
+        "docs/query_eval_cases_generic20.json",
+        "--safe-mode"
+      ],
+      "elapsed_ms": 20827,
+      "id": "query_eval_suite_generic20_metadata_only",
+      "ok": false,
+      "retried": false,
+      "returncode": 2,
+      "stderr_tail": "",
+      "stdout_json": null,
+      "stdout_tail": "{\n  \"boot_attempts\": [\n    \"safe_mode=True,fast_boot=False\",\n    \"safe_mode=True,fast_boot=True\",\n    \"safe_mode=False,fast_boot=False\",\n    \"safe_mode=False,fast_boot=True\"\n  ],\n  \"cases_failed\": 0,\n  \"cases_passed\": 0,\n  \"cases_total\": 0,\n  \"error\": \"kernel_boot_failed:missing_capability:storage.metadata\",\n  \"ok\": false\n}\n"
+    },
+    {
+      "attempt": 1,
+      "attempts_total": 4,
+      "cmd": [
+        "/mnt/d/projects/autocapture_prime/.venv/bin/python",
+        "tools/run_synthetic_gauntlet.py",
+        "--metadata-only",
+        "--safe-mode",
+        "--output",
+        "/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/synthetic_gauntlet_80.json"
+      ],
+      "elapsed_ms": 11609,
+      "id": "synthetic_gauntlet_80_metadata_only",
+      "ok": false,
+      "output": "/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/synthetic_gauntlet_80.json",
+      "retried": false,
+      "returncode": 1,
+      "stderr_tail": "",
+      "stdout_json": {
+        "boot_attempts": [
+          "safe_mode=True,fast_boot=False",
+          "safe_mode=True,fast_boot=True",
+          "safe_mode=False,fast_boot=False",
+          "safe_mode=False,fast_boot=True"
+        ],
+        "error": "kernel_boot_failed:ConfigError:instance_lock_held",
+        "ok": false,
+        "output": "/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/synthetic_gauntlet_80.json",
+        "schema_version": 1,
+        "ts_utc": "2026-02-21T19:46:02.437747+00:00"
+      },
+      "stdout_tail": "{\"boot_attempts\": [\"safe_mode=True,fast_boot=False\", \"safe_mode=True,fast_boot=True\", \"safe_mode=False,fast_boot=False\", \"safe_mode=False,fast_boot=True\"], \"error\": \"kernel_boot_failed:ConfigError:instance_lock_held\", \"ok\": false, \"output\": \"/mnt/d/projects/autocapture_prime/artifacts/non_vlm_readiness/run_20260221T194327Z/synthetic_gauntlet_80.json\", \"schema_version\": 1, \"ts_utc\": \"2026-02-21T19:46:02.437747+00:00\"}\n",
+      "strict_evaluated": 0,
+      "strict_failed": 0
+    }
+  ],
+  "strict_all_frames": true,
+  "ts_utc": "2026-02-21T19:46:02.480585+00:00"
+}

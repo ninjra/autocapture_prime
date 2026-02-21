@@ -47,6 +47,19 @@ class GatePromptOpsPolicyTests(unittest.TestCase):
         failed = {item["name"] for item in checks if not bool(item.get("ok", False))}
         self.assertIn("review_base_url_localhost", failed)
 
+    def test_validate_promptops_policy_allows_non8000_mode_with_ui_vlm_disabled(self) -> None:
+        config = _sample_config()
+        config.setdefault("plugins", {}).setdefault("enabled", {})["builtin.processing.sst.ui_vlm"] = False
+        config["plugins"]["enabled"]["builtin.vlm.vllm_localhost"] = False
+        config["processing"] = {
+            "idle": {"extractors": {"vlm": False}},
+            "sst": {"ui_vlm": {"enabled": False}},
+        }
+        lock_payload = {"plugins": {pid: {"artifact_sha256": "x"} for pid in mod.REQUIRED_PLUGIN_IDS}}
+        safe_cfg = {"plugins": {"safe_mode": True}}
+        checks = mod.validate_promptops_policy(config, lock_payload, safe_cfg)
+        self.assertTrue(all(bool(item.get("ok", False)) for item in checks))
+
 
 if __name__ == "__main__":
     unittest.main()

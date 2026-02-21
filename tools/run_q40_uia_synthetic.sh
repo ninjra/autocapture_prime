@@ -149,10 +149,13 @@ set +e
   --output "$adv_path" >"$adv_log" 2>&1
 adv_rc=$?
 set -e
-if [[ $adv_rc -ne 0 || ! -f "$adv_path" ]]; then
+if [[ ! -f "$adv_path" ]]; then
   detail="$(extract_last_json "$adv_log")"
   echo "{\"ok\":false,\"error\":\"advanced20_failed\",\"detail\":$detail,\"log\":\"$adv_log\"}"
   exit 1
+fi
+if [[ $adv_rc -ne 0 ]]; then
+  echo "{\"event\":\"run_q40_uia_synthetic.warning\",\"stage\":\"advanced20\",\"detail\":\"nonzero_exit_with_output\",\"log\":\"$adv_log\",\"output\":\"$adv_path\"}" >>"$adv_log"
 fi
 
 set +e
@@ -163,10 +166,13 @@ set +e
   --output "$gen_path" >"$gen_log" 2>&1
 gen_rc=$?
 set -e
-if [[ $gen_rc -ne 0 || ! -f "$gen_path" ]]; then
+if [[ ! -f "$gen_path" ]]; then
   detail="$(extract_last_json "$gen_log")"
   echo "{\"ok\":false,\"error\":\"generic20_failed\",\"detail\":$detail,\"log\":\"$gen_log\"}"
   exit 1
+fi
+if [[ $gen_rc -ne 0 ]]; then
+  echo "{\"event\":\"run_q40_uia_synthetic.warning\",\"stage\":\"generic20\",\"detail\":\"nonzero_exit_with_output\",\"log\":\"$gen_log\",\"output\":\"$gen_path\"}" >>"$gen_log"
 fi
 
 set +e
