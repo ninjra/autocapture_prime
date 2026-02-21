@@ -76,6 +76,17 @@ class PromptOpsLayerTests(unittest.TestCase):
             result = layer.prepare_query("pls help w/ q", prompt_id="query")
             self.assertEqual(result.prompt, "please help with q?")
 
+    def test_prepare_query_normalize_query_skips_snapshot_when_no_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _base_config(tmp)
+            config["promptops"]["query_strategy"] = "normalize_query"
+            layer = PromptOpsLayer(config)
+            with mock.patch.object(layer, "_snapshot", wraps=layer._snapshot) as snapshot:
+                result = layer.prepare_query("pls help w/ q", prompt_id="query")
+            snapshot.assert_not_called()
+            stages = result.trace.get("stages_ms", {})
+            self.assertEqual(float(stages.get("snapshot", -1.0)), 0.0)
+
     def test_prepare_query_does_not_reuse_stored_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _base_config(tmp)
@@ -84,6 +95,33 @@ class PromptOpsLayerTests(unittest.TestCase):
             layer._store.set("query", "old saved query")
             result = layer.prepare_query("pls help w/ new ask", prompt_id="query")
             self.assertEqual(result.prompt, "please help with new ask?")
+
+    def test_examples_loaded_from_examples_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _base_config(tmp)
+            examples_path = Path(tmp) / "promptops_examples.json"
+            examples_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "promptops_examples": {
+                            "query.default": [
+                                {
+                                    "required_tokens": ["inboxes"],
+                                    "requires_citation": False,
+                                }
+                            ]
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config["promptops"]["examples"] = {}
+            config["promptops"]["examples_path"] = str(examples_path)
+            layer = PromptOpsLayer(config)
+            rows = layer._examples_for("query")  # noqa: SLF001
+            self.assertTrue(rows)
+            self.assertEqual(rows[0].get("required_tokens"), ["inboxes"])
 
     def test_record_model_interaction_writes_metrics_row(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -111,6 +149,82 @@ class PromptOpsLayerTests(unittest.TestCase):
             self.assertEqual(row.get("prompt_id"), "query")
             self.assertEqual(row.get("provider_id"), "query.classic")
             self.assertFalse(row.get("success"))
+            self.assertEqual(row.get("prompt_input_text"), "what song is playing")
+            self.assertEqual(row.get("prompt_effective_text"), "what song is playing?")
+
+    def test_record_model_interaction_allow_review_false_skips_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            metrics_path = Path(tmp) / "metrics.jsonl"
+            config = _base_config(tmp)
+            config["promptops"]["metrics"]["output_path"] = str(metrics_path)
+            config["promptops"]["review"] = {
+                "enabled": True,
+                "on_failure_only": True,
+                "persist_prompts": True,
+                "auto_approve": True,
+                "base_url": "http://127.0.0.1:8000",
+                "model": "internvl3_5_8b",
+                "timeout_s": 5.0,
+                "max_tokens": 64,
+            }
+            layer = PromptOpsLayer(config)
+            with mock.patch.object(layer, "_review_with_model") as review:
+                out = layer.record_model_interaction(
+                    prompt_id="query",
+                    provider_id="query.classic",
+                    model="",
+                    prompt_input="hello",
+                    prompt_effective="hello",
+                    response_text="",
+                    success=False,
+                    latency_ms=5.0,
+                    error="failed",
+                    allow_review=False,
+                )
+            self.assertEqual(out, {"reviewed": False, "updated": False})
+            review.assert_not_called()
+            rows = [json.loads(line) for line in metrics_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].get("type"), "promptops.model_interaction")
+
+    def test_relative_metrics_output_path_resolves_under_data_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _base_config(tmp)
+            config["promptops"]["metrics"]["output_path"] = "promptops/metrics.jsonl"
+            layer = PromptOpsLayer(config)
+            _ = layer.record_model_interaction(
+                prompt_id="query",
+                provider_id="query.classic",
+                model="",
+                prompt_input="hello",
+                prompt_effective="hello",
+                response_text="ok",
+                success=True,
+                latency_ms=1.2,
+            )
+            expected = Path(tmp) / "promptops" / "metrics.jsonl"
+            self.assertTrue(expected.exists())
+
+    def test_relative_metrics_output_path_uses_env_data_root_override(self) -> None:
+        with tempfile.TemporaryDirectory() as cfg_tmp, tempfile.TemporaryDirectory() as env_tmp:
+            config = _base_config(cfg_tmp)
+            config["paths"]["data_dir"] = "data"
+            config["storage"]["data_dir"] = "data"
+            config["promptops"]["metrics"]["output_path"] = "promptops/metrics.jsonl"
+            with mock.patch.dict("os.environ", {"AUTOCAPTURE_DATA_DIR": env_tmp}, clear=False):
+                layer = PromptOpsLayer(config)
+                _ = layer.record_model_interaction(
+                    prompt_id="query",
+                    provider_id="query.classic",
+                    model="",
+                    prompt_input="hello",
+                    prompt_effective="hello",
+                    response_text="ok",
+                    success=True,
+                    latency_ms=1.2,
+                )
+            expected = Path(env_tmp) / "promptops" / "metrics.jsonl"
+            self.assertTrue(expected.exists())
 
     def test_prepare_prompt_metrics_include_trace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -177,6 +291,87 @@ class PromptOpsLayerTests(unittest.TestCase):
             self.assertFalse(out.get("updated"))
             self.assertTrue(out.get("pending_approval"))
             self.assertFalse(prompt_path.exists())
+
+    def test_review_no_examples_does_not_persist_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            metrics_path = Path(tmp) / "metrics.jsonl"
+            prompt_path = Path(tmp) / "query.txt"
+            config = _base_config(tmp)
+            config["promptops"]["metrics"]["output_path"] = str(metrics_path)
+            config["promptops"]["review"] = {
+                "enabled": True,
+                "on_failure_only": True,
+                "persist_prompts": True,
+                "auto_approve": True,
+                "base_url": "http://127.0.0.1:8000",
+                "model": "internvl3_5_8b",
+                "timeout_s": 5.0,
+                "max_tokens": 64,
+                "allow_empty_examples": False,
+            }
+            config["promptops"]["prompt_dir"] = str(Path(tmp))
+            layer = PromptOpsLayer(config)
+            with mock.patch.object(layer, "_review_with_model", return_value="hello [source]"):
+                out = layer.record_model_interaction(
+                    prompt_id="query",
+                    provider_id="query.classic",
+                    model="",
+                    prompt_input="hello",
+                    prompt_effective="hello",
+                    response_text="",
+                    success=False,
+                    latency_ms=5.0,
+                    error="failed",
+                    metadata={"case": "missing_examples"},
+                )
+            self.assertTrue(out.get("reviewed"))
+            self.assertFalse(out.get("updated"))
+            self.assertFalse(prompt_path.exists())
+            rows = [json.loads(line) for line in metrics_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            review_rows = [row for row in rows if row.get("type") == "promptops.review_result"]
+            self.assertTrue(review_rows)
+            self.assertEqual(int(review_rows[-1].get("evaluation_total", -1)), 0)
+            self.assertFalse(bool(review_rows[-1].get("evaluation_ok", True)))
+
+    def test_review_failure_records_reason_metric(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            metrics_path = Path(tmp) / "metrics.jsonl"
+            config = _base_config(tmp)
+            config["promptops"]["metrics"]["output_path"] = str(metrics_path)
+            config["promptops"]["review"] = {
+                "enabled": True,
+                "on_failure_only": True,
+                "persist_prompts": True,
+                "auto_approve": True,
+                "base_url": "http://127.0.0.1:8000",
+                "model": "internvl3_5_8b",
+                "timeout_s": 5.0,
+                "max_tokens": 64,
+            }
+            layer = PromptOpsLayer(config)
+            with mock.patch.object(
+                layer,
+                "_review_with_model",
+                return_value={"candidate": "", "error": "review_preflight_failed:models_unreachable", "meta": {"preflight": {"ok": False}}},
+            ):
+                out = layer.record_model_interaction(
+                    prompt_id="query",
+                    provider_id="query.classic",
+                    model="",
+                    prompt_input="hello",
+                    prompt_effective="hello",
+                    response_text="",
+                    success=False,
+                    latency_ms=5.0,
+                    error="failed",
+                    metadata={"case": "review_fail"},
+                )
+            self.assertTrue(out.get("reviewed"))
+            self.assertFalse(out.get("updated"))
+            rows = [json.loads(line) for line in metrics_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            review_rows = [row for row in rows if row.get("type") == "promptops.review_result"]
+            self.assertTrue(review_rows)
+            self.assertIn("review_preflight_failed", str(review_rows[-1].get("review_error") or ""))
 
 
 if __name__ == "__main__":

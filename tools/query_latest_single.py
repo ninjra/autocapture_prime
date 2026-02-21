@@ -186,6 +186,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("query", help="Query string")
     parser.add_argument("--interactive", choices=["auto", "on", "off"], default="auto")
+    parser.add_argument(
+        "--skip-vllm-unstable",
+        dest="skip_vllm_unstable",
+        action="store_true",
+        default=True,
+        help="Return skipped output when VLM is unavailable/unstable (default: true).",
+    )
+    parser.add_argument(
+        "--fail-on-vllm-unstable",
+        dest="skip_vllm_unstable",
+        action="store_false",
+        help="Fail closed when VLM is unavailable/unstable.",
+    )
     parser.add_argument("--verdict", default="", help="agree/disagree/partial")
     parser.add_argument("--expected", default="", help="expected/ground-truth answer")
     parser.add_argument("--notes", default="", help="review notes")
@@ -211,17 +224,46 @@ def main(argv: list[str] | None = None) -> int:
             os.environ["AUTOCAPTURE_VLM_API_KEY"] = api_key
     os.environ.setdefault("AUTOCAPTURE_VLM_BASE_URL", EXTERNAL_VLLM_BASE_URL)
     os.environ.setdefault("AUTOCAPTURE_VLM_MODEL", "internvl3_5_8b")
-    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", "12")
-    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_RETRIES", "3")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", "45")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_MAX_S", "120")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_SCALE", "1.5")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_RETRIES", "6")
     os.environ.setdefault("AUTOCAPTURE_VLM_MAX_INFLIGHT", "1")
     os.environ.setdefault(
         "AUTOCAPTURE_VLM_ORCHESTRATOR_CMD",
         "bash /mnt/d/projects/hypervisor/tools/wsl/start_internvl35_8b_with_watch.sh",
     )
+    if bool(args.skip_vllm_unstable):
+        os.environ.setdefault("AUTOCAPTURE_VLM_DEGRADED_PREFLIGHT_COMPLETION_TIMEOUT_S", "12")
+        os.environ.setdefault("AUTOCAPTURE_VLM_DEGRADED_PREFLIGHT_TOTAL_TIMEOUT_S", "30")
+        os.environ.setdefault("AUTOCAPTURE_VLM_DEGRADED_PREFLIGHT_RETRIES", "1")
 
-    vllm_status = check_external_vllm_ready()
+    vllm_status = check_external_vllm_ready(
+        require_completion=True,
+        retries=(1 if bool(args.skip_vllm_unstable) else None),
+        timeout_completion_s=(12.0 if bool(args.skip_vllm_unstable) else None),
+    )
     if not bool(vllm_status.get("ok", False)):
         cmd = str(vllm_status.get("orchestrator_cmd") or os.environ.get("AUTOCAPTURE_VLM_ORCHESTRATOR_CMD") or "").strip()
+        if bool(args.skip_vllm_unstable):
+            sessions_dir = root / "artifacts" / "query_sessions"
+            sessions_dir.mkdir(parents=True, exist_ok=True)
+            session_path = sessions_dir / f"query_skip_{_utc_stamp()}.json"
+            skip_reason = str(vllm_status.get("error") or "vlm_unavailable")
+            session_doc = {
+                "query": str(args.query),
+                "skipped": True,
+                "skip_reason": f"vlm_unstable:{skip_reason}",
+                "vllm_status": vllm_status,
+                "report_path": str(report_path),
+                "config_dir": cfg,
+                "data_dir": data,
+            }
+            session_path.write_text(json.dumps(session_doc, indent=2, sort_keys=True), encoding="utf-8")
+            print(f"answer: skipped (vlm unstable: {skip_reason})")
+            print("query_run_id: ")
+            print(f"artifact: {session_path}")
+            return 0
         print(
             f"ERROR: external vLLM unavailable at {EXTERNAL_VLLM_BASE_URL}. "
             f"orchestrator_cmd={cmd}",

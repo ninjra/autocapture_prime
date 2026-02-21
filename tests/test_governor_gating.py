@@ -60,6 +60,21 @@ class GovernorGatingTests(unittest.TestCase):
         scheduler.run_pending({"user_active": False, "idle_seconds": 10, "query_intent": False})
         self.assertEqual(ran, ["heavy"])
 
+    def test_user_query_allows_heavy_even_when_active(self) -> None:
+        governor = RuntimeGovernor(idle_window_s=5)
+        scheduler = Scheduler(governor)
+        ran: list[str] = []
+        scheduler.enqueue(Job(name="heavy", fn=lambda: ran.append("heavy"), heavy=True))
+
+        scheduler.run_pending({"user_active": True, "idle_seconds": 0, "query_intent": True})
+        self.assertEqual(ran, ["heavy"])
+
+    def test_user_query_does_not_preempt_by_mode(self) -> None:
+        governor = RuntimeGovernor(idle_window_s=1)
+        governor.decide({"user_active": True, "idle_seconds": 0, "query_intent": True})
+        governor._mode_changed_at -= 1.0  # simulate elapsed > preempt grace
+        self.assertFalse(governor.should_preempt({"user_active": True, "idle_seconds": 0, "query_intent": True}))
+
     def test_preempt_immediate_on_activity_when_configured(self) -> None:
         governor = RuntimeGovernor(idle_window_s=1)
         governor.update_config(

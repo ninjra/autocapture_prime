@@ -1,4 +1,7 @@
 {
+  "capability_tags": [
+    "research"
+  ],
   "compat": {
     "requires_kernel": ">=0.1.0",
     "requires_schema_versions": [
@@ -6,7 +9,7 @@
     ]
   },
   "depends_on": [],
-  "enabled": true,
+  "enabled": false,
   "entrypoints": [
     {
       "callable": "create_plugin",
@@ -31,8 +34,5 @@
     "research.watchlist"
   ],
   "required_capabilities": [],
-  "version": "0.1.0",
-  "capability_tags": [
-    "research"
-  ]
+  "version": "0.1.0"
 }

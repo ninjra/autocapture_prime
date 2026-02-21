@@ -32,14 +32,16 @@ class CapturePipeline:
         ts_utc = datetime.now(timezone.utc).isoformat()
         segment_id = stable_id("capture.segment", {"ts_utc": ts_utc, "blob_id": blob_id})
         segment = CaptureSegment(segment_id=segment_id, ts_utc=ts_utc, blob_id=blob_id, metadata=metadata)
-        self._spool.append(segment)
+        if not self._spool.append(segment):
+            raise RuntimeError(f"capture_spool_write_failed:{segment.segment_id}")
         return segment
 
 
 def create_capture_source(plugin_id: str) -> CapturePipeline:
     config = load_config(default_config_paths(), safe_mode=False)
     spool_dir = config.get("storage", {}).get("spool_dir", "data/spool")
-    spool = CaptureSpool(spool_dir)
+    spool_fsync = bool(config.get("storage", {}).get("spool_fsync", True))
+    spool = CaptureSpool(spool_dir, fsync=spool_fsync)
     blob_root = config.get("storage", {}).get("blob_dir", "data/blobs")
     blob_store = BlobStore(blob_root, load_keyring(config))
     encoder = CaptureEncoder()

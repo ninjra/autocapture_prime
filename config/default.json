@@ -182,7 +182,10 @@
     },
     "diffusion": {
       "dry_run": true,
-      "k_variants": 1
+      "k_variants": 1,
+      "hypervisor_base_url": "http://127.0.0.1:7411",
+      "hypervisor_diffusion_path": "/v1/autocapture/devtools/diffusion",
+      "hypervisor_timeout_s": 120
     }
   },
   "gateway": {
@@ -377,9 +380,9 @@
       "builtin.ocr.rapid",
       "builtin.privacy.egress_sanitizer",
       "builtin.processing.sst.pipeline",
+      "builtin.processing.sst.uia_context",
       "builtin.processing.sst.ui_vlm",
       "builtin.prompt.bundle.default",
-      "builtin.research.default",
       "builtin.reranker.basic",
       "builtin.retrieval.basic",
       "builtin.runtime.governor",
@@ -799,8 +802,8 @@
       "builtin.screen.index.v1",
       "builtin.screen.answer.v1",
       "builtin.processing.sst.pipeline",
+      "builtin.processing.sst.uia_context",
       "builtin.prompt.bundle.default",
-      "builtin.research.default",
       "builtin.reranker.basic",
       "builtin.retrieval.basic",
       "builtin.state.jepa_like",
@@ -861,42 +864,43 @@
       "builtin.screen.index.v1": true,
       "builtin.screen.answer.v1": true,
       "builtin.processing.sst.pipeline": true,
+      "builtin.processing.sst.uia_context": true,
       "builtin.prompt.bundle.default": true,
-      "builtin.research.default": true,
-      "builtin.processing.sst.ui_vlm": true,
+      "builtin.research.default": false,
+      "builtin.processing.sst.ui_vlm": false,
       "builtin.reranker.basic": true,
       "builtin.retrieval.basic": true,
       "builtin.state.jepa_like": true,
-      "builtin.state.vector.linear": false,
+      "builtin.state.vector.linear": true,
       "builtin.state.vector.sqlite_ts": true,
       "builtin.state.vector.hnsw": true,
       "builtin.state.evidence.compiler": true,
       "builtin.state.retrieval": true,
       "builtin.state.policy": true,
-      "builtin.state.workflow.miner": false,
-      "builtin.state.anomaly": false,
-      "builtin.state.jepa.training": false,
-      "builtin.runtime.governor": false,
-      "builtin.runtime.scheduler": false,
-      "builtin.sst.build.delta": false,
-      "builtin.sst.build.state": false,
-      "builtin.sst.compliance.redact": false,
-      "builtin.sst.extract.chart": false,
-      "builtin.sst.extract.code": false,
-      "builtin.sst.extract.spreadsheet": false,
-      "builtin.sst.extract.table": false,
-      "builtin.sst.index": false,
-      "builtin.sst.infer.action": false,
-      "builtin.sst.layout.assemble": false,
-      "builtin.sst.match.ids": false,
-      "builtin.sst.ocr.onnx": false,
-      "builtin.sst.persist": false,
-      "builtin.sst.preprocess.normalize": false,
-      "builtin.sst.preprocess.tile": false,
-      "builtin.sst.temporal.segment": false,
-      "builtin.sst.track.cursor": false,
-      "builtin.sst.ui.parse": false,
-      "builtin.sst.qa.answers": false,
+      "builtin.state.workflow.miner": true,
+      "builtin.state.anomaly": true,
+      "builtin.state.jepa.training": true,
+      "builtin.runtime.governor": true,
+      "builtin.runtime.scheduler": true,
+      "builtin.sst.build.delta": true,
+      "builtin.sst.build.state": true,
+      "builtin.sst.compliance.redact": true,
+      "builtin.sst.extract.chart": true,
+      "builtin.sst.extract.code": true,
+      "builtin.sst.extract.spreadsheet": true,
+      "builtin.sst.extract.table": true,
+      "builtin.sst.index": true,
+      "builtin.sst.infer.action": true,
+      "builtin.sst.layout.assemble": true,
+      "builtin.sst.match.ids": true,
+      "builtin.sst.ocr.onnx": true,
+      "builtin.sst.persist": true,
+      "builtin.sst.preprocess.normalize": true,
+      "builtin.sst.preprocess.tile": true,
+      "builtin.sst.temporal.segment": true,
+      "builtin.sst.track.cursor": true,
+      "builtin.sst.ui.parse": true,
+      "builtin.sst.qa.answers": true,
       "builtin.storage.encrypted": false,
       "builtin.storage.sqlcipher": true,
       "builtin.time.advanced": true,
@@ -904,10 +908,20 @@
       "builtin.tracking.clipboard.windows": false,
       "builtin.tracking.file_activity.windows": false,
       "builtin.vlm.basic": true,
-      "builtin.vlm.vllm_localhost": true,
+      "builtin.vlm.vllm_localhost": false,
       "builtin.window.metadata.windows": false
     },
-    "settings": {},
+    "settings": {
+      "builtin.processing.sst.uia_context": {
+        "dataroot": "/mnt/d/autocapture",
+        "allow_latest_snapshot_fallback": true,
+        "require_hash_match": true,
+        "max_focus_nodes": 64,
+        "max_context_nodes": 96,
+        "max_operable_nodes": 128,
+        "drop_offscreen": true
+      }
+    },
     "filesystem_defaults": {
       "read": [
         "{repo_root}",
@@ -1011,7 +1025,7 @@
           "{repo_root}/autocapture_nx"
         ],
         "readwrite": [
-          "{repo_root}/tools/hypervisor/runs"
+          "{repo_root}/artifacts/devtools/diffusion_runs"
         ]
       },
       "builtin.vlm.qwen2_vl_2b": {
@@ -1126,9 +1140,37 @@
     "idle": {
       "auto_start": true,
       "enabled": true,
+      "adaptive_parallelism": {
+        "enabled": true,
+        "cpu_min": 1,
+        "cpu_max": 4,
+        "cpu_step_up": 1,
+        "cpu_step_down": 1,
+        "batch_per_worker": 3,
+        "items_per_worker": 20,
+        "batch_min": 3,
+        "batch_max": 18,
+        "items_min": 20,
+        "items_max": 120,
+        "low_watermark": 0.65,
+        "high_watermark": 0.9
+      },
+      "intelligent_batch": {
+        "enabled": true,
+        "defer_vlm_on_hash_repeat": true,
+        "hash_repeat_window": 8,
+        "max_vlm_records_per_run": 0,
+        "max_pipeline_records_per_run": 0
+      },
+      "sla_control": {
+        "enabled": true,
+        "retention_horizon_hours": 144,
+        "lag_warn_ratio": 0.8,
+        "cpu_step_up_on_risk": 1
+      },
       "extractors": {
         "ocr": true,
-        "vlm": true
+        "vlm": false
       },
       "max_concurrency_cpu": 2,
       "max_concurrency_gpu": 1,
@@ -1224,8 +1266,8 @@
       },
       "features": {
         "index_enabled": true,
-        "workflow_enabled": false,
-        "anomaly_enabled": false,
+        "workflow_enabled": true,
+        "anomaly_enabled": true,
         "training_enabled": true
       }
     },
@@ -1421,7 +1463,7 @@
         "mode": "vlm_json"
       },
       "ui_vlm": {
-        "enabled": true,
+        "enabled": false,
         "max_providers": 1,
         "prefer_live_vlm": true,
         "use_cached_tokens": false
@@ -1443,6 +1485,7 @@
     "bundle_root": "promptops/sources",
     "enabled": true,
     "examples": {},
+    "examples_path": "data/promptops/examples.json",
     "eval": {
       "enabled": false,
       "cases_path": "tests/fixtures/promptops_eval_cases.json",
@@ -1473,6 +1516,8 @@
       "include_prompt": false
     },
     "metrics": {
+      "capture_prompt_text": true,
+      "max_prompt_text_chars": 4096,
       "enabled": true,
       "output_path": "data/promptops/metrics.jsonl"
     },
@@ -1484,26 +1529,54 @@
     "model_strategy": "model_contract",
     "persist_prompts": false,
     "persist_query_prompts": true,
+    "require_query_path": true,
     "query_strategy": "normalize_query",
     "require_citations": true,
     "review": {
       "approved_prompt_ids": [],
       "auto_approve": true,
+      "allow_empty_examples": false,
       "base_url": "http://127.0.0.1:8000/v1",
       "enabled": true,
       "max_tokens": 256,
       "model": "internvl3_5_8b",
       "on_failure_only": true,
+      "preflight_auto_recover": true,
+      "preflight_completion_timeout_s": 15.0,
+      "preflight_retries": 1,
+      "preflight_require_completion": true,
+      "require_preflight": true,
       "persist_prompts": true,
       "timeout_s": 15.0
+    },
+    "optimizer": {
+      "enabled": true,
+      "interval_s": 300,
+      "estimate_ms": 1500,
+      "metrics_window_rows": 5000,
+      "refresh_examples": true,
+      "query_trace_path": "data/facts/query_trace.ndjson",
+      "min_interactions": 10,
+      "min_success_rate": 0.7,
+      "max_latency_p95_ms": 4000.0,
+      "max_prompt_ids": 3,
+      "strategies": [
+        "normalize_query",
+        "model_contract"
+      ],
+      "auto_promote": false,
+      "min_pass_rate_delta": 0.05,
+      "output_path": "artifacts/promptops/optimizer_latest.json"
     },
     "sources": [],
     "strategy": "append_sources"
   },
   "research": {
     "cache_dir": "data/research/cache",
-    "enabled": true,
+    "enabled": false,
+    "fail_closed_on_plugin_error": false,
     "interval_s": 1800,
+    "owner": "hypervisor",
     "report_dir": "data/research/reports",
     "run_on_idle": true,
     "source_name": "default",
@@ -1622,6 +1695,9 @@
       "sign": true,
       "use_dpapi": true
     },
+    "archive": {
+      "safe_extract": true
+    },
     "blob_dir": "data/blobs",
     "crypto": {
       "backend": "aesgcm",
@@ -1667,6 +1743,7 @@
       "max_delete_per_run": 500,
       "record_batches": true
     },
+    "spool_fsync": true,
     "spool_dir": "data/spool",
     "spool_overflow": {
       "enabled": true,

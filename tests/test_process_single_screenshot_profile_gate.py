@@ -84,11 +84,35 @@ class ProcessSingleScreenshotProfileGateTests(unittest.TestCase):
         self.assertTrue(mod._should_require_vlm(["builtin.vlm.vllm_localhost"]))
         self.assertFalse(mod._should_require_vlm(["builtin.ocr.basic"]))
 
+    def test_disable_vlm_idle_runtime_flips_config_flags(self) -> None:
+        mod = _load_module()
+
+        class _Idle:
+            def __init__(self) -> None:
+                self._config = {
+                    "processing": {
+                        "idle": {"extractors": {"vlm": True}, "max_concurrency_gpu": 2},
+                        "sst": {"allow_vlm": True, "ui_vlm": {"enabled": True}},
+                    }
+                }
+
+        idle = _Idle()
+        mod._disable_vlm_idle_runtime(idle)
+        self.assertFalse(bool(idle._config["processing"]["idle"]["extractors"]["vlm"]))
+        self.assertEqual(int(idle._config["processing"]["idle"]["max_concurrency_gpu"]), 0)
+        self.assertFalse(bool(idle._config["processing"]["sst"]["allow_vlm"]))
+        self.assertFalse(bool(idle._config["processing"]["sst"]["ui_vlm"]["enabled"]))
+
     def test_truthy_env_helper(self) -> None:
         mod = _load_module()
         self.assertTrue(mod._is_truthy_env("1"))
         self.assertFalse(mod._is_truthy_env("0"))
         self.assertFalse(mod._is_truthy_env(""))
+
+    def test_coerce_float_helper(self) -> None:
+        mod = _load_module()
+        self.assertEqual(float(mod._coerce_float("12.5", 1.0)), 12.5)
+        self.assertEqual(float(mod._coerce_float("bad", 1.25)), 1.25)
 
     def test_blocked_env_overrides_detects_truthy_only(self) -> None:
         mod = _load_module()
@@ -110,6 +134,34 @@ class ProcessSingleScreenshotProfileGateTests(unittest.TestCase):
                 os.environ.pop("AUTOCAPTURE_VLM_MAX_TOKENS", None)
             else:
                 os.environ["AUTOCAPTURE_VLM_MAX_TOKENS"] = old_b
+
+    def test_resolve_idle_step_max_seconds_uses_budget_default(self) -> None:
+        mod = _load_module()
+        old = os.environ.get("AUTOCAPTURE_SINGLE_IDLE_STEP_MAX_SECONDS")
+        try:
+            os.environ.pop("AUTOCAPTURE_SINGLE_IDLE_STEP_MAX_SECONDS", None)
+            self.assertEqual(mod._resolve_idle_step_max_seconds(budget_ms=90000), 90)
+            self.assertEqual(mod._resolve_idle_step_max_seconds(budget_ms=5000), 30)
+            self.assertEqual(mod._resolve_idle_step_max_seconds(budget_ms=600000), 120)
+        finally:
+            if old is None:
+                os.environ.pop("AUTOCAPTURE_SINGLE_IDLE_STEP_MAX_SECONDS", None)
+            else:
+                os.environ["AUTOCAPTURE_SINGLE_IDLE_STEP_MAX_SECONDS"] = old
+
+    def test_resolve_idle_step_max_seconds_prefers_env_override(self) -> None:
+        mod = _load_module()
+        old = os.environ.get("AUTOCAPTURE_SINGLE_IDLE_STEP_MAX_SECONDS")
+        try:
+            os.environ["AUTOCAPTURE_SINGLE_IDLE_STEP_MAX_SECONDS"] = "45"
+            self.assertEqual(mod._resolve_idle_step_max_seconds(budget_ms=90000), 45)
+            os.environ["AUTOCAPTURE_SINGLE_IDLE_STEP_MAX_SECONDS"] = "5"
+            self.assertEqual(mod._resolve_idle_step_max_seconds(budget_ms=90000), 15)
+        finally:
+            if old is None:
+                os.environ.pop("AUTOCAPTURE_SINGLE_IDLE_STEP_MAX_SECONDS", None)
+            else:
+                os.environ["AUTOCAPTURE_SINGLE_IDLE_STEP_MAX_SECONDS"] = old
 
     def test_resolve_strict_model_selection_auto_single(self) -> None:
         mod = _load_module()
@@ -170,6 +222,75 @@ class ProcessSingleScreenshotProfileGateTests(unittest.TestCase):
         self.assertTrue(enabled.get("builtin.journal.basic"))
         self.assertTrue(enabled.get("builtin.ledger.basic"))
         self.assertTrue(enabled.get("builtin.anchor.basic"))
+
+    def test_inject_synthetic_hid_minimal(self) -> None:
+        mod = _load_module()
+
+        class _Meta:
+            def __init__(self) -> None:
+                self.rows: dict[str, dict] = {}
+
+            def put(self, record_id: str, payload: dict, **_kwargs) -> None:
+                self.rows[str(record_id)] = dict(payload)
+
+        class _Journal:
+            def __init__(self) -> None:
+                self.events: list[tuple[str, dict]] = []
+
+            def append_event(self, event_type: str, payload: dict, **_kwargs) -> str:
+                self.events.append((str(event_type), dict(payload)))
+                return "evt"
+
+        meta = _Meta()
+        journal = _Journal()
+        out = mod._inject_synthetic_hid(
+            metadata=meta,
+            journal=journal,
+            run_id="run_test",
+            base_ts_utc="2026-02-17T00:00:00Z",
+            mode="minimal",
+        )
+        self.assertTrue(out["enabled"])
+        self.assertEqual(out["mode"], "minimal")
+        self.assertGreaterEqual(int(out["event_count"]), 4)
+        self.assertGreaterEqual(len(meta.rows), 2)
+        summary_rows = [row for row in meta.rows.values() if row.get("record_type") == "derived.input.summary"]
+        self.assertEqual(len(summary_rows), 1)
+        summary = summary_rows[0]
+        self.assertEqual(summary.get("run_id"), "run_test")
+        self.assertGreaterEqual(int(summary.get("event_count", 0)), 4)
+        self.assertTrue(str(summary.get("payload_hash") or ""))
+        event_types = [name for name, _ in journal.events]
+        self.assertIn("input.batch", event_types)
+        self.assertIn("cursor.sample", event_types)
+
+    def test_inject_synthetic_hid_rich_has_more_events_than_minimal(self) -> None:
+        mod = _load_module()
+
+        class _Meta:
+            def __init__(self) -> None:
+                self.rows: dict[str, dict] = {}
+
+            def put(self, record_id: str, payload: dict, **_kwargs) -> None:
+                self.rows[str(record_id)] = dict(payload)
+
+        meta_min = _Meta()
+        meta_rich = _Meta()
+        out_min = mod._inject_synthetic_hid(
+            metadata=meta_min,
+            journal=None,
+            run_id="run_test",
+            base_ts_utc="2026-02-17T00:00:00Z",
+            mode="minimal",
+        )
+        out_rich = mod._inject_synthetic_hid(
+            metadata=meta_rich,
+            journal=None,
+            run_id="run_test",
+            base_ts_utc="2026-02-17T00:00:00Z",
+            mode="rich",
+        )
+        self.assertGreater(int(out_rich["event_count"]), int(out_min["event_count"]))
 
 
 if __name__ == "__main__":

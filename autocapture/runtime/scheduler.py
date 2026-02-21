@@ -75,6 +75,9 @@ class Scheduler:
         self._routing_protocol = 1
         self._routing_queue_dir = "artifacts/wsl2_queue"
         self._routing_distro = ""
+        self._routing_max_pending = 256
+        self._routing_max_inflight = 1
+        self._routing_token_ttl_s = 300.0
         snapshot = governor.budget_snapshot()
         def _snapshot_value(name: str, default: int = 0) -> int:
             if hasattr(snapshot, name):
@@ -117,8 +120,17 @@ class Scheduler:
         self._routing_protocol = int(gpu_cfg.get("protocol_version", 1) or 1)
         self._routing_queue_dir = str(gpu_cfg.get("shared_queue_dir", "artifacts/wsl2_queue"))
         self._routing_distro = str(gpu_cfg.get("distro", "") or "")
+        self._routing_max_pending = int(max(1, int(gpu_cfg.get("max_pending", 256) or 256)))
+        self._routing_max_inflight = int(max(1, int(gpu_cfg.get("max_inflight", 1) or 1)))
+        self._routing_token_ttl_s = float(max(1.0, float(gpu_cfg.get("token_ttl_s", 300.0) or 300.0)))
         if self._wsl2_queue is None or self._wsl2_queue.queue_dir != self._routing_queue_dir:
-            self._wsl2_queue = Wsl2Queue(self._routing_queue_dir, protocol_version=self._routing_protocol)
+            self._wsl2_queue = Wsl2Queue(
+                self._routing_queue_dir,
+                protocol_version=self._routing_protocol,
+                max_pending=self._routing_max_pending,
+                max_inflight=self._routing_max_inflight,
+                token_ttl_s=self._routing_token_ttl_s,
+            )
 
     def set_wsl2_queue(self, queue: Wsl2Queue | None) -> None:
         self._wsl2_queue = queue
@@ -141,7 +153,13 @@ class Scheduler:
         if self._routing_target != "wsl2":
             return None
         if self._wsl2_queue is None:
-            self._wsl2_queue = Wsl2Queue(self._routing_queue_dir, protocol_version=self._routing_protocol)
+            self._wsl2_queue = Wsl2Queue(
+                self._routing_queue_dir,
+                protocol_version=self._routing_protocol,
+                max_pending=self._routing_max_pending,
+                max_inflight=self._routing_max_inflight,
+                token_ttl_s=self._routing_token_ttl_s,
+            )
         run_id = str(signals.get("run_id") or "")
         payload = job.payload or {"job": job.name}
         result = self._wsl2_queue.dispatch(

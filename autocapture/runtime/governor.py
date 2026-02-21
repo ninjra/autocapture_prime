@@ -255,10 +255,10 @@ class RuntimeGovernor:
                 return True
             grace_ms = max(0, int(self._budgets.preempt_grace_ms))
             suspend_deadline = max(0, int(self._suspend_deadline_ms))
-            if decision.mode != "IDLE_DRAIN" and suspend_deadline:
+            if decision.mode not in {"IDLE_DRAIN", "USER_QUERY"} and suspend_deadline:
                 grace_ms = suspend_deadline if grace_ms <= 0 else min(grace_ms, suspend_deadline)
             elapsed_ms = int(max(0.0, (time.monotonic() - self._mode_changed_at) * 1000.0))
-            if decision.mode != "IDLE_DRAIN" and elapsed_ms >= grace_ms:
+            if decision.mode not in {"IDLE_DRAIN", "USER_QUERY"} and elapsed_ms >= grace_ms:
                 return True
             if (
                 decision.mode == "IDLE_DRAIN"
@@ -275,7 +275,7 @@ class RuntimeGovernor:
             return BudgetLease(self, job_name, allowed=True, granted_ms=0, heavy=False)
         with self._lock:
             decision = self._decide_locked(self._last_signals)
-            if decision.mode != "IDLE_DRAIN" or not decision.heavy_allowed:
+            if decision.mode not in {"IDLE_DRAIN", "USER_QUERY"} or not decision.heavy_allowed:
                 return BudgetLease(self, job_name, allowed=False, granted_ms=0, heavy=True)
             per_job_max = max(0, int(self._budgets.per_job_max_ms))
             remaining = max(0, int(decision.budget.remaining_ms))

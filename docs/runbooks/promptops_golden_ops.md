@@ -11,10 +11,14 @@ Operational checks for the golden PromptOps pipeline with citation-first answers
 ## Verification Commands
 - PromptOps metrics report:
   - `.venv/bin/python tools/promptops_metrics_report.py`
+- PromptOps examples refresh:
+  - `.venv/bin/python tools/promptops_refresh_examples.py`
 - PromptOps perf gate:
   - `.venv/bin/python tools/gate_promptops_perf.py`
 - PromptOps policy gate:
   - `.venv/bin/python tools/gate_promptops_policy.py`
+- PromptOps optimizer cycle (idle-safe):
+  - `.venv/bin/python tools/promptops_optimize_once.py --force --idle-seconds 90`
 - Screen schema gate:
   - `.venv/bin/python tools/gate_screen_schema.py`
 - Q/H plugin validation trace:
@@ -22,8 +26,10 @@ Operational checks for the golden PromptOps pipeline with citation-first answers
 
 ## Expected Outputs
 - `artifacts/promptops/metrics_report_latest.json`
+- `data/promptops/examples.json`
 - `artifacts/perf/gate_promptops_perf.json`
 - `artifacts/promptops/gate_promptops_policy.json`
+- `artifacts/promptops/optimizer_latest.json`
 - `artifacts/phaseA/gate_screen_schema.json`
 - `artifacts/advanced10/question_validation_plugin_trace_latest.json`
 - `docs/reports/question-validation-plugin-trace-2026-02-13.md`
@@ -31,4 +37,3 @@ Operational checks for the golden PromptOps pipeline with citation-first answers
 ## Rollback
 - Revert `config/profiles/golden_full.json` and `config/profiles/golden_full.sha256` to last known-good commit.
 - Re-run all gates before re-enabling golden rollout.
-

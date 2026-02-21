@@ -158,6 +158,29 @@ class VllmLocalhostPluginTests(unittest.TestCase):
         self.assertEqual(payload.get("backend"), "unavailable")
         self.assertIn("circuit_open", str(payload.get("model_error") or ""))
 
+    def test_chat_image_retries_on_timeout_then_succeeds(self) -> None:
+        plugin = self._plugin()
+        plugin._model = "demo-model"  # type: ignore[attr-defined]
+        plugin._max_retries = 2  # type: ignore[attr-defined]
+        calls = {"count": 0}
+
+        class _FakeClient:
+            def chat_completions(self, _req):  # noqa: ANN001
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    raise TimeoutError("timed out")
+                return {"choices": [{"message": {"content": "{\"elements\":[]}"}}]}
+
+        content = plugin._chat_image(  # type: ignore[attr-defined]
+            _FakeClient(),  # type: ignore[arg-type]
+            b"not-a-png",
+            "Return JSON",
+            max_tokens=64,
+            prompt_id="test.timeout.retry",
+        )
+        self.assertEqual(content, "{\"elements\":[]}")
+        self.assertEqual(int(calls["count"]), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

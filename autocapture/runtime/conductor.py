@@ -1,4 +1,8 @@
-"""Runtime conductor for idle processing and research."""
+"""Runtime conductor for idle processing.
+
+Research scheduling was deprecated from autocapture_prime and migrated to
+hypervisor-owned orchestration.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +12,6 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from typing import Any
 
-from autocapture.research.runner import ResearchRunner
 from autocapture.storage.pressure import StoragePressureMonitor
 from autocapture.storage.retention import StorageRetentionMonitor
 from autocapture.runtime.governor import RuntimeGovernor
@@ -17,7 +20,8 @@ from autocapture.runtime.gpu import release_vram
 from autocapture.runtime.gpu_guard import evaluate_gpu_lag_guard
 from autocapture.runtime.gpu_monitor import sample_gpu
 from autocapture.runtime.scheduler import Job, JobStepResult, Scheduler
-from autocapture_nx.kernel.activity_signal import load_activity_signal
+from autocapture_nx.ingest.handoff_ingest import auto_drain_handoff_spool
+from autocapture_nx.kernel.activity_signal import is_activity_signal_fresh, load_activity_signal
 from autocapture_nx.kernel.audit import append_audit_event
 from autocapture_nx.kernel.telemetry import record_telemetry
 from autocapture_nx.windows.fullscreen import fullscreen_snapshot
@@ -32,6 +36,7 @@ class ConductorStats:
     last_idle_stats: dict[str, Any] | None = None
     last_watchdog: dict[str, Any] | None = None
     last_research_run: float | None = None
+    last_promptops_optimize: float | None = None
     last_storage_sample: float | None = None
     last_retention_run: float | None = None
     last_telemetry_emit: float | None = None
@@ -50,7 +55,8 @@ class RuntimeConductor:
         self._idle_processor = None
         self._storage_monitor = StoragePressureMonitor(system)
         self._retention_monitor = StorageRetentionMonitor(system)
-        self._research_runner = ResearchRunner(self._config)
+        self._research_runner = None
+        self._promptops_optimizer = None
         self._events = self._resolve_event_builder(system)
         self._logger = self._resolve_logger(system)
         self._stop = threading.Event()
@@ -146,6 +152,21 @@ class RuntimeConductor:
         self._idle_processor = IdleProcessor(self._system)
         return self._idle_processor
 
+    def _resolve_promptops_optimizer(self):
+        if self._promptops_optimizer is not None:
+            return self._promptops_optimizer
+        try:
+            from autocapture.promptops.optimizer import PromptOpsOptimizer
+        except Exception:
+            PromptOpsOptimizer = None  # type: ignore
+        if PromptOpsOptimizer is None:
+            return None
+        try:
+            self._promptops_optimizer = PromptOpsOptimizer(self._config)
+        except Exception:
+            self._promptops_optimizer = None
+        return self._promptops_optimizer
+
     def _signals(self, *, query_intent: bool | None = None) -> dict[str, Any]:
         runtime_cfg = self._config.get("runtime", {}) if isinstance(self._config, dict) else {}
         active_window_s = float(runtime_cfg.get("active_window_s", 3))
@@ -182,9 +203,14 @@ class RuntimeConductor:
                 signal = load_activity_signal(self._config)
             except Exception:
                 signal = None
-            if signal is not None:
+            if signal is not None and is_activity_signal_fresh(signal, self._config):
                 idle_seconds = float(signal.idle_seconds)
                 user_active = bool(signal.user_active)
+            else:
+                # Stale/missing sidecar activity is treated as active so Stage2+
+                # never runs without a fresh idle signal.
+                idle_seconds = 0.0
+                user_active = True
         if fixture_override:
             idle_seconds = float("inf")
             user_active = False
@@ -308,9 +334,11 @@ class RuntimeConductor:
             self._stats.last_idle_run = time.time()
             started = time.monotonic()
             idle_stats = None
+            handoff_stats = None
             done = True
             ts_utc = datetime.now(timezone.utc).isoformat()
             try:
+                handoff_stats = auto_drain_handoff_spool(self._config)
                 if hasattr(processor, "process_step"):
                     result = processor.process_step(
                         should_abort=should_abort,
@@ -355,6 +383,8 @@ class RuntimeConductor:
                     self._stats.last_idle_error = "idle_errors"
                     self._stats.last_idle_error_ts = time.time()
                 payload.update(stats_payload)
+            if isinstance(handoff_stats, dict):
+                payload["stage1_handoff"] = handoff_stats
             record_telemetry("processing.idle", payload)
             return JobStepResult(done=done, consumed_ms=consumed_ms)
 
@@ -372,42 +402,56 @@ class RuntimeConductor:
         self._queued.add("idle.extract")
 
     def _schedule_research(self) -> None:
-        cfg = self._config.get("research", {})
-        if not bool(cfg.get("enabled", True)):
+        # Deprecated: research execution now runs in hypervisor.
+        return
+
+    def _schedule_promptops_optimizer(self, signals: dict[str, Any]) -> None:
+        optimizer_cfg = self._config.get("promptops", {}).get("optimizer", {})
+        if not bool(optimizer_cfg.get("enabled", False)):
             return
-        if not bool(cfg.get("run_on_idle", True)):
+        if bool(signals.get("user_active", False)):
             return
-        interval_s = float(cfg.get("interval_s", 1800))
-        now = time.time()
-        last = self._stats.last_research_run or 0.0
-        if now - last < interval_s:
+        optimizer = self._resolve_promptops_optimizer()
+        if optimizer is None:
             return
-        if "idle.research" in self._queued:
+        if hasattr(optimizer, "due") and not bool(optimizer.due()):
+            return
+        if "promptops.optimize" in self._queued:
             return
 
-        def step_fn(should_abort, budget_ms: int) -> JobStepResult:
-            self._stats.last_research_run = time.time()
-            started = time.monotonic()
-            if hasattr(self._research_runner, "run_step"):
-                done = bool(self._research_runner.run_step(should_abort=should_abort, budget_ms=budget_ms))
-            else:
-                self._research_runner.run_once()
-                done = True
-            consumed_ms = int(max(0.0, (time.monotonic() - started) * 1000.0))
-            return JobStepResult(done=done, consumed_ms=consumed_ms)
+        estimate_ms = int(optimizer_cfg.get("estimate_ms", 1500) or 1500)
+        idle_seconds = float(signals.get("idle_seconds", 0.0) or 0.0)
 
-        estimate_ms = int(cfg.get("estimate_ms", 1500))
+        def job_fn():
+            report = optimizer.run_once(
+                user_active=False,
+                idle_seconds=idle_seconds,
+                force=False,
+            )
+            self._stats.last_promptops_optimize = time.time()
+            record_telemetry("promptops.optimizer", report if isinstance(report, dict) else {"ok": False})
+            if self._events is not None:
+                try:
+                    self._events.journal_event("promptops.optimizer", report if isinstance(report, dict) else {})
+                except Exception:
+                    pass
+            if self._logger is not None:
+                try:
+                    self._logger.log("promptops.optimizer", report if isinstance(report, dict) else {})
+                except Exception:
+                    pass
+
         self._scheduler.enqueue(
             Job(
-                name="idle.research",
-                step_fn=step_fn,
+                name="promptops.optimize",
+                fn=job_fn,
                 heavy=True,
                 estimated_ms=estimate_ms,
-                gpu_heavy=True,
-                payload={"task": "idle.research"},
+                gpu_heavy=False,
+                payload={"task": "promptops.optimize"},
             )
         )
-        self._queued.add("idle.research")
+        self._queued.add("promptops.optimize")
 
     def _schedule_storage_pressure(self) -> None:
         if self._storage_monitor is None:
@@ -769,6 +813,7 @@ class RuntimeConductor:
         if not fullscreen_active:
             self._schedule_idle()
             self._schedule_research()
+            self._schedule_promptops_optimizer(signals)
             self._schedule_storage_pressure()
             self._schedule_storage_retention()
         executed = self._scheduler.run_pending(signals)

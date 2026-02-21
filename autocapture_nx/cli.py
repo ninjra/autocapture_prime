@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
+import time
 from getpass import getpass
 from dataclasses import asdict
 from pathlib import Path
@@ -15,13 +17,35 @@ from autocapture_nx.kernel.config import load_config
 from autocapture_nx.kernel.audit import append_audit_event
 from autocapture_nx.kernel.errors import AutocaptureError
 from autocapture_nx.kernel.keyring import KeyRing, export_keyring_bundle, import_keyring_bundle
-from autocapture_nx.kernel.loader import default_config_paths
+from autocapture_nx.kernel.loader import Kernel, default_config_paths
 from autocapture_nx.ux.facade import create_facade
 
 from autocapture_nx.kernel.backup_bundle import create_backup_bundle, restore_backup_bundle
+from autocapture_nx.kernel.paths import repo_root
 
 def _print_json(data: object) -> None:
     print(json.dumps(data, indent=2, sort_keys=True))
+
+
+def _run_repo_command(cmd: list[str]) -> dict[str, Any]:
+    root = repo_root()
+    env = os.environ.copy()
+    env.setdefault("PYTHONPATH", str(root))
+    proc = subprocess.run(
+        cmd,
+        cwd=str(root),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return {
+        "cmd": cmd,
+        "returncode": int(proc.returncode),
+        "ok": int(proc.returncode) == 0,
+        "stdout_tail": str(proc.stdout or "")[-4000:],
+        "stderr_tail": str(proc.stderr or "")[-4000:],
+    }
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -394,6 +418,135 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_setup(args: argparse.Namespace) -> int:
+    profile = str(getattr(args, "profile", "") or "").strip()
+    supported_profiles = {"personal_4090", "personal_windows_4090"}
+    if profile not in supported_profiles:
+        _print_json(
+            {
+                "ok": False,
+                "error": "unsupported_profile",
+                "profile": profile,
+                "supported_profiles": sorted(supported_profiles),
+            }
+        )
+        return 2
+
+    root = repo_root()
+    py = str(Path(sys.executable).resolve())
+    steps: list[dict[str, Any]] = []
+
+    profile_path = root / "config" / "profiles" / "personal_4090.json"
+    steps.append(
+        {
+            "name": "profile_exists",
+            "path": str(profile_path),
+            "ok": profile_path.exists(),
+        }
+    )
+
+    preflight_cmd = [
+        py,
+        "tools/preflight_live_stack.py",
+        "--output",
+        "artifacts/live_stack/preflight_latest.json",
+    ]
+    steps.append({"name": "preflight_live_stack", **_run_repo_command(preflight_cmd)})
+
+    facade = create_facade(safe_mode=args.safe_mode)
+    try:
+        status_payload = facade.status()
+        steps.append(
+            {
+                "name": "status_snapshot",
+                "ok": True,
+                "safe_mode": bool(status_payload.get("safe_mode", False)),
+                "plugins_loaded": int(status_payload.get("plugins_loaded", 0) or 0),
+            }
+        )
+        batch_result = facade.batch_run(
+            max_loops=int(getattr(args, "batch_loops", 1) or 1),
+            sleep_ms=int(getattr(args, "batch_sleep_ms", 50) or 50),
+            require_idle=False,
+        )
+        steps.append(
+            {
+                "name": "batch_prime",
+                "ok": bool(batch_result.get("ok", True)),
+                "result": batch_result,
+            }
+        )
+    except Exception as exc:
+        steps.append({"name": "facade_bootstrap", "ok": False, "error": f"{type(exc).__name__}:{exc}"})
+
+    sample_query = str(getattr(args, "sample_query", "") or "").strip()
+    if sample_query:
+        try:
+            query_result = facade.query(sample_query)
+            query_ok = "error" not in query_result and bool(query_result.get("answer") or query_result.get("claims"))
+            steps.append({"name": "sample_query", "ok": query_ok, "query": sample_query, "result": query_result})
+        except Exception as exc:
+            steps.append(
+                {
+                    "name": "sample_query",
+                    "ok": False,
+                    "query": sample_query,
+                    "error": f"{type(exc).__name__}:{exc}",
+                }
+            )
+
+    required = {"profile_exists", "preflight_live_stack", "status_snapshot", "batch_prime"}
+    failed_required = [step["name"] for step in steps if step.get("name") in required and not bool(step.get("ok"))]
+    payload = {
+        "ok": len(failed_required) == 0,
+        "profile": profile,
+        "failed_required_steps": failed_required,
+        "steps": steps,
+    }
+    _print_json(payload)
+    return 0 if payload["ok"] else 2
+
+
+def cmd_gate(args: argparse.Namespace) -> int:
+    profile = str(getattr(args, "profile", "") or "").strip()
+    if profile != "golden_qh":
+        _print_json(
+            {
+                "ok": False,
+                "error": "unsupported_profile",
+                "profile": profile,
+                "supported_profiles": ["golden_qh"],
+            }
+        )
+        return 2
+
+    py = str(Path(sys.executable).resolve())
+    steps: list[dict[str, Any]] = []
+
+    release_cmd = [py, "tools/release_gate.py", "--output", "artifacts/release/release_gate_latest.json"]
+    steps.append({"name": "release_gate", **_run_repo_command(release_cmd)})
+
+    q40_cmd = ["bash", "tools/q40.sh"]
+    image_path = str(getattr(args, "image", "") or "").strip()
+    if image_path:
+        q40_cmd.append(image_path)
+    if not bool(getattr(args, "skip_q40", False)):
+        steps.append({"name": "q40_eval", **_run_repo_command(q40_cmd)})
+
+    matrix_cmd = ["bash", "tools/ivm.sh"]
+    steps.append({"name": "impl_matrix_verify", **_run_repo_command(matrix_cmd)})
+
+    failed = [step["name"] for step in steps if not bool(step.get("ok"))]
+    payload = {
+        "ok": len(failed) == 0,
+        "profile": profile,
+        "failed_steps": failed,
+        "steps": steps,
+    }
+    _print_json(payload)
+    return 0 if payload["ok"] else 2
+
+
 def cmd_devtools_diffusion(args: argparse.Namespace) -> int:
     facade = create_facade(safe_mode=args.safe_mode)
     result = facade.devtools_diffusion(axis=args.axis, k_variants=args.k, dry_run=args.dry_run)
@@ -409,10 +562,66 @@ def cmd_devtools_ast_ir(args: argparse.Namespace) -> int:
 
 
 def cmd_query(args: argparse.Namespace) -> int:
+    os.environ.setdefault("AUTOCAPTURE_QUERY_METADATA_ONLY", "1")
+    os.environ.setdefault("AUTOCAPTURE_ADV_HARD_VLM_MODE", "off")
     facade = create_facade(safe_mode=args.safe_mode)
     result = facade.query(args.text)
     _print_json(result)
     return 0
+
+
+def cmd_export_chatgpt(args: argparse.Namespace) -> int:
+    from autocapture_nx.kernel.export_chatgpt import run_export_pass
+
+    paths = default_config_paths()
+    kernel = Kernel(paths, safe_mode=bool(args.safe_mode))
+    follow = bool(getattr(args, "follow", False))
+    max_segments = int(getattr(args, "max_segments", 0) or 0)
+    since_ts_raw = str(getattr(args, "since_ts", "") or "").strip()
+    since_ts = since_ts_raw or None
+    max_segments_value = max_segments if max_segments > 0 else None
+    try:
+        system = kernel.boot(start_conductor=False, fast_boot=True)
+        if not follow:
+            result = run_export_pass(system, max_segments=max_segments_value, since_ts=since_ts)
+            _print_json(result)
+            return 0 if bool(result.get("ok")) else 2
+        loops = 0
+        lines_appended = 0
+        segments_exported = 0
+        while True:
+            loops += 1
+            result = run_export_pass(system, max_segments=max_segments_value, since_ts=since_ts)
+            lines_appended += int(result.get("lines_appended", 0) or 0)
+            segments_exported += int(result.get("segments_exported", 0) or 0)
+            _print_json(
+                {
+                    "ok": bool(result.get("ok", False)),
+                    "loop": loops,
+                    "lines_appended": int(result.get("lines_appended", 0) or 0),
+                    "segments_exported": int(result.get("segments_exported", 0) or 0),
+                    "export_path": result.get("export_path"),
+                    "duration_ms": int(result.get("duration_ms", 0) or 0),
+                }
+            )
+            time.sleep(2.0)
+    except KeyboardInterrupt:
+        _print_json(
+            {
+                "ok": True,
+                "stopped": True,
+                "reason": "keyboard_interrupt",
+                "mode": "follow",
+                "summary": {
+                    "loops": loops if "loops" in locals() else 0,
+                    "lines_appended": lines_appended if "lines_appended" in locals() else 0,
+                    "segments_exported": segments_exported if "segments_exported" in locals() else 0,
+                },
+            }
+        )
+        return 0
+    finally:
+        kernel.shutdown()
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -500,6 +709,51 @@ def cmd_batch_run(args: argparse.Namespace) -> int:
     )
     _print_json(result)
     return 0
+
+
+def cmd_handoff_ingest(args: argparse.Namespace) -> int:
+    from autocapture_nx.ingest.handoff_ingest import HandoffIngestor
+
+    ingestor = HandoffIngestor(
+        Path(str(args.data_dir)),
+        mode=str(args.mode),
+        strict=bool(args.strict),
+    )
+    try:
+        result = ingestor.ingest_handoff_dir(Path(str(args.handoff_root)))
+    except Exception as exc:
+        _print_json(
+            {
+                "ok": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "handoff_root": str(args.handoff_root),
+                "data_dir": str(args.data_dir),
+            }
+        )
+        return 2
+    payload = result.as_dict()
+    payload["ok"] = True
+    _print_json(payload)
+    return 0
+
+
+def cmd_handoff_drain(args: argparse.Namespace) -> int:
+    from autocapture_nx.ingest.handoff_ingest import HandoffIngestor
+
+    ingestor = HandoffIngestor(
+        Path(str(args.data_dir)),
+        mode=str(args.mode),
+        strict=bool(args.strict),
+    )
+    result = ingestor.drain_spool(
+        Path(str(args.spool_root)),
+        include_marked=bool(args.include_marked),
+        fail_fast=bool(args.fail_fast),
+    )
+    payload = result.as_dict()
+    payload["ok"] = len(result.errors) == 0
+    _print_json(payload)
+    return 0 if payload["ok"] else 2
 
 
 def cmd_keys_rotate(args: argparse.Namespace) -> int:
@@ -824,17 +1078,16 @@ def cmd_replay(args: argparse.Namespace) -> int:
 
 
 def cmd_research_run(args: argparse.Namespace) -> int:
-    from autocapture.config.defaults import default_config_paths as mx_paths
-    from autocapture.config.load import load_config as mx_load
-    from autocapture.research.runner import ResearchRunner
-
-    config = mx_load(mx_paths(), safe_mode=args.safe_mode)
-    if args.safe_mode:
-        config.setdefault("plugins", {})["safe_mode"] = True
-    runner = ResearchRunner(config)
-    result = runner.run_once()
-    _print_json(result)
-    return 0 if result.get("ok", False) else 1
+    _print_json(
+        {
+            "ok": False,
+            "error": "deprecated_moved_to_hypervisor",
+            "message": "research.run is no longer executed in autocapture_prime.",
+            "owner": "hypervisor",
+            "next_step": "run the research pipeline from the hypervisor repo.",
+        }
+    )
+    return 2
 
 
 def _load_user_config(path: Path) -> dict:
@@ -1058,12 +1311,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_cmd.set_defaults(func=cmd_run)
 
+    setup_cmd = sub.add_parser("setup")
+    setup_cmd.add_argument("--profile", required=True)
+    setup_cmd.add_argument("--batch-loops", type=int, default=1)
+    setup_cmd.add_argument("--batch-sleep-ms", type=int, default=50)
+    setup_cmd.add_argument("--sample-query", default="")
+    setup_cmd.set_defaults(func=cmd_setup)
+
+    gate_cmd = sub.add_parser("gate")
+    gate_cmd.add_argument("--profile", required=True)
+    gate_cmd.add_argument("--skip-q40", action=argparse.BooleanOptionalAction, default=False)
+    gate_cmd.add_argument("--image", default="")
+    gate_cmd.set_defaults(func=cmd_gate)
+
     status_cmd = sub.add_parser("status")
     status_cmd.set_defaults(func=cmd_status)
 
     query_cmd = sub.add_parser("query")
     query_cmd.add_argument("text")
     query_cmd.set_defaults(func=cmd_query)
+
+    export = sub.add_parser("export")
+    export_sub = export.add_subparsers(dest="export_cmd", required=True)
+    export_chatgpt = export_sub.add_parser("chatgpt")
+    export_chatgpt.add_argument("--max-segments", type=int, default=0)
+    export_chatgpt.add_argument("--since-ts", default="")
+    export_chatgpt.add_argument("--follow", action=argparse.BooleanOptionalAction, default=False)
+    export_chatgpt.set_defaults(func=cmd_export_chatgpt)
 
     state = sub.add_parser("state")
     state_sub = state.add_subparsers(dest="state_cmd", required=True)
@@ -1102,6 +1376,23 @@ def build_parser() -> argparse.ArgumentParser:
     batch_run.add_argument("--sleep-ms", type=int, default=200)
     batch_run.add_argument("--require-idle", action=argparse.BooleanOptionalAction, default=True)
     batch_run.set_defaults(func=cmd_batch_run)
+
+    handoff_cmd = sub.add_parser("handoff")
+    handoff_sub = handoff_cmd.add_subparsers(dest="handoff_cmd", required=True)
+    handoff_ingest = handoff_sub.add_parser("ingest")
+    handoff_ingest.add_argument("--handoff-root", required=True)
+    handoff_ingest.add_argument("--data-dir", required=True)
+    handoff_ingest.add_argument("--mode", choices=["copy", "hardlink"], default="hardlink")
+    handoff_ingest.add_argument("--strict", action=argparse.BooleanOptionalAction, default=True)
+    handoff_ingest.set_defaults(func=cmd_handoff_ingest)
+    handoff_drain = handoff_sub.add_parser("drain")
+    handoff_drain.add_argument("--spool-root", required=True)
+    handoff_drain.add_argument("--data-dir", required=True)
+    handoff_drain.add_argument("--mode", choices=["copy", "hardlink"], default="hardlink")
+    handoff_drain.add_argument("--strict", action=argparse.BooleanOptionalAction, default=True)
+    handoff_drain.add_argument("--fail-fast", action=argparse.BooleanOptionalAction, default=False)
+    handoff_drain.add_argument("--include-marked", action=argparse.BooleanOptionalAction, default=False)
+    handoff_drain.set_defaults(func=cmd_handoff_drain)
 
     devtools = sub.add_parser("devtools")
     devtools_sub = devtools.add_subparsers(dest="devtools_cmd", required=True)

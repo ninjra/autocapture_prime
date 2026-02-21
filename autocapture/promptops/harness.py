@@ -169,7 +169,9 @@ def run_template_eval(
                 case.prompt,
                 prompt_id=case.prompt_id,
                 sources=case.sources,
-                examples=case.examples,
+                # Deterministic eval: do not pull ambient examples from disk unless a
+                # case explicitly supplies them.
+                examples=(list(case.examples) if case.examples is not None else []),
                 persist=False,
                 strategy=case.strategy,
                 # Eval harness must use the case prompt as the source of truth;

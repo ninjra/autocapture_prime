@@ -24,7 +24,8 @@ from typing import Iterable
 REQUIREMENT_ID_RE = re.compile(
     r"\b("
     r"SRC-\d{3}|MOD-\d{3}|I\d{3}|FX\d{3}|RM-\d{3}|"
-    r"A\d{1,2}|A-[A-Z]+-\d{2}"
+    r"A\d{1,2}|A-[A-Z]+-\d{2}|"
+    r"QRY-\d{3}|EVAL-\d{3}|ATTR-\d{3}|WSL-\d{3}|SEC-\d{3}|CAP-\d{3}|AUD-\d{3}|INP-\d{3}"
     r")\b"
 )
 
@@ -77,6 +78,7 @@ STATUS_VALUES = {
 SPECIAL_AUTH_DOCS = {
     "AGENTS.md",
     "docs/AutocapturePrime_4Pillars_Upgrade_Plan.md",
+    "docs/autocapture_prime_4pillars_optimization.md",
     "docs/windows-sidecar-capture-interface.md",
     "docs/autocapture_prime_UNDER_HYPERVISOR.md",
     "docs/codex_autocapture_prime_blueprint.md",
@@ -91,6 +93,7 @@ DOC_PLACEHOLDER_RE = re.compile(r"<[A-Z][A-Z0-9_-]*>")
 BACKTICK_TOKEN_RE = re.compile(r"`([^`]+)`")
 CAPABILITY_TOKEN_RE = re.compile(r"^[a-z0-9_]+(?:\.[a-z0-9_]+){2,}$")
 ARTIFACT_KEYWORD_RE = re.compile(r"\b(add|create|generate|produce|write|save|must|implement)\b", flags=re.IGNORECASE)
+BACKLOG_STATUS_MATRIX_PATH = "docs/reports/autocapture_prime_4pillars_optimization_matrix.md"
 
 
 @dataclass(frozen=True)
@@ -197,10 +200,27 @@ def _line_has_requirement_status_marker(line: str) -> bool:
 
 def _collect_doc_status_misses(path: Path, rel: str, rows: list[MissRow]) -> None:
     source_class = _classify_source(rel)
+    if source_class in {"derived_report", "generated_artifact"}:
+        return
+    in_master_backlog = False
+    backlog_status_map = _load_backlog_status_map(path.parents[1])
+    cli_text = ""
+    cli_path = path.parents[1] / "autocapture_nx" / "cli.py"
+    if cli_path.exists():
+        try:
+            cli_text = cli_path.read_text(encoding="utf-8")
+        except Exception:
+            cli_text = ""
     for lineno, line in _iter_text_lines(path):
         stripped = line.strip()
         if not stripped:
             continue
+
+        low = stripped.lower()
+        if "master backlog" in low:
+            in_master_backlog = True
+        elif in_master_backlog and stripped.startswith("#"):
+            in_master_backlog = False
 
         m_open = CHECKBOX_OPEN_RE.match(stripped)
         if m_open:
@@ -249,6 +269,85 @@ def _collect_doc_status_misses(path: Path, rel: str, rows: list[MissRow]) -> Non
                     snippet=stripped[:240],
                 )
             )
+
+        # Authoritative backlog rows with explicit priority markers are treated
+        # as outstanding until mapped in implementation artifacts.
+        if source_class == "authoritative_doc" and in_master_backlog and ids:
+            has_priority = bool(re.search(r"\bP[0-3]\b", stripped))
+            backlog_ids = [
+                item
+                for item in ids
+                if re.match(r"^(QRY|EVAL|ATTR|WSL|SEC|CAP|AUD|INP)-\d{3}$", item)
+            ]
+            if has_priority and backlog_ids:
+                for item_id in backlog_ids:
+                    mapped_status = str(backlog_status_map.get(item_id, "")).strip().lower()
+                    if mapped_status == "complete":
+                        continue
+                    rows.append(
+                        MissRow(
+                            category="doc_backlog_row",
+                            item_id=item_id,
+                            source_class=source_class,
+                            source_path=rel,
+                            line=lineno,
+                            reason=(
+                                "authoritative backlog item requires implementation mapping"
+                                if not mapped_status
+                                else f"authoritative backlog item status={mapped_status}"
+                            ),
+                            snippet=stripped[:240],
+                        )
+                    )
+
+        # Authoritative docs can declare concrete CLI contracts; fail if missing.
+        if source_class == "authoritative_doc" and "autocapture setup --profile" in low:
+            if 'add_parser("setup")' not in cli_text:
+                rows.append(
+                    MissRow(
+                        category="doc_cli_contract_missing",
+                        item_id="",
+                        source_class=source_class,
+                        source_path=rel,
+                        line=lineno,
+                        reason="required CLI command missing: setup",
+                        snippet=stripped[:240],
+                    )
+                )
+        if source_class == "authoritative_doc" and "autocapture gate --profile" in low:
+            if 'add_parser("gate")' not in cli_text:
+                rows.append(
+                    MissRow(
+                        category="doc_cli_contract_missing",
+                        item_id="",
+                        source_class=source_class,
+                        source_path=rel,
+                        line=lineno,
+                        reason="required CLI command missing: gate",
+                        snippet=stripped[:240],
+                    )
+                )
+
+
+def _load_backlog_status_map(repo_root: Path) -> dict[str, str]:
+    path = repo_root / BACKLOG_STATUS_MATRIX_PATH
+    if not path.exists():
+        return {}
+    out: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip().startswith("|"):
+            continue
+        if line.strip().startswith("| ID ") or line.strip().startswith("| ---"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        item_id = str(cells[0]).strip()
+        status = str(cells[1]).strip()
+        if not re.match(r"^(QRY|EVAL|ATTR|WSL|SEC|CAP|AUD|INP)-\d{3}$", item_id):
+            continue
+        out[item_id] = status
+    return out
 
 
 def _looks_repo_relative_path(token: str) -> bool:

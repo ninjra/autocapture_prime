@@ -7,22 +7,22 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from typing import Any
 
-EXTERNAL_VLLM_ROOT_URL = (
-    str(os.environ.get("AUTOCAPTURE_VLM_ROOT_URL") or "").strip() or "http://127.0.0.1:8000"
-)
-EXTERNAL_VLLM_BASE_URL = f"{EXTERNAL_VLLM_ROOT_URL}/v1"
-EXTERNAL_VLLM_EXPECTED_MODEL = "internvl3_5_8b"
+from autocapture_nx.runtime.http_localhost import request_json
+from autocapture_nx.runtime.service_ports import VLM_BASE_URL, VLM_MODEL_ID, VLM_ROOT_URL
+
+EXTERNAL_VLLM_ROOT_URL = VLM_ROOT_URL
+EXTERNAL_VLLM_BASE_URL = VLM_BASE_URL
+EXTERNAL_VLLM_EXPECTED_MODEL = VLM_MODEL_ID
 EXTERNAL_VLLM_ORCHESTRATOR_CMD = "bash /mnt/d/projects/hypervisor/tools/wsl/start_internvl35_8b_with_watch.sh"
 EXTERNAL_VLLM_WATCH_STATE_PATH = "/tmp/hypervisor-thermal-brain/vllm_watch_state.json"
 _ALLOWED_SCHEME = "http"
 _ALLOWED_HOST = "127.0.0.1"
-_ALLOWED_PORTS = {8000, 8001, 34221}
+_ALLOWED_PORTS = {8000}
 
 
 def enforce_external_vllm_base_url(candidate: str | None) -> str:
@@ -60,6 +60,22 @@ def _env_int(name: str, default: int) -> int:
         return int(raw) if raw else int(default)
     except Exception:
         return int(default)
+
+
+def _emit_preflight_progress(stage: str, **fields: Any) -> None:
+    enabled = str(os.environ.get("AUTOCAPTURE_VLM_PREFLIGHT_PROGRESS") or "").strip().casefold() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return
+    payload: dict[str, Any] = {
+        "event": "vllm_preflight.progress",
+        "stage": str(stage),
+        "ts_unix_ms": int(round(time.time() * 1000.0)),
+    }
+    payload.update(fields)
+    try:
+        print(json.dumps(payload, sort_keys=True), file=sys.stderr, flush=True)
+    except Exception:
+        return
 
 
 def _norm_model_id(value: str) -> str:
@@ -169,19 +185,25 @@ def _preflight_once(
     t0 = time.perf_counter()
     models_url = f"{base_url}/models"
     completion_url = f"{base_url}/chat/completions"
-    try:
-        req = urllib.request.Request(models_url, method="GET", headers=auth_headers)
-        with urllib.request.urlopen(req, timeout=float(timeout_models_s)) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-            out["models_status"] = int(getattr(resp, "status", 0))
-    except urllib.error.HTTPError as exc:
-        out["error"] = f"models_http_{int(getattr(exc, 'code', 0) or 0)}"
+    models_out = request_json(
+        method="GET",
+        url=models_url,
+        timeout_s=float(timeout_models_s),
+        headers=auth_headers,
+    )
+    if not bool(models_out.get("ok", False)):
+        models_status = int(models_out.get("status", 0) or 0)
+        if models_status >= 400:
+            out["error"] = f"models_http_{models_status}"
+        else:
+            m_err = str(models_out.get("error") or "").strip()
+            out["error"] = f"models_unreachable:{m_err or 'UnknownError'}"
         out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
         return out
-    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-        out["error"] = f"models_unreachable:{type(exc).__name__}"
-        out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
-        return out
+    payload = models_out.get("payload", {})
+    if not isinstance(payload, dict):
+        payload = {}
+    out["models_status"] = int(models_out.get("status", 0) or 0)
 
     models: list[str] = []
     data = payload.get("data", []) if isinstance(payload, dict) else []
@@ -210,33 +232,32 @@ def _preflight_once(
     out["selected_model"] = selected
 
     if bool(require_completion):
-        req_payload = json.dumps(
-            {
+        completion_out = request_json(
+            method="POST",
+            url=completion_url,
+            timeout_s=float(timeout_completion_s),
+            payload={
                 "model": selected,
                 "messages": [{"role": "user", "content": "ping"}],
                 "temperature": 0,
                 "max_completion_tokens": 8,
                 "max_tokens": 8,
-            }
-        ).encode("utf-8")
-        req = urllib.request.Request(
-            completion_url,
-            data=req_payload,
-            method="POST",
-            headers={"Content-Type": "application/json", **auth_headers},
+            },
+            headers=auth_headers,
         )
-        try:
-            with urllib.request.urlopen(req, timeout=float(timeout_completion_s)) as resp:
-                completion_payload = json.loads(resp.read().decode("utf-8"))
-                out["completion_status"] = int(getattr(resp, "status", 0))
-        except urllib.error.HTTPError as exc:
-            out["error"] = f"completion_http_{int(getattr(exc, 'code', 0) or 0)}"
+        if not bool(completion_out.get("ok", False)):
+            completion_status = int(completion_out.get("status", 0) or 0)
+            if completion_status >= 400:
+                out["error"] = f"completion_http_{completion_status}"
+            else:
+                c_err = str(completion_out.get("error") or "").strip()
+                out["error"] = f"completion_unreachable:{c_err or 'UnknownError'}"
             out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
             return out
-        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-            out["error"] = f"completion_unreachable:{type(exc).__name__}"
-            out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
-            return out
+        completion_payload = completion_out.get("payload", {})
+        if not isinstance(completion_payload, dict):
+            completion_payload = {}
+        out["completion_status"] = int(completion_out.get("status", 0) or 0)
         choices = completion_payload.get("choices", []) if isinstance(completion_payload, dict) else []
         completion_ok = isinstance(choices, list) and len(choices) > 0
         out["completion_ok"] = bool(completion_ok)
@@ -252,8 +273,8 @@ def _preflight_once(
 
 def check_external_vllm_ready(
     *,
-    timeout_models_s: float = 4.0,
-    timeout_completion_s: float = 12.0,
+    timeout_models_s: float | None = None,
+    timeout_completion_s: float | None = None,
     require_completion: bool = True,
     retries: int | None = None,
     auto_recover: bool = True,
@@ -268,11 +289,20 @@ def check_external_vllm_ready(
     t0 = time.perf_counter()
     base_raw = str(os.environ.get("AUTOCAPTURE_VLM_BASE_URL") or "").strip()
     expected_model = str(os.environ.get("AUTOCAPTURE_VLM_MODEL") or "").strip() or EXTERNAL_VLLM_EXPECTED_MODEL
+    models_timeout = float(timeout_models_s) if timeout_models_s is not None else _env_float("AUTOCAPTURE_VLM_PREFLIGHT_MODELS_TIMEOUT_S", 4.0)
+    if models_timeout <= 0:
+        models_timeout = _env_float("AUTOCAPTURE_VLM_PREFLIGHT_MODELS_TIMEOUT_S", 4.0)
     preflight_retries = int(retries if retries is not None else _env_int("AUTOCAPTURE_VLM_PREFLIGHT_RETRIES", 3))
     preflight_retries = max(1, preflight_retries)
-    completion_timeout = float(timeout_completion_s or _env_float("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", 12.0))
+    completion_timeout = float(timeout_completion_s) if timeout_completion_s is not None else _env_float("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", 12.0)
     if completion_timeout <= 0:
         completion_timeout = _env_float("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", 12.0)
+    completion_timeout_max = _env_float("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_MAX_S", 60.0)
+    completion_timeout_max = max(completion_timeout, completion_timeout_max)
+    completion_timeout_scale = _env_float("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_SCALE", 1.5)
+    completion_timeout_scale = max(1.0, completion_timeout_scale)
+    total_timeout_s = _env_float("AUTOCAPTURE_VLM_PREFLIGHT_TOTAL_TIMEOUT_S", 180.0)
+    total_timeout_s = max(10.0, total_timeout_s)
     orchestrator_cmd = str(os.environ.get("AUTOCAPTURE_VLM_ORCHESTRATOR_CMD") or "").strip() or EXTERNAL_VLLM_ORCHESTRATOR_CMD
     watch_path = str(os.environ.get("AUTOCAPTURE_VLM_WATCH_STATE_PATH") or "").strip() or EXTERNAL_VLLM_WATCH_STATE_PATH
     out: dict[str, Any] = {
@@ -288,14 +318,25 @@ def check_external_vllm_ready(
         out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
         return out
     out["base_url"] = base_url
+    _emit_preflight_progress(
+        "start",
+        base_url=base_url,
+        expected_model=expected_model,
+        require_completion=bool(require_completion),
+        timeout_models_s=float(models_timeout),
+        timeout_completion_s=float(completion_timeout),
+        retries=int(preflight_retries),
+        total_timeout_s=float(total_timeout_s),
+    )
 
     first = _preflight_once(
         base_url=base_url,
         expected_model=expected_model,
-        timeout_models_s=float(timeout_models_s),
+        timeout_models_s=float(models_timeout),
         timeout_completion_s=float(completion_timeout),
         require_completion=bool(require_completion),
     )
+    _emit_preflight_progress("attempt", attempt=1, ok=bool(first.get("ok", False)), error=str(first.get("error") or ""))
     if bool(first.get("ok", False)):
         first["attempts"] = 1
         first["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
@@ -317,6 +358,12 @@ def check_external_vllm_ready(
 
     orchestrator = _invoke_orchestrator_once(orchestrator_cmd, timeout_s=_env_float("AUTOCAPTURE_VLM_ORCHESTRATOR_TIMEOUT_S", 120.0))
     out["orchestrator"] = orchestrator
+    _emit_preflight_progress(
+        "orchestrator",
+        ok=bool(orchestrator.get("ok", False)),
+        detached=bool(orchestrator.get("detached", False)),
+        returncode=orchestrator.get("returncode"),
+    )
     orch_exec_error = str(orchestrator.get("error") or "").strip()
     if orch_exec_error.startswith("orchestrator_exec_failed") or orch_exec_error == "orchestrator_cmd_missing":
         out["error"] = f"orchestrator_failed:{orchestrator.get('error') or orchestrator.get('returncode')}"
@@ -335,19 +382,32 @@ def check_external_vllm_ready(
     max_attempts = max(1, preflight_retries)
     last = first
     attempts_done = 1
+    timeout_s_current = float(completion_timeout)
     deadline = time.perf_counter() + warmup_s
     while True:
+        if (time.perf_counter() - t0) >= float(total_timeout_s):
+            break
         if sleep_s > 0:
             time.sleep(sleep_s)
+        last_error = str(last.get("error") or "")
+        if last_error.startswith("completion_unreachable:TimeoutError"):
+            timeout_s_current = min(float(completion_timeout_max), float(timeout_s_current) * float(completion_timeout_scale))
         attempt = _preflight_once(
             base_url=base_url,
             expected_model=expected_model,
-            timeout_models_s=float(timeout_models_s),
-            timeout_completion_s=float(completion_timeout),
+            timeout_models_s=float(models_timeout),
+            timeout_completion_s=float(timeout_s_current),
             require_completion=bool(require_completion),
         )
         attempts_done += 1
         last = attempt
+        _emit_preflight_progress(
+            "attempt",
+            attempt=int(attempts_done),
+            ok=bool(attempt.get("ok", False)),
+            error=str(attempt.get("error") or ""),
+            timeout_completion_s=float(timeout_s_current),
+        )
         if bool(attempt.get("ok", False)):
             attempt["recovered"] = True
             attempt["attempts"] = attempts_done
@@ -362,6 +422,8 @@ def check_external_vllm_ready(
         sleep_s = poll_s
 
     out["error"] = str(last.get("error") or "preflight_failed_after_retries")
+    if (time.perf_counter() - t0) >= float(total_timeout_s):
+        out["error"] = f"preflight_total_timeout:{round(float(total_timeout_s), 3)}s"
     out["attempts"] = int(attempts_done)
     out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000.0))
     out["final"] = last

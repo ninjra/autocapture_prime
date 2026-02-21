@@ -6,14 +6,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
+from autocapture_nx.runtime.http_localhost import request_json
+from autocapture_nx.runtime.service_ports import EMBEDDER_BASE_URL, EMBEDDER_MODEL_ID
 
-DEFAULT_BASE_URL = "http://127.0.0.1:8001"
-DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
+DEFAULT_BASE_URL = EMBEDDER_BASE_URL
+DEFAULT_MODEL = EMBEDDER_MODEL_ID
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -51,28 +51,19 @@ def _http_json(
     timeout_s: float,
     payload: dict[str, Any] | None = None,
 ) -> tuple[bool, dict[str, Any], str]:
-    data = None
-    headers = {"Content-Type": "application/json"}
-    if payload is not None:
-        data = json.dumps(payload, sort_keys=True).encode("utf-8")
-    req = urllib.request.Request(url=url, data=data, headers=headers, method=method.upper())
-    try:
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            body = resp.read() or b"{}"
-            text = body.decode("utf-8", errors="replace")
-            parsed = json.loads(text) if text.strip() else {}
-            return True, parsed if isinstance(parsed, dict) else {"raw": parsed}, ""
-    except urllib.error.HTTPError as exc:
-        detail = f"http_error:{exc.code}"
-        try:
-            body = exc.read()
-            if body:
-                detail = f"{detail}:{body.decode('utf-8', errors='replace')[:400]}"
-        except Exception:
-            pass
-        return False, {}, detail
-    except Exception as exc:
-        return False, {}, f"{type(exc).__name__}:{exc}"
+    out = request_json(
+        method=method,
+        url=url,
+        timeout_s=float(timeout_s),
+        payload=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    ok = bool(out.get("ok", False))
+    parsed = out.get("payload", {})
+    payload_dict = parsed if isinstance(parsed, dict) else {}
+    if ok:
+        return True, payload_dict, ""
+    return False, payload_dict, str(out.get("error") or "").strip()
 
 
 def _probe(base_url: str, model: str, timeout_s: float) -> dict[str, Any]:
@@ -100,13 +91,19 @@ def _probe(base_url: str, model: str, timeout_s: float) -> dict[str, Any]:
             emb = first.get("embedding", []) if isinstance(first, dict) else []
             if isinstance(emb, list):
                 embedding_dim = len(emb)
-    ok = bool(health_ok and models_ok and embeddings_ok and embedding_dim > 0)
+    # Some embedding servers do not expose `/health`; treat it as diagnostic-only.
+    ok = bool(models_ok and embeddings_ok and embedding_dim > 0)
     return {
         "ok": ok,
         "base_url": base_url,
         "model": model,
         "checks": {
-            "health": {"ok": bool(health_ok), "error": health_error or "", "payload": health_payload},
+            "health": {
+                "ok": bool(health_ok),
+                "required": False,
+                "error": health_error or "",
+                "payload": health_payload,
+            },
             "models": {"ok": bool(models_ok), "error": models_error or "", "payload": models_payload},
             "embeddings": {
                 "ok": bool(embeddings_ok),

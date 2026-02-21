@@ -1,9 +1,10 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from autocapture_nx.kernel.activity_signal import load_activity_signal
+from autocapture_nx.kernel.activity_signal import is_activity_signal_fresh, load_activity_signal
 
 
 class ActivitySignalReaderTests(unittest.TestCase):
@@ -70,7 +71,19 @@ class ActivitySignalReaderTests(unittest.TestCase):
             (activity_dir / "activity_signal.json").write_text("not json", encoding="utf-8")
             self.assertIsNone(load_activity_signal(cfg))
 
+    def test_freshness_window_default_enforced(self) -> None:
+        signal = type("S", (), {"ts_utc": datetime.now(timezone.utc).isoformat()})()
+        cfg = {"runtime": {"activity": {}}}
+        self.assertTrue(is_activity_signal_fresh(signal, cfg))
+        stale = type("S", (), {"ts_utc": (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()})()
+        self.assertFalse(is_activity_signal_fresh(stale, cfg))
+
+    def test_freshness_window_respects_config_override(self) -> None:
+        now = datetime.now(timezone.utc)
+        signal = type("S", (), {"ts_utc": (now - timedelta(seconds=12)).isoformat()})()
+        cfg = {"runtime": {"activity": {"max_signal_age_s": 20}}}
+        self.assertTrue(is_activity_signal_fresh(signal, cfg, now_utc=now))
+
 
 if __name__ == "__main__":
     unittest.main()
-

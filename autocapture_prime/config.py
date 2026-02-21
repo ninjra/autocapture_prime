@@ -6,6 +6,8 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
+from autocapture_nx.runtime.service_ports import HYPERVISOR_GATEWAY_BASE_URL, VLM_ROOT_URL
+
 
 @dataclass(frozen=True)
 class PrimeConfig:
@@ -31,7 +33,7 @@ class PrimeConfig:
 
     @property
     def vllm_base_url(self) -> str:
-        return str(self.raw.get("vllm", {}).get("base_url", "http://127.0.0.1:8000"))
+        return str(self.raw.get("vllm", {}).get("base_url", VLM_ROOT_URL))
 
     @property
     def vllm_model(self) -> str:
@@ -49,6 +51,33 @@ class PrimeConfig:
     def top_k_frames(self) -> int:
         value = int(self.raw.get("qa", {}).get("top_k_frames", 4))
         return max(1, value)
+
+    @property
+    def query_owner(self) -> str:
+        owner = str(self.raw.get("chronicle_api", {}).get("query_owner", "hypervisor")).strip().lower()
+        return owner or "hypervisor"
+
+    @property
+    def hypervisor_base_url(self) -> str:
+        return str(self.raw.get("chronicle_api", {}).get("hypervisor_base_url", HYPERVISOR_GATEWAY_BASE_URL))
+
+    @property
+    def hypervisor_chat_path(self) -> str:
+        return str(self.raw.get("chronicle_api", {}).get("hypervisor_chat_path", "/v1/chat/completions"))
+
+    @property
+    def hypervisor_timeout_s(self) -> float:
+        value = float(self.raw.get("chronicle_api", {}).get("hypervisor_timeout_s", 90.0))
+        return max(1.0, value)
+
+    @property
+    def hypervisor_api_key(self) -> str:
+        raw = str(self.raw.get("chronicle_api", {}).get("hypervisor_api_key", "")).strip()
+        if raw:
+            return raw
+        import os
+
+        return str(os.environ.get("AUTOCAPTURE_HYPERVISOR_API_KEY", "")).strip()
 
     @property
     def allow_mm_embeds(self) -> bool:

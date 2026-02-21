@@ -9,9 +9,10 @@ def rrf_fusion(rankings: list[list[dict[str, Any]]], k: int = 60) -> list[dict[s
     scores: dict[str, float] = {}
     for ranking in rankings:
         for idx, item in enumerate(ranking):
-            doc_id = item.get("doc_id") or item.get("record_id")
-            if doc_id is None:
+            raw_doc_id = item.get("doc_id") or item.get("record_id")
+            if raw_doc_id is None:
                 continue
+            doc_id = str(raw_doc_id)
             scores.setdefault(doc_id, 0.0)
             scores[doc_id] += 1.0 / (k + idx + 1)
     ordered = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))

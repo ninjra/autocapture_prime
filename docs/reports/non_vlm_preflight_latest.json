@@ -1,0 +1,26 @@
+{
+  "dataroot": "/mnt/d/autocapture",
+  "db": "/mnt/d/autocapture/metadata.db",
+  "error": "preflight_failed",
+  "ok": false,
+  "preflight": {
+    "metadata_db": {
+      "ok": true,
+      "path": "/mnt/d/autocapture/metadata.db",
+      "record_count": 14344
+    },
+    "ok": false,
+    "sidecar_7411": {
+      "error": "URLError:<urlopen error [Errno 111] Connection refused>",
+      "ok": false,
+      "status": 0,
+      "url": "http://127.0.0.1:7411/health"
+    },
+    "vlm_8000": {
+      "body": "",
+      "ok": true,
+      "status": 200,
+      "url": "http://127.0.0.1:8000/health"
+    }
+  }
+}

@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -134,13 +135,14 @@ class CaseOutcome:
     answer_text: str
     detail: str
     result: dict[str, Any]
+    latency_ms: float
 
 
 def _run_case(system, case: dict[str, Any]) -> CaseOutcome:  # type: ignore[no-untyped-def]
     case_id = str(case.get("id") or sha256_text(json.dumps(case, sort_keys=True))[:12])
-    query = str(case.get("query") or "").strip()
+    query = str(case.get("query") or case.get("question") or "").strip()
     if not query:
-        return CaseOutcome(case_id, query, False, "", "missing_query", {})
+        return CaseOutcome(case_id, query, False, "", "missing_query", {}, 0.0)
     expects_any = [str(x).strip().lower() for x in (case.get("expects_any") or []) if str(x).strip()]
     expects_all = [str(x).strip().lower() for x in (case.get("expects_all") or []) if str(x).strip()]
     raw_exact = case.get("expect_exact")
@@ -153,10 +155,11 @@ def _run_case(system, case: dict[str, Any]) -> CaseOutcome:  # type: ignore[no-u
     else:
         expects_exact = [str(raw_exact).strip()] if str(raw_exact).strip() else []
     require_citations = bool(case.get("require_citations", True))
+    started = time.perf_counter()
     try:
         result = run_query(system, query, schedule_extract=False)
     except Exception as exc:
-        return CaseOutcome(case_id, query, False, "", f"query_failed:{type(exc).__name__}:{exc}", {})
+        return CaseOutcome(case_id, query, False, "", f"query_failed:{type(exc).__name__}:{exc}", {}, (time.perf_counter() - started) * 1000.0)
     claim_texts = _claim_texts(result)
     text = _answer_text(result)
     if not text:
@@ -182,7 +185,38 @@ def _run_case(system, case: dict[str, Any]) -> CaseOutcome:  # type: ignore[no-u
             f"citations_ok={citations_ok}"
         )
     )
-    return CaseOutcome(case_id, query, passed, text, detail, result)
+    return CaseOutcome(case_id, query, passed, text, detail, result, (time.perf_counter() - started) * 1000.0)
+
+
+def _boot_kernel(preferred_safe_mode: bool) -> tuple[Kernel | None, Any | None, str, list[str], str]:
+    attempts: list[str] = []
+    last_error = ""
+    for safe_mode, fast_boot in (
+        (bool(preferred_safe_mode), False),
+        (bool(preferred_safe_mode), True),
+        (False, False),
+        (False, True),
+    ):
+        attempts.append(f"safe_mode={safe_mode},fast_boot={fast_boot}")
+        kernel = Kernel(default_config_paths(), safe_mode=bool(safe_mode))
+        try:
+            system = kernel.boot(start_conductor=False, fast_boot=bool(fast_boot))
+            has_metadata = bool(getattr(system, "has", lambda _name: False)("storage.metadata"))
+            if has_metadata:
+                return kernel, system, attempts[-1], attempts, ""
+            last_error = "missing_capability:storage.metadata"
+            try:
+                kernel.shutdown()
+            except Exception:
+                pass
+            continue
+        except Exception as exc:
+            try:
+                kernel.shutdown()
+            except Exception:
+                pass
+            last_error = f"{type(exc).__name__}:{exc}"
+    return None, None, "", attempts, last_error
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -192,8 +226,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     cases = _load_cases(Path(args.cases))
-    kernel = Kernel(default_config_paths(), safe_mode=bool(args.safe_mode))
-    system = kernel.boot(start_conductor=False, fast_boot=False)
+    kernel, system, boot_mode, boot_attempts, boot_error = _boot_kernel(bool(args.safe_mode))
+    if kernel is None or system is None:
+        payload = {
+            "ok": False,
+            "cases_total": 0,
+            "cases_passed": 0,
+            "cases_failed": 0,
+            "error": f"kernel_boot_failed:{boot_error or 'unknown'}",
+            "boot_attempts": boot_attempts,
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 2
     config = getattr(system, "config", {})
     rows: list[dict[str, Any]] = []
     passed = 0
@@ -216,8 +260,10 @@ def main(argv: list[str] | None = None) -> int:
                 "query_sha256": sha256_text(out.query),
                 "passed": bool(out.passed),
                 "detail": out.detail,
+                "latency_ms": float(round(out.latency_ms, 3)),
                 "answer_state": str(answer.get("state") or ""),
                 "answer_claim_count": int(len(answer.get("claims", []))) if isinstance(answer.get("claims", []), list) else 0,
+                "answer_has_citations": bool(_has_citations(result)),
                 "coverage_bp": int(round(float(eval_obj.get("coverage_ratio", 0.0) or 0.0) * 10000.0)),
                 "custom_claims_count": int(((result.get("custom_claims", {}) or {}).get("count") or 0)),
                 "synth_claims_count": int(((result.get("synth_claims", {}) or {}).get("count") or 0)),
@@ -243,6 +289,7 @@ def main(argv: list[str] | None = None) -> int:
         "cases_total": total,
         "cases_passed": passed,
         "cases_failed": max(0, total - passed),
+        "boot_mode": str(boot_mode),
         "rows": rows,
     }
     print(json.dumps(summary, indent=2, sort_keys=True))

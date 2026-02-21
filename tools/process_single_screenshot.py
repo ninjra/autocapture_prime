@@ -17,9 +17,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
+import signal
 import sys
+import time
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,6 +65,19 @@ CORE_WRITER_PLUGINS: tuple[str, ...] = (
 
 def _utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _emit_progress(stage: str, **fields: Any) -> None:
+    payload: dict[str, Any] = {
+        "event": "process_single_screenshot.progress",
+        "ts_utc": datetime.now(timezone.utc).isoformat(),
+        "stage": str(stage),
+    }
+    payload.update(fields)
+    try:
+        print(json.dumps(payload, sort_keys=True), file=sys.stderr, flush=True)
+    except Exception:
+        pass
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -123,7 +139,14 @@ def _guess_content_type(blob: bytes) -> str:
     return "application/octet-stream"
 
 
-def _build_frame_record(*, run_id: str, record_id: str, ts_utc: str, image_bytes: bytes) -> dict[str, Any]:
+def _build_frame_record(
+    *,
+    run_id: str,
+    record_id: str,
+    ts_utc: str,
+    image_bytes: bytes,
+    uia_ref: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     width, height = _image_size(image_bytes)
     content_hash = hashlib.sha256(image_bytes).hexdigest()
     payload: dict[str, Any] = {
@@ -140,8 +163,327 @@ def _build_frame_record(*, run_id: str, record_id: str, ts_utc: str, image_bytes
         "frame_index": 0,
         "source": "tools.process_single_screenshot",
     }
+    if isinstance(uia_ref, dict) and uia_ref:
+        payload["uia_ref"] = {
+            "record_id": str(uia_ref.get("record_id") or ""),
+            "ts_utc": str(uia_ref.get("ts_utc") or ts_utc),
+            "content_hash": str(uia_ref.get("content_hash") or ""),
+        }
     payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
     return payload
+
+
+def _record_with_payload_hash(payload: dict[str, Any]) -> dict[str, Any]:
+    out = dict(payload)
+    out["payload_hash"] = sha256_canonical({k: v for k, v in out.items() if k != "payload_hash"})
+    return out
+
+
+def _parse_ts_utc(value: str) -> datetime:
+    raw = str(value or "").strip()
+    if not raw:
+        return datetime.now(timezone.utc)
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except Exception:
+        return datetime.now(timezone.utc)
+
+
+def _to_utc_z(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _resolve_idle_step_max_seconds(*, budget_ms: int) -> int:
+    raw = str(os.environ.get("AUTOCAPTURE_SINGLE_IDLE_STEP_MAX_SECONDS") or "").strip()
+    try:
+        env_val = int(raw) if raw else 0
+    except Exception:
+        env_val = 0
+    if env_val > 0:
+        return max(15, min(600, env_val))
+    budget_s = max(1, int((int(budget_ms) + 999) // 1000))
+    return max(30, min(120, budget_s))
+
+
+def _metadata_put(metadata: Any, record_id: str, payload: dict[str, Any]) -> None:
+    if hasattr(metadata, "put_new"):
+        try:
+            _safe_call(metadata, "put_new", record_id, payload)
+            return
+        except Exception:
+            pass
+    _safe_call(metadata, "put", record_id, payload)
+
+
+def _load_synthetic_uia_module() -> Any:
+    path = resolve_repo_path("tools/synthetic_uia_contract_pack.py")
+    spec = importlib.util.spec_from_file_location("synthetic_uia_contract_pack_tool", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("synthetic_uia_contract_pack_load_failed")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _prepare_synthetic_uia_pack(
+    *,
+    run_dir: Path,
+    run_id: str,
+    ts_utc: str,
+    mode: str,
+    hash_mode: str,
+    dataroot: str,
+    pack_json: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if mode not in {"metadata", "fallback"}:
+        return {}, {"enabled": False, "source": "off"}
+    if pack_json:
+        pack_path = resolve_repo_path(pack_json)
+        payload = _load_json(pack_path)
+        return payload, {
+            "enabled": True,
+            "source": mode,
+            "pack_path": str(pack_path),
+            "dataroot": str(dataroot),
+        }
+    module = _load_synthetic_uia_module()
+    out_dir = Path(str(dataroot or "")).expanduser()
+    if not out_dir.is_absolute():
+        out_dir = (run_dir / out_dir).resolve()
+    result = module.write_contract_pack(
+        out_dir=out_dir,
+        run_id=run_id,
+        uia_record_id=f"{run_id}/uia/0",
+        ts_utc=ts_utc,
+        hash_mode=hash_mode,
+        focus_nodes=3,
+        context_nodes=6,
+        operable_nodes=8,
+        write_hash_file=True,
+    )
+    pack = _load_json(Path(str(result.get("pack_path") or "")))
+    return pack, {
+        "enabled": True,
+        "source": mode,
+        "pack_path": str(result.get("pack_path") or ""),
+        "dataroot": str(out_dir),
+        "hash_mode": str(hash_mode),
+    }
+
+
+def _inject_synthetic_uia(
+    *,
+    metadata: Any,
+    run_dir: Path,
+    run_id: str,
+    ts_utc: str,
+    mode: str,
+    hash_mode: str,
+    dataroot: str,
+    pack_json: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    pack, summary = _prepare_synthetic_uia_pack(
+        run_dir=run_dir,
+        run_id=run_id,
+        ts_utc=ts_utc,
+        mode=mode,
+        hash_mode=hash_mode,
+        dataroot=dataroot,
+        pack_json=pack_json,
+    )
+    if not pack:
+        return None, {"enabled": False, "source": "off"}
+    uia_ref = pack.get("uia_ref") if isinstance(pack.get("uia_ref"), dict) else None
+    metadata_record = pack.get("metadata_record") if isinstance(pack.get("metadata_record"), dict) else {}
+    metadata_written = False
+    if mode == "metadata" and isinstance(uia_ref, dict):
+        record_id = str(metadata_record.get("record_id") or uia_ref.get("record_id") or "").strip()
+        payload = metadata_record.get("payload") if isinstance(metadata_record.get("payload"), dict) else {}
+        if record_id and payload:
+            _metadata_put(metadata, record_id, dict(payload))
+            metadata_written = True
+    fallback = pack.get("fallback") if isinstance(pack.get("fallback"), dict) else {}
+    summary.update(
+        {
+            "enabled": True,
+            "uia_record_id": str((uia_ref or {}).get("record_id") or ""),
+            "metadata_record_written": bool(metadata_written),
+            "fallback_latest_snap_json": str(fallback.get("latest_snap_json") or ""),
+            "fallback_latest_snap_sha256": str(fallback.get("latest_snap_sha256") or ""),
+        }
+    )
+    return (dict(uia_ref) if isinstance(uia_ref, dict) else None), summary
+
+
+def _metadata_keys(metadata: Any) -> list[str]:
+    keys_fn = getattr(metadata, "keys", None)
+    if callable(keys_fn):
+        try:
+            return [str(x) for x in keys_fn()]
+        except Exception:
+            return []
+    return []
+
+
+def _collect_uia_docs(metadata: Any, *, run_id: str) -> dict[str, Any]:
+    prefix = f"{run_id}/derived.sst.text/extra/"
+    counts_template: dict[str, int] = {"obs.uia.focus": 0, "obs.uia.context": 0, "obs.uia.operable": 0}
+    all_docs: list[tuple[str, str]] = []
+    scoped_docs: list[tuple[str, str]] = []
+    for record_id in _metadata_keys(metadata):
+        rid = str(record_id)
+        try:
+            payload = _safe_call(metadata, "get", rid, None)
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        kind = str(payload.get("doc_kind") or "").strip()
+        if kind not in counts_template:
+            continue
+        item = (rid, kind)
+        all_docs.append(item)
+        if rid.startswith(prefix):
+            scoped_docs.append(item)
+    selected = scoped_docs if scoped_docs else all_docs
+    counts = dict(counts_template)
+    doc_ids: list[str] = []
+    for rid, kind in selected:
+        counts[kind] = int(counts.get(kind, 0)) + 1
+        doc_ids.append(rid)
+    return {
+        "count_by_kind": counts,
+        "doc_ids": sorted(doc_ids),
+        "total": int(sum(int(v) for v in counts.values())),
+    }
+
+
+def _append_journal_event(journal: Any | None, *, event_type: str, payload: dict[str, Any], ts_utc: str) -> bool:
+    if journal is None:
+        return False
+    try:
+        if hasattr(journal, "append_event"):
+            _safe_call(journal, "append_event", event_type, payload, ts_utc=ts_utc)
+            return True
+        entry = {
+            "schema_version": 1,
+            "event_id": "",
+            "sequence": None,
+            "ts_utc": ts_utc,
+            "tzid": "UTC",
+            "offset_minutes": 0,
+            "event_type": event_type,
+            "payload": payload,
+            "run_id": str(payload.get("run_id") or ""),
+        }
+        _safe_call(journal, "append", entry)
+        return True
+    except Exception:
+        return False
+
+
+def _inject_synthetic_hid(
+    *,
+    metadata: Any,
+    journal: Any | None,
+    run_id: str,
+    base_ts_utc: str,
+    mode: str,
+) -> dict[str, Any]:
+    start_dt = _parse_ts_utc(base_ts_utc)
+    events: list[dict[str, Any]] = [
+        {"kind": "key", "action": "press", "key": "ctrl", "ts_utc": _to_utc_z(start_dt)},
+        {"kind": "key", "action": "press", "key": "k", "ts_utc": _to_utc_z(start_dt)},
+        {"kind": "mouse", "action": "move", "x": 768, "y": 432, "ts_utc": _to_utc_z(start_dt)},
+        {"kind": "mouse", "action": "click", "button": "left", "x": 768, "y": 432, "ts_utc": _to_utc_z(start_dt)},
+    ]
+    cursor_points: list[dict[str, Any]] = [
+        {"x": 740, "y": 410},
+        {"x": 768, "y": 432},
+        {"x": 812, "y": 460},
+    ]
+    if mode == "rich":
+        events.extend(
+            [
+                {"kind": "key", "action": "press", "key": "alt", "ts_utc": _to_utc_z(start_dt)},
+                {"kind": "key", "action": "press", "key": "tab", "ts_utc": _to_utc_z(start_dt)},
+                {"kind": "mouse", "action": "wheel", "delta": -120, "x": 1730, "y": 980, "ts_utc": _to_utc_z(start_dt)},
+                {"kind": "mouse", "action": "click", "button": "left", "x": 1730, "y": 980, "ts_utc": _to_utc_z(start_dt)},
+            ]
+        )
+        cursor_points.extend([{"x": 1320, "y": 620}, {"x": 1730, "y": 980}])
+
+    key_count = sum(1 for item in events if str(item.get("kind")) == "key")
+    mouse_count = sum(1 for item in events if str(item.get("kind")) == "mouse")
+    end_dt = start_dt
+    if events:
+        end_dt = start_dt.replace(microsecond=0)
+    summary_id = prefixed_id(run_id, "derived.input.summary", 0)
+    summary_payload = _record_with_payload_hash(
+        {
+            "schema_version": 1,
+            "record_type": "derived.input.summary",
+            "run_id": run_id,
+            "event_id": prefixed_id(run_id, "input.batch", 0),
+            "start_ts_utc": _to_utc_z(start_dt),
+            "end_ts_utc": _to_utc_z(end_dt),
+            "event_count": int(len(events)),
+            "counts": {"key": int(key_count), "mouse": int(mouse_count)},
+            "events": events,
+            "source": "tools.process_single_screenshot.synthetic_hid",
+        }
+    )
+    _metadata_put(metadata, summary_id, summary_payload)
+    cursor_ids: list[str] = []
+    for idx, point in enumerate(cursor_points):
+        cursor_id = prefixed_id(run_id, "derived.cursor.sample", idx)
+        cursor_payload = _record_with_payload_hash(
+            {
+                "schema_version": 1,
+                "record_type": "derived.cursor.sample",
+                "run_id": run_id,
+                "ts_utc": _to_utc_z(start_dt),
+                "cursor": {"x": int(point.get("x", 0)), "y": int(point.get("y", 0))},
+                "source": "tools.process_single_screenshot.synthetic_hid",
+            }
+        )
+        _metadata_put(metadata, cursor_id, cursor_payload)
+        cursor_ids.append(cursor_id)
+
+    journal_events_written = 0
+    input_payload = {
+        "record_type": "derived.input.summary",
+        "record_id": summary_id,
+        "run_id": run_id,
+        "start_ts_utc": summary_payload["start_ts_utc"],
+        "end_ts_utc": summary_payload["end_ts_utc"],
+        "events": events,
+        "counts": summary_payload["counts"],
+    }
+    if _append_journal_event(journal, event_type="input.batch", payload=input_payload, ts_utc=summary_payload["end_ts_utc"]):
+        journal_events_written += 1
+    if cursor_ids:
+        cursor_payload = {
+            "record_type": "derived.cursor.sample",
+            "record_id": cursor_ids[-1],
+            "run_id": run_id,
+            "cursor": {"x": int(cursor_points[-1]["x"]), "y": int(cursor_points[-1]["y"])},
+        }
+        if _append_journal_event(
+            journal,
+            event_type="cursor.sample",
+            payload=cursor_payload,
+            ts_utc=summary_payload["end_ts_utc"],
+        ):
+            journal_events_written += 1
+
+    return {
+        "enabled": True,
+        "mode": mode,
+        "metadata_record_ids": [summary_id] + cursor_ids,
+        "journal_events_written": int(journal_events_written),
+        "event_count": int(len(events)),
+    }
 
 
 def _safe_call(obj: Any, name: str, *args, **kwargs) -> Any:
@@ -222,6 +564,27 @@ def _should_require_vlm(required_plugins: list[str]) -> bool:
     return forced in {"1", "true", "yes"}
 
 
+def _disable_vlm_idle_runtime(idle: Any) -> None:
+    cfg = getattr(idle, "_config", None)
+    if not isinstance(cfg, dict):
+        return
+    processing_cfg = cfg.setdefault("processing", {})
+    if not isinstance(processing_cfg, dict):
+        return
+    idle_cfg = processing_cfg.setdefault("idle", {})
+    if isinstance(idle_cfg, dict):
+        extractors_cfg = idle_cfg.setdefault("extractors", {})
+        if isinstance(extractors_cfg, dict):
+            extractors_cfg["vlm"] = False
+        idle_cfg["max_concurrency_gpu"] = 0
+    sst_cfg = processing_cfg.setdefault("sst", {})
+    if isinstance(sst_cfg, dict):
+        sst_cfg["allow_vlm"] = False
+        ui_vlm_cfg = sst_cfg.setdefault("ui_vlm", {})
+        if isinstance(ui_vlm_cfg, dict):
+            ui_vlm_cfg["enabled"] = False
+
+
 def _is_truthy_env(value: str | None) -> bool:
     text = str(value or "").strip().casefold()
     if not text:
@@ -258,6 +621,13 @@ def _coerce_int(raw: Any, default: int) -> int:
         return int(default)
 
 
+def _coerce_float(raw: Any, default: float) -> float:
+    try:
+        return float(raw)
+    except Exception:
+        return float(default)
+
+
 def _resolve_strict_model_selection(*, selected_model: str, served_models: list[str], strict_golden: bool) -> tuple[str, str]:
     selected = str(selected_model or "").strip()
     models = [str(x).strip() for x in served_models if str(x).strip()]
@@ -272,6 +642,35 @@ def _resolve_strict_model_selection(*, selected_model: str, served_models: list[
             f"strict_golden_requires_explicit_vllm_model_multiple_available:{','.join(models)}"
         )
     raise RuntimeError("strict_golden_requires_vllm_models")
+
+
+def _best_effort_finalize_run_state(
+    data_dir: Path,
+    *,
+    error: str | None = None,
+    terminated_signal: int | None = None,
+) -> None:
+    run_state_path = data_dir / "run_state.json"
+    if not run_state_path.exists():
+        return
+    try:
+        raw = json.loads(run_state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(raw, dict):
+        return
+    now_utc = datetime.now(timezone.utc).isoformat()
+    raw["state"] = "stopped"
+    raw["stopped_at"] = now_utc
+    raw["ts_utc"] = now_utc
+    if error:
+        raw["last_error"] = str(error)
+    if terminated_signal is not None:
+        raw["terminated_signal"] = int(terminated_signal)
+    try:
+        run_state_path.write_text(json.dumps(raw, sort_keys=True), encoding="utf-8")
+    except Exception:
+        return
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -294,9 +693,60 @@ def main(argv: list[str] | None = None) -> int:
         default=24,
         help="Maximum number of idle processor steps to run before giving up.",
     )
+    parser.add_argument(
+        "--synthetic-hid",
+        choices=("off", "minimal", "rich"),
+        default="minimal",
+        help="Inject deterministic synthetic HID metadata/journal records before idle processing.",
+    )
+    parser.add_argument(
+        "--uia-synthetic",
+        choices=("off", "metadata", "fallback"),
+        default="off",
+        help="Inject synthetic UIA sidecar contract data via metadata or fallback.",
+    )
+    parser.add_argument(
+        "--uia-synthetic-pack-json",
+        default="",
+        help="Optional path to a prebuilt synthetic_uia_contract_pack.json fixture.",
+    )
+    parser.add_argument(
+        "--uia-synthetic-dataroot",
+        default="",
+        help="Synthetic dataroot used for fallback mode (defaults to run_dir/synthetic_uia).",
+    )
+    parser.add_argument(
+        "--uia-synthetic-hash-mode",
+        choices=("match", "mismatch"),
+        default="match",
+        help="Synthetic hash mode for generated UIA fixtures.",
+    )
+    parser.add_argument(
+        "--skip-vllm-unstable",
+        dest="skip_vllm_unstable",
+        action="store_true",
+        default=True,
+        help="Degrade VLM-dependent processing to skipped when VLM preflight fails (default: true).",
+    )
+    parser.add_argument(
+        "--fail-on-vllm-unstable",
+        dest="skip_vllm_unstable",
+        action="store_false",
+        help="Fail closed when VLM preflight fails.",
+    )
     parsed = parser.parse_args(args)
 
     image_path = Path(str(parsed.image))
+    _emit_progress(
+        "start",
+        image=str(image_path),
+        profile=str(parsed.profile),
+        budget_ms=int(parsed.budget_ms),
+        max_idle_steps=int(parsed.max_idle_steps),
+        synthetic_hid=str(parsed.synthetic_hid),
+        uia_synthetic=str(parsed.uia_synthetic),
+        skip_vllm_unstable=bool(parsed.skip_vllm_unstable),
+    )
     if not image_path.exists():
         print(f"ERROR: image not found: {image_path}")
         return 2
@@ -309,6 +759,13 @@ def main(argv: list[str] | None = None) -> int:
     config_dir = run_dir / "config"
     data_dir = run_dir / "data"
     report_path = run_dir / "report.json"
+    synthetic_uia_dataroot = (
+        Path(str(parsed.uia_synthetic_dataroot)).expanduser()
+        if str(parsed.uia_synthetic_dataroot or "").strip()
+        else (run_dir / "synthetic_uia")
+    )
+    if not synthetic_uia_dataroot.is_absolute():
+        synthetic_uia_dataroot = (run_dir / synthetic_uia_dataroot).resolve()
 
     strict_golden = _strict_golden_enabled()
     base_cfg = _load_json(resolve_repo_path(parsed.config_base))
@@ -345,9 +802,15 @@ def main(argv: list[str] | None = None) -> int:
             return 2
     os.environ.setdefault("AUTOCAPTURE_VLM_BASE_URL", EXTERNAL_VLLM_BASE_URL)
     os.environ.setdefault("AUTOCAPTURE_VLM_MODEL", "internvl3_5_8b")
-    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", "12")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", "45")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_MAX_S", "120")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_SCALE", "1.5")
     os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_RETRIES", "3")
+    os.environ.setdefault("AUTOCAPTURE_VLM_ORCHESTRATOR_WARMUP_S", "20")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_RETRY_SLEEP_S", "1")
     os.environ.setdefault("AUTOCAPTURE_VLM_MAX_INFLIGHT", "1")
+    os.environ.setdefault("AUTOCAPTURE_SST_OCR_MIN_FULL_FRAME_TOKENS", "120")
+    os.environ.setdefault("AUTOCAPTURE_SINGLE_IDLE_STEP_MAX_SECONDS", "240")
     os.environ.setdefault(
         "AUTOCAPTURE_VLM_ORCHESTRATOR_CMD",
         "bash /mnt/d/projects/hypervisor/tools/wsl/start_internvl35_8b_with_watch.sh",
@@ -425,6 +888,10 @@ def main(argv: list[str] | None = None) -> int:
                 allowlist.append("builtin.vlm.qwen2_vl_2b")
             if "builtin.processing.sst.ui_vlm" not in allowlist:
                 allowlist.append("builtin.processing.sst.ui_vlm")
+            if "builtin.processing.sst.uia_context" not in allowlist:
+                allowlist.append("builtin.processing.sst.uia_context")
+            if "builtin.sst.ui.parse" not in allowlist:
+                allowlist.append("builtin.sst.ui.parse")
             if "builtin.answer.synth_vllm_localhost" not in allowlist:
                 allowlist.append("builtin.answer.synth_vllm_localhost")
             _ensure_core_writer_plugins(allowlist=allowlist)
@@ -447,6 +914,8 @@ def main(argv: list[str] | None = None) -> int:
             enabled["builtin.sst.qa.answers"] = False
             enabled["builtin.observation.graph"] = True
             enabled["builtin.processing.sst.ui_vlm"] = True
+            enabled["builtin.processing.sst.uia_context"] = True
+            enabled["builtin.sst.ui.parse"] = True
             enabled["builtin.answer.synth_vllm_localhost"] = True
             enabled["builtin.vlm.vllm_localhost"] = True
             enabled["builtin.vlm.qwen2_vl_2b"] = not remote_vlm_only
@@ -488,12 +957,29 @@ def main(argv: list[str] | None = None) -> int:
                     cooldown_s = 45.0
                 vllm_settings["failure_cooldown_s"] = max(5.0, cooldown_s)
                 vllm_settings["two_pass_enabled"] = True
-                vllm_settings["thumb_max_px"] = _coerce_int(vllm_settings.get("thumb_max_px"), 960)
-                vllm_settings["max_rois"] = _coerce_int(vllm_settings.get("max_rois"), 6)
-                vllm_settings["roi_max_side"] = _coerce_int(vllm_settings.get("roi_max_side"), 896)
-                vllm_settings["thumb_max_tokens"] = _coerce_int(vllm_settings.get("thumb_max_tokens"), 384)
-                vllm_settings["roi_max_tokens"] = _coerce_int(vllm_settings.get("roi_max_tokens"), 512)
-                vllm_settings["max_tokens"] = _coerce_int(vllm_settings.get("max_tokens"), 512)
+                # Option A contract: maximize ingest-time structured metadata
+                # quality while keeping deterministic upper bounds.
+                vllm_settings["timeout_s"] = min(_coerce_float(vllm_settings.get("timeout_s"), 25.0), 25.0)
+                vllm_settings["max_retries"] = min(_coerce_int(vllm_settings.get("max_retries"), 2), 2)
+                vllm_settings["thumb_max_px"] = min(_coerce_int(vllm_settings.get("thumb_max_px"), 1536), 1536)
+                vllm_settings["max_rois"] = min(_coerce_int(vllm_settings.get("max_rois"), 7), 7)
+                vllm_settings["grid_sections"] = min(_coerce_int(vllm_settings.get("grid_sections"), 6), 6)
+                vllm_settings["roi_max_side"] = min(_coerce_int(vllm_settings.get("roi_max_side"), 2048), 2048)
+                vllm_settings["thumb_max_tokens"] = min(_coerce_int(vllm_settings.get("thumb_max_tokens"), 640), 640)
+                vllm_settings["roi_max_tokens"] = min(_coerce_int(vllm_settings.get("roi_max_tokens"), 1024), 1024)
+                vllm_settings["max_tokens"] = min(_coerce_int(vllm_settings.get("max_tokens"), 640), 640)
+                vllm_settings["factpack_enabled"] = bool(vllm_settings.get("factpack_enabled", True))
+            if str(parsed.uia_synthetic) in {"metadata", "fallback"}:
+                uia_settings = settings.setdefault("builtin.processing.sst.uia_context", {})
+                if isinstance(uia_settings, dict):
+                    uia_settings["dataroot"] = str(synthetic_uia_dataroot)
+                    uia_settings["allow_latest_snapshot_fallback"] = True
+                    uia_settings["require_hash_match"] = True
+                vllm_settings["factpack_max_tokens"] = min(
+                    _coerce_int(vllm_settings.get("factpack_max_tokens"), 1280),
+                    1280,
+                )
+                vllm_settings["topic_factpack_enabled"] = True
                 vllm_settings["temperature"] = 0.0
                 vllm_settings["top_p"] = 1.0
                 vllm_settings["n"] = 1
@@ -533,6 +1019,20 @@ def main(argv: list[str] | None = None) -> int:
     if isinstance(plugins_cfg, dict):
         caps_cfg = plugins_cfg.setdefault("capabilities", {})
         if isinstance(caps_cfg, dict):
+            stage_hooks = caps_cfg.setdefault("processing.stage.hooks", {})
+            if isinstance(stage_hooks, dict):
+                stage_hooks["fanout"] = True
+                stage_hooks["mode"] = "multi"
+                stage_hooks["max_providers"] = max(64, int(stage_hooks.get("max_providers", 0) or 0))
+            ocr_cap = caps_cfg.setdefault("ocr.engine", {})
+            if isinstance(ocr_cap, dict):
+                ocr_cap["fanout"] = True
+                ocr_cap["mode"] = "multi"
+                ocr_cap["max_providers"] = max(2, int(ocr_cap.get("max_providers", 0) or 0))
+                preferred_ocr = ["builtin.ocr.nemotron_torch", "builtin.ocr.rapid", "builtin.ocr.basic"]
+                existing_ocr = ocr_cap.get("preferred", [])
+                if isinstance(existing_ocr, list):
+                    ocr_cap["preferred"] = preferred_ocr + [str(x) for x in existing_ocr if str(x) not in preferred_ocr]
             vision = caps_cfg.setdefault("vision.extractor", {})
             if isinstance(vision, dict):
                 preferred = vision.setdefault("preferred", [])
@@ -588,21 +1088,22 @@ def main(argv: list[str] | None = None) -> int:
     if isinstance(processing_cfg, dict):
         idle_cfg = processing_cfg.setdefault("idle", {})
         if isinstance(idle_cfg, dict):
-            idle_cfg["max_seconds_per_run"] = int(max(int(idle_cfg.get("max_seconds_per_run", 30) or 30), 240))
+            max_step_seconds = _resolve_idle_step_max_seconds(budget_ms=int(parsed.budget_ms))
+            idle_cfg["max_seconds_per_run"] = int(max_step_seconds)
             idle_cfg["max_concurrency_gpu"] = int(idle_cfg.get("max_concurrency_gpu", 1) or 1)
             extractors_cfg = idle_cfg.setdefault("extractors", {})
             if isinstance(extractors_cfg, dict):
-                # Enable direct VLM extractor by default for single-image eval runs.
-                # This can be disabled explicitly via env for profiling duplicates.
-                idle_vlm_enabled = str(os.environ.get("AUTOCAPTURE_IDLE_VLM_EXTRACT", "1")).strip().casefold() not in {
-                    "0",
-                    "false",
-                    "no",
-                }
-                extractors_cfg["vlm"] = bool(idle_vlm_enabled)
+                # Strict golden single-image mode should use SST as the single
+                # metadata path. Direct idle OCR/VLM extractors duplicate work
+                # and can consume most of the per-step budget before SST runs.
+                extractors_cfg["ocr"] = False
+                extractors_cfg["vlm"] = False
         sst_cfg = processing_cfg.setdefault("sst", {})
         if isinstance(sst_cfg, dict):
             sst_cfg["enabled"] = True
+            # Option A contract: metadata quality must come from ingest-time
+            # extraction, not query-time image calls.
+            sst_cfg["allow_ocr"] = True
             sst_cfg["allow_vlm"] = True
             ui_parse_cfg = sst_cfg.setdefault("ui_parse", {})
             if isinstance(ui_parse_cfg, dict):
@@ -641,6 +1142,14 @@ def main(argv: list[str] | None = None) -> int:
         "force_idle": bool(parsed.force_idle),
         "profile_path": str(profile_path),
         "strict_golden": bool(strict_golden),
+        "uia_injection": {
+            "enabled": bool(str(parsed.uia_synthetic) in {"metadata", "fallback"}),
+            "source": str(parsed.uia_synthetic),
+            "pack_json": str(parsed.uia_synthetic_pack_json or ""),
+            "dataroot": str(synthetic_uia_dataroot),
+            "hash_mode": str(parsed.uia_synthetic_hash_mode),
+        },
+        "uia_docs": {"count_by_kind": {}, "doc_ids": [], "total": 0},
     }
     if profile_path.exists():
         report["profile_sha256"] = hashlib.sha256(profile_path.read_bytes()).hexdigest()
@@ -653,17 +1162,38 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     kernel = None
+    exit_code = 0
+    termination_meta: dict[str, int | None] = {"signal": None}
+    prior_signal_handlers: dict[int, Any] = {}
+
+    def _termination_handler(sig_num: int, _frame: Any) -> None:
+        termination_meta["signal"] = int(sig_num)
+        raise RuntimeError(f"terminated_signal:{int(sig_num)}")
+
+    for sig_name in ("SIGTERM", "SIGINT"):
+        sig_obj = getattr(signal, sig_name, None)
+        if sig_obj is None:
+            continue
+        try:
+            prior_signal_handlers[int(sig_obj)] = signal.getsignal(sig_obj)
+            signal.signal(sig_obj, _termination_handler)
+        except Exception:
+            continue
+
     try:
+        _emit_progress("kernel.boot.begin", data_dir=str(data_dir), config_dir=str(config_dir))
         os.environ["TZ"] = str(report["determinism_contract"]["timezone"])
         os.environ["LANG"] = str(report["determinism_contract"]["lang"])
         os.environ["LC_ALL"] = str(report["determinism_contract"]["lang"])
         os.environ["PYTHONHASHSEED"] = str(report["determinism_contract"]["pythonhashseed"])
         kernel = Kernel(default_config_paths(), safe_mode=False)
         system = kernel.boot(start_conductor=False, fast_boot=False)
+        _emit_progress("kernel.boot.done")
         report["boot_ok"] = True
 
         metadata = system.get("storage.metadata")
         media = system.get("storage.media")
+        journal = system.get("journal.writer") if getattr(system, "has", lambda _n: False)("journal.writer") else None
         report["stores"] = {"metadata": type(metadata).__name__, "media": type(media).__name__}
         report["caps_present"] = {
             "ocr.engine": bool(getattr(system, "has", lambda _n: False)("ocr.engine")),
@@ -713,7 +1243,10 @@ def main(argv: list[str] | None = None) -> int:
             raise RuntimeError(
                 f"required_plugin_gate_failed: missing=[{missing}] failed=[{failed}]"
             )
+        vlm_degraded = False
+        vlm_degraded_reason = ""
         if _should_require_vlm(required_plugins):
+            _emit_progress("vlm.preflight.begin", base_url=EXTERNAL_VLLM_BASE_URL)
             plugin_settings = (base_cfg.get("plugins") or {}).get("settings", {}) if isinstance(base_cfg, dict) else {}
             vllm_cfg = plugin_settings.get("builtin.vlm.vllm_localhost", {}) if isinstance(plugin_settings, dict) else {}
             if not str(os.environ.get("AUTOCAPTURE_VLM_API_KEY") or "").strip():
@@ -722,23 +1255,38 @@ def main(argv: list[str] | None = None) -> int:
                     cfg_key = _repo_default_vlm_api_key()
                 if cfg_key:
                     os.environ["AUTOCAPTURE_VLM_API_KEY"] = cfg_key
+            vlm_preflight_t0 = time.monotonic()
             vllm_status = check_external_vllm_ready(require_completion=True)
+            _emit_progress(
+                "vlm.preflight.done",
+                ok=bool(vllm_status.get("ok", False)),
+                latency_ms=int((time.monotonic() - vlm_preflight_t0) * 1000),
+                selected_model=str(vllm_status.get("selected_model") or ""),
+            )
             report["vllm_status"] = vllm_status
             if not bool(vllm_status.get("ok", False)):
-                raise RuntimeError(f"external_vllm_unavailable:{vllm_status}")
+                if bool(parsed.skip_vllm_unstable):
+                    vlm_degraded = True
+                    vlm_degraded_reason = str(vllm_status.get("error") or "external_vllm_unavailable")
+                    report["vllm_status"]["degraded_mode"] = True
+                    report["vllm_status"]["degraded_reason"] = str(vlm_degraded_reason)
+                    _emit_progress("vlm.preflight.degraded", reason=str(vlm_degraded_reason))
+                else:
+                    raise RuntimeError(f"external_vllm_unavailable:{vllm_status}")
             models = [str(x).strip() for x in (vllm_status.get("models") or []) if str(x).strip()]
             selected_model = str(vllm_cfg.get("model") or "").strip() if isinstance(vllm_cfg, dict) else ""
-            selected_model, model_source = _resolve_strict_model_selection(
-                selected_model=selected_model,
-                served_models=models,
-                strict_golden=bool(strict_golden),
-            )
-            report["vllm_model_selected"] = selected_model
-            report["vllm_model_source"] = model_source
-            if selected_model and models and selected_model not in models:
-                raise RuntimeError(
-                    f"strict_golden_model_not_served:selected={selected_model}:available={','.join(models)}"
+            if not vlm_degraded:
+                selected_model, model_source = _resolve_strict_model_selection(
+                    selected_model=selected_model,
+                    served_models=models,
+                    strict_golden=bool(strict_golden),
                 )
+                report["vllm_model_selected"] = selected_model
+                report["vllm_model_source"] = model_source
+                if selected_model and models and selected_model not in models:
+                    raise RuntimeError(
+                        f"strict_golden_model_not_served:selected={selected_model}:available={','.join(models)}"
+                    )
         try:
             ocr_cap = system.get("ocr.engine") if getattr(system, "has", lambda _n: False)("ocr.engine") else None
             vlm_cap = system.get("vision.extractor") if getattr(system, "has", lambda _n: False)("vision.extractor") else None
@@ -749,7 +1297,39 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             report["providers"] = {"ocr": [], "vlm": []}
 
-        frame_record = _build_frame_record(run_id=run_id, record_id=record_id, ts_utc=ts_utc, image_bytes=image_bytes)
+        uia_ref: dict[str, Any] | None = None
+        if str(parsed.uia_synthetic) in {"metadata", "fallback"}:
+            _emit_progress("ingest.synthetic_uia.begin", mode=str(parsed.uia_synthetic))
+            uia_ref, uia_summary = _inject_synthetic_uia(
+                metadata=metadata,
+                run_dir=run_dir,
+                run_id=run_id,
+                ts_utc=ts_utc,
+                mode=str(parsed.uia_synthetic),
+                hash_mode=str(parsed.uia_synthetic_hash_mode),
+                dataroot=str(synthetic_uia_dataroot),
+                pack_json=str(parsed.uia_synthetic_pack_json or ""),
+            )
+            report["uia_injection"] = dict(uia_summary)
+            _emit_progress(
+                "ingest.synthetic_uia.done",
+                mode=str(parsed.uia_synthetic),
+                record_id=str((uia_ref or {}).get("record_id") or ""),
+            )
+
+        frame_record = _build_frame_record(
+            run_id=run_id,
+            record_id=record_id,
+            ts_utc=ts_utc,
+            image_bytes=image_bytes,
+            uia_ref=uia_ref,
+        )
+        _emit_progress(
+            "ingest.frame.begin",
+            record_id=str(record_id),
+            image_bytes=int(len(image_bytes)),
+            ts_utc=str(ts_utc),
+        )
 
         # Media first; metadata should only reference an existing blob.
         if hasattr(media, "put_new"):
@@ -760,29 +1340,60 @@ def main(argv: list[str] | None = None) -> int:
         else:
             _safe_call(media, "put", record_id, image_bytes, ts_utc=ts_utc)
 
-        if hasattr(metadata, "put_new"):
-            try:
-                _safe_call(metadata, "put_new", record_id, frame_record)
-            except Exception:
-                _safe_call(metadata, "put", record_id, frame_record)
-        else:
-            _safe_call(metadata, "put", record_id, frame_record)
+        _metadata_put(metadata, record_id, frame_record)
         report["ingest_ok"] = True
+        _emit_progress("ingest.frame.done", record_id=str(record_id))
+        if str(parsed.synthetic_hid or "").strip() in {"minimal", "rich"}:
+            _emit_progress("ingest.synthetic_hid.begin", mode=str(parsed.synthetic_hid))
+            report["synthetic_hid"] = _inject_synthetic_hid(
+                metadata=metadata,
+                journal=journal,
+                run_id=run_id,
+                base_ts_utc=ts_utc,
+                mode=str(parsed.synthetic_hid),
+            )
+            _emit_progress(
+                "ingest.synthetic_hid.done",
+                mode=str(parsed.synthetic_hid),
+                event_count=int((report.get("synthetic_hid") or {}).get("event_count", 0) or 0),
+            )
+        else:
+            report["synthetic_hid"] = {"enabled": False, "mode": "off", "metadata_record_ids": [], "journal_events_written": 0}
 
         need_vlm = _should_require_vlm(required_plugins)
+        if str(parsed.uia_synthetic) in {"metadata", "fallback"}:
+            # Synthetic UIA gauntlet mode validates metadata-driven answering paths;
+            # do not block idle completion on VLM extractor counters.
+            need_vlm = False
+        if vlm_degraded:
+            need_vlm = False
         need_sst = (
             "builtin.processing.sst.pipeline" in required_plugins
             or "builtin.processing.sst.ui_vlm" in required_plugins
         )
+        if vlm_degraded:
+            need_sst = False
         need_state = any(str(plugin_id).startswith("builtin.state.") for plugin_id in required_plugins)
         idle = IdleProcessor(system)
+        if vlm_degraded:
+            _disable_vlm_idle_runtime(idle)
+            report["vlm_degraded"] = True
+            report["vlm_degraded_reason"] = str(vlm_degraded_reason)
         max_steps = max(1, int(parsed.max_idle_steps))
         done = False
         last_stats: dict[str, Any] = {}
         cumulative_stats: dict[str, int] = {}
         per_step_stats: list[dict[str, Any]] = []
         steps_taken = 0
+        _emit_progress(
+            "idle.loop.begin",
+            max_steps=int(max_steps),
+            need_vlm=bool(need_vlm),
+            need_sst=bool(need_sst),
+            need_state=bool(need_state),
+        )
         for step_idx in range(max_steps):
+            step_t0 = time.monotonic()
             step_done, stats = idle.process_step(
                 should_abort=None,
                 budget_ms=max(0, int(parsed.budget_ms)),
@@ -797,6 +1408,13 @@ def main(argv: list[str] | None = None) -> int:
                 except Exception:
                     continue
             done = bool(step_done)
+            _emit_progress(
+                "idle.step",
+                step=int(steps_taken),
+                step_done=bool(step_done),
+                latency_ms=int((time.monotonic() - step_t0) * 1000),
+                stats=last_stats,
+            )
             # Stop once the processor declares done, or when state-layer has run.
             # Do not exit solely on sst_runs>0; that can leave state spans unbuilt.
             if _should_stop_idle_loop(
@@ -807,6 +1425,12 @@ def main(argv: list[str] | None = None) -> int:
                 need_state=need_state,
             ):
                 break
+        _emit_progress(
+            "idle.loop.done",
+            steps_taken=int(steps_taken),
+            done=bool(done),
+            stats_cumulative=cumulative_stats,
+        )
         report["idle"] = {
             "done": bool(done),
             "steps_taken": int(steps_taken),
@@ -824,8 +1448,10 @@ def main(argv: list[str] | None = None) -> int:
                 "state_ok": bool(int(cumulative_stats.get("state_runs", 0) or 0) > 0),
             },
         }
+        report["uia_docs"] = _collect_uia_docs(metadata, run_id=run_id)
 
         if parsed.query:
+            _emit_progress("query.begin", query=str(parsed.query))
             # Full query path (PromptOps + citations policy + retrieval) against the
             # persisted extracted metadata produced above.
             q = str(parsed.query)
@@ -834,13 +1460,18 @@ def main(argv: list[str] | None = None) -> int:
             report["query_basic"] = run_query_without_state(system, q, schedule_extract=False)
             report["query_state"] = run_state_query(system, q)
             report["query_arbitrated"] = run_query(system, q, schedule_extract=False)
+            _emit_progress("query.done")
     except Exception as exc:
         report["error"] = f"{type(exc).__name__}: {exc}"
-        _write_json(report_path, report)
-        print(json.dumps({"ok": False, "error": report["error"], "report": str(report_path)}, sort_keys=True))
-        return 1
+        _emit_progress("error", error=str(report["error"]))
+        exit_code = 1
     finally:
-        if kernel is not None:
+        for sig_num, handler in prior_signal_handlers.items():
+            try:
+                signal.signal(sig_num, handler)
+            except Exception:
+                continue
+        if kernel is not None and termination_meta.get("signal") is None:
             try:
                 kernel.shutdown()
             except Exception:
@@ -873,9 +1504,19 @@ def main(argv: list[str] | None = None) -> int:
             os.environ["PYTHONHASHSEED"] = original_pythonhashseed
         else:
             os.environ.pop("PYTHONHASHSEED", None)
+        _best_effort_finalize_run_state(
+            data_dir,
+            error=str(report.get("error") or ""),
+            terminated_signal=termination_meta.get("signal"),
+        )
 
     report["finished_utc"] = datetime.now(timezone.utc).isoformat()
     _write_json(report_path, report)
+    if exit_code != 0:
+        _emit_progress("finish", ok=False, report=str(report_path))
+        print(json.dumps({"ok": False, "error": report.get("error") or "run_failed", "report": str(report_path)}, sort_keys=True))
+        return int(exit_code)
+    _emit_progress("finish", ok=True, report=str(report_path))
     print(json.dumps({"ok": True, "report": str(report_path)}, sort_keys=True))
     return 0
 

@@ -1,1 +1,1 @@
-how many inboxes do i have open?
+Enumerate every distinct top-level window visible in the screenshot. For each window: app/product name, host-vs-VDI context, and whether it is fully visible or partially occluded. Return the list in front-to-back z-order.

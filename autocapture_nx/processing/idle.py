@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import zipfile
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -31,7 +32,15 @@ from autocapture_nx.kernel.model_output_records import (
     model_output_record_id,
 )
 from autocapture_nx.kernel.providers import capability_providers
+from autocapture_nx.ingest.uia_obs_docs import (
+    _ensure_frame_uia_docs,
+    _frame_uia_expected_ids,
+    _uia_extract_snapshot_dict,
+)
+from autocapture_nx.storage.stage1_derived_store import build_stage1_overlay_store
 from autocapture_nx.storage.facts_ndjson import append_fact_line
+from autocapture.storage.retention import retention_eligibility_record_id
+from autocapture.storage.stage1 import mark_stage1_and_retention, stage1_complete_record_id
 
 
 @dataclass
@@ -50,6 +59,19 @@ class IdleProcessStats:
     state_edges: int = 0
     state_evidence: int = 0
     state_errors: int = 0
+    records_planned: int = 0
+    records_completed: int = 0
+    pending_records: int = 0
+    vlm_deferred: int = 0
+    vlm_throttled: int = 0
+    pipeline_deferred: int = 0
+    stage1_complete_records: int = 0
+    stage1_retention_marked_records: int = 0
+    stage1_missing_retention_marker_count: int = 0
+    stage1_backfill_scanned_records: int = 0
+    stage1_backfill_marked_records: int = 0
+    stage1_uia_docs_inserted: int = 0
+    stage1_uia_frames_missing_count: int = 0
 
 
 @dataclass
@@ -70,7 +92,11 @@ class _IdleWorkItem:
     encoded_source: str
     parent_hash: str | None
     missing_count: int
+    needs_ocr: bool
+    needs_vlm: bool
     needs_pipeline: bool
+    allow_pipeline_vlm: bool
+    deferred_vlm_from: str | None
 
 
 def _is_missing_metadata_record(value: Any) -> bool:
@@ -336,6 +362,11 @@ class IdleProcessor:
         self._pipeline = self._cap("processing.pipeline")
         self._events = self._cap("event.builder")
         self._logger = self._cap("observability.logger")
+        self._stage1_store, self._stage1_derived = build_stage1_overlay_store(
+            config=self._config,
+            metadata=self._metadata,
+            logger=self._logger,
+        )
         self._lexical = None
         self._vector = None
         self._indexes_ready = False
@@ -351,8 +382,23 @@ class IdleProcessor:
         return None
 
     def _checkpoint_id(self) -> str:
-        run_id = str(self._config.get("runtime", {}).get("run_id", "run"))
-        return f"{run_id}/derived.idle.checkpoint"
+        return "system/derived.idle.checkpoint"
+
+    def _checkpoint_candidates(self) -> list[str]:
+        candidates = [self._checkpoint_id()]
+        runtime_run_id = str(self._config.get("runtime", {}).get("run_id", "") or "").strip()
+        if runtime_run_id:
+            candidates.append(f"{runtime_run_id}/derived.idle.checkpoint")
+        candidates.append("run/derived.idle.checkpoint")
+        # Preserve order while deduping.
+        out: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            out.append(candidate)
+        return out
 
     def _load_checkpoint(self) -> IdleCheckpoint | None:
         if self._checkpoint_loaded:
@@ -360,20 +406,23 @@ class IdleProcessor:
         self._checkpoint_loaded = True
         if self._metadata is None:
             return None
-        record = self._metadata.get(self._checkpoint_id(), None)
-        if isinstance(record, dict) and record.get("record_type") == "derived.idle.checkpoint":
+        for checkpoint_id in self._checkpoint_candidates():
+            record = self._metadata.get(checkpoint_id, None)
+            if not (isinstance(record, dict) and record.get("record_type") == "derived.idle.checkpoint"):
+                continue
             last_record_id = record.get("last_record_id")
             processed_total = int(record.get("processed_total", 0) or 0)
             updated = str(record.get("ts_utc") or "")
             if updated:
                 self._checkpoint = IdleCheckpoint(last_record_id=str(last_record_id) if last_record_id else None, processed_total=processed_total, updated_utc=updated)
+                break
         return self._checkpoint
 
     def _store_checkpoint(self, last_record_id: str, processed_total: int) -> None:
         if self._metadata is None:
             return
         ts_utc = datetime.now(timezone.utc).isoformat()
-        run_id = str(self._config.get("runtime", {}).get("run_id", "run"))
+        run_id = str(self._config.get("runtime", {}).get("run_id", "") or "").strip() or "run"
         payload = {
             "record_type": "derived.idle.checkpoint",
             "run_id": run_id,
@@ -381,13 +430,18 @@ class IdleProcessor:
             "last_record_id": last_record_id,
             "processed_total": int(processed_total),
         }
-        if hasattr(self._metadata, "put_replace"):
-            try:
-                self._metadata.put_replace(self._checkpoint_id(), payload)
-            except Exception:
+        try:
+            if hasattr(self._metadata, "put_replace"):
+                try:
+                    self._metadata.put_replace(self._checkpoint_id(), payload)
+                except Exception:
+                    self._metadata.put(self._checkpoint_id(), payload)
+            else:
                 self._metadata.put(self._checkpoint_id(), payload)
-        else:
-            self._metadata.put(self._checkpoint_id(), payload)
+        except Exception as exc:
+            if self._logger is not None:
+                self._logger.log("idle.checkpoint_error", {"error": str(exc)})
+            return
         self._checkpoint = IdleCheckpoint(last_record_id=last_record_id, processed_total=int(processed_total), updated_utc=ts_utc)
         if self._events is not None:
             try:
@@ -413,18 +467,39 @@ class IdleProcessor:
     def _ordered_evidence_ids(self, order_by: str) -> list[str]:
         if self._metadata is None:
             return []
+        record_ids = self._record_ids()
+        canonical_ids = [record_id for record_id in record_ids if "/evidence.capture." in str(record_id)]
+        if order_by != "ts_utc":
+            # Canonical IDs are authoritative and avoid an expensive metadata.get()
+            # call over every record in large DBs.
+            if canonical_ids:
+                canonical_ids.sort()
+                return canonical_ids
+            # Legacy compatibility fallback for datasets that predate canonical IDs.
+            evidence_ids: list[str] = []
+            for record_id in record_ids:
+                record = self._metadata.get(record_id, {})
+                record_type = str(record.get("record_type", ""))
+                if record_type.startswith("evidence.capture."):
+                    evidence_ids.append(record_id)
+            evidence_ids.sort()
+            return evidence_ids
+
         evidence: list[tuple[str, str | None]] = []
-        for record_id in self._record_ids():
-            record = self._metadata.get(record_id, {})
-            record_type = str(record.get("record_type", ""))
-            if not record_type.startswith("evidence.capture."):
-                continue
-            ts = record.get("ts_start_utc") or record.get("ts_utc")
-            evidence.append((record_id, ts))
-        if order_by == "ts_utc":
-            evidence.sort(key=lambda item: (_ts_key(item[1]), item[0]))
+        if canonical_ids:
+            for record_id in canonical_ids:
+                record = self._metadata.get(record_id, {})
+                ts = record.get("ts_start_utc") or record.get("ts_utc")
+                evidence.append((record_id, ts))
         else:
-            evidence.sort(key=lambda item: item[0])
+            for record_id in record_ids:
+                record = self._metadata.get(record_id, {})
+                record_type = str(record.get("record_type", ""))
+                if not record_type.startswith("evidence.capture."):
+                    continue
+                ts = record.get("ts_start_utc") or record.get("ts_utc")
+                evidence.append((record_id, ts))
+        evidence.sort(key=lambda item: (_ts_key(item[1]), item[0]))
         return [record_id for record_id, _ts in evidence]
 
     def _needs_processing(
@@ -494,6 +569,164 @@ class IdleProcessor:
             return None
         self._state_processor = StateTapeProcessor(self._system)
         return self._state_processor
+
+    def _mark_stage1_retention(self, record_id: str, record: dict[str, Any], *, reason: str, stats: IdleProcessStats) -> None:
+        if self._stage1_store is None:
+            return
+        try:
+            self._ensure_stage1_uia_docs(record_id, record, stats=stats)
+        except Exception:
+            # Fail-open: stage1 marker pass will quarantine until docs are valid.
+            pass
+        try:
+            result = mark_stage1_and_retention(
+                self._stage1_store,
+                record_id,
+                record if isinstance(record, dict) else {},
+                reason=reason,
+                event_builder=self._events,
+                logger=self._logger,
+            )
+            if bool(result.get("stage1_complete", False)):
+                stats.stage1_complete_records += 1
+                if bool(result.get("retention_missing", False)):
+                    stats.stage1_missing_retention_marker_count += 1
+                else:
+                    stats.stage1_retention_marked_records += 1
+        except Exception:
+            pass
+
+    def _ensure_stage1_uia_docs(self, record_id: str, record: dict[str, Any], *, stats: IdleProcessStats) -> None:
+        if self._stage1_store is None:
+            return
+        if not isinstance(record, dict):
+            return
+        if str(record.get("record_type") or "") != "evidence.capture.frame":
+            return
+        storage_cfg = self._config.get("storage", {}) if isinstance(self._config, dict) else {}
+        dataroot = str(storage_cfg.get("data_dir") or "").strip()
+        if not dataroot:
+            dataroot = str(os.environ.get("AUTOCAPTURE_DATA_DIR") or "").strip()
+        if not dataroot:
+            dataroot = "data"
+        status = _ensure_frame_uia_docs(
+            self._stage1_store,
+            source_record_id=str(record_id),
+            record=record,
+            dataroot=str(dataroot),
+            snapshot_metadata=self._metadata,
+        )
+        stats.stage1_uia_docs_inserted += int(status.get("inserted", 0) or 0)
+        if bool(status.get("required", False)) and not bool(status.get("ok", False)):
+            stats.stage1_uia_frames_missing_count += 1
+
+    def _has_stage1_uia_docs(self, record: dict[str, Any]) -> bool:
+        if self._stage1_store is None:
+            return True
+        if not isinstance(record, dict):
+            return True
+        if str(record.get("record_type") or "") != "evidence.capture.frame":
+            return True
+        uia_ref = record.get("uia_ref") if isinstance(record.get("uia_ref"), dict) else {}
+        uia_record_id = str(uia_ref.get("record_id") or "").strip()
+        if not uia_record_id:
+            return True
+        expected_ids = _frame_uia_expected_ids(uia_record_id)
+        missing = False
+        for kind, doc_id in expected_ids.items():
+            row = self._stage1_store.get(doc_id, None)
+            if not (isinstance(row, dict) and str(row.get("record_type") or "") == kind):
+                missing = True
+                break
+        if not missing:
+            return True
+        # Fail-open: if snapshot is unavailable we do not block stage1 completeness.
+        snapshot_value = self._metadata.get(uia_record_id, None)
+        snapshot = _uia_extract_snapshot_dict(snapshot_value)
+        if not isinstance(snapshot, dict):
+            return True
+        return False
+
+    def _has_stage1_and_retention_markers(self, record_id: str) -> bool:
+        if self._stage1_store is None:
+            return False
+        stage1_marker = self._stage1_store.get(stage1_complete_record_id(record_id), None)
+        retention_marker = self._stage1_store.get(retention_eligibility_record_id(record_id), None)
+        if _is_missing_metadata_record(stage1_marker):
+            return False
+        if _is_missing_metadata_record(retention_marker):
+            return False
+        record_raw = self._metadata.get(record_id, {})
+        record = record_raw if isinstance(record_raw, dict) else {}
+        if str(record.get("record_type") or "") == "evidence.capture.frame":
+            if not bool(retention_marker.get("stage1_contract_validated", False)):
+                return False
+            if bool(retention_marker.get("quarantine_pending", False)):
+                return False
+        if not self._has_stage1_uia_docs(record):
+            return False
+        return True
+
+    def _backfill_stage1_markers(
+        self,
+        *,
+        evidence_ids: list[str],
+        start_index: int,
+        allow_ocr: bool,
+        allow_vlm: bool,
+        pipeline_enabled: bool,
+        max_records: int,
+        should_abort: Callable[[], bool] | None,
+        expired: Callable[[], bool],
+        stats: IdleProcessStats,
+    ) -> int:
+        if self._metadata is None:
+            return 0
+        if max_records <= 0 or start_index <= 0:
+            return 0
+        capped_start = min(start_index, len(evidence_ids))
+        if capped_start <= 0:
+            return 0
+        marked = 0
+        scanned = 0
+        # Work newest-first in the checkpointed prefix so recent unmarked frames converge first.
+        for record_id in reversed(evidence_ids[:capped_start]):
+            if should_abort and should_abort():
+                break
+            if expired():
+                break
+            if marked >= max_records:
+                break
+            record_raw = self._metadata.get(record_id, {})
+            record = record_raw if isinstance(record_raw, dict) else {}
+            record_type = str(record.get("record_type", ""))
+            if not record_type.startswith("evidence.capture."):
+                continue
+            scanned += 1
+            if self._has_stage1_and_retention_markers(record_id):
+                continue
+            if self._needs_processing(record_id, record, allow_ocr, allow_vlm, pipeline_enabled):
+                continue
+            had_stage1 = not _is_missing_metadata_record(self._metadata.get(stage1_complete_record_id(record_id), None))
+            retention_marker = self._metadata.get(retention_eligibility_record_id(record_id), None)
+            had_retention = not _is_missing_metadata_record(retention_marker)
+            if str(record.get("record_type") or "") == "evidence.capture.frame" and isinstance(retention_marker, dict):
+                had_retention = had_retention and bool(retention_marker.get("stage1_contract_validated", False)) and not bool(
+                    retention_marker.get("quarantine_pending", False)
+                )
+            self._mark_stage1_retention(record_id, record, reason="stage1_backfill", stats=stats)
+            has_stage1 = not _is_missing_metadata_record(self._metadata.get(stage1_complete_record_id(record_id), None))
+            retention_after = self._metadata.get(retention_eligibility_record_id(record_id), None)
+            has_retention = not _is_missing_metadata_record(retention_after)
+            if str(record.get("record_type") or "") == "evidence.capture.frame" and isinstance(retention_after, dict):
+                has_retention = has_retention and bool(retention_after.get("stage1_contract_validated", False)) and not bool(
+                    retention_after.get("quarantine_pending", False)
+                )
+            if (has_stage1 and not had_stage1) or (has_retention and not had_retention):
+                marked += 1
+        stats.stage1_backfill_scanned_records += scanned
+        stats.stage1_backfill_marked_records += marked
+        return marked
 
     def _index_text(self, doc_id: str, text: str) -> None:
         if not text:
@@ -665,6 +898,9 @@ class IdleProcessor:
         ocr_providers: list[tuple[str, Any]],
         vlm_providers: list[tuple[str, Any]],
         max_items: int,
+        intelligent_enabled: bool,
+        defer_vlm_on_hash_repeat: bool,
+        hash_repeat_window: int,
         should_abort: Callable[[], bool] | None,
         expired: Callable[[], bool],
         pipeline_enabled: bool,
@@ -674,6 +910,9 @@ class IdleProcessor:
         if metadata is None:
             return [], None, False, 0
         items: list[_IdleWorkItem] = []
+        recent_hashes: deque[str] = deque(maxlen=max(1, int(hash_repeat_window)))
+        recent_hash_set: set[str] = set()
+        hash_vlm_anchor: dict[str, str] = {}
         last_record_id: str | None = None
         aborted = False
         planned = 0
@@ -723,7 +962,8 @@ class IdleProcessor:
                 event_builder=self._events,
                 logger=self._logger,
             )
-            missing_count = 0
+            ocr_missing_count = 0
+            vlm_missing_count = 0
             if allow_ocr:
                 for provider_id, _extractor in ocr_providers:
                     missing, _derived_id = _missing_derived_text(
@@ -735,7 +975,7 @@ class IdleProcessor:
                         config=self._config,
                     )
                     if missing:
-                        missing_count += 1
+                        ocr_missing_count += 1
             if allow_vlm:
                 for provider_id, _extractor in vlm_providers:
                     missing, _derived_id = _missing_derived_text(
@@ -747,7 +987,34 @@ class IdleProcessor:
                         config=self._config,
                     )
                     if missing:
-                        missing_count += 1
+                        vlm_missing_count += 1
+            content_hash = str(record.get("content_hash") or "").strip().lower()
+            if (
+                intelligent_enabled
+                and defer_vlm_on_hash_repeat
+                and vlm_missing_count > 0
+                and content_hash
+                and content_hash in recent_hash_set
+            ):
+                stats.vlm_deferred += 1
+                deferred_vlm_from = hash_vlm_anchor.get(content_hash)
+                vlm_missing_count = 0
+            else:
+                deferred_vlm_from = None
+                if content_hash and vlm_missing_count > 0 and content_hash not in hash_vlm_anchor:
+                    hash_vlm_anchor[content_hash] = record_id
+            if content_hash:
+                if len(recent_hashes) == recent_hashes.maxlen and recent_hashes:
+                    evicted = recent_hashes[0]
+                else:
+                    evicted = ""
+                recent_hashes.append(content_hash)
+                recent_hash_set.add(content_hash)
+                if evicted and evicted not in recent_hashes:
+                    recent_hash_set.discard(evicted)
+            needs_ocr = ocr_missing_count > 0
+            needs_vlm = vlm_missing_count > 0
+            missing_count = int(ocr_missing_count + vlm_missing_count)
             needs_pipeline = False
             if pipeline_enabled:
                 run_id = _derive_run_id(self._config, record_id)
@@ -756,6 +1023,7 @@ class IdleProcessor:
                 if _is_missing_metadata_record(metadata.get(frame_id)):
                     needs_pipeline = True
             if missing_count == 0 and not needs_pipeline:
+                self._mark_stage1_retention(record_id, record, reason="already_processed", stats=stats)
                 last_record_id = source_record_id
                 continue
             run_id = _derive_run_id(self._config, record_id)
@@ -774,7 +1042,11 @@ class IdleProcessor:
                     encoded_source=encoded_source,
                     parent_hash=parent_hash,
                     missing_count=missing_count,
+                    needs_ocr=needs_ocr,
+                    needs_vlm=needs_vlm,
                     needs_pipeline=needs_pipeline,
+                    allow_pipeline_vlm=needs_vlm,
+                    deferred_vlm_from=deferred_vlm_from,
                 )
             )
             last_record_id = source_record_id
@@ -795,10 +1067,12 @@ class IdleProcessor:
         expired: Callable[[], bool],
         stats: IdleProcessStats,
         max_items: int,
+        max_records: int = 0,
     ) -> int:
         if not items or not allow or self._metadata is None:
             return 0
         processed = 0
+        scheduled_records: set[str] = set()
         for provider_id, extractor in providers:
             if should_abort and should_abort():
                 break
@@ -806,6 +1080,14 @@ class IdleProcessor:
                 break
             tasks: list[tuple[_IdleWorkItem, str]] = []
             for item in items:
+                if kind == "ocr" and not bool(item.needs_ocr):
+                    continue
+                if kind == "vlm" and not bool(item.needs_vlm):
+                    continue
+                if max_records > 0 and item.record_id not in scheduled_records and len(scheduled_records) >= max_records:
+                    if kind == "vlm":
+                        stats.vlm_throttled += 1
+                    continue
                 missing, derived_id = _missing_derived_text(
                     self._metadata,
                     kind=kind,
@@ -816,6 +1098,8 @@ class IdleProcessor:
                 )
                 if missing:
                     tasks.append((item, derived_id))
+                    if max_records > 0:
+                        scheduled_records.add(item.record_id)
             if not tasks:
                 continue
             size = max(1, int(batch_size or 1))
@@ -909,6 +1193,73 @@ class IdleProcessor:
                             pass
         return processed
 
+    def _materialize_deferred_vlm(
+        self,
+        *,
+        items: list[_IdleWorkItem],
+        providers: list[tuple[str, Any]],
+        stats: IdleProcessStats,
+        max_items: int,
+    ) -> int:
+        if self._metadata is None or not items or not providers:
+            return 0
+        copied = 0
+        for item in items:
+            source_id = str(item.deferred_vlm_from or "").strip()
+            if not source_id:
+                continue
+            for provider_id, _extractor in providers:
+                if max_items > 0 and stats.processed >= max_items:
+                    return copied
+                missing_target, target_derived_id = _missing_derived_text(
+                    self._metadata,
+                    kind="vlm",
+                    run_id=item.run_id,
+                    provider_id=str(provider_id),
+                    source_id=item.record_id,
+                    config=self._config,
+                )
+                if not missing_target:
+                    continue
+                missing_source, source_derived_id = _missing_derived_text(
+                    self._metadata,
+                    kind="vlm",
+                    run_id=_derive_run_id(self._config, source_id),
+                    provider_id=str(provider_id),
+                    source_id=source_id,
+                    config=self._config,
+                )
+                if missing_source:
+                    continue
+                source_payload = self._metadata.get(source_derived_id, {})
+                if not isinstance(source_payload, dict):
+                    continue
+                text = str(source_payload.get("text") or "").strip()
+                if not text:
+                    continue
+                payload = build_text_record(
+                    kind="vlm",
+                    text=text,
+                    source_id=item.record_id,
+                    source_record=item.record,
+                    provider_id=str(provider_id),
+                    config=self._config,
+                    ts_utc=item.ts_utc,
+                )
+                if not payload:
+                    continue
+                stored = self._store_derived_text(
+                    derived_id=target_derived_id,
+                    payload=payload,
+                    record_id=item.record_id,
+                    record=item.record,
+                    kind="vlm",
+                    stats=stats,
+                )
+                if stored:
+                    copied += 1
+        return copied
+
     def process(self, *, should_abort: Callable[[], bool] | None = None) -> IdleProcessStats:
         done, stats = self.process_step(should_abort=should_abort, budget_ms=0, persist_checkpoint=False)
         _ = done
@@ -939,6 +1290,16 @@ class IdleProcessor:
         backfill_out_of_order = bool(idle_cfg.get("backfill_out_of_order", order_by == "ts_utc"))
         max_gpu = int(idle_cfg.get("max_concurrency_gpu", 1) or 0)
         batch_size = int(idle_cfg.get("batch_size", 4) or 1)
+        intelligent_cfg = idle_cfg.get("intelligent_batch", {}) if isinstance(idle_cfg.get("intelligent_batch", {}), dict) else {}
+        intelligent_enabled = bool(intelligent_cfg.get("enabled", False))
+        defer_vlm_on_hash_repeat = bool(intelligent_cfg.get("defer_vlm_on_hash_repeat", True))
+        hash_repeat_window = max(1, int(intelligent_cfg.get("hash_repeat_window", 8) or 8))
+        max_vlm_records_per_run = max(0, int(intelligent_cfg.get("max_vlm_records_per_run", 0) or 0))
+        max_pipeline_records_per_run = max(0, int(intelligent_cfg.get("max_pipeline_records_per_run", 0) or 0))
+        stage1_backfill_cfg = idle_cfg.get("stage1_marker_backfill", {}) if isinstance(idle_cfg.get("stage1_marker_backfill", {}), dict) else {}
+        stage1_backfill_enabled = bool(stage1_backfill_cfg.get("enabled", True))
+        default_stage1_backfill_max = max(32, int(max_items * 2) if max_items > 0 else 64)
+        stage1_backfill_max_records = max(0, int(stage1_backfill_cfg.get("max_records_per_run", default_stage1_backfill_max) or 0))
         if max_gpu <= 0:
             allow_vlm = False
         sst_cfg = self._config.get("processing", {}).get("sst", {})
@@ -988,10 +1349,23 @@ class IdleProcessor:
                     backlog.append(record_id)
             if backlog:
                 pending_ids = list(dict.fromkeys(backlog + pending_ids))
+        stats.pending_records = int(len(pending_ids))
 
         processed_total = checkpoint.processed_total if checkpoint else 0
         last_record_id: str | None = None
         aborted = False
+        if stage1_backfill_enabled and start_index > 0 and stage1_backfill_max_records > 0 and not _expired():
+            self._backfill_stage1_markers(
+                evidence_ids=evidence_ids,
+                start_index=start_index,
+                allow_ocr=allow_ocr,
+                allow_vlm=allow_vlm,
+                pipeline_enabled=pipeline_enabled,
+                max_records=stage1_backfill_max_records,
+                should_abort=should_abort,
+                expired=_expired,
+                stats=stats,
+            )
         ocr_providers = _capability_providers(self._ocr, "ocr.engine") if (allow_ocr and self._ocr is not None) else []
         vlm_providers = _capability_providers(self._vlm, "vision.extractor") if (allow_vlm and self._vlm is not None) else []
         items, last_record_id, aborted, _planned = self._collect_work_items(
@@ -1001,11 +1375,15 @@ class IdleProcessor:
             ocr_providers=ocr_providers,
             vlm_providers=vlm_providers,
             max_items=max_items,
+            intelligent_enabled=intelligent_enabled,
+            defer_vlm_on_hash_repeat=defer_vlm_on_hash_repeat,
+            hash_repeat_window=hash_repeat_window,
             should_abort=should_abort,
             expired=_expired,
             pipeline_enabled=pipeline_enabled,
             stats=stats,
         )
+        stats.records_planned = int(len(items))
         if items and not aborted and not _expired():
             max_cpu = int(idle_cfg.get("max_concurrency_cpu", 1) or 1)
             processed_total += self._batch_extract(
@@ -1031,11 +1409,22 @@ class IdleProcessor:
                 expired=_expired,
                 stats=stats,
                 max_items=max_items,
+                max_records=max_vlm_records_per_run,
+            )
+            processed_total += self._materialize_deferred_vlm(
+                items=items,
+                providers=vlm_providers,
+                stats=stats,
+                max_items=max_items,
             )
             pipeline = self._pipeline
             if pipeline_enabled and pipeline is not None and hasattr(pipeline, "process_record"):
+                pipeline_processed = 0
                 for item in items:
                     if not item.needs_pipeline:
+                        continue
+                    if max_pipeline_records_per_run > 0 and pipeline_processed >= max_pipeline_records_per_run:
+                        stats.pipeline_deferred += 1
                         continue
                     if should_abort and should_abort():
                         aborted = True
@@ -1050,7 +1439,7 @@ class IdleProcessor:
                             record=item.record,
                             frame_bytes=item.frame_bytes,
                             allow_ocr=pipeline_allow_ocr,
-                            allow_vlm=pipeline_allow_vlm,
+                            allow_vlm=bool(pipeline_allow_vlm and item.allow_pipeline_vlm),
                             should_abort=should_abort,
                             # Enforce both the per-run max_seconds_per_run deadline and any
                             # governor lease budget deadline, whichever is sooner.
@@ -1094,6 +1483,18 @@ class IdleProcessor:
                     stats.sst_tokens += int(result.ocr_tokens)
                     stats.processed += int(result.derived_records)
                     processed_total += int(result.derived_records)
+                    pipeline_processed += 1
+            for item in items:
+                if self._needs_processing(
+                    item.record_id,
+                    item.record if isinstance(item.record, dict) else {},
+                    allow_ocr,
+                    allow_vlm,
+                    pipeline_enabled,
+                ):
+                    continue
+                self._mark_stage1_retention(item.record_id, item.record, reason="idle_processed", stats=stats)
+                stats.records_completed += 1
             last_record_id = last_record_id or (items[-1].source_id if items else None)
 
         state_done = True

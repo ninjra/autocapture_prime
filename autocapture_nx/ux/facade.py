@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Iterator, cast
 
 from autocapture.indexing.factory import build_indexes
+from autocapture.storage.stage1 import mark_stage1_and_retention
 from autocapture_nx.kernel.config import ConfigPaths, load_config, reset_user_config, restore_user_config, validate_config
 from autocapture_nx.kernel.derived_records import (
     build_derivation_edge,
@@ -26,10 +27,11 @@ from autocapture_nx.kernel.query import run_query
 from autocapture_nx.kernel.telemetry import telemetry_snapshot, percentile
 from autocapture_nx.kernel.atomic_write import atomic_write_json
 from autocapture_nx.kernel.doctor import build_health_report
-from autocapture_nx.kernel.activity_signal import load_activity_signal
+from autocapture_nx.kernel.activity_signal import is_activity_signal_fresh, load_activity_signal
 from autocapture_nx.kernel.logging import JsonlLogger
 from autocapture_nx.plugin_system.manager import PluginManager
 from autocapture_nx.processing.idle import _extract_frame, _get_media_blob
+from autocapture_nx.storage.stage1_derived_store import build_stage1_overlay_store
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -312,11 +314,20 @@ class UXFacade:
             logger = None
         # OPS-06: always include DB schema/version snapshot without requiring heavy work.
         try:
-            from autocapture_nx.kernel.db_status import db_status_snapshot
+            from autocapture_nx.kernel.db_status import db_status_snapshot, metadata_db_stability_snapshot
 
-            db_status = db_status_snapshot(self._config)
+            db_status = db_status_snapshot(
+                self._config,
+                include_hash=True,
+                include_pragmas=True,
+                include_stability=True,
+                stability_samples=2,
+                stability_poll_interval_ms=50,
+            )
+            db_stability = metadata_db_stability_snapshot(self._config, sample_count=3, poll_interval_ms=100)
         except Exception:
             db_status = None
+            db_stability = None
         kernel = self._kernel_mgr.kernel()
         if kernel is None:
             kernel = Kernel(self._paths, safe_mode=self._safe_mode)
@@ -357,6 +368,8 @@ class UXFacade:
                 pass
         if db_status is not None:
             report["db_status"] = db_status
+        if db_stability is not None:
+            report["db_stability"] = db_stability
         return report
 
     def diagnostics_bundle_create(self) -> dict[str, Any]:
@@ -979,7 +992,8 @@ class UXFacade:
 
     def query(self, text: str, *, schedule_extract: bool = False) -> dict[str, Any]:
         with self._kernel_mgr.session() as system:
-            return run_query(system, text, schedule_extract=bool(schedule_extract))
+            _ = schedule_extract
+            return run_query(system, text, schedule_extract=False)
 
     def state_query(self, text: str) -> dict[str, Any]:
         from autocapture_nx.kernel.query import run_state_query
@@ -1131,6 +1145,13 @@ class UXFacade:
                     }
                 except Exception:
                     governor = None
+        db_stability = None
+        try:
+            from autocapture_nx.kernel.db_status import metadata_db_stability_snapshot
+
+            db_stability = metadata_db_stability_snapshot(self._config, sample_count=2, poll_interval_ms=25)
+        except Exception:
+            db_stability = None
         return {
             "run_id": run_id,
             "ledger_head": ledger_head,
@@ -1147,6 +1168,7 @@ class UXFacade:
             "slo": slo,
             "resources": resources,
             "governor": governor,
+            "db_stability": db_stability,
             "kernel_ready": system is not None,
             "kernel_error": kernel_error,
         }
@@ -1503,48 +1525,32 @@ class UXFacade:
     def run_start(self) -> dict[str, Any]:
         with self._pause_lock:
             self._clear_pause_locked()
-        # If capture is not configured, fail fast with a clear message. This repo
-        # treats capture+ingest as an external (Windows sidecar) responsibility by
-        # default.
-        try:
-            capture_cfg = self._config.get("capture") if isinstance(self._config.get("capture"), dict) else {}
-            want_screenshot = bool((capture_cfg.get("screenshot") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
-            want_audio = bool((capture_cfg.get("audio") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
-            want_source = bool((capture_cfg.get("video") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
-            input_cfg = capture_cfg.get("input_tracking", {}) if isinstance(capture_cfg, dict) else {}
-            input_mode = str(input_cfg.get("mode") or "").strip().lower()
-            want_input = bool(input_mode and input_mode not in {"off", "disabled", "none"})
-            want_window_meta = bool((capture_cfg.get("window_metadata") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
-            want_cursor = bool((capture_cfg.get("cursor") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
-            want_clipboard = bool((capture_cfg.get("clipboard") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
-            want_file_activity = bool((capture_cfg.get("file_activity") or {}).get("enabled", False)) if isinstance(capture_cfg, dict) else False
-            if not any((want_source, want_screenshot, want_audio, want_input, want_window_meta, want_cursor, want_clipboard, want_file_activity)):
-                return {
-                    "ok": False,
-                    "error": "capture_disabled",
-                    "running": False,
-                    "hint": "use_windows_sidecar_contract",
-                }
-        except Exception:
-            # If config is malformed, fall through to existing error handling.
-            pass
         # Fail closed: require explicit capture consent if configured.
         try:
             privacy_cfg = self._config.get("privacy", {}) if isinstance(self._config, dict) else {}
-            capture_cfg = privacy_cfg.get("capture", {}) if isinstance(privacy_cfg, dict) else {}
-            require_consent = bool(capture_cfg.get("require_consent", True))
+            capture_privacy_cfg = privacy_cfg.get("capture", {}) if isinstance(privacy_cfg, dict) else {}
+            require_consent = bool(capture_privacy_cfg.get("require_consent", True))
             if require_consent:
                 from autocapture_nx.kernel.consent import load_capture_consent
 
-                data_dir = str(self._config.get("storage", {}).get("data_dir", "data"))
+                storage_cfg = self._config.get("storage", {}) if isinstance(self._config, dict) else {}
+                configured_data_dir = str(storage_cfg.get("data_dir", "data")) if isinstance(storage_cfg, dict) else "data"
+                data_dir = str(os.environ.get("AUTOCAPTURE_DATA_DIR") or configured_data_dir)
                 consent = load_capture_consent(data_dir=data_dir)
                 if not consent.accepted:
                     return {"ok": False, "error": "consent_required", "running": False}
         except Exception:
             return {"ok": False, "error": "consent_check_failed", "running": False}
-
-        start_result = self._start_components()
-        if not bool(start_result.get("ok", False)):
+        start_result_raw = self._start_components()
+        if isinstance(start_result_raw, dict):
+            start_result = start_result_raw
+        else:
+            start_result = {
+                "ok": bool(self._run_active),
+                "started": [],
+                "error": "capture_start_failed",
+            }
+        if not bool(start_result.get("ok", self._run_active)):
             return {"ok": False, "error": str(start_result.get("error") or "capture_start_failed"), "details": start_result, "running": False}
         # Ledger an operator capture start event (append-only).
         with self._kernel_mgr.session() as system:
@@ -2183,6 +2189,36 @@ class UXFacade:
                     "record_id": record_id,
                     "error": "storage_unavailable",
                 }
+            event_builder = None
+            try:
+                event_builder = system.get("event.builder") if hasattr(system, "get") else None
+            except Exception:
+                event_builder = None
+            logger = None
+            try:
+                logger = system.get("observability.logger") if hasattr(system, "get") else None
+            except Exception:
+                logger = None
+            stage1_store, _stage1_derived = build_stage1_overlay_store(
+                config=system.config if hasattr(system, "config") else {},
+                metadata=metadata,
+                logger=logger,
+            )
+
+            def _mark_stage1_retention(reason: str) -> dict[str, Any] | None:
+                try:
+                    return mark_stage1_and_retention(
+                        stage1_store,
+                        record_id,
+                        record if isinstance(record, dict) else {},
+                        ts_utc=(record.get("ts_utc") if isinstance(record, dict) else None),
+                        reason=reason,
+                        event_builder=event_builder,
+                        logger=logger,
+                    )
+                except Exception:
+                    return None
+
             record = metadata.get(record_id, None) if hasattr(metadata, "get") else None
             if record is None:
                 return {"ok": False, "record_id": record_id, "error": "record_not_found"}
@@ -2216,12 +2252,11 @@ class UXFacade:
                         signal = load_activity_signal(system.config)
                     except Exception:
                         signal = None
-                    if signal is not None:
+                    if signal is not None and is_activity_signal_fresh(signal, system.config):
                         idle_seconds = float(signal.idle_seconds)
                         can_run = idle_seconds >= idle_window
                     else:
-                        assume_idle = bool(system.config.get("runtime", {}).get("activity", {}).get("assume_idle_when_missing", False))
-                        can_run = assume_idle
+                        can_run = False
             if not can_run:
                 return {
                     "ok": False,
@@ -2280,6 +2315,7 @@ class UXFacade:
                         "error": "pipeline_failed",
                         "detail": str(exc),
                     }
+                marker = _mark_stage1_retention("trace_process")
                 return {
                     "ok": True,
                     "record_id": record_id,
@@ -2287,6 +2323,8 @@ class UXFacade:
                     "derived_ids": list(result.derived_ids),
                     "pipeline_used": True,
                     "forced": bool(force),
+                    "stage1_marker": (marker or {}).get("stage1_record_id") if isinstance(marker, dict) else None,
+                    "retention_marker": (marker or {}).get("retention_record_id") if isinstance(marker, dict) else None,
                 }
 
             if not allow_ocr and not allow_vlm:
@@ -2321,12 +2359,6 @@ class UXFacade:
                 except Exception:
                     lexical = None
                     vector = None
-            event_builder = None
-            try:
-                event_builder = system.get("event.builder") if hasattr(system, "get") else None
-            except Exception:
-                event_builder = None
-
             run_id = record.get("run_id") if isinstance(record, dict) else None
             run_id = run_id or record_id.split("/", 1)[0]
             encoded_source = encode_record_id_component(record_id)
@@ -2413,6 +2445,7 @@ class UXFacade:
                     except Exception:
                         pass
 
+            marker = _mark_stage1_retention("trace_process")
             return {
                 "ok": True,
                 "record_id": record_id,
@@ -2420,6 +2453,8 @@ class UXFacade:
                 "derived_ids": derived_ids,
                 "pipeline_used": False,
                 "forced": bool(force),
+                "stage1_marker": (marker or {}).get("stage1_record_id") if isinstance(marker, dict) else None,
+                "retention_marker": (marker or {}).get("retention_record_id") if isinstance(marker, dict) else None,
             }
 
     def telemetry(self) -> dict[str, Any]:

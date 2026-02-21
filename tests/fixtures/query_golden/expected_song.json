@@ -47,7 +47,7 @@
         "claims_built": 0,
         "enabled": false,
         "provider_ids": {},
-        "reason": "capability_missing"
+        "reason": "raw_off_enforced"
       }
     },
     "error": null

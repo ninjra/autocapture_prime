@@ -5,6 +5,14 @@
       1
     ]
   },
+  "default_settings": {
+    "api_key": "",
+    "base_url": "http://127.0.0.1:8000",
+    "fallback_model": "",
+    "model": "",
+    "strict_remote_only": true,
+    "timeout_s": 20.0
+  },
   "depends_on": [],
   "enabled": false,
   "entrypoints": [
@@ -30,37 +38,29 @@
     "embedder.text"
   ],
   "required_capabilities": [],
-  "default_settings": {
-    "base_url": "http://127.0.0.1:8000",
-    "api_key": "",
-    "model": "",
-    "timeout_s": 20.0,
-    "fallback_model": "",
-    "strict_remote_only": true
-  },
   "settings_schema": {
-    "type": "object",
     "additionalProperties": false,
     "properties": {
+      "api_key": {
+        "type": "string"
+      },
       "base_url": {
         "type": "string"
       },
-      "api_key": {
+      "fallback_model": {
         "type": "string"
       },
       "model": {
         "type": "string"
       },
-      "timeout_s": {
-        "type": "number"
-      },
-      "fallback_model": {
-        "type": "string"
-      },
       "strict_remote_only": {
         "type": "boolean"
+      },
+      "timeout_s": {
+        "type": "number"
       }
-    }
+    },
+    "type": "object"
   },
   "version": "0.1.0"
 }

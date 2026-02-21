@@ -59,6 +59,7 @@ class DoctorDbVersionsTests(unittest.TestCase):
                 client = TestClient(app)
                 doc = client.get("/api/doctor").json()
                 self.assertIn("db_status", doc)
+                self.assertIn("db_stability", doc)
                 dbs = doc["db_status"].get("dbs", [])
                 names = {row.get("name") for row in dbs if isinstance(row, dict)}
                 self.assertIn("metadata", names)
@@ -66,6 +67,8 @@ class DoctorDbVersionsTests(unittest.TestCase):
                 self.assertTrue(meta.get("exists"))
                 self.assertEqual(int(meta.get("sqlite_user_version") or 0), 42)
                 self.assertTrue(isinstance(meta.get("sha256"), str) and len(meta.get("sha256")) == 64)
+                db_stability = doc.get("db_stability", {})
+                self.assertEqual(str(db_stability.get("name") or ""), "metadata")
             finally:
                 try:
                     if app is not None:
@@ -84,4 +87,3 @@ class DoctorDbVersionsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

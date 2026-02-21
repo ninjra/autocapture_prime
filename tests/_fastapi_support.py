@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 
-def fastapi_testclient_usable(*, timeout_s: float = 3.0) -> bool:
+def fastapi_testclient_usable(*, timeout_s: float = 10.0) -> bool:
     code = (
         "from fastapi import FastAPI\n"
         "from fastapi.testclient import TestClient\n"

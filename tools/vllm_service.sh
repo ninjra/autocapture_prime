@@ -14,7 +14,7 @@ deprecated_launch() {
 }
 
 health_ok() {
-  curl -fsS --max-time 2 "${BASE_URL}/health" >/dev/null 2>&1
+  curl -fsS --max-time 2 "${BASE_URL}/v1/models" >/dev/null 2>&1
 }
 
 case "${ACTION}" in

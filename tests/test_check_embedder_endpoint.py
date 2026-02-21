@@ -68,7 +68,24 @@ class CheckEmbedderEndpointTests(unittest.TestCase):
         self.assertFalse(out["ok"])
         self.assertEqual(out["checks"]["health"]["error"], "down")
 
+    def test_probe_ok_when_health_missing_but_models_and_embeddings_work(self) -> None:
+        mod = _load_module()
+
+        def fake_http_json(*, method: str, url: str, timeout_s: float, payload=None):
+            if url.endswith("/health"):
+                return False, {}, "missing"
+            if url.endswith("/v1/models"):
+                return True, {"data": [{"id": "embed-model"}]}, ""
+            if url.endswith("/v1/embeddings"):
+                return True, {"data": [{"embedding": [0.1, 0.2, 0.3]}]}, ""
+            return False, {}, "unexpected"
+
+        with mock.patch.object(mod, "_http_json", side_effect=fake_http_json):
+            out = mod._probe("http://127.0.0.1:8001", "embed-model", 3.0)
+        self.assertTrue(out["ok"])
+        self.assertFalse(out["checks"]["health"]["ok"])
+        self.assertFalse(out["checks"]["health"]["required"])
+
 
 if __name__ == "__main__":
     unittest.main()
-

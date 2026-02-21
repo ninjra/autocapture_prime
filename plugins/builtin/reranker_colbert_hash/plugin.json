@@ -5,6 +5,11 @@
       1
     ]
   },
+  "default_settings": {
+    "db_path": "",
+    "dim": 32,
+    "weight": 1.0
+  },
   "depends_on": [
     "builtin.index.colbert_hash"
   ],
@@ -32,20 +37,21 @@
     "retrieval.reranker"
   ],
   "required_capabilities": [],
-  "default_settings": {
-    "dim": 32,
-    "weight": 1.0,
-    "db_path": ""
-  },
   "settings_schema": {
-    "type": "object",
     "additionalProperties": false,
     "properties": {
-      "dim": { "type": "integer", "minimum": 8 },
-      "weight": { "type": "number" },
-      "db_path": { "type": "string" }
-    }
+      "db_path": {
+        "type": "string"
+      },
+      "dim": {
+        "minimum": 8,
+        "type": "integer"
+      },
+      "weight": {
+        "type": "number"
+      }
+    },
+    "type": "object"
   },
   "version": "0.1.0"
 }
-

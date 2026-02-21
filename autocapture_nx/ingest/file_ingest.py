@@ -63,27 +63,37 @@ def ingest_file(
     media_record_id = _media_record_id(sha256_hex)
 
     existed = False
+    missing = object()
     try:
-        existed = bool(getattr(storage_media, "exists")(media_record_id))
+        exists_fn = getattr(storage_media, "exists")
+        existed = bool(exists_fn(media_record_id))
     except Exception:
-        existed = False
+        try:
+            get_fn = getattr(storage_media, "get")
+            existed = get_fn(media_record_id, missing) is not missing
+        except Exception:
+            existed = False
 
+    write_collided = False
     if not existed:
         # Stream the file into media store (avoid large peak memory).
         with open(file_path, "rb") as handle:
-            if hasattr(storage_media, "put_stream"):
-                storage_media.put_stream(media_record_id, handle, ts_utc=ts_utc)
-            else:
-                blob = handle.read()
-                try:
-                    storage_media.put_new(media_record_id, blob, ts_utc=ts_utc, fsync_policy=fsync_policy)
-                except TypeError:
-                    storage_media.put_new(media_record_id, blob, ts_utc=ts_utc)
+            try:
+                if hasattr(storage_media, "put_stream"):
+                    storage_media.put_stream(media_record_id, handle, ts_utc=ts_utc)
+                else:
+                    blob = handle.read()
+                    try:
+                        storage_media.put_new(media_record_id, blob, ts_utc=ts_utc, fsync_policy=fsync_policy)
+                    except TypeError:
+                        storage_media.put_new(media_record_id, blob, ts_utc=ts_utc)
+            except FileExistsError:
+                write_collided = True
     else:
         # Blob exists; do not rewrite.
         pass
 
-    deduped = existed
+    deduped = existed or write_collided
 
     record_id = f"{run_id}/evidence.input.file/{input_id}"
     payload: dict[str, Any] = {
@@ -129,4 +139,3 @@ def ingest_file(
         size_bytes=size_bytes,
         deduped=deduped,
     )
-

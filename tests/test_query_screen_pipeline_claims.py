@@ -116,7 +116,7 @@ class _FakeAnswer:
 
 class _FakeSystem:
     def __init__(self) -> None:
-        self.config = {"query": {"screen_pipeline": {"enabled": True}}}
+        self.config = {"runtime": {"raw_off": {"enabled": False}}, "query": {"screen_pipeline": {"enabled": True}}}
         self._cap = {
             "screen.parse.v1": _FakeParse(),
             "screen.index.v1": _FakeIndex(),
@@ -151,6 +151,27 @@ class QueryScreenPipelineClaimsTests(unittest.TestCase):
         derived = metadata.get(derived_id, {})
         self.assertEqual(str(derived.get("record_type") or ""), "derived.sst.text.extra")
         self.assertEqual(str(derived.get("provider_id") or ""), "builtin.screen.answer.v1")
+
+    def test_raw_off_default_disables_query_time_screen_pipeline(self) -> None:
+        class _RawOffSystem(_FakeSystem):
+            def __init__(self) -> None:
+                super().__init__()
+                self.config = {"query": {"screen_pipeline": {"enabled": True}}}
+
+        system = _RawOffSystem()
+        metadata = _FakeMetadata()
+        claims, debug, err = _run_screen_pipeline_custom_claims(
+            system,
+            query_text="how many inboxes",
+            evidence_ids=["run/evidence.capture.frame/1"],
+            metadata=metadata,
+            query_ledger_hash="ledger123",
+            anchor_ref="anchor123",
+        )
+        self.assertIsNone(err)
+        self.assertEqual(claims, [])
+        self.assertFalse(bool(debug.get("enabled")))
+        self.assertEqual(str(debug.get("reason") or ""), "raw_off_enforced")
 
 
 if __name__ == "__main__":

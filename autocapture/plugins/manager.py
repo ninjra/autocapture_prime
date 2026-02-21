@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib
-import importlib.machinery
 import importlib.util
 import json
 import hashlib
@@ -164,23 +163,20 @@ class PluginManager:
         if ":" not in factory_path:
             raise ValueError(f"Invalid factory path: {factory_path}")
         module_name, callable_name = factory_path.split(":", 1)
+        importlib.invalidate_caches()
+        module = importlib.import_module(module_name)
         if force_reload:
-            spec = importlib.util.find_spec(module_name)
-            if spec and spec.origin:
-                source = Path(spec.origin).read_text(encoding="utf-8")
-                code = compile(source, spec.origin, "exec")
-                import types
-                import sys
-
-                module = types.ModuleType(module_name)
-                module.__file__ = spec.origin
-                exec(code, module.__dict__)
-                sys.modules[module_name] = module
-            else:
-                module = importlib.import_module(module_name)
-        else:
-            module = importlib.import_module(module_name)
+            source_file = str(getattr(module, "__file__", "") or "")
+            if source_file:
+                try:
+                    cache_file = importlib.util.cache_from_source(source_file)
+                    Path(cache_file).unlink(missing_ok=True)
+                except Exception:
+                    pass
+            module = importlib.reload(module)
         factory = getattr(module, callable_name)
+        if not callable(factory):
+            raise TypeError(f"Factory not callable: {factory_path}")
         return factory
 
     def get_extension(self, kind: str, name: str | None = None) -> ExtensionInstance:
@@ -197,8 +193,19 @@ class PluginManager:
                 if cache_key in self._extension_cache:
                     return self._extension_cache[cache_key]
                 force_reload = manifest.plugin_id in self._reload_plugins
-                factory = self._load_factory(ext.factory, force_reload=force_reload)
-                instance = factory(manifest.plugin_id)
+                try:
+                    factory = self._load_factory(ext.factory, force_reload=force_reload)
+                    instance = factory(manifest.plugin_id)
+                except Exception as exc:
+                    raise RuntimeError(
+                        "plugin_factory_load_failed:"
+                        f"plugin_id={manifest.plugin_id};"
+                        f"extension={ext.name};"
+                        f"kind={ext.kind};"
+                        f"factory={ext.factory};"
+                        f"manifest={manifest.path};"
+                        f"error={type(exc).__name__}:{exc}"
+                    ) from exc
                 if force_reload:
                     self._reload_plugins.discard(manifest.plugin_id)
                 wrapped = ExtensionInstance(plugin_id=manifest.plugin_id, manifest=ext, instance=instance)

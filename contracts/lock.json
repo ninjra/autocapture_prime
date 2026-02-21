@@ -9,12 +9,12 @@
     "contracts/chronicle/v0/generated/chronicle_codegen_stamp.json": "88dfa61fb3e53a0e72e4bdf30e9f562a6dfdff9f51235c6fd367cba9ebbff05e",
     "contracts/chronicle/v0/spool_format.md": "a6bb6ed46de7ab45be8db61795ebdb0a73a3451cdad5639950f0710d13fad043",
     "contracts/citation.schema.json": "fbd7c720a7fb915aea331b59dcad3ac25a042d0d2780717e9a208500e2d8653f",
-    "contracts/config_schema.json": "868c70bcb18064117c844a04af24d4adbb4b62a7ee4c941dc5dacff75eff1c6c",
+    "contracts/config_schema.json": "97ea9bcfeb0f1674d767d13b92fe1472c7b1472ee780dfbe4235c328c3b57b03",
     "contracts/diagnostics_bundle.schema.json": "ed67b1509cdc3f67042966003b1771c7b2f627b12d2ab4bd5a625a4462c1d4c4",
     "contracts/evaluation.schema.json": "1d44fbc2ebacaa85c6e77c35a2e4e338e93e215905e7f7e50f08895be96a84b9",
-    "contracts/evidence.schema.json": "34d7f492ae0204ca720ab149758bce1c6181fa18941e27f0ff2796bfbd22c105",
+    "contracts/evidence.schema.json": "2f00a1abc0670030308ab77f347ab9d7f7d4e2f017d65d76fcbc8b946389bd29",
     "contracts/frozen_surfaces.json": "ff22987e315655ef3c04090ce0414c74b1dcfb2ca36f36be8f7c8a5eb429984b",
-    "contracts/ir_pins.json": "da0555f07fe95b870245b127dc6cb6723a189fd8fb3e006ff986437e4105ae59",
+    "contracts/ir_pins.json": "724d0aab240717d8945e70af77df1065552aa4ed8aca59a53c7ce0b77ec5644a",
     "contracts/journal_schema.json": "6db83b98168def82e4c7dba3d4175597d6cd1e942ead8cefefc18b75c940eb50",
     "contracts/ledger_schema.json": "4dcc4657309e1326c739fb924a6cf2ef00d994f88de7a5833a30628fa493ccc8",
     "contracts/model_output_record.schema.json": "7d83215244125137cb91063e89e09a07ac28adad2dcc356d7de52c97e426f1f1",
@@ -28,8 +28,8 @@
     "contracts/sst_stage_output.schema.json": "48fef9b4b0546d98b2b157a8f791acfe05ebe280c1df7de925020f83e24c9f45",
     "contracts/state_layer.schema.json": "d3ed0706ecbb26ddfab7d7ff6ec473dc520994dbb5e4f046809cddc211f924cb",
     "contracts/time_intent.schema.json": "6696c55883e35e0f2eb0689d61b7a05c637959d1d53ba7d8f985bbc2d5e397d8",
-    "contracts/user_surface.md": "95c2898730179edc34cb5406287644653f8ce3d73681dec034def6978b0e68f4"
+    "contracts/user_surface.md": "21f18a2a89dbf9a5c0e73a5bfd8a5642d373d7e48d3413268afa442dd1e925f4"
   },
-  "generated_at": "2026-02-16T16:32:58.299698+00:00",
+  "generated_at": "2026-02-20T21:44:38.304768+00:00",
   "version": 1
 }

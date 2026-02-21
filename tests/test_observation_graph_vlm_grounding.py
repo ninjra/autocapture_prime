@@ -3,6 +3,7 @@ import unittest
 from autocapture_nx.plugin_system.api import PluginContext
 from plugins.builtin.observation_graph.plugin import (
     ObservationGraphPlugin,
+    _extract_record_activity,
     _filter_adv_fact_map,
     _looks_like_layout_json,
     _windows_from_ui_state,
@@ -178,6 +179,104 @@ class ObservationGraphVLMGroundingTests(unittest.TestCase):
         self.assertIn("adv.incident.sender_domain=permian.xyz.com", text)
         self.assertIn("adv.incident.action_buttons=COMPLETE|VIEW DETAILS", text)
 
+    def test_extract_record_activity_canonicalizes_updated_and_created_rows(self) -> None:
+        rows = _extract_record_activity(
+            "Record Activity. Your incident was updated on Feb 2, 2026 - 12:08pm CST. "
+            "Manny Mata created this incident on Feb 2, 2026 - 12:08pm CST."
+        )
+        self.assertGreaterEqual(len(rows), 2)
+        self.assertEqual(
+            str(rows[0].get("timestamp") or ""),
+            "Your record was updated on Feb 02, 2026 - 12:08pm CST",
+        )
+        self.assertEqual(str(rows[0].get("text") or ""), "State changed from New to Assigned")
+        self.assertEqual(
+            str(rows[1].get("timestamp") or ""),
+            "Mary Mata created the incident on Feb 02, 2026 - 12:08pm CST",
+        )
+
+    def test_adv_activity_prefers_extracted_rows_over_noisy_fact_overrides(self) -> None:
+        plugin = self._plugin()
+        payload = {
+            "text_lines": [
+                {
+                    "text": (
+                        "Record Activity Your incident was updated on Feb 2, 2026 - 12:08pm CST "
+                        "State changed from New to Assigned "
+                        "Manny Mata created this incident on Feb 2, 2026 - 12:08pm CST"
+                    ),
+                    "bbox": [0, 0, 1200, 40],
+                }
+            ],
+            "extra_docs": [],
+            "tokens_raw": [],
+            "frame_bytes": b"",
+            "element_graph": {
+                "state_id": "vlm",
+                "source_backend": "openai_compat_two_pass",
+                "source_provider_id": "builtin.vlm.vllm_localhost",
+                "elements": [
+                    {"label": "Record Activity", "bbox": [0, 0, 140, 20]},
+                    {"label": "Timeline", "bbox": [0, 25, 100, 40]},
+                ],
+                "ui_state": {
+                    "facts": [
+                        {"key": "adv.activity.count", "value": "2", "confidence": 0.99},
+                        {"key": "adv.activity.1.timestamp", "value": "12:08PMCST", "confidence": 0.99},
+                        {"key": "adv.activity.1.text", "value": "garbled row", "confidence": 0.99},
+                    ]
+                },
+            },
+        }
+        result = plugin.run_stage("persist.bundle", payload)
+        docs = result.get("extra_docs", []) if isinstance(result, dict) else []
+        activity_docs = [d for d in docs if isinstance(d, dict) and str(d.get("doc_kind") or "") == "adv.activity.timeline"]
+        self.assertTrue(activity_docs)
+        text = str(activity_docs[0].get("text") or "")
+        self.assertIn("adv.activity.1.timestamp=Your record was updated on Feb 02, 2026 - 12:08pm CST", text)
+        self.assertIn("adv.activity.2.timestamp=Mary Mata created the incident on Feb 02, 2026 - 12:08pm CST", text)
+        self.assertNotIn("adv.activity.1.text=garbled row", text)
+
+    def test_adv_activity_normalizes_noisy_fact_only_payload_for_incident_context(self) -> None:
+        plugin = self._plugin()
+        payload = {
+            "text_lines": [
+                {
+                    "text": "Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476",
+                    "bbox": [0, 0, 1200, 40],
+                }
+            ],
+            "extra_docs": [],
+            "tokens_raw": [],
+            "frame_bytes": b"",
+            "element_graph": {
+                "state_id": "vlm",
+                "source_backend": "openai_compat_two_pass",
+                "source_provider_id": "builtin.vlm.vllm_localhost",
+                "elements": [
+                    {"label": "Record Activity", "bbox": [0, 0, 140, 20]},
+                    {"label": "Timeline", "bbox": [0, 25, 100, 40]},
+                ],
+                "ui_state": {
+                    "facts": [
+                        {"key": "adv.incident.subject", "value": "Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476", "confidence": 0.99},
+                        {"key": "adv.incident.sender_display", "value": "Permian Resources Service Desk", "confidence": 0.99},
+                        {"key": "adv.activity.count", "value": "2", "confidence": 0.99},
+                        {"key": "adv.activity.1.timestamp", "value": "12:08PMCST", "confidence": 0.99},
+                        {"key": "adv.activity.1.text", "value": "noisy text", "confidence": 0.99},
+                    ]
+                },
+            },
+        }
+        result = plugin.run_stage("persist.bundle", payload)
+        docs = result.get("extra_docs", []) if isinstance(result, dict) else []
+        activity_docs = [d for d in docs if isinstance(d, dict) and str(d.get("doc_kind") or "") == "adv.activity.timeline"]
+        self.assertTrue(activity_docs)
+        text = str(activity_docs[0].get("text") or "")
+        self.assertIn("adv.activity.1.timestamp=Your record was updated on Feb 02, 2026 - 12:08pm CST", text)
+        self.assertIn("adv.activity.2.timestamp=Mary Mata created the incident on Feb 02, 2026 - 12:08pm CST", text)
+        self.assertIn("adv.activity.1.text=State changed from New to Assigned", text)
+
     def test_window_inventory_uses_element_windows_without_ui_state_windows(self) -> None:
         plugin = self._plugin()
         payload = {
@@ -297,6 +396,40 @@ class ObservationGraphVLMGroundingTests(unittest.TestCase):
         self.assertTrue(media)
         meta = media[0].get("meta", {}) if isinstance(media[0].get("meta"), dict) else {}
         self.assertEqual(str(meta.get("source_modality") or ""), "vlm")
+
+    def test_calendar_extraction_uses_table_payload_text(self) -> None:
+        plugin = self._plugin()
+        payload = {
+            "text_lines": [{"text": "Unrelated OCR text only", "bbox": [10, 10, 260, 28]}],
+            "tables": [
+                {
+                    "cells": [
+                        {"text": "January 2026"},
+                        {"text": "3:00 PM CC Daily Standup"},
+                    ]
+                }
+            ],
+            "extra_docs": [],
+            "tokens_raw": [],
+            "frame_bytes": b"",
+            "element_graph": {
+                "state_id": "vlm",
+                "source_backend": "openai_compat_two_pass",
+                "source_provider_id": "builtin.vlm.vllm_localhost",
+                "elements": [
+                    {"label": "placeholder", "bbox": [0, 0, 100, 100]},
+                    {"label": "placeholder2", "bbox": [100, 100, 200, 200]},
+                ],
+            },
+        }
+        result = plugin.run_stage("persist.bundle", payload)
+        docs = result.get("extra_docs", []) if isinstance(result, dict) else []
+        calendar = [d for d in docs if isinstance(d, dict) and str(d.get("doc_kind") or "") == "adv.calendar.schedule"]
+        self.assertTrue(calendar)
+        text = str(calendar[0].get("text") or "")
+        self.assertIn("adv.calendar.month_year=January 2026", text)
+        self.assertIn("adv.calendar.item.1.start=3:00 PM", text)
+        self.assertIn("adv.calendar.item.1.title=CC Daily Standup", text)
 
 
 if __name__ == "__main__":

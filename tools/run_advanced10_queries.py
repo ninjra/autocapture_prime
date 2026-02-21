@@ -17,9 +17,45 @@ from typing import Any
 
 from autocapture_nx.inference.vllm_endpoint import check_external_vllm_ready, enforce_external_vllm_base_url
 
+STRICT_DISALLOWED_ANSWER_PROVIDERS = frozenset(
+    {
+        "builtin.answer.synth_vllm_localhost",
+        "hard_vlm.direct",
+    }
+)
+
 
 def _utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = str(os.environ.get(name) or "").strip()
+    try:
+        return int(raw) if raw else int(default)
+    except Exception:
+        return int(default)
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = str(os.environ.get(name) or "").strip()
+    try:
+        return float(raw) if raw else float(default)
+    except Exception:
+        return float(default)
+
+
+def _emit_progress(stage: str, **fields: Any) -> None:
+    payload: dict[str, Any] = {
+        "event": "run_advanced10_queries.progress",
+        "ts_utc": datetime.now(timezone.utc).isoformat(),
+        "stage": str(stage),
+    }
+    payload.update(fields)
+    try:
+        print(json.dumps(payload, sort_keys=True), flush=True)
+    except Exception:
+        pass
 
 
 def _repo_root() -> Path:
@@ -52,6 +88,7 @@ def _run_query_once(
     image_path: str = "",
     timeout_s: float = 90.0,
     determinism: dict[str, str] | None = None,
+    metadata_only: bool = False,
 ) -> dict[str, Any]:
     py = root / ".venv" / "bin" / "python"
     env = dict(os.environ)
@@ -60,6 +97,18 @@ def _run_query_once(
     if str(image_path or "").strip():
         env["AUTOCAPTURE_QUERY_IMAGE_PATH"] = str(image_path).strip()
     env["AUTOCAPTURE_HARD_VLM_DEBUG"] = "1"
+    if bool(metadata_only):
+        env["AUTOCAPTURE_QUERY_METADATA_ONLY"] = "1"
+        # Option A contract: no query-time hard VLM/image dependency in metadata mode.
+        env["AUTOCAPTURE_ADV_HARD_VLM_MODE"] = "off"
+        env["AUTOCAPTURE_QUERY_METADATA_ONLY_ALLOW_HARD_VLM"] = "0"
+        env.pop("AUTOCAPTURE_QUERY_IMAGE_PATH", None)
+        # Keep metadata-only strict runs bounded; defaults remain overrideable.
+        env.setdefault("AUTOCAPTURE_HARD_VLM_MAX_CANDIDATES", "1")
+        env.setdefault("AUTOCAPTURE_HARD_VLM_MAX_TOKENS", "256")
+        env.setdefault("AUTOCAPTURE_HARD_VLM_TIMEOUT_S", "12")
+        env.setdefault("AUTOCAPTURE_HARD_VLM_BUDGET_S", "20")
+        env.setdefault("AUTOCAPTURE_HARD_VLM_RETRIES", "2")
     base_url_raw = str(env.get("AUTOCAPTURE_VLM_BASE_URL") or "").strip() or "http://127.0.0.1:8000/v1"
     try:
         env["AUTOCAPTURE_VLM_BASE_URL"] = enforce_external_vllm_base_url(base_url_raw)
@@ -138,6 +187,7 @@ def _run_query(
     lock_retries: int = 4,
     lock_retry_wait_s: float = 0.25,
     determinism: dict[str, str] | None = None,
+    metadata_only: bool = False,
 ) -> dict[str, Any]:
     retries = max(0, int(lock_retries))
     wait_s = max(0.0, float(lock_retry_wait_s))
@@ -152,6 +202,7 @@ def _run_query(
             image_path=image_path,
             timeout_s=timeout_s,
             determinism=determinism,
+            metadata_only=metadata_only,
         )
         result["attempt"] = attempt
         result["attempts"] = attempts
@@ -163,6 +214,54 @@ def _run_query(
         if attempt < attempts and wait_s > 0.0:
             time.sleep(wait_s * attempt)
     return last or {"ok": False, "error": "query_failed", "answer": {}, "processing": {}, "attempts": attempts}
+
+
+def _contractize_query_failure(result: dict[str, Any], *, query: str, case_id: str) -> dict[str, Any]:
+    """Return a deterministic no-evidence contract for query transport/runtime failures.
+
+    Generic20 cases are best-effort and must still emit stable contract fields so
+    matrix checks can distinguish "no evidence" from schema drift.
+    """
+
+    raw_error = str(result.get("error") or "").strip()
+    reason = "query_failed"
+    if "timeout" in raw_error.casefold():
+        reason = "query_timeout"
+    digest = hashlib.sha256(f"{case_id}|{query}".encode("utf-8")).hexdigest()[:16]
+    query_run_id = f"qry_degraded_{digest}"
+    summary = f"Not available yet ({reason})."
+    bullets = [
+        "Query contract degraded: upstream query execution failed.",
+        f"reason: {reason}",
+    ]
+    return {
+        "ok": True,
+        "error": raw_error,
+        "answer": {
+            "state": "no_evidence",
+            "summary": summary,
+            "display": {
+                "summary": summary,
+                "bullets": bullets,
+                "confidence_pct": 0.0,
+            },
+            "claims": [],
+        },
+        "processing": {
+            "extraction": {
+                "blocked": True,
+                "blocked_reason": reason,
+                "scheduled_extract_job_id": "",
+            },
+            "query_trace": {
+                "query_run_id": query_run_id,
+                "method": "metadata_only_degraded",
+                "winner": "",
+                "stage_ms": {"total": 0.0},
+            },
+            "attribution": {"providers": []},
+        },
+    }
 
 
 def _configured_vlm_model(config_dir: Path) -> str:
@@ -318,6 +417,105 @@ def _to_haystack(result: dict[str, Any], summary: str, bullets: list[str]) -> st
     ).casefold()
 
 
+def _is_support_line(text: str) -> bool:
+    low = str(text or "").strip().casefold()
+    return low.startswith("support:") or low.startswith("source:")
+
+
+def _core_answer_surface(summary: str, bullets: list[str]) -> str:
+    core_bullets = [str(x or "").strip() for x in bullets if str(x or "").strip() and not _is_support_line(str(x or ""))]
+    return "\n".join([str(summary or ""), "\n".join(core_bullets)]).strip()
+
+
+def _normalize_exact_text(value: Any) -> str:
+    return " ".join(str(value or "").split()).casefold()
+
+
+def _strict_quality_markers(case_id: str, summary: str, bullets: list[str]) -> list[str]:
+    markers: list[str] = []
+    surface = _core_answer_surface(summary, bullets)
+    low = surface.casefold()
+    if "..." in surface or "…" in surface:
+        markers.append("truncated_ellipsis")
+    # Explicit user policy: partial window outcomes are not acceptable for Q1.
+    if str(case_id or "").upper() == "Q1" and (
+        "partially_occluded" in low or bool(re.search(r"\bpartial(?:ly)?\b", low))
+    ):
+        markers.append("partial_visibility_language")
+    return sorted(set(markers))
+
+
+def _provider_signal_sets(provider_rows: list[dict[str, Any]]) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+    positive_provider_ids: list[str] = []
+    non_disallowed_positive_ids: list[str] = []
+    disallowed_active: list[dict[str, Any]] = []
+    for row in provider_rows:
+        if not isinstance(row, dict):
+            continue
+        provider_id = str(row.get("provider_id") or "").strip()
+        if not provider_id:
+            continue
+        contribution_bp = int(row.get("contribution_bp", 0) or 0)
+        claim_count = int(row.get("claim_count", 0) or 0)
+        citation_count = int(row.get("citation_count", 0) or 0)
+        if contribution_bp > 0:
+            positive_provider_ids.append(provider_id)
+            if provider_id not in STRICT_DISALLOWED_ANSWER_PROVIDERS:
+                non_disallowed_positive_ids.append(provider_id)
+        if provider_id in STRICT_DISALLOWED_ANSWER_PROVIDERS and (
+            contribution_bp > 0 or claim_count > 0 or citation_count > 0
+        ):
+            disallowed_active.append(
+                {
+                    "provider_id": provider_id,
+                    "contribution_bp": contribution_bp,
+                    "claim_count": claim_count,
+                    "citation_count": citation_count,
+                }
+            )
+    return (
+        sorted(set(positive_provider_ids)),
+        sorted(set(non_disallowed_positive_ids)),
+        disallowed_active,
+    )
+
+
+def _token_present(token: str, haystack: str) -> bool:
+    text = str(token or "").strip()
+    if not text:
+        return False
+    low_haystack = str(haystack or "").casefold()
+    low_text = text.casefold()
+    if not low_haystack:
+        return False
+    if low_text.isdigit():
+        # Avoid false positives such as expected "16" matching "163".
+        pattern = rf"(?<!\d){re.escape(low_text)}(?!\d)"
+        return bool(re.search(pattern, low_haystack))
+    return low_text in low_haystack
+
+
+def _strict_haystack(result: dict[str, Any], summary: str, bullets: list[str]) -> str:
+    answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
+    display = answer.get("display", {}) if isinstance(answer.get("display", {}), dict) else {}
+    display_fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
+    processing = result.get("processing", {}) if isinstance(result.get("processing", {}), dict) else {}
+    hard_vlm = processing.get("hard_vlm", {}) if isinstance(processing.get("hard_vlm", {}), dict) else {}
+    hard_fields = hard_vlm.get("fields", {}) if isinstance(hard_vlm.get("fields", {}), dict) else {}
+    core_bullets = [str(x or "").strip() for x in bullets if str(x or "").strip() and not _is_support_line(str(x or ""))]
+    strict_fields = {
+        "display_fields": {k: v for k, v in display_fields.items() if str(k) != "support_snippets"},
+        "hard_fields": hard_fields,
+    }
+    return "\n".join(
+        [
+            str(summary or ""),
+            "\n".join(core_bullets),
+            json.dumps(strict_fields, sort_keys=True),
+        ]
+    ).casefold()
+
+
 def _box_iou(a: dict[str, Any], b: dict[str, Any]) -> float:
     try:
         ax1 = float(a.get("x1"))
@@ -352,11 +550,13 @@ def _evaluate_expected(
     bullets: list[str],
     *,
     strict_expected_answer: bool = False,
+    enforce_true_strict: bool = False,
 ) -> dict[str, Any]:
     case_id = str(item.get("id") or "").strip().upper()
     expected = item.get("expected_answer")
     checks: list[dict[str, Any]] = []
-    haystack = _to_haystack(result, summary, bullets)
+    haystack = _strict_haystack(result, summary, bullets) if bool(strict_expected_answer) else _to_haystack(result, summary, bullets)
+    core_surface = _core_answer_surface(summary, bullets)
     passed = True
 
     # Enforce that advanced visual questions are answered through the full
@@ -364,6 +564,7 @@ def _evaluate_expected(
     # substring matches.
     is_q_series = bool(re.match(r"^Q(?:[1-9]|10)$", case_id))
     processing = result.get("processing", {}) if isinstance(result.get("processing", {}), dict) else {}
+    metadata_only_query = bool(processing.get("metadata_only_query", False))
     promptops_used = bool(processing.get("promptops_used", False))
     hard_vlm = processing.get("hard_vlm", {}) if isinstance(processing.get("hard_vlm", {}), dict) else {}
     hard_fields = hard_vlm.get("fields", {}) if isinstance(hard_vlm.get("fields", {}), dict) else {}
@@ -378,12 +579,84 @@ def _evaluate_expected(
         isinstance(p, dict) and str(p.get("provider_id") or "") == "builtin.answer.synth_vllm_localhost"
         for p in provider_rows
     )
-    if is_q_series:
-        q_checks = [
-            ("promptops_used", promptops_used),
-            ("hard_vlm_structured", bool(structured_hard_keys)),
-            ("synth_provider_in_path", synth_in_path),
+    answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
+    display = answer.get("display", {}) if isinstance(answer.get("display", {}), dict) else {}
+    display_fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
+    metadata_structured = bool(display_fields)
+    if bool(strict_expected_answer) and bool(enforce_true_strict):
+        quality_markers = _strict_quality_markers(case_id, summary, bullets)
+        quality_ok = len(quality_markers) == 0
+        checks.append(
+            {
+                "type": "strict_quality",
+                "key": "no_partial_or_truncated_surface",
+                "required": True,
+                "present": bool(quality_ok),
+                "markers": quality_markers,
+            }
+        )
+        if not quality_ok:
+            passed = False
+        positive_provider_ids, non_disallowed_positive_ids, disallowed_active = _provider_signal_sets(provider_rows)
+        provider_checks = [
+            ("positive_provider_contribution", bool(positive_provider_ids), {"provider_ids": positive_provider_ids}),
+            (
+                "non_disallowed_positive_provider_contribution",
+                bool(non_disallowed_positive_ids),
+                {"provider_ids": non_disallowed_positive_ids},
+            ),
+            (
+                "disallowed_answer_provider_activity",
+                len(disallowed_active) == 0,
+                {"offenders": disallowed_active},
+            ),
         ]
+        for key, ok, details in provider_checks:
+            checks.append(
+                {
+                    "type": "pipeline_enforcement",
+                    "key": key,
+                    "required": True,
+                    "present": bool(ok),
+                    **details,
+                }
+            )
+            if not ok:
+                passed = False
+    if bool(strict_expected_answer) and is_q_series:
+        if "indeterminate" in str(summary or "").casefold():
+            checks.append(
+                {
+                    "type": "strict_quality",
+                    "key": "summary_not_indeterminate",
+                    "required": True,
+                    "present": False,
+                }
+            )
+            passed = False
+        else:
+            checks.append(
+                {
+                    "type": "strict_quality",
+                    "key": "summary_not_indeterminate",
+                    "required": True,
+                    "present": True,
+                }
+            )
+
+    if is_q_series:
+        if metadata_only_query:
+            q_checks = [
+                ("metadata_only_query", metadata_only_query),
+                ("promptops_used", promptops_used),
+                ("metadata_structured_display", metadata_structured),
+            ]
+        else:
+            q_checks = [
+                ("promptops_used", promptops_used),
+                ("hard_vlm_structured", bool(structured_hard_keys)),
+                ("synth_provider_in_path", synth_in_path),
+            ]
         for key, ok in q_checks:
             checks.append(
                 {
@@ -397,13 +670,43 @@ def _evaluate_expected(
             if not ok:
                 passed = False
 
+    exact_summary = str(item.get("expected_exact_summary") or "").strip()
+    if exact_summary:
+        ok = bool(_normalize_exact_text(summary) == _normalize_exact_text(exact_summary))
+        checks.append(
+            {
+                "type": "exact_summary",
+                "key": "expected_exact_summary",
+                "expected": exact_summary,
+                "actual": str(summary or ""),
+                "match": ok,
+            }
+        )
+        if not ok:
+            passed = False
+
+    exact_surface = str(item.get("expected_exact_surface") or "").strip()
+    if exact_surface:
+        ok = bool(_normalize_exact_text(core_surface) == _normalize_exact_text(exact_surface))
+        checks.append(
+            {
+                "type": "exact_surface",
+                "key": "expected_exact_surface",
+                "expected": exact_surface,
+                "actual": str(core_surface or ""),
+                "match": ok,
+            }
+        )
+        if not ok:
+            passed = False
+
     contains_all = item.get("expected_contains_all", [])
     if isinstance(contains_all, list):
         for idx, token in enumerate(contains_all):
             text = str(token).strip()
             if not text:
                 continue
-            ok = text.casefold() in haystack
+            ok = _token_present(text, haystack)
             checks.append({"type": "contains_all", "key": f"contains_all[{idx}]", "expected": text, "present": bool(ok)})
             if not ok:
                 passed = False
@@ -413,7 +716,7 @@ def _evaluate_expected(
         any_ok = False
         for token in contains_any:
             text = str(token).strip()
-            if text and text.casefold() in haystack:
+            if text and _token_present(text, haystack):
                 any_ok = True
                 break
         checks.append(
@@ -585,7 +888,7 @@ def _evaluate_expected(
                 )
                 passed = False
             else:
-                ok = str(token or "").casefold() in haystack
+                ok = _token_present(str(token or ""), haystack)
                 checks.append(
                     {
                         "type": "expected_answer",
@@ -598,10 +901,112 @@ def _evaluate_expected(
                 if not ok:
                     passed = False
 
+    if bool(strict_expected_answer) and is_q_series and case_id == "Q9":
+        expected_red = 8
+        expected_green = 16
+        summary_low = str(summary or "").casefold()
+        parsed_counts: dict[str, int] = {}
+        count_match = re.search(
+            r"count_red\s*=\s*(\d+)\D+count_green\s*=\s*(\d+)\D+count_other\s*=\s*(\d+)",
+            summary_low,
+        )
+        if count_match:
+            parsed_counts = {
+                "red_count": int(count_match.group(1)),
+                "green_count": int(count_match.group(2)),
+                "other_count": int(count_match.group(3)),
+            }
+        if not parsed_counts:
+            display_fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
+            try:
+                parsed_counts = {
+                    "red_count": int(display_fields.get("red_count") or 0),
+                    "green_count": int(display_fields.get("green_count") or 0),
+                    "other_count": int(display_fields.get("other_count") or 0),
+                }
+            except Exception:
+                parsed_counts = {}
+        red_ok = bool(parsed_counts.get("red_count") == expected_red)
+        green_ok = bool(parsed_counts.get("green_count") == expected_green)
+        checks.append(
+            {
+                "type": "strict_numeric",
+                "key": "q9_red_count",
+                "expected": expected_red,
+                "actual": parsed_counts.get("red_count"),
+                "match": red_ok,
+            }
+        )
+        checks.append(
+            {
+                "type": "strict_numeric",
+                "key": "q9_green_count",
+                "expected": expected_green,
+                "actual": parsed_counts.get("green_count"),
+                "match": green_ok,
+            }
+        )
+        if not red_ok or not green_ok:
+            passed = False
+
     if not checks:
         return {"evaluated": False, "passed": None, "checks": []}
 
     return {"evaluated": True, "passed": bool(passed), "checks": checks}
+
+
+def _case_requires_vlm(item: dict[str, Any]) -> bool:
+    raw = item.get("requires_vlm")
+    if isinstance(raw, bool):
+        return bool(raw)
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    if isinstance(raw, str):
+        value = raw.strip().casefold()
+        if value in {"1", "true", "yes", "on"}:
+            return True
+        if value in {"0", "false", "no", "off"}:
+            return False
+    # Advanced Q/H suites are VLM-first by default unless explicitly disabled.
+    case_id = str(item.get("id") or "").strip()
+    return bool(re.match(r"^(?:Q(?:[1-9]|10)|H(?:[1-9]|10)|GQ(?:[1-9]|1[0-9]|20))$", case_id, re.IGNORECASE))
+
+
+def _probe_vllm_stability(
+    *,
+    checks: int,
+    interval_ms: float,
+) -> dict[str, Any]:
+    required = max(1, int(checks))
+    wait_s = max(0.0, float(interval_ms) / 1000.0)
+    samples: list[dict[str, Any]] = []
+    consecutive_ok = 0
+    for idx in range(required):
+        if idx > 0 and wait_s > 0:
+            time.sleep(wait_s)
+        sample = check_external_vllm_ready(
+            require_completion=True,
+            auto_recover=False,
+            retries=1,
+        )
+        sample_row = {
+            "attempt": idx + 1,
+            "ok": bool(sample.get("ok", False)),
+            "error": str(sample.get("error") or ""),
+            "selected_model": str(sample.get("selected_model") or ""),
+        }
+        samples.append(sample_row)
+        if sample_row["ok"]:
+            consecutive_ok += 1
+        else:
+            consecutive_ok = 0
+            break
+    return {
+        "ok": bool(consecutive_ok >= required),
+        "required_checks": int(required),
+        "consecutive_ok": int(consecutive_ok),
+        "samples": samples,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -617,6 +1022,31 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Continue execution even when external vLLM health check fails.",
     )
+    parser.add_argument(
+        "--skip-vllm-unstable",
+        dest="skip_vllm_unstable",
+        action="store_true",
+        default=True,
+        help="Mark VLM-required cases as skipped while VLM preflight/stability is unhealthy (default: true).",
+    )
+    parser.add_argument(
+        "--fail-on-vllm-unstable",
+        dest="skip_vllm_unstable",
+        action="store_false",
+        help="Fail closed instead of skipping VLM-required cases when VLM is unstable/unavailable.",
+    )
+    parser.add_argument(
+        "--vlm-stability-checks",
+        type=int,
+        default=_env_int("AUTOCAPTURE_VLM_STABILITY_CHECKS", 2),
+        help="Require this many consecutive successful completion probes before treating VLM as stable.",
+    )
+    parser.add_argument(
+        "--vlm-stability-interval-ms",
+        type=float,
+        default=_env_float("AUTOCAPTURE_VLM_STABILITY_INTERVAL_MS", 750.0),
+        help="Delay between VLM stability probes in milliseconds.",
+    )
     parser.add_argument("--query-timeout-s", type=float, default=90.0, help="Per-query timeout in seconds.")
     parser.add_argument("--lock-retries", type=int, default=4, help="Retries for transient instance_lock_held errors.")
     parser.add_argument("--lock-retry-wait-ms", type=float, default=250.0, help="Base wait between lock retries in ms.")
@@ -629,12 +1059,22 @@ def main(argv: list[str] | None = None) -> int:
         help="Maximum allowed absolute confidence drift (percentage points) across repro runs.",
     )
     args = parser.parse_args(argv)
+    _emit_progress(
+        "start",
+        strict_all=bool(args.strict_all),
+        metadata_only=bool(args.metadata_only),
+        query_timeout_s=float(args.query_timeout_s),
+        lock_retries=int(args.lock_retries),
+    )
 
     report_path = Path(str(args.report or "").strip()) if str(args.report or "").strip() else _latest_report(root)
     if not report_path.exists():
         print(json.dumps({"ok": False, "error": "report_not_found", "report": str(report_path)}))
         return 2
-    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report_raw = report_path.read_text(encoding="utf-8")
+    report = json.loads(report_raw)
+    source_report_sha256 = hashlib.sha256(report_raw.encode("utf-8")).hexdigest()
+    source_report_run_id = str(report.get("run_id") or "").strip()
     cfg = str(report.get("config_dir") or "").strip()
     data = str(report.get("data_dir") or "").strip()
     if not cfg or not data:
@@ -675,6 +1115,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.strict_all and bool(args.allow_vllm_unavailable):
         print(json.dumps({"ok": False, "error": "strict_mode_disallows_allow-vllm-unavailable"}))
         return 2
+    if args.strict_all and not bool(args.metadata_only):
+        print(json.dumps({"ok": False, "error": "strict_mode_requires_metadata_only"}))
+        return 2
+    if args.strict_all:
+        # Strict mode must fail closed on VLM instability; skipping is non-shippable.
+        args.skip_vllm_unstable = False
 
     profile_path = (root / str(args.profile)).resolve() if not Path(str(args.profile)).is_absolute() else Path(str(args.profile))
     if args.strict_all and not profile_path.exists():
@@ -713,21 +1159,80 @@ def main(argv: list[str] | None = None) -> int:
         "pythonhashseed": str(determinism_raw.get("pythonhashseed") or "0"),
     }
     repro_runs = int(args.repro_runs or 0)
-    if repro_runs <= 0:
+    if repro_runs <= 0 and bool(args.metadata_only):
+        repro_runs = 1
+    elif repro_runs <= 0:
         repro_runs = int(determinism_raw.get("repro_runs") or (3 if args.strict_all else 1))
     repro_runs = max(1, repro_runs)
 
-    vllm_status = check_external_vllm_ready(require_completion=bool(args.strict_all))
-    if not bool(vllm_status.get("ok", False)):
-        if args.allow_vllm_unavailable:
-            vllm_status["degraded_mode"] = True
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_S", "45")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_MAX_S", "120")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_COMPLETION_TIMEOUT_SCALE", "1.5")
+    os.environ.setdefault("AUTOCAPTURE_VLM_PREFLIGHT_RETRIES", "6")
+    _emit_progress("vlm.preflight.begin", strict_all=bool(args.strict_all))
+    preflight_t0 = time.monotonic()
+    metadata_only_mode = bool(args.metadata_only)
+    if metadata_only_mode:
+        vllm_status = {
+            "ok": True,
+            "metadata_only_mode": True,
+            "preflight_skipped": True,
+            "selected_model": "",
+        }
+    else:
+        preflight_retries_override = 1 if bool(args.skip_vllm_unstable) else None
+        preflight_completion_timeout_override = 12.0 if bool(args.skip_vllm_unstable) else None
+        vllm_status = check_external_vllm_ready(
+            require_completion=True,
+            retries=preflight_retries_override,
+            timeout_completion_s=preflight_completion_timeout_override,
+        )
+    _emit_progress(
+        "vlm.preflight.done",
+        ok=bool(vllm_status.get("ok", False)),
+        latency_ms=int((time.monotonic() - preflight_t0) * 1000),
+        selected_model=str(vllm_status.get("selected_model") or ""),
+    )
+    if metadata_only_mode:
+        stability = {
+            "ok": True,
+            "required_checks": 0,
+            "consecutive_ok": 0,
+            "samples": [],
+            "metadata_only_bypass": True,
+        }
+    elif not bool(vllm_status.get("ok", False)) and bool(args.skip_vllm_unstable):
+        stability = {
+            "ok": False,
+            "required_checks": max(1, int(args.vlm_stability_checks)),
+            "consecutive_ok": 0,
+            "samples": [],
+            "skipped_after_preflight_failure": True,
+        }
+    else:
+        stability = _probe_vllm_stability(
+            checks=max(1, int(args.vlm_stability_checks)),
+            interval_ms=float(args.vlm_stability_interval_ms),
+        )
+    vllm_status["stability"] = stability
+    vllm_unstable = (not bool(vllm_status.get("ok", False))) or (not bool(stability.get("ok", False)))
+    skip_vlm_cases = False
+    if vllm_unstable:
+        reason = str(vllm_status.get("error") or "vlm_unavailable_or_unstable")
+        vllm_status["degraded_mode"] = True
+        vllm_status["unstable_reason"] = reason
+        if metadata_only_mode:
+            skip_vlm_cases = False
+            vllm_status["metadata_only_bypass"] = True
+        elif bool(args.skip_vllm_unstable) or bool(args.allow_vllm_unavailable):
+            skip_vlm_cases = True
         else:
             print(
                 json.dumps(
                     {
                         "ok": False,
                         "error": "external_vllm_unavailable",
-                        "message": "External vLLM preflight failed after orchestrator recovery attempts.",
+                        "message": "External vLLM preflight/stability failed.",
                         "orchestrator_cmd": str(vllm_status.get("orchestrator_cmd") or os.environ.get("AUTOCAPTURE_VLM_ORCHESTRATOR_CMD") or ""),
                         "vllm_status": vllm_status,
                     }
@@ -741,24 +1246,94 @@ def main(argv: list[str] | None = None) -> int:
     rows: list[dict[str, Any]] = []
     passed_total = 0
     evaluated_total = 0
+    skipped_total = 0
+    _emit_progress("cases.loaded", count=int(len(items)), cases_path=str(cases_path))
 
     for item in items:
         case_id = str(item.get("id") or "")
         question = str(item.get("question") or "").strip()
         if not question:
             continue
-        image_path = "" if bool(args.metadata_only) else str(report.get("image_path") or "").strip()
+        requires_vlm = _case_requires_vlm(item)
+        if skip_vlm_cases and requires_vlm:
+            skip_reason = str(vllm_status.get("unstable_reason") or "vlm_unavailable_or_unstable")
+            eval_result = {
+                "evaluated": False,
+                "passed": None,
+                "skipped": True,
+                "skip_reason": f"vlm_unstable:{skip_reason}",
+                "checks": [
+                    {
+                        "type": "skip_gate",
+                        "key": "vlm_stability",
+                        "required": True,
+                        "present": False,
+                        "reason": f"vlm_unstable:{skip_reason}",
+                    }
+                ],
+            }
+            rows.append(
+                {
+                    "id": case_id,
+                    "question": question,
+                    "ok": False,
+                    "passed": False,
+                    "skipped": True,
+                    "skip_reason": str(eval_result.get("skip_reason") or ""),
+                    "requires_vlm": bool(requires_vlm),
+                    "error": "skipped_vlm_unstable",
+                    "answer_state": "skipped",
+                    "summary": "",
+                    "bullets": [],
+                    "query_run_id": "",
+                    "method": "skip",
+                    "winner": "",
+                    "stage_ms": {},
+                    "providers": [],
+                    "hard_vlm": {},
+                    "source_report": str(report_path),
+                    "source_report_sha256": str(source_report_sha256),
+                    "source_report_run_id": str(source_report_run_id),
+                    "determinism_repro": {
+                        "type": "determinism_repro",
+                        "runs": int(repro_runs),
+                        "match": None,
+                        "signatures": [],
+                        "confidence_samples_pct": [],
+                        "confidence_drift_max_pct": None,
+                        "confidence_drift_tolerance_pct": round(float(max(0.0, args.confidence_drift_tolerance_pct)), 3),
+                        "errors": ["skipped_vlm_unstable"],
+                    },
+                    "expected_eval": eval_result,
+                }
+            )
+            skipped_total += 1
+            _emit_progress(
+                "case.skipped",
+                case_id=case_id,
+                reason=str(eval_result.get("skip_reason") or ""),
+            )
+            continue
+        _emit_progress("case.begin", case_id=case_id, question=question)
+        case_t0 = time.monotonic()
+        image_path = str(report.get("image_path") or "").strip()
+        if image_path and not Path(image_path).is_absolute():
+            image_path = str((root / image_path).resolve())
+        query_image_path = "" if bool(args.metadata_only) else image_path
         result = _run_query(
             root,
             cfg=cfg,
             data=data,
             query=question,
-            image_path=image_path,
+            image_path=query_image_path,
             timeout_s=float(args.query_timeout_s),
             lock_retries=int(args.lock_retries),
             lock_retry_wait_s=float(args.lock_retry_wait_ms) / 1000.0,
             determinism=determinism,
+            metadata_only=bool(args.metadata_only),
         )
+        if bool(args.metadata_only) and (not bool(result.get("ok", False))) and str(case_id or "").upper().startswith("GQ"):
+            result = _contractize_query_failure(result, query=question, case_id=str(case_id or "GQ"))
         summary, bullets = _display(result)
         signatures = [_canonical_signature(result, summary, bullets)]
         confidence_samples: list[float] = []
@@ -773,12 +1348,15 @@ def main(argv: list[str] | None = None) -> int:
                 cfg=cfg,
                 data=data,
                 query=question,
-                image_path=image_path,
+                image_path=query_image_path,
                 timeout_s=float(args.query_timeout_s),
                 lock_retries=int(args.lock_retries),
                 lock_retry_wait_s=float(args.lock_retry_wait_ms) / 1000.0,
                 determinism=determinism,
+                metadata_only=bool(args.metadata_only),
             )
+            if bool(args.metadata_only) and (not bool(rerun.get("ok", False))) and str(case_id or "").upper().startswith("GQ"):
+                rerun = _contractize_query_failure(rerun, query=question, case_id=str(case_id or "GQ"))
             rsum, rbul = _display(rerun)
             signatures.append(_canonical_signature(rerun, rsum, rbul))
             conf = _confidence_pct(rerun)
@@ -805,6 +1383,7 @@ def main(argv: list[str] | None = None) -> int:
             summary,
             bullets,
             strict_expected_answer=True,
+            enforce_true_strict=bool(args.strict_all),
         )
         repro_check = {
             "type": "determinism_repro",
@@ -837,6 +1416,10 @@ def main(argv: list[str] | None = None) -> int:
                 "id": case_id,
                 "question": question,
                 "ok": bool(result.get("ok", False)),
+                "passed": bool(eval_result.get("passed", False)) if bool(eval_result.get("evaluated", False)) else False,
+                "skipped": False,
+                "skip_reason": "",
+                "requires_vlm": bool(requires_vlm),
                 "error": str(result.get("error") or ""),
                 "answer_state": str(answer.get("state") or ""),
                 "summary": summary,
@@ -847,15 +1430,42 @@ def main(argv: list[str] | None = None) -> int:
                 "stage_ms": trace.get("stage_ms", {}),
                 "providers": attribution.get("providers", []),
                 "hard_vlm": processing.get("hard_vlm", {}),
+                "source_report": str(report_path),
+                "source_report_sha256": str(source_report_sha256),
+                "source_report_run_id": str(source_report_run_id),
                 "determinism_repro": repro_check,
                 "expected_eval": eval_result,
             }
         )
+        _emit_progress(
+            "case.done",
+            case_id=case_id,
+            ok=bool(result.get("ok", False)),
+            passed=bool(eval_result.get("passed", False)) if bool(eval_result.get("evaluated", False)) else False,
+            latency_ms=int((time.monotonic() - case_t0) * 1000),
+            winner=str(trace.get("winner") or ""),
+        )
 
+    evaluated_failed = int(max(0, evaluated_total - passed_total))
+    all_rows_passed = bool(evaluated_failed == 0 and (int(evaluated_total) + int(skipped_total) == int(len(rows))))
+    strict_failure_reasons: list[str] = []
+    if bool(args.strict_all):
+        if int(evaluated_total) <= 0:
+            strict_failure_reasons.append("strict_evaluated_zero")
+        if int(skipped_total) > 0:
+            strict_failure_reasons.append("strict_skipped_nonzero")
+        if int(evaluated_failed) > 0:
+            strict_failure_reasons.append("strict_failed_nonzero")
+        if int(evaluated_total) != int(len(rows)):
+            strict_failure_reasons.append("strict_evaluated_mismatch")
+    strict_ok = len(strict_failure_reasons) == 0
     out = {
-        "ok": True,
+        "ok": bool(all_rows_passed and (strict_ok if bool(args.strict_all) else True)),
         "generated_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "report": str(report_path),
+        "source_report": str(report_path),
+        "source_report_sha256": str(source_report_sha256),
+        "source_report_run_id": str(source_report_run_id),
         "config_dir": cfg,
         "data_dir": data,
         "vllm_status": vllm_status,
@@ -867,7 +1477,12 @@ def main(argv: list[str] | None = None) -> int:
         "determinism": determinism,
         "evaluated_total": int(evaluated_total),
         "evaluated_passed": int(passed_total),
-        "evaluated_failed": int(max(0, evaluated_total - passed_total)),
+        "evaluated_failed": int(evaluated_failed),
+        "rows_skipped": int(skipped_total),
+        "skip_vlm_unstable": bool(args.skip_vllm_unstable),
+        "strict_all": bool(args.strict_all),
+        "strict_ok": bool(strict_ok),
+        "strict_failure_reasons": [str(x) for x in strict_failure_reasons],
         "rows": rows,
     }
     case_prefix = f"advanced{len(rows)}"
@@ -878,9 +1493,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(out, indent=2, sort_keys=True), encoding="utf-8")
+    _emit_progress(
+        "finish",
+        ok=bool(out["ok"]),
+        rows=int(len(rows)),
+        evaluated_total=int(evaluated_total),
+        evaluated_passed=int(passed_total),
+        output=str(output_path),
+    )
     print(json.dumps({"ok": True, "output": str(output_path), "rows": len(rows)}))
     if bool(args.strict_all):
-        if int(evaluated_total) != int(len(rows)) or int(passed_total) != int(len(rows)):
+        if not strict_ok:
             return 1
     return 0
 

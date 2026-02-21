@@ -41,7 +41,7 @@ class QueryLatestSingleAuthTests(unittest.TestCase):
 
             seen: dict[str, str] = {}
 
-            def _probe():
+            def _probe(*_args: object, **_kwargs: object):
                 seen["key"] = str(os.environ.get("AUTOCAPTURE_VLM_API_KEY") or "")
                 return {"ok": True}
 
@@ -61,6 +61,33 @@ class QueryLatestSingleAuthTests(unittest.TestCase):
                 rc = mod.main(["what song is playing", "--interactive", "off"])
             self.assertEqual(rc, 0)
             self.assertEqual(seen.get("key"), "cfg-key")
+
+    def test_main_returns_skipped_when_vllm_unavailable(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            cfg = root / "cfg"
+            data = root / "data"
+            cfg.mkdir(parents=True, exist_ok=True)
+            data.mkdir(parents=True, exist_ok=True)
+            run_dir = root / "artifacts" / "single_image_runs" / "single_1"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "report.json").write_text(
+                json.dumps({"config_dir": str(cfg), "data_dir": str(data)}),
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(mod, "_repo_root", return_value=root),
+                mock.patch.object(mod, "check_external_vllm_ready", return_value={"ok": False, "error": "down"}),
+                mock.patch.object(mod, "_run_query", side_effect=AssertionError("query_should_not_run")),
+            ):
+                rc = mod.main(["what was i doing", "--interactive", "off"])
+            self.assertEqual(rc, 0)
+            sessions = sorted((root / "artifacts" / "query_sessions").glob("query_skip_*.json"))
+            self.assertTrue(sessions)
+            payload = json.loads(sessions[-1].read_text(encoding="utf-8"))
+            self.assertTrue(bool(payload.get("skipped", False)))
+            self.assertIn("vlm_unstable:", str(payload.get("skip_reason") or ""))
 
 
 if __name__ == "__main__":

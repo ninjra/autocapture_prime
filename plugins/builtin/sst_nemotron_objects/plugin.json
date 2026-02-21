@@ -5,6 +5,9 @@
       1
     ]
   },
+  "default_settings": {
+    "max_objects": 256
+  },
   "depends_on": [],
   "enabled": false,
   "entrypoints": [
@@ -34,19 +37,16 @@
     "processing.stage.hooks"
   ],
   "required_capabilities": [],
-  "default_settings": {
-    "max_objects": 256
-  },
   "settings_schema": {
-    "type": "object",
     "additionalProperties": false,
     "properties": {
       "max_objects": {
-        "type": "integer",
+        "maximum": 4096,
         "minimum": 1,
-        "maximum": 4096
+        "type": "integer"
       }
-    }
+    },
+    "type": "object"
   },
   "version": "0.2.0"
 }

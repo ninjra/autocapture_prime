@@ -11,6 +11,55 @@ from autocapture_nx.kernel.hashing import sha256_canonical, sha256_text
 from autocapture_nx.kernel.ids import encode_record_id_component
 
 
+def apply_producer_metadata(
+    payload: dict[str, Any],
+    *,
+    producer_plugin_id: str,
+    stage_id: str,
+    input_artifact_ids: list[str] | None = None,
+    input_hashes: list[str] | None = None,
+    plugin_chain: list[str] | None = None,
+) -> dict[str, Any]:
+    out = dict(payload)
+    producer = str(producer_plugin_id or "").strip()
+    stage = str(stage_id or "").strip()
+    if producer and not str(out.get("producer_plugin_id") or "").strip():
+        out["producer_plugin_id"] = producer
+    if producer and not str(out.get("source_provider_id") or "").strip():
+        out["source_provider_id"] = producer
+    provenance = out.get("provenance", {}) if isinstance(out.get("provenance", {}), dict) else {}
+    provenance = dict(provenance)
+    if producer and not str(provenance.get("plugin_id") or "").strip():
+        provenance["plugin_id"] = producer
+    if producer and not str(provenance.get("producer_plugin_id") or "").strip():
+        provenance["producer_plugin_id"] = producer
+    if stage and not str(provenance.get("stage_id") or "").strip():
+        provenance["stage_id"] = stage
+    if input_artifact_ids:
+        ids = [str(x) for x in input_artifact_ids if str(x)]
+        if ids:
+            provenance["input_artifact_ids"] = ids
+    if input_hashes:
+        hashes = [str(x) for x in input_hashes if str(x)]
+        if hashes:
+            provenance["input_hashes"] = hashes
+    chain = [str(x) for x in (plugin_chain or []) if str(x)]
+    if producer and producer not in chain:
+        chain.append(producer)
+    if chain:
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for item in chain:
+            if item in seen:
+                continue
+            seen.add(item)
+            deduped.append(item)
+        provenance["plugin_chain"] = deduped
+    if provenance:
+        out["provenance"] = provenance
+    return out
+
+
 def build_span_ref(source_record: dict[str, Any], source_id: str) -> dict[str, Any]:
     ts_start = source_record.get("ts_start_utc") or source_record.get("ts_utc")
     ts_end = source_record.get("ts_end_utc") or source_record.get("ts_utc")
@@ -144,6 +193,14 @@ def build_text_record(
             payload["model_files"] = override.get("files")
     if normalized_text != text:
         payload["text_raw"] = text
+    payload = apply_producer_metadata(
+        payload,
+        producer_plugin_id=str(provider_id),
+        stage_id=f"derived.text.{kind}",
+        input_artifact_ids=[str(source_id)],
+        input_hashes=[str(source_record.get("content_hash") or source_record.get("payload_hash") or "")],
+        plugin_chain=[str(provider_id)],
+    )
     payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
     return payload
 
@@ -174,6 +231,14 @@ def build_derivation_edge(
         "span_ref": span_ref,
         "method": method,
     }
+    edge = apply_producer_metadata(
+        edge,
+        producer_plugin_id=f"builtin.processing.{str(method)}",
+        stage_id="derived.graph.edge",
+        input_artifact_ids=[str(parent_id), str(child_id)],
+        input_hashes=[],
+        plugin_chain=[f"builtin.processing.{str(method)}"],
+    )
     edge["content_hash"] = sha256_text(dumps(edge))
     return edge
 
@@ -200,5 +265,15 @@ def build_artifact_manifest(
         "artifact_sha256": str(artifact_sha256 or ""),
         "derived_from": dict(derived_from) if isinstance(derived_from, dict) else {},
     }
+    model_provider = str((payload.get("derived_from") or {}).get("model_provider") or "").strip()
+    producer = model_provider or "builtin.processing.pipeline"
+    payload = apply_producer_metadata(
+        payload,
+        producer_plugin_id=producer,
+        stage_id="derived.artifact.manifest",
+        input_artifact_ids=[str(artifact_id)],
+        input_hashes=[str(artifact_sha256 or "")],
+        plugin_chain=[producer],
+    )
     payload["content_hash"] = sha256_text(dumps(payload))
     return payload

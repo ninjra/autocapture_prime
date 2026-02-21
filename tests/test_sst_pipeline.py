@@ -120,6 +120,15 @@ def _contains_bytes(obj: Any) -> bool:
 
 @unittest.skipIf(Image is None, "Pillow is required for SST pipeline tests")
 class SSTPipelineTests(unittest.TestCase):
+    def test_pipeline_reads_ocr_min_full_frame_tokens_from_config(self) -> None:
+        config = _load_default_config()
+        sst = config.setdefault("processing", {}).setdefault("sst", {})
+        sst["ocr_min_full_frame_tokens"] = 222
+        metadata = _MetadataStore()
+        system = _System(config, {"storage.metadata": metadata})
+        pipeline = SSTPipeline(system, extractor_id="test.sst", extractor_version="0.1.0")
+        self.assertEqual(int(pipeline._sst_cfg.get("ocr_min_full_frame_tokens", 0)), 222)
+
     def test_pipeline_persists_derived_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _load_default_config()

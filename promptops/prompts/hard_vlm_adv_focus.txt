@@ -1,0 +1,6 @@
+<think>
+Okay, let's break this down. The user wants the EFFECTIVE_PROMPT rewritten to improve grounding and clarity while keeping the user intent the same. The main issue was the JSON_parse_failed error, which suggests that the output didn't meet the required structure. The original prompt specified that the evidence array must have exactly two items, each with 'kind' and 'text' keys, and the text should be the exact highlighted text from the UI.
+
+First, I need to ensure that the rewritten prompt clearly enforces the JSON structure. The keys 'focused_window' and 'evidence' must be present, with 'evidence' being an array of exactly two items. Each item in the array should have 'kind' and 'text' keys, and the 'text' must be the exact highlighted text from the UI. The original prompt mentioned preferring evidence from the active Outlook task/incident row and reading-pane title if present, so that should be included to guide where to extract the evidence from.
+
+I should also make sure that the output is strictly JSON without any markdown or extra text. The error was a JSON parse failure, so the structure must be precise. The rewritten prompt should emphasize the exactness of the text and the array length. Maybe using terms like

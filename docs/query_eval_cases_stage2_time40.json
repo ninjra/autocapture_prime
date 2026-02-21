@@ -1,0 +1,562 @@
+[
+  {
+    "id": "S2Q01",
+    "question": "List all contiguous processed time windows in the last 24 hours using stage1-complete records. For each window return start_utc, end_utc, duration_s, and frame_count. If data is missing, return indeterminate with missing record types.",
+    "difficulty_class": "time_window_inventory",
+    "improved": "Temporal grouping over normalized Stage1 records",
+    "risked": "Window split/merge errors from timestamp jitter",
+    "enforcement_location": "query planner -> normalized timeline aggregator",
+    "regression_detection": "schema + deterministic ordering by start_utc",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q02",
+    "question": "Return the single longest contiguous processed window in the last 24 hours with start_utc, end_utc, duration_minutes, and frame_count, plus one citation for each value.",
+    "difficulty_class": "longest_window",
+    "improved": "Deterministic max-window selection",
+    "risked": "Off-by-one frame and ties",
+    "enforcement_location": "time-series reducer",
+    "regression_detection": "stable max selection and cited fields",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q03",
+    "question": "For the latest contiguous processed window, report coverage ratio = stage1_complete_frames / capture_frames in that same span, with numerator and denominator shown.",
+    "difficulty_class": "coverage_ratio",
+    "improved": "Cross-type counting within a bounded span",
+    "risked": "Mismatched window boundaries",
+    "enforcement_location": "window-bounded counter",
+    "regression_detection": "ratio fields present with explicit counts",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q04",
+    "question": "Find gaps between contiguous processed windows in the last 24 hours and return top 5 largest gaps by duration_seconds with gap_start_utc and gap_end_utc.",
+    "difficulty_class": "gap_analysis",
+    "improved": "Inter-window gap computation",
+    "risked": "Sorting instability",
+    "enforcement_location": "timeline differ",
+    "regression_detection": "ordered gap list length<=5",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q05",
+    "question": "Within the largest processed window, bucket frames into 5-minute bins and return frame_count per bin in chronological order.",
+    "difficulty_class": "binned_counts",
+    "improved": "Deterministic temporal binning",
+    "risked": "Boundary bin assignment errors",
+    "enforcement_location": "binning aggregator",
+    "regression_detection": "chronological bin output",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q06",
+    "question": "For each contiguous processed window, return whether UIA linkage was present for at least one frame and provide counts: frames_with_uia_ref and frames_without_uia_ref.",
+    "difficulty_class": "uia_linkage_presence",
+    "improved": "UIA coverage visibility per span",
+    "risked": "Incorrect uia_ref joins",
+    "enforcement_location": "frame->uia join stats",
+    "regression_detection": "per-window linkage count fields",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q07",
+    "question": "Pick the latest processed window and return the first and last 3 frame record_ids in that window to prove deterministic ordering.",
+    "difficulty_class": "ordering_proof",
+    "improved": "Stable ordering verification",
+    "risked": "Non-deterministic sort key selection",
+    "enforcement_location": "ordered frame enumerator",
+    "regression_detection": "6 record_ids emitted with order rationale",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q08",
+    "question": "Return the UTC start and end of the most recent fully processed 60-minute span (or explain why no full hour exists).",
+    "difficulty_class": "hour_span_selection",
+    "improved": "Window completeness reasoning",
+    "risked": "Partial-hour leakage",
+    "enforcement_location": "complete-hour selector",
+    "regression_detection": "explicit yes/no completeness decision",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q09",
+    "question": "How many characters were typed during the latest contiguous processed window? Return total_characters_typed, evidence span, and citation anchors.",
+    "difficulty_class": "typed_character_total",
+    "improved": "HID-derived text volume accounting",
+    "risked": "Confusing keypresses with printable characters",
+    "enforcement_location": "HID normalization -> text metric reducer",
+    "regression_detection": "character count + span boundaries",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q10",
+    "question": "For the longest contiguous processed window, compute typing speed as characters_per_minute and keys_per_minute. Include numerator/denominator values used.",
+    "difficulty_class": "typing_rate",
+    "improved": "Rate metrics from normalized HID",
+    "risked": "Unit conversion mistakes",
+    "enforcement_location": "rate calculator",
+    "regression_detection": "rate + source counts",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q11",
+    "question": "Report top 10 one-minute intervals by typed characters in the last 24 hours. Return interval_start_utc, interval_end_utc, character_count.",
+    "difficulty_class": "burst_typing_intervals",
+    "improved": "High-resolution temporal ranking",
+    "risked": "Incorrect minute bucketing",
+    "enforcement_location": "1-minute histogram ranker",
+    "regression_detection": "top-10 sorted by character_count desc",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q12",
+    "question": "During the most recent 30 processed minutes, how many non-printable key events occurred (modifiers/navigation) versus printable characters?",
+    "difficulty_class": "key_class_split",
+    "improved": "Printable vs control key discrimination",
+    "risked": "Misclassification of shifted characters",
+    "enforcement_location": "key event classifier",
+    "regression_detection": "two-class count output",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q13",
+    "question": "Provide cumulative characters typed over the last 6 hours at 30-minute checkpoints (time, cumulative_characters).",
+    "difficulty_class": "cumulative_time_series",
+    "improved": "Monotonic cumulative metric generation",
+    "risked": "Reset errors between windows",
+    "enforcement_location": "cumulative reducer",
+    "regression_detection": "monotonic series with checkpoint timestamps",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q14",
+    "question": "For each processed window in the last 12 hours, return total keystrokes, printable characters, and backspace count.",
+    "difficulty_class": "window_key_metrics",
+    "improved": "Per-window HID metric rollups",
+    "risked": "Event deduplication drift",
+    "enforcement_location": "window rollup aggregator",
+    "regression_detection": "per-window metric tuple",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q15",
+    "question": "Identify the longest uninterrupted typing streak (no >5s key gap) and return streak_start_utc, streak_end_utc, characters_typed.",
+    "difficulty_class": "typing_streak",
+    "improved": "Gap-constrained streak detection",
+    "risked": "Gap threshold misapplication",
+    "enforcement_location": "streak detector",
+    "regression_detection": "single max streak with metrics",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q16",
+    "question": "In the latest processed hour, what percentage of keystrokes were deletions (Backspace/Delete)? Return percentage and raw counts.",
+    "difficulty_class": "deletion_ratio",
+    "improved": "Key category ratio math",
+    "risked": "Wrong denominator",
+    "enforcement_location": "ratio reducer",
+    "regression_detection": "percentage + counts",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q17",
+    "question": "Return typed-character totals by active window title for the latest contiguous processed span, sorted descending.",
+    "difficulty_class": "chars_by_window",
+    "improved": "Cross-link HID with active-window metadata",
+    "risked": "Window attribution leakage",
+    "enforcement_location": "window attribution join",
+    "regression_detection": "descending totals by title",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q18",
+    "question": "Compare the latest two contiguous processed windows: characters_typed delta, keystrokes delta, and duration delta.",
+    "difficulty_class": "window_delta_compare",
+    "improved": "Adjacent-window comparison",
+    "risked": "Picking non-adjacent spans",
+    "enforcement_location": "window comparator",
+    "regression_detection": "three deltas with window ids",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q19",
+    "question": "For the latest contiguous processed window, report mouse left_click_count, right_click_count, double_click_count, and scroll_notches.",
+    "difficulty_class": "mouse_activity_counts",
+    "improved": "Mouse event normalization",
+    "risked": "Double-click overcounting",
+    "enforcement_location": "mouse reducer",
+    "regression_detection": "all four counts emitted",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q20",
+    "question": "Compute cursor travel distance in pixels for each contiguous processed window in the last 6 hours, and return top 5 windows by travel distance.",
+    "difficulty_class": "cursor_distance",
+    "improved": "Path-length computation from pointer events",
+    "risked": "Coordinate reset artifacts",
+    "enforcement_location": "pointer trajectory reducer",
+    "regression_detection": "top-5 ranked by distance",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q21",
+    "question": "Return drag operations detected in the latest processed window with start_utc, end_utc, duration_ms, and approximate distance_px.",
+    "difficulty_class": "drag_detection",
+    "improved": "Composite mouse gesture detection",
+    "risked": "False drags from jitter",
+    "enforcement_location": "gesture classifier",
+    "regression_detection": "drag event list schema",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q22",
+    "question": "In the most recent 2 processed hours, break down HID activity into keyboard_seconds_active, mouse_seconds_active, and overlap_seconds.",
+    "difficulty_class": "hid_overlap",
+    "improved": "Temporal overlap accounting",
+    "risked": "Double counting overlap",
+    "enforcement_location": "activity interval union/intersection",
+    "regression_detection": "three duration outputs",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q23",
+    "question": "For each 15-minute bucket in the latest processed hour, return keystrokes, characters, clicks, and scroll_notches.",
+    "difficulty_class": "multi_metric_buckets",
+    "improved": "Synchronized multi-metric bucketing",
+    "risked": "Bucket boundary mismatches",
+    "enforcement_location": "bucket aggregator",
+    "regression_detection": "4 metric columns per bucket",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q24",
+    "question": "Return top 5 busiest minutes by combined HID score (characters + clicks + scroll_notches) in the last 12 processed hours.",
+    "difficulty_class": "busiest_minutes",
+    "improved": "Composite activity scoring",
+    "risked": "Inconsistent score formula",
+    "enforcement_location": "score ranker",
+    "regression_detection": "top-5 minutes + explicit score formula",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q25",
+    "question": "For the latest contiguous processed span, return dwell time by process_path and by window_title (top 10 each).",
+    "difficulty_class": "dwell_time",
+    "improved": "Foreground attribution rollups",
+    "risked": "Process-title mismatch",
+    "enforcement_location": "window/session dwell aggregator",
+    "regression_detection": "two ranked lists with durations",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q26",
+    "question": "Count active-window switches in each contiguous processed window over the last 24 hours and return switch_rate_per_minute.",
+    "difficulty_class": "window_switch_rate",
+    "improved": "Context-switch quantification",
+    "risked": "Overcounting repeated same-title events",
+    "enforcement_location": "window change detector",
+    "regression_detection": "count + rate per window",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q27",
+    "question": "Return longest uninterrupted focus session per app in the last 12 processed hours (app, session_start_utc, session_end_utc, duration_s).",
+    "difficulty_class": "focus_sessions",
+    "improved": "Sessionization by active app",
+    "risked": "Session break threshold drift",
+    "enforcement_location": "focus sessionizer",
+    "regression_detection": "max session per app",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q28",
+    "question": "For the latest processed 90 minutes, return app transitions as an ordered list: from_app, to_app, transition_utc.",
+    "difficulty_class": "transition_chain",
+    "improved": "Ordered transition extraction",
+    "risked": "Deduping away legitimate rapid toggles",
+    "enforcement_location": "transition graph builder",
+    "regression_detection": "ordered transition chain",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q29",
+    "question": "Return the top 10 URLs/domains by foreground dwell time in the last 6 processed hours; include unknown when URL cannot be derived.",
+    "difficulty_class": "url_dwell",
+    "improved": "URL/domain time attribution",
+    "risked": "Dropping unknown bucket",
+    "enforcement_location": "browser attribution layer",
+    "regression_detection": "ranked domain dwell list",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q30",
+    "question": "For the latest contiguous window, report productivity mix: typing_time_s, pointing_time_s, reading_time_s, and uncategorized_time_s with method notes.",
+    "difficulty_class": "activity_mix",
+    "improved": "Behavioral mode partitioning",
+    "risked": "Overlapping intervals causing >100% totals",
+    "enforcement_location": "activity classifier",
+    "regression_detection": "partition totals + rationale",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q31",
+    "question": "For a random sample of 10 processed frames from the latest window, show lineage: frame_id -> stage1_complete_id -> retention_marker_id.",
+    "difficulty_class": "lineage_sampling",
+    "improved": "Lineage integrity checks",
+    "risked": "Sampling outside the target window",
+    "enforcement_location": "record lineage resolver",
+    "regression_detection": "10 lineage rows",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q32",
+    "question": "For frames with uia_ref in the latest processed window, return counts of emitted obs.uia.focus, obs.uia.context, obs.uia.operable records.",
+    "difficulty_class": "uia_derivation_counts",
+    "improved": "UIA ingestion verification",
+    "risked": "Counting stale fallback artifacts",
+    "enforcement_location": "uia-derived record counter",
+    "regression_detection": "three obs.uia counts present",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q33",
+    "question": "If obs.uia.* records are missing, return exact reason categories and affected frame counts (missing_uia_ref, lookup_fail, hash_mismatch, parse_error).",
+    "difficulty_class": "uia_failure_breakdown",
+    "improved": "Fail-open diagnostics",
+    "risked": "Conflating error categories",
+    "enforcement_location": "uia diagnostics aggregator",
+    "regression_detection": "reason bucket counts",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q34",
+    "question": "Return plugin-completeness status for latest 100 processed frames: which Stage1 plugin outputs exist per frame and which are missing.",
+    "difficulty_class": "plugin_completeness",
+    "improved": "Per-frame completeness matrix",
+    "risked": "Assuming plugin success from partial output",
+    "enforcement_location": "completeness auditor",
+    "regression_detection": "matrix-style completeness output",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q35",
+    "question": "For latest 500 frames, compute percentage with valid normalized bbox fields for all emitted UIA-derived docs.",
+    "difficulty_class": "bbox_validity_rate",
+    "improved": "Geometry validation coverage",
+    "risked": "Invalid numeric range acceptance",
+    "enforcement_location": "bbox validator",
+    "regression_detection": "valid/invalid counts + percentage",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q36",
+    "question": "Show 3 deterministic linkage examples: frame -> uia_ref -> uia snapshot -> obs.uia.* -> stage1 complete -> retention eligible.",
+    "difficulty_class": "end_to_end_lineage_examples",
+    "improved": "Traceability proof generation",
+    "risked": "Linking across unrelated runs",
+    "enforcement_location": "lineage graph traversal",
+    "regression_detection": "exactly 3 examples with complete chain",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q37",
+    "question": "In the latest 6 processed hours, how many frames are stage1-complete but not yet retention-eligible? Return count and representative reasons.",
+    "difficulty_class": "retention_gap",
+    "improved": "Stage1-to-retention consistency checking",
+    "risked": "Reason inference without evidence",
+    "enforcement_location": "retention eligibility auditor",
+    "regression_detection": "gap count + reason buckets",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q38",
+    "question": "What is projected retention risk in hours if current ingest throughput continues? Return pending_records, throughput_records_per_s, projected_lag_hours, retention_risk.",
+    "difficulty_class": "retention_risk_projection",
+    "improved": "Operational risk estimation",
+    "risked": "Using stale throughput",
+    "enforcement_location": "runtime metrics projection",
+    "regression_detection": "all four metrics returned",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q39",
+    "question": "For the last 24 processed hours, return per-hour totals of frames processed, characters typed, and app switches in one table.",
+    "difficulty_class": "hourly_fact_table",
+    "improved": "Cross-metric hourly reporting",
+    "risked": "Mismatched hour cutoffs",
+    "enforcement_location": "hourly report builder",
+    "regression_detection": "hourly table rows with 3 metrics",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  },
+  {
+    "id": "S2Q40",
+    "question": "Answer this audit question only from normalized data: how many characters did I type between the start and end of the latest contiguous processed window? Include exact span boundaries and confidence.",
+    "difficulty_class": "audit_characters_over_span",
+    "improved": "Normalized-layer-only query contract",
+    "risked": "Accidental raw-media dependency",
+    "enforcement_location": "query retrieval over derived/state only",
+    "regression_detection": "character count + explicit span boundaries",
+    "expected_paths": [
+      {"path": "answer.state"},
+      {"path": "answer.display.summary"},
+      {"path": "processing.query_trace.query_run_id"}
+    ]
+  }
+]

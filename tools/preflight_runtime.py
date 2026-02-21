@@ -66,17 +66,13 @@ def _check_gpu() -> CheckResult:
 
 
 def _check_vllm(base_url: str) -> CheckResult:
-    health_url = base_url.rstrip("/") + "/health"
     curl = shutil.which("curl")
     if not curl:
         return CheckResult("vllm.health", False, "curl not found")
-    rc, out = _run([curl, "-sS", "--max-time", "3", health_url], timeout=5.0)
-    if rc == 0 and out:
-        return CheckResult("vllm.health", True, out[:200])
     models_url = base_url.rstrip("/") + "/v1/models"
-    rc2, out2 = _run([curl, "-sS", "--max-time", "3", models_url], timeout=5.0)
-    if rc2 != 0:
-        return CheckResult("vllm.health", False, out2[:200] or f"cannot reach {base_url}")
+    rc, out = _run([curl, "-sS", "--max-time", "3", models_url], timeout=5.0)
+    if rc != 0:
+        return CheckResult("vllm.health", False, out[:200] or f"cannot reach {models_url}")
     return CheckResult("vllm.health", True, "v1/models reachable")
 
 

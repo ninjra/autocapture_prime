@@ -34,6 +34,9 @@ def main() -> int:
     # redaction/validator tests. Keep this list tight to avoid masking real leaks.
     allowlisted = {
         "tests/test_log_redaction.py",
+        # Intentional fixture key name used to validate localhost-only
+        # Hypervisor query wiring. Value is synthetic/non-secret.
+        "tests/test_chronicle_api_hypervisor_query.py",
     }
     findings: list[tuple[str, str]] = []
     for rel in _git_ls_files(repo_root):

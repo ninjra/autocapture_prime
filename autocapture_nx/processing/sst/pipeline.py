@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -399,6 +400,7 @@ class SSTPipeline:
             max_tokens=int(self._sst_cfg["ocr_max_tokens"]),
             max_patches=int(self._sst_cfg["ocr_max_patches"]),
             prefer_full_frame=bool(self._sst_cfg.get("ocr_prefer_full_frame", True)),
+            min_full_frame_tokens=int(self._sst_cfg.get("ocr_min_full_frame_tokens", 8) or 8),
             allow_ocr=allow_ocr,
             should_abort=should_abort,
             deadline_ts=deadline_ts,
@@ -1638,6 +1640,7 @@ def _sanitize_extra_docs(
     frame_height: int,
     diagnostics: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    allowed_record_types = {"obs.uia.focus", "obs.uia.context", "obs.uia.operable"}
     out: list[dict[str, Any]] = []
     dropped = 0
     for doc in docs:
@@ -1655,6 +1658,19 @@ def _sanitize_extra_docs(
         provider_value = str(doc.get("provider_id") or provider_id)
         stage_value = str(doc.get("stage") or stage)
         confidence_bp = _coerce_bp(doc.get("confidence_bp", 8000))
+        record_type = str(doc.get("record_type") or "").strip()
+        if record_type:
+            if record_type not in allowed_record_types or record_type != doc_kind:
+                diagnostics.append(
+                    {
+                        "kind": "sst.stage_hook_extra_doc_record_type_rejected",
+                        "stage": stage,
+                        "provider_id": provider_value,
+                        "record_type": record_type,
+                        "doc_kind": doc_kind,
+                    }
+                )
+                record_type = ""
         bboxes = _sanitize_bboxes(doc.get("bboxes") or doc.get("bbox"), frame_bbox, frame_width, frame_height)
         doc_id = str(doc.get("doc_id", "")).strip()
         if not doc_id:
@@ -1682,6 +1698,7 @@ def _sanitize_extra_docs(
                 "doc_id": doc_id,
                 "text": text,
                 "doc_kind": doc_kind,
+                "record_type": record_type,
                 "meta": meta,
                 "provider_id": provider_value,
                 "stage": stage_value,
@@ -1844,6 +1861,15 @@ def _sst_config(config: dict[str, Any]) -> dict[str, Any]:
         val = sst.get(name, default)
         return bool(val)
 
+    def _env_int(name: str, default: int) -> int:
+        raw = str(os.environ.get(name) or "").strip()
+        if not raw:
+            return int(default)
+        try:
+            return int(raw)
+        except Exception:
+            return int(default)
+
     denylist = sst.get("redact_denylist", [])
     if not isinstance(denylist, list):
         denylist = []
@@ -1936,6 +1962,10 @@ def _sst_config(config: dict[str, Any]) -> dict[str, Any]:
         "ocr_nms_iou_bp": _int("ocr_nms_iou_bp", 7000),
         "ocr_max_tokens": _int("ocr_max_tokens", 4000),
         "ocr_max_patches": _int("ocr_max_patches", 64),
+        "ocr_min_full_frame_tokens": _env_int(
+            "AUTOCAPTURE_SST_OCR_MIN_FULL_FRAME_TOKENS",
+            _int("ocr_min_full_frame_tokens", 8),
+        ),
         "layout_line_y_px": _int("layout_line_y_px", 12),
         "layout_block_gap_px": _int("layout_block_gap_px", 28),
         "layout_align_tol_px": _int("layout_align_tol_px", 48),

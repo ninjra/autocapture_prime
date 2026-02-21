@@ -5,6 +5,10 @@
       1
     ]
   },
+  "default_settings": {
+    "db_path": "",
+    "dim": 32
+  },
   "depends_on": [],
   "enabled": true,
   "entrypoints": [
@@ -30,18 +34,18 @@
     "index.postprocess"
   ],
   "required_capabilities": [],
-  "default_settings": {
-    "dim": 32,
-    "db_path": ""
-  },
   "settings_schema": {
-    "type": "object",
     "additionalProperties": false,
     "properties": {
-      "dim": { "type": "integer", "minimum": 8 },
-      "db_path": { "type": "string" }
-    }
+      "db_path": {
+        "type": "string"
+      },
+      "dim": {
+        "minimum": 8,
+        "type": "integer"
+      }
+    },
+    "type": "object"
   },
   "version": "0.1.0"
 }
-

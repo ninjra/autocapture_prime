@@ -16,20 +16,20 @@ fi
 
 echo "image=${IMAGE_ARG}"
 RUN_JSON="$(
-  .venv/bin/python "$ROOT/tools/process_single_screenshot.py" --image "${IMAGE_ARG}" --budget-ms 30000 --query "what song is playing"
+  "$ROOT/.venv/bin/python" "$ROOT/tools/process_single_screenshot.py" --image "${IMAGE_ARG}" --budget-ms 30000 --query "what song is playing"
 )"
 echo "${RUN_JSON}"
 REPORT_PATH="$(
-  RUN_JSON_PAYLOAD="${RUN_JSON}" .venv/bin/python -c 'import json,os; obj=json.loads(os.environ.get("RUN_JSON_PAYLOAD","{}")); print(str(obj.get("report","")).strip())'
+  RUN_JSON_PAYLOAD="${RUN_JSON}" "$ROOT/.venv/bin/python" -c 'import json,os; obj=json.loads(os.environ.get("RUN_JSON_PAYLOAD","{}")); print(str(obj.get("report","")).strip())'
 )"
 if [[ -n "${REPORT_PATH}" && -f "${REPORT_PATH}" ]]; then
   CFG_DIR="$(
-    REPORT_PATH_INPUT="${REPORT_PATH}" .venv/bin/python -c 'import json,os; p=os.environ.get("REPORT_PATH_INPUT",""); doc=json.loads(open(p,encoding="utf-8").read()) if p else {}; print(str(doc.get("config_dir","")).strip())'
+    REPORT_PATH_INPUT="${REPORT_PATH}" "$ROOT/.venv/bin/python" -c 'import json,os; p=os.environ.get("REPORT_PATH_INPUT",""); doc=json.loads(open(p,encoding="utf-8").read()) if p else {}; print(str(doc.get("config_dir","")).strip())'
   )"
   DATA_DIR="$(
-    REPORT_PATH_INPUT="${REPORT_PATH}" .venv/bin/python -c 'import json,os; p=os.environ.get("REPORT_PATH_INPUT",""); doc=json.loads(open(p,encoding="utf-8").read()) if p else {}; print(str(doc.get("data_dir","")).strip())'
+    REPORT_PATH_INPUT="${REPORT_PATH}" "$ROOT/.venv/bin/python" -c 'import json,os; p=os.environ.get("REPORT_PATH_INPUT",""); doc=json.loads(open(p,encoding="utf-8").read()) if p else {}; print(str(doc.get("data_dir","")).strip())'
   )"
-  AUTOCAPTURE_CONFIG_DIR="${CFG_DIR}" AUTOCAPTURE_DATA_DIR="${DATA_DIR}" .venv/bin/python "$ROOT/tools/query_eval_suite.py" --cases "${CASES_ARG}" || true
+  AUTOCAPTURE_CONFIG_DIR="${CFG_DIR}" AUTOCAPTURE_DATA_DIR="${DATA_DIR}" "$ROOT/.venv/bin/python" "$ROOT/tools/query_eval_suite.py" --cases "${CASES_ARG}" || true
 else
   echo "WARN: report not found; skipping query_eval_suite" >&2
 fi

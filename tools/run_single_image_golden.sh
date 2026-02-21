@@ -2,19 +2,32 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IMAGE_PATH="${1:-$ROOT/artifacts/test_input_qh.png}"
-PROFILE_PATH="${2:-$ROOT/config/profiles/golden_full.json}"
+IMAGE_PATH="$ROOT/artifacts/test_input_qh.png"
+PROFILE_PATH="$ROOT/config/profiles/golden_full.json"
 BUDGET_MS="${AUTOCAPTURE_GOLDEN_BUDGET_MS:-90000}"
 MAX_IDLE_STEPS="${AUTOCAPTURE_GOLDEN_MAX_IDLE_STEPS:-4}"
-SHIFTED=0
 if [[ $# -ge 1 ]]; then
-  SHIFTED=1
+  IMAGE_PATH="$1"
+  shift
 fi
-if [[ $# -ge 2 ]]; then
-  SHIFTED=2
+if [[ $# -ge 1 && "${1:-}" != --* ]]; then
+  PROFILE_PATH="$1"
+  shift
 fi
-if [[ $SHIFTED -gt 0 ]]; then
-  shift "$SHIFTED"
+
+vlm_flag=""
+for arg in "$@"; do
+  if [[ "$arg" == "--skip-vllm-unstable" || "$arg" == "--fail-on-vllm-unstable" ]]; then
+    vlm_flag="$arg"
+    break
+  fi
+done
+if [[ -z "$vlm_flag" ]]; then
+  skip_vlm_unstable="${AUTOCAPTURE_SKIP_VLM_UNSTABLE:-1}"
+  case "${skip_vlm_unstable,,}" in
+    1|true|yes|on) vlm_flag="--skip-vllm-unstable" ;;
+    *) vlm_flag="--fail-on-vllm-unstable" ;;
+  esac
 fi
 
 exec "$ROOT/.venv/bin/python" "$ROOT/tools/process_single_screenshot.py" \
@@ -23,4 +36,5 @@ exec "$ROOT/.venv/bin/python" "$ROOT/tools/process_single_screenshot.py" \
   --force-idle \
   --budget-ms "$BUDGET_MS" \
   --max-idle-steps "$MAX_IDLE_STEPS" \
+  "$vlm_flag" \
   "$@"

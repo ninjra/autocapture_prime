@@ -49,6 +49,7 @@ def _default_manifest(py: str) -> list[GateStep]:
         GateStep("gate_security", [py, "tools/gate_security.py"], "artifacts/security/gate_security.json"),
         GateStep("gate_perf", [py, "tools/gate_perf.py"], "artifacts/perf/gate_perf.json"),
         GateStep("gate_slo_budget", [py, "tools/gate_slo_budget.py"], None),
+        GateStep("gate_telemetry_schema", [py, "tools/gate_telemetry_schema.py"], None),
         GateStep(
             "gate_promptops_policy",
             [py, "tools/gate_promptops_policy.py"],
@@ -58,6 +59,7 @@ def _default_manifest(py: str) -> list[GateStep]:
         GateStep("gate_screen_schema", [py, "tools/gate_screen_schema.py"], "artifacts/phaseA/gate_screen_schema.json"),
         GateStep("gate_ledger", [py, "tools/gate_ledger.py"], None),
         GateStep("gate_deps_lock", [py, "tools/gate_deps_lock.py"], None),
+        GateStep("gate_config_matrix", [py, "tools/gate_config_matrix.py"], "artifacts/config/gate_config_matrix.json"),
         GateStep("gate_static", [py, "tools/gate_static.py"], None),
         GateStep("gate_vuln", [py, "tools/gate_vuln.py"], None),
         GateStep("gate_doctor", [py, "tools/gate_doctor.py"], None),
@@ -70,6 +72,15 @@ def _default_manifest(py: str) -> list[GateStep]:
         ),
         GateStep("run_mod021_low_resource", ["bash", "tools/run_mod021_low_resource.sh"], None),
     ]
+    q40_report = os.environ.get("Q40_STRICT_REPORT", "").strip()
+    if q40_report:
+        steps.append(
+            GateStep(
+                "gate_q40_strict",
+                [py, "tools/gate_q40_strict.py", "--report", q40_report],
+                "artifacts/q40/gate_q40_strict.json",
+            )
+        )
     return steps
 
 
@@ -90,9 +101,43 @@ def _extract_json_tail(text: str) -> dict[str, Any] | None:
     return None
 
 
+def _coerce_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _matrix_semantic_issues(payload: dict[str, Any], *, path: str) -> list[str]:
+    issues: list[str] = []
+    has_matrix_shape = any(key in payload for key in ("matrix_total", "matrix_evaluated", "matrix_skipped", "matrix_failed"))
+    if not has_matrix_shape:
+        return issues
+    matrix_evaluated = _coerce_int(payload.get("matrix_evaluated"))
+    matrix_skipped = _coerce_int(payload.get("matrix_skipped"))
+    matrix_failed = _coerce_int(payload.get("matrix_failed"))
+    if matrix_evaluated is None:
+        issues.append(f"{path}.matrix_evaluated=invalid")
+    elif matrix_evaluated <= 0:
+        issues.append(f"{path}.matrix_evaluated=0")
+    if matrix_skipped is None:
+        issues.append(f"{path}.matrix_skipped=invalid")
+    elif matrix_skipped > 0:
+        issues.append(f"{path}.matrix_skipped=nonzero")
+    if matrix_failed is None:
+        issues.append(f"{path}.matrix_failed=invalid")
+    elif matrix_failed > 0:
+        issues.append(f"{path}.matrix_failed=nonzero")
+    matrix_total = _coerce_int(payload.get("matrix_total"))
+    if matrix_total is not None and matrix_evaluated is not None and matrix_evaluated > matrix_total:
+        issues.append(f"{path}.matrix_evaluated=gt_total")
+    return issues
+
+
 def _find_non_pass_markers(payload: Any, *, path: str = "root") -> list[str]:
     issues: list[str] = []
     if isinstance(payload, dict):
+        issues.extend(_matrix_semantic_issues(payload, path=path))
         for key, value in payload.items():
             key_s = str(key).strip().lower()
             next_path = f"{path}.{key}"

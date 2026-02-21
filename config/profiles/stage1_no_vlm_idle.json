@@ -1,0 +1,73 @@
+{
+  "processing": {
+    "idle": {
+      "extractors": {
+        "ocr": true,
+        "vlm": false
+      },
+      "max_concurrency_cpu": 3,
+      "batch_size": 9,
+      "max_items_per_run": 60,
+      "adaptive_parallelism": {
+        "enabled": true,
+        "cpu_min": 1,
+        "cpu_max": 6,
+        "cpu_step_up": 1,
+        "cpu_step_down": 1,
+        "batch_per_worker": 3,
+        "items_per_worker": 20,
+        "batch_min": 3,
+        "batch_max": 24,
+        "items_min": 20,
+        "items_max": 160,
+        "low_watermark": 0.65,
+        "high_watermark": 0.9
+      },
+      "metadata_db_guard": {
+        "enabled": true,
+        "fail_closed": true
+      },
+      "intelligent_batch": {
+        "enabled": true,
+        "defer_vlm_on_hash_repeat": true,
+        "hash_repeat_window": 8,
+        "max_vlm_records_per_run": 0,
+        "max_pipeline_records_per_run": 0
+      }
+    },
+    "sst": {
+      "allow_ocr": true,
+      "allow_vlm": false
+    },
+    "on_query": {
+      "allow_decode_extract": false,
+      "extractors": {
+        "ocr": false,
+        "vlm": false
+      },
+      "require_idle": true
+    },
+    "state_layer": {
+      "arbitration": {
+        "skip_secondary_when_read_only": true
+      }
+    }
+  },
+  "query": {
+    "fast_cache": {
+      "enabled": true,
+      "ttl_s": 30.0,
+      "max_entries": 512
+    }
+  },
+  "runtime": {
+    "activity": {
+      "assume_idle_when_missing": false
+    }
+  },
+  "storage": {
+    "stage1_derived": {
+      "enabled": true
+    }
+  }
+}

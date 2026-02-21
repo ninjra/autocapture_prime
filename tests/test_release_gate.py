@@ -31,6 +31,21 @@ def test_find_non_pass_markers_accepts_all_pass() -> None:
     assert issues == []
 
 
+def test_find_non_pass_markers_detects_matrix_semantic_violations() -> None:
+    mod = _load_module()
+    payload = {"ok": True, "matrix_total": 40, "matrix_evaluated": 0, "matrix_skipped": 40, "matrix_failed": 0}
+    issues = mod._find_non_pass_markers(payload)
+    assert any("matrix_evaluated=0" in issue for issue in issues)
+    assert any("matrix_skipped=nonzero" in issue for issue in issues)
+
+
+def test_find_non_pass_markers_accepts_strict_matrix_green() -> None:
+    mod = _load_module()
+    payload = {"ok": True, "matrix_total": 40, "matrix_evaluated": 40, "matrix_skipped": 0, "matrix_failed": 0}
+    issues = mod._find_non_pass_markers(payload)
+    assert issues == []
+
+
 def test_default_manifest_includes_required_release_steps() -> None:
     mod = _load_module()
     steps = mod._default_manifest(sys.executable)

@@ -28,9 +28,26 @@ vllm:
   model: OpenGVLab/InternVL3_5-8B
   trust_remote_code: false
 
+embedder:
+  base_url: http://127.0.0.1:8001
+  model: BAAI/bge-small-en-v1.5
+
+grounding:
+  base_url: http://127.0.0.1:8011
+
 chronicle_api:
   host: 127.0.0.1
   port: 7020
+  query_owner: hypervisor
+  hypervisor_base_url: http://127.0.0.1:34221
+  hypervisor_chat_path: /v1/chat/completions
+  hypervisor_timeout_s: 90.0
+
+popup_query:
+  base_url: http://127.0.0.1:8787
+
+devtools:
+  base_url: http://127.0.0.1:7411
 
 qa:
   top_k_frames: 4

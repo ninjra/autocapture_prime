@@ -13,5 +13,6 @@ def test_status_does_not_force_kernel_boot(tmp_path, monkeypatch) -> None:
     assert "capture_status" in payload
     assert "processing_state" in payload
     assert "slo" in payload
+    assert "db_stability" in payload
     assert facade._kernel_mgr.kernel() is None  # type: ignore[attr-defined]
     facade.shutdown()

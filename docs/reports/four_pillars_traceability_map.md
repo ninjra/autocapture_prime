@@ -74,3 +74,15 @@ Scope rules:
 ## Determinism
 - All mappings use repo-local evidence only.
 - Any unmapped `A*` item is a `DO_NOT_SHIP` condition until this file is updated with executable evidence.
+
+## Strict Closure Evidence (2026-02-19)
+- Accuracy + Citeability:
+  - `artifacts/advanced10/advanced20_strict_latest.json` (`20/20`, strict, no skips/fails)
+  - `docs/reports/advanced20_answers_latest.txt`
+- Security (fail-closed semantics):
+  - `tools/run_advanced10_queries.py` (strict metadata-only + strict quality checks)
+  - `tools/eval_q40_matrix.py` (strict provenance + skip/fail closure)
+  - `docs/contracts/advanced20_strict_rubric.md`
+- Performance + deterministic closure:
+  - `artifacts/advanced10/generic20_latest.json` (`20/20`, strict, no skips/fails)
+  - `artifacts/advanced10/q40_matrix_strict_latest.json` (`40/40 evaluated`, `0 skipped`, `0 failed`)

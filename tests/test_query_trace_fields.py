@@ -116,6 +116,64 @@ class QueryTraceFieldsTests(unittest.TestCase):
         self.assertIn("query_eval.ndjson", rel_paths)
         self.assertIn("query_trace.ndjson", rel_paths)
 
+    def test_query_trace_carries_promptops_fields(self) -> None:
+        evidence_id = "run_test/evidence.capture.segment/seg1"
+        derived_id = "run_test/derived.text.ocr/provider/seg1"
+        metadata = _Meta(
+            {
+                evidence_id: {
+                    "record_type": "evidence.capture.segment",
+                    "content_hash": "hash_e",
+                    "ts_utc": "2026-02-07T00:00:00Z",
+                },
+                derived_id: {
+                    "record_type": "derived.text.ocr",
+                    "text": "Inbox count is 4",
+                    "span_ref": {"kind": "text", "note": "test"},
+                    "content_hash": "hash_d",
+                },
+            }
+        )
+        system = _System(
+            config={
+                "runtime": {"run_id": "run_test"},
+                "storage": {"data_dir": "/tmp/data"},
+                "processing": {
+                    "state_layer": {"query_enabled": False},
+                    "on_query": {"allow_decode_extract": False},
+                },
+                "plugins": {"locks": {"lockfile": "config/plugin_locks.json"}},
+                "promptops": {
+                    "enabled": True,
+                    "mode": "auto_apply",
+                    "query_strategy": "normalize_query",
+                    "model_strategy": "model_contract",
+                    "require_citations": True,
+                    "history": {"enabled": False},
+                    "github": {"enabled": False},
+                    "sources": [],
+                    "examples": {},
+                    "metrics": {"enabled": False},
+                    "review": {"enabled": False},
+                },
+            },
+            caps={
+                "time.intent_parser": _Parser(),
+                "retrieval.strategy": _Retrieval([{"record_id": evidence_id, "derived_id": derived_id, "ts_utc": "2026-02-07T00:00:00Z"}]),
+                "answer.builder": _Answer(),
+                "storage.metadata": metadata,
+                "event.builder": _EventBuilder(),
+            },
+        )
+        out = query_mod.run_query(system, "pls help w/ query")
+        processing = out.get("processing", {}) if isinstance(out.get("processing", {}), dict) else {}
+        trace = processing.get("query_trace", {}) if isinstance(processing.get("query_trace", {}), dict) else {}
+        self.assertTrue(bool(trace.get("promptops_used", False)))
+        self.assertEqual(str(trace.get("promptops_strategy") or ""), "normalize_query")
+        self.assertEqual(str(trace.get("query_original") or ""), "pls help w/ query")
+        self.assertTrue(bool(str(trace.get("query_effective") or "").strip()))
+        self.assertIn("promptops_applied", trace)
+
     def test_apply_display_promotes_display_fields_when_hard_only_answer_text(self) -> None:
         system = _System(
             config={"runtime": {"run_id": "run_test"}},

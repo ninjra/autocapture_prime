@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
+from autocapture_nx import __version__ as kernel_version
 from autocapture_nx.kernel.hashing import sha256_directory, sha256_file
 from autocapture_nx.kernel.config import SchemaLiteValidator
 from autocapture_nx.kernel.audit import PluginAuditLog
@@ -630,28 +631,47 @@ class PluginManager:
         }
 
     def approve_hashes(self) -> Dict[str, Any]:
-        # `tools/` is not guaranteed to be importable when autocapture is installed
-        # as a package (e.g., running `.venv/bin/autocapture` outside repo PYTHONPATH).
-        # Fall back to loading the updater by path.
-        try:
-            from tools.hypervisor.scripts.update_plugin_locks import update_plugin_locks  # type: ignore
+        """Refresh plugin lock hashes from current plugin manifests/artifacts.
 
-            return update_plugin_locks()
-        except Exception:
-            import importlib.util
-
-            from autocapture_nx.kernel.paths import resolve_repo_path
-
-            path = resolve_repo_path("tools/hypervisor/scripts/update_plugin_locks.py")
-            spec = importlib.util.spec_from_file_location("autocapture_update_plugin_locks", str(path))
-            if spec is None or spec.loader is None:
-                raise RuntimeError("plugin_locks_updater_unavailable")
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            updater = getattr(module, "update_plugin_locks", None)
-            if not callable(updater):
-                raise RuntimeError("plugin_locks_updater_missing")
-            return updater()
+        This implementation is in-repo and does not depend on tools/hypervisor.
+        """
+        manifests = self._registry.discover_manifests()
+        contract_lock = resolve_repo_path("contracts/lock.json")
+        contract_lock_hash = sha256_file(contract_lock) if contract_lock.exists() else None
+        plugins: dict[str, Any] = {}
+        for manifest in manifests:
+            plugin_root = Path(manifest.path).parent
+            manifest_path = plugin_root / "plugin.json"
+            req_path = plugin_root / "requirements.txt"
+            sbom: dict[str, Any] = {"requirements": [], "requirements_sha256": None}
+            if req_path.exists():
+                try:
+                    sbom["requirements_sha256"] = sha256_file(req_path)
+                    reqs: list[str] = []
+                    for line in req_path.read_text(encoding="utf-8").splitlines():
+                        raw = str(line).strip()
+                        if not raw or raw.startswith("#"):
+                            continue
+                        reqs.append(raw)
+                    sbom["requirements"] = reqs
+                except Exception:
+                    sbom = {"requirements": [], "requirements_sha256": None}
+            plugins[manifest.plugin_id] = {
+                "kernel_api_version": str(kernel_version),
+                "contract_lock_hash": contract_lock_hash,
+                "manifest_sha256": sha256_file(manifest_path),
+                "artifact_sha256": sha256_directory(plugin_root),
+                "sbom": sbom,
+            }
+        lockfile = {
+            "version": 1,
+            "generated_at": self._now_utc(),
+            "kernel_api_version": str(kernel_version),
+            "contract_lock_hash": contract_lock_hash,
+            "plugins": dict(sorted(plugins.items(), key=lambda item: str(item[0]))),
+        }
+        self._write_lockfile(lockfile)
+        return lockfile
 
     def settings_get(self, plugin_id: str) -> dict[str, Any]:
         manifests = self._registry.discover_manifests()
