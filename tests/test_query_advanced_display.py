@@ -755,6 +755,121 @@ class QueryAdvancedDisplayTests(unittest.TestCase):
         obs = next((p for p in providers if isinstance(p, dict) and str(p.get("provider_id") or "") == "builtin.observation.graph"), {})
         self.assertEqual(int(obs.get("contribution_bp") or 0), 10000)
 
+    def test_fallback_claim_sources_include_hard_topic_doc_kinds(self) -> None:
+        class _Metadata:
+            def latest(self, *, record_type: str, limit: int = 256):  # noqa: ARG002
+                if record_type != "derived.sst.text.extra":
+                    return []
+                return [
+                    {
+                        "record_id": "rec_dev_1",
+                        "record": {
+                            "record_type": "derived.sst.text.extra",
+                            "doc_kind": "adv.dev.summary",
+                            "provider_id": "builtin.observation.graph",
+                            "source_id": "src_dev_1",
+                            "text": "Observation: adv.dev.what_changed_count=1; adv.dev.what_changed.1=Added k preset buttons 10/25/50/100 and server-side clamp 1-200.",
+                            "meta": {},
+                        },
+                    },
+                    {
+                        "record_id": "rec_console_1",
+                        "record": {
+                            "record_type": "derived.sst.text.extra",
+                            "doc_kind": "adv.console.colors",
+                            "provider_id": "builtin.observation.graph",
+                            "source_id": "src_console_1",
+                            "text": "Observation: adv.console.red_count=1; adv.console.red_lines=if lastExit != 0 retry with saltEndpoint.",
+                            "meta": {},
+                        },
+                    },
+                ][: max(0, int(limit))]
+
+            def get(self, _record_id: str):  # noqa: ANN001
+                return None
+
+        hard_k_rows = query_mod._fallback_claim_sources_for_topic("hard_k_presets", _Metadata())
+        self.assertTrue(any(str(row.get("doc_kind") or "") == "adv.dev.summary" for row in hard_k_rows))
+        hard_ep_rows = query_mod._fallback_claim_sources_for_topic("hard_endpoint_pseudocode", _Metadata())
+        self.assertTrue(any(str(row.get("doc_kind") or "") == "adv.console.colors" for row in hard_ep_rows))
+
+    def test_apply_answer_display_promotes_state_when_display_is_strict_and_provider_backed(self) -> None:
+        class _System:
+            config: dict = {}
+
+            def get(self, key: str):  # noqa: ANN001
+                return None
+
+        result = {"answer": {"state": "no_evidence", "claims": []}, "processing": {}}
+        with (
+            mock.patch.object(
+                query_mod,
+                "_build_answer_display",
+                return_value={
+                    "topic": "hard_endpoint_pseudocode",
+                    "summary": "Endpoint-selection and retry pseudocode extracted.",
+                    "bullets": [
+                        "if Test-Endpoint(endpoint) fails and saltEndpoint exists and Test-Endpoint(saltEndpoint) succeeds: endpoint = saltEndpoint",
+                        "run vectorCmd (Invoke-Expression); lastExit = $LASTEXITCODE",
+                        "if lastExit != 0 and saltEndpoint exists and saltEndpoint != endpoint: endpoint = saltEndpoint; rerun vectorCmd; lastExit = $LASTEXITCODE",
+                        "if lastExit != 0: print failure; exit 1",
+                        "else: print success",
+                    ],
+                    "fields": {
+                        "pseudocode_steps": 5,
+                        "pseudocode": [
+                            "if Test-Endpoint(endpoint) fails and saltEndpoint exists and Test-Endpoint(saltEndpoint) succeeds: endpoint = saltEndpoint",
+                            "run vectorCmd (Invoke-Expression); lastExit = $LASTEXITCODE",
+                            "if lastExit != 0 and saltEndpoint exists and saltEndpoint != endpoint: endpoint = saltEndpoint; rerun vectorCmd; lastExit = $LASTEXITCODE",
+                            "if lastExit != 0: print failure; exit 1",
+                            "else: print success",
+                        ],
+                    },
+                },
+            ),
+            mock.patch.object(
+                query_mod,
+                "_augment_claim_sources_for_display",
+                return_value=[
+                    {
+                        "provider_id": "builtin.observation.graph",
+                        "record_id": "rec_console_1",
+                        "doc_kind": "adv.console.colors",
+                        "signal_pairs": {"adv.console.red_count": "1"},
+                        "meta": {},
+                    }
+                ],
+            ),
+            mock.patch.object(
+                query_mod,
+                "_provider_contributions",
+                return_value=[
+                    {
+                        "provider_id": "builtin.observation.graph",
+                        "claim_count": 1,
+                        "citation_count": 1,
+                        "contribution_bp": 10000,
+                        "doc_kinds": ["adv.console.colors"],
+                        "record_types": ["derived.sst.text.extra"],
+                        "signal_keys": ["adv.console.red_count"],
+                    }
+                ],
+            ),
+            mock.patch.object(query_mod, "_workflow_tree", return_value={"nodes": [], "edges": []}),
+        ):
+            out = query_mod._apply_answer_display(
+                _System(),
+                "Summarize endpoint-selection and retry pseudocode.",
+                result,
+                query_intent={"topic": "hard_endpoint_pseudocode"},
+            )
+        answer = out.get("answer", {}) if isinstance(out.get("answer", {}), dict) else {}
+        self.assertEqual(str(answer.get("state") or ""), "ok")
+        claims = answer.get("claims", []) if isinstance(answer.get("claims", []), list) else []
+        self.assertTrue(claims)
+        first_cite = (claims[0].get("citations", [{}])[0] if isinstance(claims[0], dict) and isinstance(claims[0].get("citations", []), list) and claims[0].get("citations", []) else {})
+        self.assertEqual(str(first_cite.get("source") or ""), "builtin.observation.graph")
+
 
 if __name__ == "__main__":
     unittest.main()
