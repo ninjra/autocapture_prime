@@ -120,6 +120,43 @@ class RunAdvanced10ExpectedEvalTests(unittest.TestCase):
         self.assertTrue(eval_out["passed"])
         self.assertGreaterEqual(len(eval_out["checks"]), 4)
 
+    def test_expected_exact_summary_passes_with_whitespace_and_case_normalization(self) -> None:
+        mod = _load_module()
+        case = {"id": "QX", "expected_exact_summary": "Focused Window: Outlook VDI"}
+        result = {
+            "answer": {
+                "state": "ok",
+                "display": {"summary": " focused   window:   outlook vdi ", "bullets": []},
+            },
+            "processing": {"query_trace": {"winner": "classic"}},
+        }
+        eval_out = mod._evaluate_expected(case, result, result["answer"]["display"]["summary"], [])
+        self.assertTrue(eval_out["evaluated"])
+        self.assertTrue(eval_out["passed"])
+        self.assertTrue(any(c.get("key") == "expected_exact_summary" for c in eval_out.get("checks", [])))
+
+    def test_expected_exact_surface_fails_on_partial_match(self) -> None:
+        mod = _load_module()
+        case = {"id": "QX", "expected_exact_surface": "Focused window: Outlook VDI\nCount: 7"}
+        result = {
+            "answer": {
+                "state": "ok",
+                "display": {"summary": "Focused window: Outlook VDI", "bullets": ["Count: 7", "Extra: partial"]},
+            },
+            "processing": {"query_trace": {"winner": "classic"}},
+        }
+        eval_out = mod._evaluate_expected(case, result, result["answer"]["display"]["summary"], result["answer"]["display"]["bullets"])
+        self.assertTrue(eval_out["evaluated"])
+        self.assertFalse(eval_out["passed"])
+        self.assertTrue(
+            any(
+                isinstance(c, dict)
+                and c.get("key") == "expected_exact_surface"
+                and not bool(c.get("match"))
+                for c in eval_out.get("checks", [])
+            )
+        )
+
     def test_expected_answer_flatten_backcompat(self) -> None:
         mod = _load_module()
         case = {"expected_answer": {"subject": "Task Set Up Open Invoice", "buttons": ["COMPLETE", "VIEW DETAILS"]}}

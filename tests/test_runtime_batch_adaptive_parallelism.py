@@ -7,6 +7,7 @@ from autocapture_nx.runtime.batch import (
     _build_landscape_manifest,
     _estimate_sla_snapshot,
     _metadata_db_guard,
+    run_processing_batch,
 )
 
 
@@ -190,6 +191,47 @@ class RuntimeBatchAdaptiveParallelismTests(unittest.TestCase):
         self.assertIsInstance(guard, dict)
         self.assertFalse(bool(guard.get("ok", True)))
         self.assertFalse(bool(guard.get("fail_closed", True)))
+
+    def test_run_processing_batch_fail_closed_guard_blocks_without_processing(self) -> None:
+        class _Governor:
+            def update_config(self, _cfg):  # noqa: ANN001
+                return None
+
+        class _Conductor:
+            def __init__(self) -> None:
+                self._governor = _Governor()
+
+            def _signals(self):  # noqa: ANN001
+                return {}
+
+        class _System:
+            def __init__(self, base: dict[str, object]) -> None:
+                self.config = base
+
+            def get(self, _name):  # noqa: ANN001
+                return None
+
+        system = _System(self._base_config())
+        with (
+            mock.patch("autocapture_nx.runtime.batch.create_conductor", return_value=_Conductor()),
+            mock.patch("autocapture_nx.runtime.batch.IdleProcessor"),
+            mock.patch(
+                "autocapture_nx.runtime.batch._metadata_db_guard",
+                return_value={
+                    "enabled": True,
+                    "ok": False,
+                    "fail_closed": True,
+                    "reason": "metadata_db_churn_detected",
+                    "snapshot": {"stable": False},
+                },
+            ),
+        ):
+            out = run_processing_batch(system, max_loops=5, sleep_ms=1, require_idle=True)
+        self.assertFalse(bool(out.get("ok", True)))
+        self.assertEqual(str(out.get("blocked_reason") or ""), "metadata_db_churn_detected")
+        self.assertEqual(int(out.get("loops") or 0), 0)
+        guard = out.get("metadata_db_guard", {}) if isinstance(out.get("metadata_db_guard", {}), dict) else {}
+        self.assertFalse(bool(guard.get("ok", True)))
 
 
 if __name__ == "__main__":

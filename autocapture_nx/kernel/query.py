@@ -2217,6 +2217,8 @@ def _is_allowed_claim_record_type(record_type: str) -> bool:
         return False
     if value.startswith("evidence.capture."):
         return True
+    if value.startswith("obs.uia."):
+        return True
     if not value.startswith("derived."):
         return False
     blocked_prefixes = (

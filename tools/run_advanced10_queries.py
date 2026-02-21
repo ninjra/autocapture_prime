@@ -427,6 +427,10 @@ def _core_answer_surface(summary: str, bullets: list[str]) -> str:
     return "\n".join([str(summary or ""), "\n".join(core_bullets)]).strip()
 
 
+def _normalize_exact_text(value: Any) -> str:
+    return " ".join(str(value or "").split()).casefold()
+
+
 def _strict_quality_markers(case_id: str, summary: str, bullets: list[str]) -> list[str]:
     markers: list[str] = []
     surface = _core_answer_surface(summary, bullets)
@@ -552,6 +556,7 @@ def _evaluate_expected(
     expected = item.get("expected_answer")
     checks: list[dict[str, Any]] = []
     haystack = _strict_haystack(result, summary, bullets) if bool(strict_expected_answer) else _to_haystack(result, summary, bullets)
+    core_surface = _core_answer_surface(summary, bullets)
     passed = True
 
     # Enforce that advanced visual questions are answered through the full
@@ -664,6 +669,36 @@ def _evaluate_expected(
             )
             if not ok:
                 passed = False
+
+    exact_summary = str(item.get("expected_exact_summary") or "").strip()
+    if exact_summary:
+        ok = bool(_normalize_exact_text(summary) == _normalize_exact_text(exact_summary))
+        checks.append(
+            {
+                "type": "exact_summary",
+                "key": "expected_exact_summary",
+                "expected": exact_summary,
+                "actual": str(summary or ""),
+                "match": ok,
+            }
+        )
+        if not ok:
+            passed = False
+
+    exact_surface = str(item.get("expected_exact_surface") or "").strip()
+    if exact_surface:
+        ok = bool(_normalize_exact_text(core_surface) == _normalize_exact_text(exact_surface))
+        checks.append(
+            {
+                "type": "exact_surface",
+                "key": "expected_exact_surface",
+                "expected": exact_surface,
+                "actual": str(core_surface or ""),
+                "match": ok,
+            }
+        )
+        if not ok:
+            passed = False
 
     contains_all = item.get("expected_contains_all", [])
     if isinstance(contains_all, list):
