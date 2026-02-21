@@ -182,6 +182,7 @@ class RuntimeConductor:
         user_active = idle_seconds < active_window_s
         enforce_cfg = runtime_cfg.get("mode_enforcement", {})
         suspend_workers = bool(enforce_cfg.get("suspend_workers", True))
+        allow_query_heavy = bool(enforce_cfg.get("allow_query_heavy", True))
         activity_score = 0.0
         activity_recent = False
         fixture_override = bool(enforce_cfg.get("fixture_override", False))
@@ -232,7 +233,7 @@ class RuntimeConductor:
             "user_active": user_active,
             "query_intent": False,
             "suspend_workers": suspend_workers,
-            "allow_query_heavy": False,
+            "allow_query_heavy": allow_query_heavy,
             "activity_score": activity_score,
             "activity_recent": activity_recent,
         }

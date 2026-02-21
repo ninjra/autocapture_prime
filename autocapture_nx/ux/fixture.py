@@ -736,6 +736,7 @@ def _runtime_signals(system: Any) -> dict[str, Any]:
             user_active = True
     enforce_cfg = runtime_cfg.get("mode_enforcement", {}) if isinstance(runtime_cfg, dict) else {}
     suspend_workers = bool(enforce_cfg.get("suspend_workers", True))
+    allow_query_heavy = bool(enforce_cfg.get("allow_query_heavy", True))
     fixture_override = bool(enforce_cfg.get("fixture_override", False))
     if fixture_override:
         idle_seconds = float("inf")
@@ -747,7 +748,7 @@ def _runtime_signals(system: Any) -> dict[str, Any]:
         "user_active": user_active,
         "query_intent": False,
         "suspend_workers": suspend_workers,
-        "allow_query_heavy": False,
+        "allow_query_heavy": allow_query_heavy,
         "activity_score": activity_score,
         "activity_recent": activity_recent,
     }

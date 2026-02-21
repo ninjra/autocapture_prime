@@ -154,6 +154,9 @@ class RuntimeGovernor:
         user_active = bool(signals.get("user_active", False)) or activity_score >= 0.5 or activity_recent
         fullscreen_active = bool(signals.get("fullscreen_active", False))
         query_intent = bool(signals.get("query_intent", False))
+        # Backward-compatible default keeps USER_QUERY behavior for callers
+        # that have not started emitting allow_query_heavy explicitly.
+        allow_query_heavy = bool(signals.get("allow_query_heavy", True))
         fixture_override = bool(signals.get("fixture_override", False))
         suspend_workers = bool(signals.get("suspend_workers", self.suspend_workers))
         allow_active = bool(self._budgets.allow_heavy_during_active)
@@ -184,7 +187,7 @@ class RuntimeGovernor:
             except Exception:
                 pass
 
-        if query_intent:
+        if query_intent and allow_query_heavy:
             return "USER_QUERY", "query_intent", idle_seconds, activity_score
         if user_active and suspend_workers and not allow_active:
             return "ACTIVE_CAPTURE_ONLY", "active_user", idle_seconds, activity_score

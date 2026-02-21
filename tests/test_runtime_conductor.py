@@ -169,6 +169,43 @@ class RuntimeConductorTests(unittest.TestCase):
         conductor._run_once()
         self.assertEqual(idle.called, 1)
 
+    def test_force_run_sets_user_query_signals_and_executes_idle_extract(self) -> None:
+        config = {
+            "runtime": {
+                "idle_window_s": 10,
+                "active_window_s": 2,
+                "mode_enforcement": {"suspend_workers": True},
+                "budgets": {
+                    "window_s": 600,
+                    "window_budget_ms": 8000,
+                    "per_job_max_ms": 2500,
+                    "max_jobs_per_window": 4,
+                    "max_heavy_concurrency": 1,
+                    "preempt_grace_ms": 0,
+                    "min_idle_seconds": 10,
+                    "allow_heavy_during_active": False,
+                    "cpu_max_utilization": 1.0,
+                    "ram_max_utilization": 1.0,
+                },
+                "telemetry": {"enabled": False, "emit_interval_s": 5},
+            },
+            "processing": {"idle": {"enabled": True, "sleep_ms": 1}},
+        }
+        tracker = _Tracker(idle_seconds=0)
+        system = _System(config, tracker)
+        conductor = RuntimeConductor(system)
+        idle = _IdleProcessor()
+        conductor._idle_processor = idle
+
+        signals = conductor._signals(query_intent=True)
+        self.assertTrue(bool(signals.get("query_intent")))
+        self.assertTrue(bool(signals.get("allow_query_heavy")))
+        self.assertEqual(conductor._governor.decide(signals).mode, "USER_QUERY")
+
+        executed = conductor._run_once(force=True)
+        self.assertIn("idle.extract", executed)
+        self.assertEqual(idle.called, 1)
+
     def test_missing_sidecar_activity_signal_is_fail_closed_active(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             signal_path = Path(tmp) / "activity" / "activity_signal.json"

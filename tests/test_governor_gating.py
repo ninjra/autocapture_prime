@@ -69,6 +69,22 @@ class GovernorGatingTests(unittest.TestCase):
         scheduler.run_pending({"user_active": True, "idle_seconds": 0, "query_intent": True})
         self.assertEqual(ran, ["heavy"])
 
+    def test_user_query_respects_allow_query_heavy_gate(self) -> None:
+        governor = RuntimeGovernor(idle_window_s=5)
+        scheduler = Scheduler(governor)
+        ran: list[str] = []
+        scheduler.enqueue(Job(name="heavy", fn=lambda: ran.append("heavy"), heavy=True))
+
+        signals = {
+            "user_active": True,
+            "idle_seconds": 0,
+            "query_intent": True,
+            "allow_query_heavy": False,
+        }
+        scheduler.run_pending(signals)
+        self.assertEqual(ran, [])
+        self.assertEqual(governor.decide(signals).mode, "ACTIVE_CAPTURE_ONLY")
+
     def test_user_query_does_not_preempt_by_mode(self) -> None:
         governor = RuntimeGovernor(idle_window_s=1)
         governor.decide({"user_active": True, "idle_seconds": 0, "query_intent": True})
