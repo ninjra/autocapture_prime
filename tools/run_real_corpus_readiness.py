@@ -82,6 +82,82 @@ def _provider_citation_count(row: dict[str, Any]) -> int:
     return int(total)
 
 
+def _provider_diagnostics(row: dict[str, Any]) -> list[dict[str, Any]]:
+    providers = row.get("providers", [])
+    if not isinstance(providers, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in providers:
+        if not isinstance(item, dict):
+            continue
+        out.append(
+            {
+                "provider_id": str(item.get("provider_id") or ""),
+                "claim_count": int(item.get("claim_count", 0) or 0),
+                "citation_count": int(item.get("citation_count", 0) or 0),
+                "record_types": [str(x) for x in (item.get("record_types") or []) if str(x)],
+                "doc_kinds": [str(x) for x in (item.get("doc_kinds") or []) if str(x)],
+                "signal_keys_sample": [str(x) for x in (item.get("signal_keys") or [])[:6] if str(x)],
+            }
+        )
+    return out
+
+
+def _extract_citation_entries(row: dict[str, Any]) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    raw_citations = row.get("citations")
+    if isinstance(raw_citations, list):
+        for item in raw_citations:
+            if isinstance(item, dict):
+                entries.append(dict(item))
+    answer = row.get("answer", {}) if isinstance(row.get("answer", {}), dict) else {}
+    claims = answer.get("claims", []) if isinstance(answer.get("claims", []), list) else []
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        citations = claim.get("citations", []) if isinstance(claim.get("citations", []), list) else []
+        for item in citations:
+            if isinstance(item, dict):
+                entries.append(dict(item))
+    return entries
+
+
+def _citation_linkage_diagnostics(row: dict[str, Any]) -> dict[str, Any]:
+    citations = _extract_citation_entries(row)
+    issues: list[str] = []
+    parsed: list[dict[str, Any]] = []
+    for item in citations:
+        locator = item.get("locator", {}) if isinstance(item.get("locator", {}), dict) else {}
+        evidence_id = str(item.get("evidence_id") or item.get("record_id") or locator.get("record_id") or "").strip()
+        derived_id = str(item.get("derived_id") or "").strip()
+        locator_kind = str(locator.get("kind") or "").strip()
+        entry_issues: list[str] = []
+        if not evidence_id:
+            entry_issues.append("missing_evidence_id")
+        if not locator_kind:
+            entry_issues.append("missing_locator")
+        if entry_issues:
+            for issue in entry_issues:
+                issues.append(issue)
+        parsed.append(
+            {
+                "evidence_id": evidence_id,
+                "derived_id": derived_id,
+                "locator_kind": locator_kind,
+                "issues": entry_issues,
+            }
+        )
+    if not parsed:
+        provider_rows = _provider_diagnostics(row)
+        if provider_rows and _provider_citation_count(row) <= 0:
+            issues.append("providers_claims_without_citations")
+    return {
+        "count": int(len(parsed)),
+        "issues": sorted(set(str(x) for x in issues if str(x))),
+        "entries": parsed[:10],
+    }
+
+
 def _row_index(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
     rows = payload.get("rows", [])
     if not isinstance(rows, list):
@@ -104,9 +180,17 @@ def _strict_case_eval(case: dict[str, Any], row: dict[str, Any] | None) -> dict[
     evaluated = False
     citations = 0
     answer_state = ""
+    query_run_id = ""
+    source_report = ""
+    provider_diagnostics: list[dict[str, Any]] = []
+    citation_linkage: dict[str, Any] = {"count": 0, "issues": [], "entries": []}
     if row is None:
         reasons.append("missing_row")
     else:
+        query_run_id = str(row.get("query_run_id") or "").strip()
+        source_report = str(row.get("source_report") or "").strip()
+        provider_diagnostics = _provider_diagnostics(row)
+        citation_linkage = _citation_linkage_diagnostics(row)
         skipped = bool(row.get("skipped", False))
         if skipped:
             reasons.append("row_skipped")
@@ -143,6 +227,10 @@ def _strict_case_eval(case: dict[str, Any], row: dict[str, Any] | None) -> dict[
         "reasons": reasons,
         "answer_state": answer_state,
         "citation_count": int(citations),
+        "query_run_id": query_run_id,
+        "source_report": source_report,
+        "provider_diagnostics": provider_diagnostics,
+        "citation_linkage": citation_linkage,
     }
 
 
@@ -326,6 +414,12 @@ def _strict_failure_cause_summary(strict_rows: list[dict[str, Any]]) -> dict[str
                 "id": cid,
                 "cause": cause,
                 "reasons": [str(x) for x in (row.get("reasons") or [])],
+                "answer_state": str(row.get("answer_state") or ""),
+                "citation_count": int(row.get("citation_count", 0) or 0),
+                "query_run_id": str(row.get("query_run_id") or ""),
+                "source_report": str(row.get("source_report") or ""),
+                "provider_diagnostics": row.get("provider_diagnostics", []),
+                "citation_linkage": row.get("citation_linkage", {}),
             }
         )
     return {"counts": counts, "by_case": by_case}
@@ -424,6 +518,42 @@ def _resolve_report_path_with_policy(
     return _resolve_report_path("", pattern, latest_name)
 
 
+def _latest_lineage_report() -> Path | None:
+    root = Path("artifacts/lineage")
+    if not root.exists():
+        return None
+    found = sorted(
+        root.glob("*/stage1_stage2_lineage_queryability.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return found[0] if found else None
+
+
+def _coerce_nonnegative_int(value: Any, default: int = 0) -> int:
+    try:
+        out = int(value)
+    except Exception:
+        out = int(default)
+    return max(0, int(out))
+
+
+def _evaluate_queryability_slo(*, lineage_path: Path, min_ratio: float) -> dict[str, Any]:
+    payload = _load_json(lineage_path)
+    summary = payload.get("summary", {}) if isinstance(payload.get("summary", {}), dict) else {}
+    frames_total = _coerce_nonnegative_int(summary.get("frames_total"), default=0)
+    frames_queryable = _coerce_nonnegative_int(summary.get("frames_queryable"), default=0)
+    ratio = float(frames_queryable) / float(frames_total) if frames_total > 0 else 0.0
+    return {
+        "enabled": True,
+        "lineage_report": str(lineage_path.resolve()),
+        "frames_total": int(frames_total),
+        "frames_queryable": int(frames_queryable),
+        "queryable_ratio": float(ratio),
+        "required_min_ratio": float(max(0.0, min(float(min_ratio), 1.0))),
+    }
+
+
 def _write_coverage_markdown(
     *,
     path: Path,
@@ -484,6 +614,12 @@ def _write_summary_markdown(
     lines.append(f"- query_raw_media_reads_total: `{int(qc.get('query_raw_media_reads_total', 0) or 0)}`")
     qlat = qc.get("query_latency_p95_ms")
     lines.append(f"- query_latency_p95_ms: `{round(float(qlat), 3) if isinstance(qlat, (int, float)) else ''}`")
+    qslo = payload.get("queryability_slo", {}) if isinstance(payload.get("queryability_slo", {}), dict) else {}
+    if bool(qslo.get("enabled", False)):
+        lines.append(f"- queryable_ratio: `{round(float(qslo.get('queryable_ratio', 0.0) or 0.0), 6)}`")
+        lines.append(f"- queryable_min_ratio: `{round(float(qslo.get('required_min_ratio', 0.0) or 0.0), 6)}`")
+        lines.append(f"- frames_total: `{int(qslo.get('frames_total', 0) or 0)}`")
+        lines.append(f"- frames_queryable: `{int(qslo.get('frames_queryable', 0) or 0)}`")
     lines.append("")
     lines.append("## Artifacts")
     lines.append("")
@@ -505,6 +641,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", default="")
     parser.add_argument("--out-dir", default="")
     parser.add_argument("--latest-report-md", default="docs/reports/real_corpus_strict_latest.md")
+    parser.add_argument("--lineage-json", default="")
+    parser.add_argument("--min-queryable-ratio", type=float, default=0.0)
     args = parser.parse_args(argv)
 
     contract_path = Path(str(args.contract))
@@ -535,6 +673,39 @@ def main(argv: list[str] | None = None) -> int:
     strict_summary, strict_rows, strict_failures = _strict_eval(contract=contract, advanced=advanced, generic=generic)
     strict_failure_causes = _strict_failure_cause_summary(strict_rows)
     generic_summary = _generic_eval(generic)
+
+    min_queryable_ratio = float(max(0.0, min(float(args.min_queryable_ratio), 1.0)))
+    queryability_slo: dict[str, Any] = {"enabled": bool(min_queryable_ratio > 0.0)}
+    if min_queryable_ratio > 0.0:
+        lineage_raw = str(args.lineage_json).strip()
+        lineage_path = Path(lineage_raw).expanduser() if lineage_raw else _latest_lineage_report()
+        if lineage_path is None or not lineage_path.exists():
+            queryability_slo.update(
+                {
+                    "enabled": True,
+                    "lineage_report": str(lineage_path) if lineage_path is not None else "",
+                    "required_min_ratio": float(min_queryable_ratio),
+                    "error": "lineage_report_missing",
+                }
+            )
+            strict_failures.append("queryability_slo_missing")
+        else:
+            try:
+                queryability_slo = _evaluate_queryability_slo(lineage_path=lineage_path, min_ratio=min_queryable_ratio)
+                if int(queryability_slo.get("frames_total", 0) or 0) <= 0:
+                    strict_failures.append("queryability_slo_no_frames")
+                elif float(queryability_slo.get("queryable_ratio", 0.0) or 0.0) < min_queryable_ratio:
+                    strict_failures.append("queryability_slo_ratio_below_threshold")
+            except Exception as exc:
+                queryability_slo.update(
+                    {
+                        "enabled": True,
+                        "lineage_report": str(lineage_path.resolve()),
+                        "required_min_ratio": float(min_queryable_ratio),
+                        "error": f"lineage_parse_failed:{type(exc).__name__}:{exc}",
+                    }
+                )
+                strict_failures.append("queryability_slo_parse_failed")
     if bool(source_policy.get("require_real_corpus", False)):
         disallowed = False
         missing_source = False
@@ -688,6 +859,7 @@ def main(argv: list[str] | None = None) -> int:
             "query_latency_samples": int(len(latency_values)),
         },
         "queryability_coverage_md": str(coverage_md_path.resolve()),
+        "queryability_slo": queryability_slo,
         "strict_failure_causes": strict_failure_causes,
         "strict_failure_cause_counts": strict_failure_causes.get("counts", {}),
     }
@@ -715,6 +887,7 @@ def main(argv: list[str] | None = None) -> int:
         "generic20": generic_summary,
         "stage1_audit": stage1_audit_summary or {},
         "strict_failure_causes": strict_failure_causes,
+        "queryability_slo": queryability_slo,
     }
     metrics_path.write_text(json.dumps(metrics_payload, indent=2, sort_keys=True), encoding="utf-8")
 
