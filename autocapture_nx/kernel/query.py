@@ -43,6 +43,44 @@ from autocapture_nx.kernel.activity_signal import load_activity_signal
 from autocapture_nx.inference.openai_compat import OpenAICompatClient, image_bytes_to_data_url
 
 _QUERY_FAST_CACHE: dict[str, dict[str, Any]] = {}
+_QUERY_CONTRACT_COUNTERS: dict[str, int] = {
+    "query_extractor_launch_total": 0,
+    "query_schedule_extract_requests_total": 0,
+    "query_raw_media_reads_total": 0,
+}
+
+
+def _query_contract_counter_add(name: str, delta: int = 1) -> None:
+    key = str(name or "").strip()
+    if not key:
+        return
+    try:
+        inc = int(delta)
+    except Exception:
+        inc = 0
+    if inc <= 0:
+        return
+    prev = int(_QUERY_CONTRACT_COUNTERS.get(key, 0) or 0)
+    _QUERY_CONTRACT_COUNTERS[key] = int(max(0, prev + inc))
+
+
+def _query_contract_counter_snapshot() -> dict[str, int]:
+    return {str(k): int(v or 0) for k, v in _QUERY_CONTRACT_COUNTERS.items()}
+
+
+def _query_contract_counter_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    keys = set([str(x) for x in before.keys()]) | set([str(x) for x in after.keys()])
+    for key in sorted(keys):
+        b = int(before.get(key, 0) or 0) if isinstance(before, dict) else 0
+        a = int(after.get(key, 0) or 0) if isinstance(after, dict) else 0
+        out[str(key)] = int(max(0, a - b))
+    return out
+
+
+def _reset_query_contract_counters_for_tests() -> None:
+    for key in list(_QUERY_CONTRACT_COUNTERS.keys()):
+        _QUERY_CONTRACT_COUNTERS[str(key)] = 0
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -56,6 +94,45 @@ def _env_flag(name: str, default: bool = False) -> bool:
 
 def _metadata_only_query_enabled() -> bool:
     return _env_flag("AUTOCAPTURE_QUERY_METADATA_ONLY", default=False)
+
+
+def _read_ledger_head_fast(path: str, *, max_tail_bytes: int = 262144) -> str | None:
+    ledger_path = str(path or "").strip()
+    if not ledger_path:
+        return None
+    try:
+        size = int(os.path.getsize(ledger_path) or 0)
+    except Exception:
+        return None
+    if size <= 0:
+        return None
+    tail_bytes = max(1024, int(max_tail_bytes))
+    start = max(0, size - tail_bytes)
+    try:
+        with open(ledger_path, "rb") as handle:
+            handle.seek(start)
+            raw = handle.read()
+    except Exception:
+        return None
+    if not raw:
+        return None
+    text = raw.decode("utf-8", errors="ignore")
+    lines = text.splitlines()
+    if start > 0 and lines:
+        # First line may be a partial record due to tail seek.
+        lines = lines[1:]
+    for raw_line in reversed(lines):
+        line = str(raw_line or "").strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except Exception:
+            continue
+        entry_hash = str(payload.get("entry_hash") or "").strip()
+        if entry_hash:
+            return entry_hash
+    return None
 
 
 def _parse_ts(ts: str | None) -> datetime | None:
@@ -1182,9 +1259,41 @@ def _derived_text_doc(hit: dict[str, Any], media_id: str, metadata: Any) -> tupl
 
 def run_query_without_state(system, query: str, *, schedule_extract: bool = False) -> dict[str, Any]:
     start_perf = time.perf_counter()
-    parser = system.get("time.intent_parser")
-    retrieval = system.get("retrieval.strategy")
-    answer = system.get("answer.builder")
+    if bool(schedule_extract):
+        _query_contract_counter_add("query_schedule_extract_requests_total", 1)
+    missing_capabilities: list[str] = []
+
+    class _FallbackParser:
+        def parse(self, raw_query: str) -> dict[str, Any]:
+            return {"query": str(raw_query or ""), "time_window": None}
+
+    class _FallbackRetrieval:
+        def search(self, _raw_query: str, time_window: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+            _ = time_window
+            return []
+
+        def trace(self) -> list[dict[str, Any]]:
+            return []
+
+    class _FallbackAnswer:
+        def build(self, claims: list[dict[str, Any]]) -> dict[str, Any]:
+            return {"state": "ok" if claims else "no_evidence", "claims": claims, "errors": []}
+
+    try:
+        parser = system.get("time.intent_parser")
+    except Exception:
+        parser = _FallbackParser()
+        missing_capabilities.append("time.intent_parser")
+    try:
+        retrieval = system.get("retrieval.strategy")
+    except Exception:
+        retrieval = _FallbackRetrieval()
+        missing_capabilities.append("retrieval.strategy")
+    try:
+        answer = system.get("answer.builder")
+    except Exception:
+        answer = _FallbackAnswer()
+        missing_capabilities.append("answer.builder")
     event_builder = None
     if hasattr(system, "get"):
         try:
@@ -1241,7 +1350,11 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
             processing["query_cache"] = {"hit": True, "ttl_s": float(cache_ttl_s)}
             cached["processing"] = processing
             return cached
-    metadata = system.get("storage.metadata")
+    try:
+        metadata = system.get("storage.metadata")
+    except Exception:
+        metadata = None
+        missing_capabilities.append("storage.metadata")
     stale_map: dict[str, str] = {}
     try:
         stale_cap = system.get("integrity.stale")
@@ -1310,6 +1423,7 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
                 candidate_ids=candidate_ids,
             )
             extraction_ran = True
+            _query_contract_counter_add("query_extractor_launch_total", 1)
             results = retrieval.search(query_text, time_window=time_window)
         elif not candidate_ids:
             extraction_blocked = True
@@ -1414,10 +1528,102 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
         )
         anchor_ref = event_builder.last_anchor() if hasattr(event_builder, "last_anchor") else None
 
+    def _ledger_head_from_file() -> str | None:
+        storage_cfg = system.config.get("storage", {}) if hasattr(system, "config") and isinstance(system.config, dict) else {}
+        data_dir = str(storage_cfg.get("data_dir") or "").strip()
+        if data_dir:
+            ledger_path = os.path.join(data_dir, "ledger.ndjson")
+            head = _read_ledger_head_fast(ledger_path)
+            if head:
+                return head
+        return None
+
+    ledger_head_file = _ledger_head_from_file()
+
+    def _current_ledger_head() -> str | None:
+        if ledger_head_file:
+            return ledger_head_file
+        if event_builder is not None and hasattr(event_builder, "ledger_head"):
+            try:
+                head = event_builder.ledger_head()
+                if isinstance(head, str) and head:
+                    return head
+            except Exception:
+                pass
+        if isinstance(query_ledger_hash, str) and query_ledger_hash:
+            return query_ledger_hash
+        return None
+
+    def _current_anchor_ref() -> Any | None:
+        if event_builder is not None and hasattr(event_builder, "last_anchor"):
+            try:
+                latest = event_builder.last_anchor()
+                if isinstance(latest, dict) and latest:
+                    return dict(latest)
+                if latest:
+                    return latest
+            except Exception:
+                pass
+        if isinstance(anchor_ref, dict) and anchor_ref:
+            return dict(anchor_ref)
+        if anchor_ref:
+            return anchor_ref
+        return None
+
     def _record_hash(rec: dict[str, Any]) -> str | None:
         if not isinstance(rec, dict):
             return None
         return rec.get("content_hash") or rec.get("payload_hash")
+
+    def _fallback_claim_text(primary: dict[str, Any], evidence: dict[str, Any]) -> str:
+        parts: list[str] = []
+
+        def _add(value: Any, *, cap: int = 220) -> None:
+            text = str(value or "").strip()
+            if not text:
+                return
+            if len(text) > cap:
+                text = text[: cap - 3] + "..."
+            parts.append(text)
+
+        record_type = str((primary or {}).get("record_type") or (evidence or {}).get("record_type") or "")
+        _add(record_type, cap=96)
+
+        for item in (primary, evidence):
+            if not isinstance(item, dict):
+                continue
+            window = item.get("window")
+            if isinstance(window, dict):
+                _add(window.get("title"), cap=240)
+                _add(window.get("process_path"), cap=180)
+            window_ref = item.get("window_ref")
+            if isinstance(window_ref, dict):
+                nested = window_ref.get("window")
+                if isinstance(nested, dict):
+                    _add(nested.get("title"), cap=240)
+                    _add(nested.get("process_path"), cap=180)
+            meta = item.get("meta")
+            if isinstance(meta, dict):
+                _add(meta.get("window_title"), cap=240)
+                _add(meta.get("window_pid"), cap=48)
+                _add(meta.get("hwnd"), cap=64)
+                nodes = meta.get("uia_nodes")
+                if isinstance(nodes, list):
+                    for node in nodes[:4]:
+                        if not isinstance(node, dict):
+                            continue
+                        _add(node.get("name"), cap=180)
+                        _add(node.get("role"), cap=80)
+
+        seen: set[str] = set()
+        uniq: list[str] = []
+        for part in parts:
+            key = part.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            uniq.append(part)
+        return " | ".join(uniq[:8])
 
     def _claim_with_citation(
         *,
@@ -1458,8 +1664,8 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
                     "derived_hash": derived_hash,
                     "span_kind": "text",
                     "span_ref": record.get("span_ref") if isinstance(record, dict) else None,
-                    "ledger_head": query_ledger_hash,
-                    "anchor_ref": anchor_ref,
+                    "ledger_head": _current_ledger_head(),
+                    "anchor_ref": _current_anchor_ref(),
                     "source": "local",
                     "offset_start": int(match_start),
                     "offset_end": int(match_end),
@@ -1496,19 +1702,35 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
     synth_debug: dict[str, Any] = {}
     synth_error: str | None = None
     query_cfg = system.config.get("query", {}) if hasattr(system, "config") else {}
-    synth_enabled = bool(query_cfg.get("enable_synthesizer", False)) if isinstance(query_cfg, dict) else False
+    query_cfg = query_cfg if isinstance(query_cfg, dict) else {}
+    synth_cfg = query_cfg.get("synthesizer", {}) if isinstance(query_cfg.get("synthesizer", {}), dict) else {}
+    synth_enabled = bool(query_cfg.get("enable_synthesizer", False))
     if not synth_enabled:
+        synth_enabled = _env_flag("AUTOCAPTURE_ENABLE_SYNTHESIZER", default=False)
+    if not synth_enabled and _env_flag("AUTOCAPTURE_GOLDEN_STRICT", default=False):
         plugins_cfg = system.config.get("plugins", {}) if hasattr(system, "config") else {}
         plugin_settings = plugins_cfg.get("settings", {}) if isinstance(plugins_cfg, dict) else {}
         golden_profile = plugin_settings.get("__golden_profile", {}) if isinstance(plugin_settings, dict) else {}
         if isinstance(golden_profile, dict):
             synth_enabled = bool(golden_profile.get("enable_synthesizer", False))
-    if not synth_enabled:
-        synth_enabled = str(os.environ.get("AUTOCAPTURE_ENABLE_SYNTHESIZER") or "").strip().casefold() in {
-            "1",
-            "true",
-            "yes",
-        }
+    try:
+        synth_budget_ms = int(
+            synth_cfg.get(
+                "latency_budget_ms",
+                query_cfg.get("synth_latency_budget_ms", 2500),
+            )
+            or 2500
+        )
+    except Exception:
+        synth_budget_ms = 2500
+    if synth_budget_ms < 0:
+        synth_budget_ms = 0
+    elapsed_before_synth_ms = float((time.perf_counter() - start_perf) * 1000.0)
+    if synth_enabled and synth_budget_ms > 0 and elapsed_before_synth_ms >= float(synth_budget_ms):
+        synth_debug["skipped_reason"] = "budget_exhausted"
+        synth_debug["elapsed_before_synth_ms"] = float(round(elapsed_before_synth_ms, 3))
+        synth_debug["latency_budget_ms"] = int(synth_budget_ms)
+        synth_enabled = False
     try:
         synthesizer = None
         if hasattr(system, "get"):
@@ -1604,8 +1826,8 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
                                     "derived_hash": derived_hash,
                                     "span_kind": "text",
                                     "span_ref": derived.get("span_ref") if isinstance(derived, dict) else None,
-                                    "ledger_head": query_ledger_hash,
-                                    "anchor_ref": anchor_ref,
+                                    "ledger_head": _current_ledger_head(),
+                                    "anchor_ref": _current_anchor_ref(),
                                     "source": "synth",
                                     "offset_start": int(start),
                                     "offset_end": int(end),
@@ -1637,7 +1859,12 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
             stale_hits.append(evidence_id)
         record = metadata.get(derived_id or evidence_id, {})
         evidence_record = metadata.get(evidence_id, {})
-        text = record.get("text", "")
+        record_text = str(record.get("text", "") or "") if isinstance(record, dict) else ""
+        text = record_text
+        if not text:
+            text = str(result.get("snippet") or "").strip()
+        if not text:
+            text = _fallback_claim_text(record if isinstance(record, dict) else {}, evidence_record if isinstance(evidence_record, dict) else {})
         evidence_hash = evidence_record.get("content_hash") or evidence_record.get("payload_hash")
         if evidence_hash is None and evidence_record.get("text"):
             evidence_hash = hash_text(normalize_text(evidence_record.get("text", "")))
@@ -1650,9 +1877,9 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
             derived_hash = derived_record.get("content_hash") or derived_record.get("payload_hash")
             if derived_hash is None and derived_record.get("text"):
                 derived_hash = hash_text(normalize_text(derived_record.get("text", "")))
-        span_kind = "text" if text else "record"
+        span_kind = "text" if record_text else "record"
         offset_start = 0
-        offset_end = len(text) if text else 0
+        offset_end = len(record_text) if record_text else 0
         locator_kind = "text_offsets" if span_kind == "text" else ("time_range" if isinstance(span_ref, dict) and span_ref.get("kind") == "time" else "record")
         locator_record_id = str(derived_id or evidence_id)
         locator_record_hash = str(derived_hash or evidence_hash or "")
@@ -1664,7 +1891,7 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
             record_hash=locator_record_hash,
             offset_start=offset_start if span_kind == "text" else None,
             offset_end=offset_end if span_kind == "text" else None,
-            span_text=text if span_kind == "text" else None,
+            span_text=record_text if span_kind == "text" else None,
         )
         claims.append(
             {
@@ -1680,8 +1907,8 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
                         "derived_hash": derived_hash,
                         "span_kind": span_kind,
                         "span_ref": span_ref,
-                        "ledger_head": query_ledger_hash,
-                        "anchor_ref": anchor_ref,
+                        "ledger_head": _current_ledger_head(),
+                        "anchor_ref": _current_anchor_ref(),
                         "source": "local",
                         "offset_start": offset_start,
                         "offset_end": offset_end,
@@ -1691,6 +1918,7 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
                 ],
             }
         )
+    query_ledger_hash = _current_ledger_head() or query_ledger_hash
     raw_claim_count = int(len(claims))
     claims, source_rejections = _filter_claims_by_source_policy(claims, metadata)
     try:
@@ -1834,12 +2062,21 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
             "candidate_count": len(candidate_ids),
             "extracted_count": len(extracted_ids),
         },
+        "query_contract_metrics": {
+            "query_extractor_launch_total": int(1 if extraction_ran else 0),
+            "query_schedule_extract_requests_total": int(1 if bool(schedule_extract) else 0),
+            "query_raw_media_reads_total": 0,
+        },
+        "capability_warnings": [str(item) for item in missing_capabilities if str(item)],
         "policy": {
             "source_guard_applied": True,
             "raw_claim_count": int(raw_claim_count),
             "filtered_claim_count": int(len(claims)),
             "source_rejections_count": int(len(source_rejections)),
             "source_rejections": [item for item in source_rejections if isinstance(item, dict)][:64],
+        },
+        "retrieval": {
+            "trace": [dict(item) for item in retrieval_trace if isinstance(item, dict)][:96],
         },
     }
     if isinstance(promptops_cfg, dict) and bool(promptops_cfg.get("enabled", True)):
@@ -2019,6 +2256,7 @@ def _attach_query_trace(
     winner: str,
     stage_ms: dict[str, Any],
     handoffs: list[dict[str, Any]],
+    query_contract_metrics: dict[str, Any] | None = None,
     query_intent: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(result, dict):
@@ -2070,6 +2308,18 @@ def _attach_query_trace(
     merged_handoffs = [item for item in merged_handoffs if isinstance(item, dict)] + [item for item in handoffs if isinstance(item, dict)]
 
     query_run_id = str(incoming.get("query_run_id") or "").strip() or _new_query_run_id(query, method)
+    contract_metrics_in = query_contract_metrics if isinstance(query_contract_metrics, dict) else {}
+    incoming_contract_metrics = incoming.get("query_contract_metrics", {})
+    if isinstance(incoming_contract_metrics, dict):
+        merged_contract_metrics = dict(incoming_contract_metrics)
+        merged_contract_metrics.update(contract_metrics_in)
+    else:
+        merged_contract_metrics = dict(contract_metrics_in)
+    query_contract_metrics_out = {
+        "query_extractor_launch_total": int(merged_contract_metrics.get("query_extractor_launch_total", 0) or 0),
+        "query_schedule_extract_requests_total": int(merged_contract_metrics.get("query_schedule_extract_requests_total", 0) or 0),
+        "query_raw_media_reads_total": int(merged_contract_metrics.get("query_raw_media_reads_total", 0) or 0),
+    }
     trace = {
         "schema_version": 1,
         "query_run_id": query_run_id,
@@ -2088,6 +2338,7 @@ def _attach_query_trace(
         "handoffs": merged_handoffs[:96],
         "provider_count": int(len(provider_rows)),
         "providers": provider_rows[:48],
+        "query_contract_metrics": query_contract_metrics_out,
     }
     if isinstance(promptops_trace, dict):
         trace["promptops_trace"] = dict(promptops_trace)
@@ -2100,9 +2351,77 @@ def _attach_query_trace(
             "matched_tokens": [str(x) for x in (query_intent.get("matched_tokens") or []) if str(x)][:20],
         }
     processing["query_trace"] = trace
+    processing["query_contract_metrics"] = query_contract_metrics_out
     out = dict(result)
     out["processing"] = processing
     return out
+
+
+def _retrieval_trace_rows(processing: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    retrieval_cfg = processing.get("retrieval", {}) if isinstance(processing.get("retrieval", {}), dict) else {}
+    retrieval_trace = retrieval_cfg.get("trace", []) if isinstance(retrieval_cfg.get("trace", []), list) else []
+    rows.extend([item for item in retrieval_trace if isinstance(item, dict)])
+    state_layer = processing.get("state_layer", {}) if isinstance(processing.get("state_layer", {}), dict) else {}
+    state_trace = state_layer.get("retrieval_trace", []) if isinstance(state_layer.get("retrieval_trace", []), list) else []
+    rows.extend([item for item in state_trace if isinstance(item, dict)])
+    return rows
+
+
+def _retrieval_perf_summary(result: dict[str, Any], processing: dict[str, Any]) -> dict[str, Any]:
+    trace_rows = _retrieval_trace_rows(processing)
+    perf_rows = [item for item in trace_rows if str(item.get("tier") or "").strip().upper() == "PERF"]
+    perf = perf_rows[-1] if perf_rows else {}
+    result_rows = result.get("results", []) if isinstance(result.get("results", []), list) else []
+    matched_rows = int(len(result_rows))
+    try:
+        matched_rows = int(perf.get("results_returned", matched_rows) or matched_rows)
+    except Exception:
+        matched_rows = int(len(result_rows))
+    scanned_rows = 0
+    try:
+        scanned_rows = int(perf.get("records_scanned", 0) or 0)
+    except Exception:
+        scanned_rows = 0
+    answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
+    answer_state = str(answer.get("state") or "").strip().casefold()
+    claims = answer.get("claims", []) if isinstance(answer.get("claims", []), list) else []
+    claim_count = int(len(claims))
+    claims_with_citation = 0
+    citation_count = 0
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        citations = claim.get("citations", []) if isinstance(claim.get("citations", []), list) else []
+        if citations:
+            claims_with_citation += 1
+            citation_count += int(len(citations))
+    citation_coverage_bp = int(round((float(claims_with_citation) / float(claim_count)) * 10000.0)) if claim_count > 0 else 0
+    evaluation = result.get("evaluation", {}) if isinstance(result.get("evaluation", {}), dict) else {}
+    blocked_reason = str(evaluation.get("blocked_reason") or "").strip().casefold()
+    miss_reason = ""
+    if matched_rows <= 0 or answer_state in {"no_evidence"}:
+        miss_reason = "retrieval_miss"
+    elif claim_count > 0 and citation_count <= 0:
+        miss_reason = "citation_invalid"
+    elif answer_state in {"error", "degraded", "not_available_yet", "indeterminate"}:
+        miss_reason = "upstream_unreachable"
+    if blocked_reason in {"query_compute_disabled", "autocapture_upstream_unreachable"}:
+        miss_reason = "upstream_unreachable"
+    return {
+        "trace_rows": int(len(trace_rows)),
+        "perf_rows": int(len(perf_rows)),
+        "scanned_rows": int(max(0, scanned_rows)),
+        "matched_rows": int(max(0, matched_rows)),
+        "result_rows": int(len(result_rows)),
+        "claim_count": int(claim_count),
+        "citation_count": int(max(0, citation_count)),
+        "claims_with_citation": int(max(0, claims_with_citation)),
+        "citation_coverage_bp": int(max(0, citation_coverage_bp)),
+        "answer_state": str(answer_state),
+        "miss_reason": str(miss_reason),
+        "search_ms": float(_ms(perf.get("search_ms", 0.0))),
+    }
 
 
 def _append_query_metric(system, *, query: str, method: str, result: dict[str, Any]) -> None:
@@ -2234,6 +2553,82 @@ def _append_query_metric(system, *, query: str, method: str, result: dict[str, A
     }
     try:
         _ = append_fact_line(config, rel_path="query_trace.ndjson", payload=_facts_safe(trace_payload))
+    except Exception:
+        pass
+    promptops_trace = query_trace.get("promptops_trace", {}) if isinstance(query_trace.get("promptops_trace", {}), dict) else {}
+    promptops_stages = promptops_trace.get("stages_ms", {}) if isinstance(promptops_trace.get("stages_ms", {}), dict) else {}
+    promptops_latency_ms = 0.0
+    if isinstance(promptops_trace.get("total_ms"), (int, float)):
+        promptops_latency_ms = float(promptops_trace.get("total_ms") or 0.0)
+    elif promptops_stages:
+        promptops_latency_ms = float(sum(_ms(v) for v in promptops_stages.values()))
+    promptops_payload = {
+        "schema_version": 1,
+        "record_type": "derived.query.promptops.summary",
+        "producer_plugin_id": "builtin.query.promptops.summary",
+        "source_provider_id": "builtin.query.promptops.summary",
+        "ts_utc": payload["ts_utc"],
+        "query_run_id": query_run_id,
+        "query_sha256": payload["query_sha256"],
+        "method": str(method or ""),
+        "winner": str(query_trace.get("winner") or ""),
+        "promptops_used": bool(query_trace.get("promptops_used", False)),
+        "promptops_applied": bool(query_trace.get("promptops_applied", False)),
+        "promptops_required": bool(query_trace.get("promptops_required", False)),
+        "promptops_required_failed": bool(query_trace.get("promptops_required_failed", False)),
+        "promptops_error": str(query_trace.get("promptops_error") or ""),
+        "promptops_strategy": str(query_trace.get("promptops_strategy") or ""),
+        "promptops_latency_ms": float(round(promptops_latency_ms, 3)),
+        "promptops_stage_ms": {str(k): _ms(v) for k, v in promptops_stages.items()},
+        "answer_state": payload["answer_state"],
+        "claim_count": int(payload.get("claim_count", 0) or 0),
+        "citation_count": int(_citation_count(result)),
+        "provenance": {
+            "plugin_id": "builtin.query.promptops.summary",
+            "producer_plugin_id": "builtin.query.promptops.summary",
+            "stage_id": "query.promptops_summary",
+            "input_artifact_ids": [str(payload.get("query_run_id") or "")],
+            "input_hashes": [str(payload.get("query_sha256") or "")],
+            "plugin_chain": ["builtin.query.promptops.summary"],
+        },
+    }
+    try:
+        _ = append_fact_line(config, rel_path="query_promptops_summary.ndjson", payload=_facts_safe(promptops_payload))
+    except Exception:
+        pass
+    retrieval_perf = _retrieval_perf_summary(result, processing)
+    retrieval_payload = {
+        "schema_version": 1,
+        "record_type": "derived.query.retrieval.diagnostics",
+        "producer_plugin_id": "builtin.query.retrieval.diagnostics",
+        "source_provider_id": "builtin.query.retrieval.diagnostics",
+        "ts_utc": payload["ts_utc"],
+        "query_run_id": query_run_id,
+        "query_sha256": payload["query_sha256"],
+        "method": str(method or ""),
+        "winner": str(query_trace.get("winner") or ""),
+        "answer_state": str(payload.get("answer_state") or ""),
+        "scanned_rows": int(retrieval_perf.get("scanned_rows", 0) or 0),
+        "matched_rows": int(retrieval_perf.get("matched_rows", 0) or 0),
+        "result_rows": int(retrieval_perf.get("result_rows", 0) or 0),
+        "claim_count": int(retrieval_perf.get("claim_count", 0) or 0),
+        "citation_count": int(retrieval_perf.get("citation_count", 0) or 0),
+        "claims_with_citation": int(retrieval_perf.get("claims_with_citation", 0) or 0),
+        "citation_coverage_bp": int(retrieval_perf.get("citation_coverage_bp", 0) or 0),
+        "miss_reason": str(retrieval_perf.get("miss_reason") or ""),
+        "search_ms": float(round(float(retrieval_perf.get("search_ms", 0.0) or 0.0), 3)),
+        "provider_count": int(len(provider_rows)),
+        "provenance": {
+            "plugin_id": "builtin.query.retrieval.diagnostics",
+            "producer_plugin_id": "builtin.query.retrieval.diagnostics",
+            "stage_id": "query.retrieval_diagnostics",
+            "input_artifact_ids": [str(payload.get("query_run_id") or "")],
+            "input_hashes": [str(payload.get("query_sha256") or "")],
+            "plugin_chain": ["builtin.query.retrieval.diagnostics"],
+        },
+    }
+    try:
+        _ = append_fact_line(config, rel_path="query_retrieval_diagnostics.ndjson", payload=_facts_safe(retrieval_payload))
     except Exception:
         pass
     if policy_rejections:
@@ -2825,6 +3220,7 @@ def _load_evidence_image_bytes(system: Any, evidence_id: str) -> bytes:
     stream_fn = getattr(media, "open_stream", None)
     if callable(stream_fn):
         try:
+            _query_contract_counter_add("query_raw_media_reads_total", 1)
             with stream_fn(evidence_id) as handle:
                 blob = handle.read()
             if isinstance(blob, (bytes, bytearray)) and blob:
@@ -2836,6 +3232,7 @@ def _load_evidence_image_bytes(system: Any, evidence_id: str) -> bytes:
     get_fn = getattr(media, "get", None)
     if callable(get_fn):
         try:
+            _query_contract_counter_add("query_raw_media_reads_total", 1)
             blob = get_fn(evidence_id)
             if isinstance(blob, (bytes, bytearray)) and blob:
                 resolved = _resolve_blob(bytes(blob))
@@ -7816,6 +8213,27 @@ def _apply_answer_display(
         notice = str(answer_obj.get("notice") or "").strip().casefold()
         if notice.startswith("citations required: no evidence available"):
             answer_obj.pop("notice", None)
+    # Retrieval-first fallback: keep a deterministic, citation-backed partial
+    # response when display sources exist but strict promotion is not satisfied.
+    if str(answer_obj.get("state") or "").strip().casefold() in {"", "no_evidence", "partial", "error", "degraded"}:
+        claims_now = answer_obj.get("claims", []) if isinstance(answer_obj.get("claims", []), list) else []
+        display_summary = str(display.get("summary") or "").strip() if isinstance(display, dict) else ""
+        if (not claims_now) and display_summary and display_sources:
+            _add_display_backed_claim_if_needed(
+                system=system,
+                answer_obj=answer_obj,
+                result=result,
+                display=display if isinstance(display, dict) else {},
+                display_sources=display_sources,
+            )
+            claims_now = answer_obj.get("claims", []) if isinstance(answer_obj.get("claims", []), list) else []
+            if claims_now:
+                prior_state = str(answer_obj.get("state") or "").strip().casefold()
+                if prior_state in {"", "no_evidence", "error", "degraded"}:
+                    answer_obj["state"] = "partial"
+                notice = str(answer_obj.get("notice") or "").strip().casefold()
+                if notice.startswith("citations required: no evidence available"):
+                    answer_obj.pop("notice", None)
 
     processing = result.get("processing", {}) if isinstance(result.get("processing", {}), dict) else {}
     processing = dict(processing)
@@ -8170,6 +8588,7 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
     query_intent = _query_intent(query)
     query_topic = str(query_intent.get("topic") or "generic")
     query_start = time.perf_counter()
+    query_counter_before = _query_contract_counter_snapshot()
     state_cfg = config.get("processing", {}).get("state_layer", {}) if isinstance(config.get("processing", {}), dict) else {}
     if isinstance(state_cfg, dict) and bool(state_cfg.get("query_enabled", False)):
         stage_ms: dict[str, Any] = {}
@@ -8201,8 +8620,10 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
                 needs_secondary = False
                 secondary_reason = "read_only_skip_secondary"
         if needs_secondary and _metadata_only_query_enabled():
-            needs_secondary = False
-            secondary_reason = "metadata_only_skip_secondary"
+            cfg = _query_arbitration_cfg(system)
+            if bool(cfg.get("skip_secondary_when_metadata_only", False)):
+                needs_secondary = False
+                secondary_reason = "metadata_only_skip_secondary"
 
         if needs_secondary:
             secondary_method = "state" if primary_method == "classic" else "classic"
@@ -8251,6 +8672,7 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
                 winner=winner,
                 stage_ms=stage_ms,
                 handoffs=handoffs,
+                query_contract_metrics=_query_contract_counter_delta(query_counter_before, _query_contract_counter_snapshot()),
                 query_intent=query_intent,
             )
             _append_query_metric(system, query=query, method=method, result=chosen)
@@ -8281,6 +8703,7 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
             winner=str(primary_method),
             stage_ms=stage_ms,
             handoffs=handoffs,
+            query_contract_metrics=_query_contract_counter_delta(query_counter_before, _query_contract_counter_snapshot()),
             query_intent=query_intent,
         )
         _append_query_metric(system, query=query, method=method, result=result)
@@ -8303,6 +8726,7 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
         winner="classic",
         stage_ms=stage_ms,
         handoffs=handoffs,
+        query_contract_metrics=_query_contract_counter_delta(query_counter_before, _query_contract_counter_snapshot()),
         query_intent=query_intent,
     )
     _append_query_metric(system, query=query, method="classic", result=result)

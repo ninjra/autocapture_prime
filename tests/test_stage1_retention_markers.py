@@ -93,7 +93,7 @@ class Stage1RetentionMarkerTests(unittest.TestCase):
         marker_id = retention_eligibility_record_id(record_id)
         self.assertIsNone(metadata.get(marker_id))
 
-    def test_frame_without_uia_docs_is_quarantined_until_retry(self) -> None:
+    def test_frame_without_uia_docs_blocks_retention_until_retry(self) -> None:
         metadata = _MetadataStore()
         record_id = "run_test/evidence.capture.frame/3"
         uia_id = "run_test/evidence.uia.snapshot/3"
@@ -110,15 +110,15 @@ class Stage1RetentionMarkerTests(unittest.TestCase):
         first = mark_stage1_and_retention(metadata, record_id, payload, reason="idle_processed")
         self.assertTrue(first["stage1_complete"])
         marker_id = retention_eligibility_record_id(record_id)
-        marker = metadata.get(marker_id, {})
-        self.assertFalse(bool(marker.get("stage1_contract_validated", False)))
-        self.assertTrue(bool(marker.get("quarantine_pending", False)))
+        self.assertIsNone(metadata.get(marker_id))
+        self.assertIsNone(first["retention_record_id"])
 
         # Simulate retry after UIA docs are materialized by Stage1.
         self._seed_uia_docs(metadata, frame_id=record_id, snapshot_id=uia_id, content_hash="uia777")
         second = mark_stage1_and_retention(metadata, record_id, payload, reason="idle_processed")
         self.assertTrue(second["stage1_complete"])
         self.assertEqual(second["stage1_record_id"], first["stage1_record_id"])
+        self.assertEqual(second["retention_record_id"], marker_id)
         marker_after = metadata.get(marker_id, {})
         self.assertTrue(bool(marker_after.get("stage1_contract_validated", False)))
         self.assertFalse(bool(marker_after.get("quarantine_pending", False)))

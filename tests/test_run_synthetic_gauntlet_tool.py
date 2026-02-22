@@ -51,6 +51,44 @@ class SyntheticGauntletToolTests(unittest.TestCase):
         self.assertFalse(bool(rows[0]["strict"]))
         self.assertEqual(int(summary.get("cases_total") or 0), 1)
 
+    def test_evaluate_case_memory_style_strict_tokens_pass(self) -> None:
+        mod = _load_module()
+        case = {
+            "id": "mem1",
+            "query": "How many characters were typed in the latest window?",
+            "expects_all": ["characters", "latest window"],
+            "require_citations": True,
+        }
+        result = {
+            "answer": {
+                "display": {"summary": "Latest window characters typed: 182"},
+                "claims": [{"text": "Latest window characters typed: 182", "citations": [{"evidence_id": "e1"}]}],
+            }
+        }
+        strict_case, passed, detail = mod._evaluate_case(case, result)  # noqa: SLF001
+        self.assertTrue(strict_case)
+        self.assertTrue(passed)
+        self.assertEqual(detail, "ok")
+
+    def test_evaluate_case_memory_style_strict_fails_without_citations(self) -> None:
+        mod = _load_module()
+        case = {
+            "id": "mem2",
+            "query": "How many characters were typed in the latest window?",
+            "expects_any": ["characters typed"],
+            "require_citations": True,
+        }
+        result = {
+            "answer": {
+                "display": {"summary": "characters typed: 54"},
+                "claims": [{"text": "characters typed: 54", "citations": []}],
+            }
+        }
+        strict_case, passed, detail = mod._evaluate_case(case, result)  # noqa: SLF001
+        self.assertTrue(strict_case)
+        self.assertFalse(passed)
+        self.assertIn("citations_ok=False", detail)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,87 @@ from autocapture.storage.retention import retention_eligibility_record_id
 from autocapture.storage.stage1 import stage1_complete_record_id
 from autocapture_nx.ingest.uia_obs_docs import _frame_uia_expected_ids
 from autocapture_nx.storage.stage1_derived_store import default_stage1_derived_db_path
+
+
+def _probe_sqlite(path: Path) -> tuple[bool, str]:
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = _connect_readonly_with_retry(path, timeout_s=1.0, retries=3, retry_delay_s=0.15)
+        conn.execute("PRAGMA query_only = ON")
+        conn.execute("PRAGMA schema_version")
+        return True, "ok"
+    except Exception as exc:
+        return False, f"{type(exc).__name__}:{exc}"
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _is_transient_sqlite_error(exc: BaseException) -> bool:
+    text = f"{type(exc).__name__}:{exc}".lower()
+    markers = (
+        "disk i/o error",
+        "database is locked",
+        "database disk image is malformed",
+        "sqlitedb",
+        "sqlite_busy",
+        "readonly database",
+    )
+    return any(marker in text for marker in markers)
+
+
+def _connect_readonly_with_retry(
+    path: Path,
+    *,
+    timeout_s: float,
+    retries: int = 3,
+    retry_delay_s: float = 0.2,
+) -> sqlite3.Connection:
+    attempts = max(1, int(retries) + 1)
+    last_exc: BaseException | None = None
+    target = Path(path).expanduser()
+    for attempt in range(1, attempts + 1):
+        try:
+            conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True, timeout=max(0.1, float(timeout_s)))
+            conn.execute("PRAGMA query_only = ON")
+            return conn
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= attempts or not _is_transient_sqlite_error(exc):
+                break
+            time.sleep(max(0.01, float(retry_delay_s)))
+    assert last_exc is not None
+    raise last_exc
+
+
+def _resolve_db_path(path: Path) -> tuple[Path, str]:
+    primary = Path(path).expanduser()
+    candidates = [primary, primary.parent / "metadata.live.db"]
+    seen: set[str] = set()
+    deduped: list[Path] = []
+    for candidate in candidates:
+        marker = str(candidate.resolve()) if candidate.exists() else str(candidate)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        deduped.append(candidate)
+    first_error = ""
+    for idx, candidate in enumerate(deduped):
+        if not candidate.exists():
+            if idx == 0:
+                first_error = "missing"
+            continue
+        ok, reason = _probe_sqlite(candidate)
+        if ok:
+            return candidate, ("primary" if idx == 0 else "fallback")
+        if idx == 0:
+            first_error = reason
+    if first_error:
+        return primary, first_error
+    return primary, "missing"
 
 
 def _parse_payload(raw: Any) -> dict[str, Any] | None:
@@ -112,16 +194,24 @@ def _valid_bboxes(value: Any) -> bool:
     return True
 
 
-def _obs_payload_ok(payload: dict[str, Any] | None, *, kind: str, uia_record_id: str, uia_hash: str) -> bool:
+def _obs_payload_ok(
+    payload: dict[str, Any] | None,
+    *,
+    kind: str,
+    frame_id: str,
+    frame_ts: datetime | None,
+    uia_record_id: str,
+    uia_hash: str,
+) -> bool:
     if not isinstance(payload, dict):
         return False
     if str(payload.get("record_type") or "") != str(kind):
         return False
+    if str(payload.get("source_record_id") or "") != str(frame_id):
+        return False
     if str(payload.get("uia_record_id") or "") != str(uia_record_id):
         return False
     if uia_hash and str(payload.get("uia_content_hash") or "") != str(uia_hash):
-        return False
-    if not str(payload.get("source_record_id") or "").strip():
         return False
     if not str(payload.get("hwnd") or "").strip():
         return False
@@ -129,7 +219,62 @@ def _obs_payload_ok(payload: dict[str, Any] | None, *, kind: str, uia_record_id:
         return False
     if _safe_int(payload.get("window_pid")) <= 0:
         return False
+    payload_ts = _parse_ts_utc(payload.get("ts_utc"))
+    if payload_ts is None:
+        return False
+    if isinstance(frame_ts, datetime):
+        drift_s = abs(float((payload_ts - frame_ts).total_seconds()))
+        if drift_s > 600.0:
+            return False
     return _valid_bboxes(payload.get("bboxes"))
+
+
+def _stage1_payload_ok(
+    payload: dict[str, Any] | None,
+    *,
+    frame_id: str,
+    frame_ts: datetime | None,
+    uia_record_id: str,
+    uia_hash: str,
+) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if str(payload.get("record_type") or "") != "derived.ingest.stage1.complete":
+        return False
+    if not bool(payload.get("complete", False)):
+        return False
+    if str(payload.get("source_record_id") or "") != str(frame_id):
+        return False
+    if str(payload.get("source_record_type") or "") != "evidence.capture.frame":
+        return False
+    if uia_record_id and str(payload.get("uia_record_id") or "") != str(uia_record_id):
+        return False
+    if uia_hash and str(payload.get("uia_content_hash") or "") != str(uia_hash):
+        return False
+    payload_ts = _parse_ts_utc(payload.get("ts_utc"))
+    if payload_ts is None:
+        return False
+    if isinstance(frame_ts, datetime):
+        drift_s = abs(float((payload_ts - frame_ts).total_seconds()))
+        if drift_s > 600.0:
+            return False
+    return True
+
+
+def _retention_payload_ok(payload: dict[str, Any] | None, *, frame_id: str) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if str(payload.get("record_type") or "") != "retention.eligible":
+        return False
+    if str(payload.get("source_record_id") or "") != str(frame_id):
+        return False
+    if str(payload.get("source_record_type") or "") != "evidence.capture.frame":
+        return False
+    if not bool(payload.get("stage1_contract_validated", False)):
+        return False
+    if bool(payload.get("quarantine_pending", False)):
+        return False
+    return True
 
 
 def _window_rows(rows: list[dict[str, Any]], *, gap_seconds: int) -> list[dict[str, Any]]:
@@ -193,8 +338,9 @@ def run_audit(
     derived_db_path: Path | None = None,
     gap_seconds: int = 120,
     sample_limit: int = 10,
+    frame_report_limit: int = 200,
 ) -> dict[str, Any]:
-    conn = sqlite3.connect(str(db_path), timeout=5.0)
+    conn = _connect_readonly_with_retry(db_path, timeout_s=5.0, retries=4, retry_delay_s=0.2)
     conn.row_factory = sqlite3.Row
     derived_conn: sqlite3.Connection | None = None
     derived_table: str | None = None
@@ -203,7 +349,7 @@ def run_audit(
     try:
         table, id_col, payload_col = _resolve_table(conn)
         if isinstance(derived_db_path, Path) and derived_db_path.exists():
-            derived_conn = sqlite3.connect(str(derived_db_path), timeout=5.0)
+            derived_conn = _connect_readonly_with_retry(derived_db_path, timeout_s=5.0, retries=4, retry_delay_s=0.2)
             derived_conn.row_factory = sqlite3.Row
             try:
                 derived_table, derived_id_col, derived_payload_col = _resolve_table(derived_conn)
@@ -259,10 +405,18 @@ def run_audit(
                 secondary_id_col=derived_id_col,
                 secondary_payload_col=derived_payload_col,
             )
-            if stage1_type == "derived.ingest.stage1.complete" and isinstance(stage1_payload, dict) and bool(stage1_payload.get("complete", False)):
+            if stage1_type == "derived.ingest.stage1.complete" and _stage1_payload_ok(
+                stage1_payload,
+                frame_id=frame_id,
+                frame_ts=ts_obj,
+                uia_record_id=uia_record_id,
+                uia_hash=uia_hash,
+            ):
                 plugin_ok_counts["stage1_complete"] += 1
+                stage1_ok = True
             else:
                 issues.append("stage1_complete_missing_or_invalid")
+                stage1_ok = False
 
             plugin_required_counts["retention_eligible"] += 1
             retention_id = retention_eligibility_record_id(frame_id)
@@ -277,17 +431,20 @@ def run_audit(
                 secondary_id_col=derived_id_col,
                 secondary_payload_col=derived_payload_col,
             )
-            retention_ok = (
-                retention_type == "retention.eligible"
-                and isinstance(retention_payload, dict)
-                and bool(retention_payload.get("stage1_contract_validated", False))
-                and not bool(retention_payload.get("quarantine_pending", False))
+            retention_ok = retention_type == "retention.eligible" and _retention_payload_ok(
+                retention_payload,
+                frame_id=frame_id,
             )
             if retention_ok:
                 plugin_ok_counts["retention_eligible"] += 1
             else:
                 issues.append("retention_eligible_missing_or_invalid")
 
+            uia_snapshot_required = bool(uia_record_id)
+            uia_snapshot_ok = False
+            obs_focus_ok = False
+            obs_context_ok = False
+            obs_operable_ok = False
             if uia_record_id:
                 plugin_required_counts["uia_snapshot"] += 1
                 snap_type, _snap_payload = _fetch_row(
@@ -299,6 +456,7 @@ def run_audit(
                 )
                 if snap_type == "evidence.uia.snapshot":
                     plugin_ok_counts["uia_snapshot"] += 1
+                    uia_snapshot_ok = True
                 else:
                     issues.append("uia_snapshot_missing")
 
@@ -321,8 +479,21 @@ def run_audit(
                         secondary_id_col=derived_id_col,
                         secondary_payload_col=derived_payload_col,
                     )
-                    if obs_type == kind and _obs_payload_ok(obs_payload, kind=kind, uia_record_id=uia_record_id, uia_hash=uia_hash):
+                    if obs_type == kind and _obs_payload_ok(
+                        obs_payload,
+                        kind=kind,
+                        frame_id=frame_id,
+                        frame_ts=ts_obj,
+                        uia_record_id=uia_record_id,
+                        uia_hash=uia_hash,
+                    ):
                         plugin_ok_counts[key] += 1
+                        if key == "obs_uia_focus":
+                            obs_focus_ok = True
+                        elif key == "obs_uia_context":
+                            obs_context_ok = True
+                        elif key == "obs_uia_operable":
+                            obs_operable_ok = True
                     else:
                         issues.append(f"{key}_missing_or_invalid")
 
@@ -336,6 +507,14 @@ def run_audit(
                 "queryable": bool(queryable),
                 "issues": issues,
                 "uia_record_id": uia_record_id,
+                "plugins": {
+                    "stage1_complete": {"required": True, "ok": bool(stage1_ok)},
+                    "retention_eligible": {"required": True, "ok": bool(retention_ok)},
+                    "uia_snapshot": {"required": bool(uia_snapshot_required), "ok": bool(uia_snapshot_ok)},
+                    "obs_uia_focus": {"required": bool(uia_snapshot_required), "ok": bool(obs_focus_ok)},
+                    "obs_uia_context": {"required": bool(uia_snapshot_required), "ok": bool(obs_context_ok)},
+                    "obs_uia_operable": {"required": bool(uia_snapshot_required), "ok": bool(obs_operable_ok)},
+                },
             }
             rows.append(frame_row)
             if (not queryable) and len(sample_blocked) < max(0, int(sample_limit)):
@@ -350,6 +529,19 @@ def run_audit(
 
         queryable_rows = [row for row in rows if bool(row.get("queryable", False))]
         windows = _window_rows(queryable_rows, gap_seconds=int(gap_seconds))
+        frame_limit = max(1, int(frame_report_limit))
+        frame_lineage: list[dict[str, Any]] = []
+        for row in rows[:frame_limit]:
+            frame_lineage.append(
+                {
+                    "frame_id": str(row.get("frame_id") or ""),
+                    "ts_utc": str(row.get("ts_utc") or ""),
+                    "queryable": bool(row.get("queryable", False)),
+                    "issues": [str(item) for item in (row.get("issues") or []) if str(item)],
+                    "uia_record_id": str(row.get("uia_record_id") or ""),
+                    "plugins": dict(row.get("plugins") or {}) if isinstance(row.get("plugins"), dict) else {},
+                }
+            )
         return {
             "ok": True,
             "schema_version": 1,
@@ -371,6 +563,9 @@ def run_audit(
             },
             "issue_counts": issue_counts,
             "queryable_windows": windows,
+            "frame_lineage_total": int(len(rows)),
+            "frame_lineage_limit": int(frame_limit),
+            "frame_lineage": frame_lineage,
             "sample_blocked_frames": sample_blocked,
         }
     finally:
@@ -389,6 +584,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--gap-seconds", type=int, default=120, help="Max intra-window timestamp gap in seconds.")
     parser.add_argument("--samples", type=int, default=10, help="Blocked frame samples to emit.")
+    parser.add_argument("--frame-limit", type=int, default=200, help="How many per-frame lineage rows to include.")
     parser.add_argument("--output", default="", help="Optional JSON output path.")
     return parser
 
@@ -396,9 +592,10 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
-    db_path = Path(str(args.db)).expanduser()
-    if not db_path.exists():
-        payload = {"ok": False, "error": "db_not_found", "db": str(db_path)}
+    requested_db = Path(str(args.db)).expanduser()
+    resolved_db, resolved_reason = _resolve_db_path(requested_db)
+    if not resolved_db.exists():
+        payload = {"ok": False, "error": "db_not_found", "db": str(resolved_db)}
         print(json.dumps(payload, sort_keys=True))
         return 2
     derived_db: Path | None = None
@@ -406,20 +603,24 @@ def main() -> int:
     if raw_derived:
         derived_db = Path(raw_derived).expanduser()
     else:
-        candidate = default_stage1_derived_db_path(db_path.parent)
+        candidate = default_stage1_derived_db_path(resolved_db.parent)
         if candidate.exists():
             derived_db = candidate
     try:
         payload = run_audit(
-            db_path,
+            resolved_db,
             derived_db_path=derived_db,
             gap_seconds=int(args.gap_seconds),
             sample_limit=int(args.samples),
+            frame_report_limit=int(args.frame_limit),
         )
     except Exception as exc:
-        payload = {"ok": False, "error": f"{type(exc).__name__}:{exc}", "db": str(db_path)}
+        payload = {"ok": False, "error": f"{type(exc).__name__}:{exc}", "db": str(resolved_db)}
         print(json.dumps(payload, sort_keys=True))
         return 1
+    payload["db_requested"] = str(requested_db)
+    payload["db_resolved"] = str(resolved_db)
+    payload["db_resolution"] = str(resolved_reason)
     out = str(args.output or "").strip()
     if out:
         out_path = Path(out).expanduser()
