@@ -12,6 +12,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urljoin
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -195,18 +196,158 @@ def _http_preflight(url: str, *, timeout_s: float) -> dict[str, Any]:
         return {"ok": False, "url": target, "status": 0, "error": f"{type(exc).__name__}:{exc}"}
 
 
+def _http_json_request(
+    *,
+    url: str,
+    timeout_s: float,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    target = str(url or "").strip()
+    if not target:
+        return {"ok": False, "url": target, "status": 0, "error": "missing_url", "json": {}}
+    raw_data: bytes | None = None
+    req_headers = dict(headers or {})
+    if payload is not None:
+        req_headers.setdefault("Content-Type", "application/json")
+        raw_data = json.dumps(payload).encode("utf-8")
+    try:
+        req = urllib.request.Request(target, method=str(method or "GET").upper(), headers=req_headers, data=raw_data)
+        with urllib.request.urlopen(req, timeout=max(0.2, float(timeout_s))) as resp:  # noqa: S310 - localhost only
+            code = int(getattr(resp, "status", 200) or 200)
+            body_raw = resp.read(4096)
+            body = body_raw.decode("utf-8", errors="replace").strip()
+        parsed: dict[str, Any] = {}
+        if body:
+            try:
+                obj = json.loads(body)
+                if isinstance(obj, dict):
+                    parsed = obj
+            except Exception:
+                parsed = {}
+        return {
+            "ok": 200 <= code < 300,
+            "url": target,
+            "status": code,
+            "body": body,
+            "json": parsed,
+        }
+    except urllib.error.HTTPError as exc:
+        return {
+            "ok": False,
+            "url": target,
+            "status": int(exc.code),
+            "error": f"http_error:{exc.reason}",
+            "json": {},
+        }
+    except Exception as exc:
+        return {"ok": False, "url": target, "status": 0, "error": f"{type(exc).__name__}:{exc}", "json": {}}
+
+
+def _popup_query_preflight(
+    *,
+    sidecar_base_url: str,
+    popup_path: str,
+    auth_token_path: str,
+    query_text: str,
+    max_citations: int,
+    timeout_s: float,
+) -> dict[str, Any]:
+    base = str(sidecar_base_url or "").strip().rstrip("/")
+    popup_url = str(popup_path or "").strip()
+    token_url = str(auth_token_path or "").strip()
+    if base:
+        if not popup_url.startswith("http://") and not popup_url.startswith("https://"):
+            popup_url = urljoin(base + "/", popup_url.lstrip("/"))
+        if not token_url.startswith("http://") and not token_url.startswith("https://"):
+            token_url = urljoin(base + "/", token_url.lstrip("/"))
+    token_resp = _http_json_request(url=token_url, timeout_s=timeout_s, method="GET")
+    token = str((token_resp.get("json") if isinstance(token_resp.get("json"), dict) else {}).get("token") or "").strip()
+    if not bool(token_resp.get("ok", False)) or not token:
+        return {
+            "ok": False,
+            "error": "popup_token_unavailable",
+            "sidecar_base_url": base,
+            "token_url": token_url,
+            "popup_url": popup_url,
+            "token_probe": token_resp,
+            "popup_response": {},
+            "forbidden_reasons": [],
+        }
+    popup_resp = _http_json_request(
+        url=popup_url,
+        timeout_s=timeout_s,
+        method="POST",
+        headers={"Authorization": f"Bearer {token}"},
+        payload={"query": str(query_text or "status check"), "max_citations": int(max(1, max_citations))},
+    )
+    popup_json = popup_resp.get("json") if isinstance(popup_resp.get("json"), dict) else {}
+    blocked_reason = str(popup_json.get("processing_blocked_reason") or "")
+    state = str(popup_json.get("state") or "")
+    error_text = str(popup_json.get("error") or "")
+    forbidden = []
+    for token_val in ("query_compute_disabled", "autocapture_upstream_unreachable"):
+        if blocked_reason == token_val:
+            forbidden.append(token_val)
+        if token_val in error_text:
+            forbidden.append(token_val)
+    forbidden = sorted(set(forbidden))
+    ok = bool(popup_resp.get("ok", False)) and len(forbidden) == 0
+    return {
+        "ok": bool(ok),
+        "error": "" if ok else ("popup_forbidden_block_reason" if forbidden else "popup_query_failed"),
+        "sidecar_base_url": base,
+        "token_url": token_url,
+        "popup_url": popup_url,
+        "query": str(query_text or ""),
+        "popup_state": state,
+        "popup_blocked_reason": blocked_reason,
+        "forbidden_reasons": forbidden,
+        "token_probe": token_resp,
+        "popup_response": popup_resp,
+    }
+
+
 def _metadata_db_preflight(path: Path) -> dict[str, Any]:
     target = Path(path)
     if not target.exists():
         return {"ok": False, "path": str(target), "error": "missing"}
-    try:
-        conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True, timeout=1.0)
-        cur = conn.cursor()
-        count = int(cur.execute("select count(*) from metadata").fetchone()[0])
-        conn.close()
-        return {"ok": True, "path": str(target), "record_count": count}
-    except Exception as exc:
-        return {"ok": False, "path": str(target), "error": f"{type(exc).__name__}:{exc}"}
+    attempts = 4
+    delay_s = 0.2
+    last_exc: BaseException | None = None
+    for attempt in range(1, attempts + 1):
+        conn: sqlite3.Connection | None = None
+        try:
+            conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True, timeout=1.0)
+            cur = conn.cursor()
+            count = int(cur.execute("select count(*) from metadata").fetchone()[0])
+            return {
+                "ok": True,
+                "path": str(target),
+                "record_count": count,
+                "attempts": int(attempt),
+                "retried": bool(attempt > 1),
+            }
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= attempts or not _is_transient_db_error(
+                {
+                    "stdout_tail": "",
+                    "stderr_tail": f"{type(exc).__name__}:{exc}",
+                    "stdout_json": {},
+                }
+            ):
+                break
+            time.sleep(delay_s)
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+    assert last_exc is not None
+    return {"ok": False, "path": str(target), "error": f"{type(last_exc).__name__}:{last_exc}", "attempts": int(attempts)}
 
 
 def _run_preflight(
@@ -214,13 +355,26 @@ def _run_preflight(
     db_path: Path,
     sidecar_url: str,
     vlm_url: str,
+    popup_base_url: str,
+    popup_path: str,
+    auth_token_path: str,
+    popup_query: str,
+    popup_max_citations: int,
     timeout_s: float,
 ) -> dict[str, Any]:
     sidecar = _http_preflight(sidecar_url, timeout_s=timeout_s)
     vlm = _http_preflight(vlm_url, timeout_s=timeout_s)
     metadata = _metadata_db_preflight(db_path)
-    ok = bool(sidecar.get("ok", False) and vlm.get("ok", False) and metadata.get("ok", False))
-    return {"ok": ok, "sidecar_7411": sidecar, "vlm_8000": vlm, "metadata_db": metadata}
+    popup = _popup_query_preflight(
+        sidecar_base_url=popup_base_url,
+        popup_path=popup_path,
+        auth_token_path=auth_token_path,
+        query_text=popup_query,
+        max_citations=popup_max_citations,
+        timeout_s=timeout_s,
+    )
+    ok = bool(sidecar.get("ok", False) and vlm.get("ok", False) and metadata.get("ok", False) and popup.get("ok", False))
+    return {"ok": ok, "sidecar_7411": sidecar, "vlm_8000": vlm, "metadata_db": metadata, "popup_query": popup}
 
 
 def _load_json_object(path: Path) -> dict[str, Any]:
@@ -304,6 +458,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--preflight-timeout-s", type=float, default=2.5)
     parser.add_argument("--preflight-sidecar-url", default="http://127.0.0.1:7411/health")
     parser.add_argument("--preflight-vlm-url", default="http://127.0.0.1:8000/health")
+    parser.add_argument("--preflight-popup-base-url", default="http://127.0.0.1:7411")
+    parser.add_argument("--preflight-popup-path", default="/api/query/popup")
+    parser.add_argument("--preflight-popup-token-path", default="/api/auth/token")
+    parser.add_argument("--preflight-popup-query", default="status check")
+    parser.add_argument("--preflight-popup-max-citations", type=int, default=6)
+    parser.add_argument("--run-real-corpus-strict", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--require-real-corpus-strict", action=argparse.BooleanOptionalAction, default=False)
     args = parser.parse_args(argv)
 
     root = _repo_root()
@@ -321,6 +482,7 @@ def main(argv: list[str] | None = None) -> int:
     bench_json = run_dir / "batch_knob_bench.json"
     query_eval_json = run_dir / "query_eval_generic20.json"
     synthetic_gauntlet_json = run_dir / "synthetic_gauntlet_80.json"
+    real_corpus_strict_json = run_dir / "real_corpus_strict_matrix.json"
 
     base_env = os.environ.copy()
     base_env["PYTHONPATH"] = str(root)
@@ -351,6 +513,11 @@ def main(argv: list[str] | None = None) -> int:
         db_path=db_path,
         sidecar_url=str(args.preflight_sidecar_url),
         vlm_url=str(args.preflight_vlm_url),
+        popup_base_url=str(args.preflight_popup_base_url),
+        popup_path=str(args.preflight_popup_path),
+        auth_token_path=str(args.preflight_popup_token_path),
+        popup_query=str(args.preflight_popup_query),
+        popup_max_citations=int(args.preflight_popup_max_citations),
         timeout_s=float(args.preflight_timeout_s),
     )
     if bool(args.require_preflight) and not bool(preflight.get("ok", False)):
@@ -633,6 +800,29 @@ def main(argv: list[str] | None = None) -> int:
             pass
         steps.append(gauntlet_step)
 
+    if bool(args.run_real_corpus_strict):
+        strict_step = _run_step_with_retry(
+            step_id="real_corpus_strict_matrix",
+            cmd=[
+                py,
+                "tools/run_real_corpus_readiness.py",
+                "--stage1-audit-json",
+                str(stage1_audit_json),
+                "--out",
+                str(real_corpus_strict_json),
+                "--latest-report-md",
+                str(run_dir / "real_corpus_strict_latest.md"),
+            ],
+            cwd=root,
+            env=base_env,
+            timeout_s=int(args.timeout_s),
+            retries=1,
+            retry_delay_s=2,
+        )
+        if isinstance(strict_step.get("stdout_json"), dict):
+            strict_step["output"] = str(real_corpus_strict_json)
+        steps.append(strict_step)
+
     required_failures: list[str] = []
     optional_failures: list[str] = []
     optional_skipped: list[str] = []
@@ -642,6 +832,8 @@ def main(argv: list[str] | None = None) -> int:
             "query_eval_suite_generic20_metadata_only",
             "synthetic_gauntlet_80_metadata_only",
         } and not bool(args.require_query_pass)
+        if step_id == "real_corpus_strict_matrix" and not bool(args.require_real_corpus_strict):
+            is_optional = True
         if not bool(step.get("ok", False)):
             if is_optional and _is_dpapi_windows_failure(step):
                 step["skipped"] = True
@@ -662,6 +854,16 @@ def main(argv: list[str] | None = None) -> int:
             if isinstance(row, dict) and not bool(row.get("ok", False)):
                 required_failures.append(step_id)
 
+    processing_health_summary: dict[str, Any] = {}
+    for step in steps:
+        if str(step.get("id") or "") == "processing_health_snapshot":
+            row = step.get("stdout_json")
+            if isinstance(row, dict):
+                processing_health_summary = row
+            break
+    stage1_summary = _load_json_object(stage1_audit_json).get("summary", {}) if stage1_audit_json.exists() else {}
+    strict_payload = _load_json_object(real_corpus_strict_json) if real_corpus_strict_json.exists() else {}
+
     payload = {
         "schema_version": 1,
         "ts_utc": datetime.now(timezone.utc).isoformat(),
@@ -677,6 +879,25 @@ def main(argv: list[str] | None = None) -> int:
         "failed_steps": required_failures,
         "optional_failed_steps": optional_failures,
         "optional_skipped_steps": optional_skipped,
+        "real_corpus_strict": strict_payload,
+        "readiness_report": {
+            "service_reachability": preflight,
+            "strict_matrix": {
+                "ok": bool(strict_payload.get("ok", False)),
+                "matrix_total": int(strict_payload.get("matrix_total", 0) or 0),
+                "matrix_evaluated": int(strict_payload.get("matrix_evaluated", 0) or 0),
+                "matrix_failed": int(strict_payload.get("matrix_failed", 0) or 0),
+                "matrix_skipped": int(strict_payload.get("matrix_skipped", 0) or 0),
+                "failure_cause_counts": strict_payload.get("strict_failure_cause_counts", {}),
+            },
+            "stage1_backlog_risk": {
+                "frames_total": int((stage1_summary or {}).get("frames_total", 0) or 0),
+                "frames_queryable": int((stage1_summary or {}).get("frames_queryable", 0) or 0),
+                "frames_blocked": int((stage1_summary or {}).get("frames_blocked", 0) or 0),
+                "processing_latest": (processing_health_summary or {}).get("latest", {}),
+                "processing_alerts": (processing_health_summary or {}).get("alerts", []),
+            },
+        },
         "artifacts": {
             "lineage": str(lineage_json),
             "stage1_completeness_audit": str(stage1_audit_json),
@@ -684,6 +905,7 @@ def main(argv: list[str] | None = None) -> int:
             "batch_knob_bench": str(bench_json),
             "query_eval": str(query_eval_json),
             "synthetic_gauntlet": str(synthetic_gauntlet_json),
+            "real_corpus_strict_matrix": str(real_corpus_strict_json),
         },
     }
     out_path = root / str(args.output)

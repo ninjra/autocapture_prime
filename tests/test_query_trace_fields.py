@@ -109,12 +109,18 @@ class QueryTraceFieldsTests(unittest.TestCase):
         self.assertGreaterEqual(float(stage_ms.get("classic_query", 0.0)), 0.0)
         self.assertGreaterEqual(float(stage_ms.get("display", 0.0)), 0.0)
         self.assertGreater(float(stage_ms.get("total", 0.0)), 0.0)
+        query_contract = trace.get("query_contract_metrics", {}) if isinstance(trace.get("query_contract_metrics", {}), dict) else {}
+        self.assertEqual(int(query_contract.get("query_extractor_launch_total", -1)), 0)
+        self.assertEqual(int(query_contract.get("query_schedule_extract_requests_total", -1)), 0)
+        self.assertEqual(int(query_contract.get("query_raw_media_reads_total", -1)), 0)
         handoffs = trace.get("handoffs", [])
         self.assertIsInstance(handoffs, list)
         self.assertGreaterEqual(len(handoffs), 2)
         rel_paths = [str(call.kwargs.get("rel_path", "")) for call in append_mock.call_args_list]
         self.assertIn("query_eval.ndjson", rel_paths)
         self.assertIn("query_trace.ndjson", rel_paths)
+        self.assertIn("query_promptops_summary.ndjson", rel_paths)
+        self.assertIn("query_retrieval_diagnostics.ndjson", rel_paths)
 
     def test_query_trace_carries_promptops_fields(self) -> None:
         evidence_id = "run_test/evidence.capture.segment/seg1"
@@ -174,6 +180,115 @@ class QueryTraceFieldsTests(unittest.TestCase):
         self.assertTrue(bool(str(trace.get("query_effective") or "").strip()))
         self.assertIn("promptops_applied", trace)
 
+    def test_query_promptops_summary_artifact_has_compact_fields(self) -> None:
+        evidence_id = "run_test/evidence.capture.segment/seg1"
+        derived_id = "run_test/derived.text.ocr/provider/seg1"
+        metadata = _Meta(
+            {
+                evidence_id: {
+                    "record_type": "evidence.capture.segment",
+                    "content_hash": "hash_e",
+                    "ts_utc": "2026-02-07T00:00:00Z",
+                },
+                derived_id: {
+                    "record_type": "derived.text.ocr",
+                    "text": "Inbox count is 4",
+                    "span_ref": {"kind": "text", "note": "test"},
+                    "content_hash": "hash_d",
+                },
+            }
+        )
+        system = _System(
+            config={
+                "runtime": {"run_id": "run_test"},
+                "storage": {"data_dir": "/tmp/data"},
+                "processing": {
+                    "state_layer": {"query_enabled": False},
+                    "on_query": {"allow_decode_extract": False},
+                },
+                "plugins": {"locks": {"lockfile": "config/plugin_locks.json"}},
+                "promptops": {
+                    "enabled": True,
+                    "mode": "auto_apply",
+                    "query_strategy": "normalize_query",
+                },
+            },
+            caps={
+                "time.intent_parser": _Parser(),
+                "retrieval.strategy": _Retrieval([{"record_id": evidence_id, "derived_id": derived_id, "ts_utc": "2026-02-07T00:00:00Z"}]),
+                "answer.builder": _Answer(),
+                "storage.metadata": metadata,
+                "event.builder": _EventBuilder(),
+            },
+        )
+        with mock.patch.object(query_mod, "append_fact_line") as append_mock:
+            _ = query_mod.run_query(system, "pls help w/ query")
+        payload = None
+        for call in append_mock.call_args_list:
+            if str(call.kwargs.get("rel_path", "")) == "query_promptops_summary.ndjson":
+                payload = call.kwargs.get("payload")
+                break
+        self.assertIsInstance(payload, dict)
+        assert isinstance(payload, dict)
+        self.assertEqual(str(payload.get("record_type") or ""), "derived.query.promptops.summary")
+        self.assertTrue(bool(str(payload.get("query_run_id") or "").strip()))
+        self.assertEqual(str(payload.get("method") or ""), "classic")
+        self.assertIn("promptops_used", payload)
+        self.assertIn("promptops_applied", payload)
+        self.assertIn("promptops_strategy", payload)
+        self.assertIn("promptops_latency_ms", payload)
+
+    def test_query_retrieval_diagnostics_artifact_has_required_fields(self) -> None:
+        evidence_id = "run_test/evidence.capture.segment/seg1"
+        derived_id = "run_test/derived.text.ocr/provider/seg1"
+        metadata = _Meta(
+            {
+                evidence_id: {
+                    "record_type": "evidence.capture.segment",
+                    "content_hash": "hash_e",
+                    "ts_utc": "2026-02-07T00:00:00Z",
+                },
+                derived_id: {
+                    "record_type": "derived.text.ocr",
+                    "text": "Inbox count is 4",
+                    "span_ref": {"kind": "text", "note": "test"},
+                    "content_hash": "hash_d",
+                },
+            }
+        )
+        system = _System(
+            config={
+                "runtime": {"run_id": "run_test"},
+                "storage": {"data_dir": "/tmp/data"},
+                "processing": {
+                    "state_layer": {"query_enabled": False},
+                    "on_query": {"allow_decode_extract": False},
+                },
+                "plugins": {"locks": {"lockfile": "config/plugin_locks.json"}},
+            },
+            caps={
+                "time.intent_parser": _Parser(),
+                "retrieval.strategy": _Retrieval([{"record_id": evidence_id, "derived_id": derived_id, "ts_utc": "2026-02-07T00:00:00Z"}]),
+                "answer.builder": _Answer(),
+                "storage.metadata": metadata,
+                "event.builder": _EventBuilder(),
+            },
+        )
+        with mock.patch.object(query_mod, "append_fact_line") as append_mock:
+            _ = query_mod.run_query(system, "how many inboxes do i have open")
+        payload = None
+        for call in append_mock.call_args_list:
+            if str(call.kwargs.get("rel_path", "")) == "query_retrieval_diagnostics.ndjson":
+                payload = call.kwargs.get("payload")
+                break
+        self.assertIsInstance(payload, dict)
+        assert isinstance(payload, dict)
+        self.assertEqual(str(payload.get("record_type") or ""), "derived.query.retrieval.diagnostics")
+        self.assertIn("scanned_rows", payload)
+        self.assertIn("matched_rows", payload)
+        self.assertIn("citation_coverage_bp", payload)
+        self.assertIn("miss_reason", payload)
+
     def test_apply_display_promotes_display_fields_when_hard_only_answer_text(self) -> None:
         system = _System(
             config={"runtime": {"run_id": "run_test"}},
@@ -204,6 +319,53 @@ class QueryTraceFieldsTests(unittest.TestCase):
         fields = hard.get("fields", {}) if isinstance(hard.get("fields"), dict) else {}
         self.assertEqual(str(fields.get("focus_window") or ""), "Outlook VDI")
         self.assertEqual(str(fields.get("evidence_count") or ""), "2")
+
+    def test_apply_display_returns_partial_with_citation_when_display_sources_exist(self) -> None:
+        system = _System(
+            config={"runtime": {"run_id": "run_test"}},
+            caps={"storage.metadata": _Meta({})},
+        )
+        base_result = {
+            "answer": {
+                "state": "error",
+                "claims": [],
+                "errors": ["upstream_failed"],
+                "notice": "citations required: no evidence available",
+            },
+            "processing": {"query_trace": {"winner": "classic", "method": "classic"}},
+        }
+        display = {
+            "schema_version": 1,
+            "summary": "Observed activity: running tests in terminal",
+            "bullets": [],
+            "fields": {},
+            "topic": "runtime",
+        }
+        display_sources = [
+            {
+                "provider_id": "builtin.observation.graph",
+                "record_id": "run_test/evidence.capture.frame/9",
+                "record_type": "evidence.capture.frame",
+                "signal_pairs": {"topic": "runtime"},
+            }
+        ]
+        with mock.patch.object(query_mod, "_build_answer_display", return_value=display), mock.patch.object(
+            query_mod, "_augment_claim_sources_for_display", return_value=display_sources
+        ):
+            out = query_mod._apply_answer_display(
+                system,
+                "what is happening now",
+                base_result,
+                query_intent={"topic": "generic", "family": "generic"},
+            )
+        answer = out.get("answer", {}) if isinstance(out.get("answer"), dict) else {}
+        claims = answer.get("claims", []) if isinstance(answer.get("claims"), list) else []
+        self.assertEqual(str(answer.get("state") or ""), "partial")
+        self.assertTrue(bool(claims))
+        first = claims[0] if claims and isinstance(claims[0], dict) else {}
+        citations = first.get("citations", []) if isinstance(first.get("citations"), list) else []
+        self.assertTrue(bool(citations))
+        self.assertNotIn("notice", answer)
 
     def test_latest_evidence_record_id_falls_back_from_metadata(self) -> None:
         system = _System(

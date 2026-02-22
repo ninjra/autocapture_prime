@@ -206,15 +206,16 @@ def mark_stage1_and_retention(
     if is_frame and stage1_contract_validated:
         stage1_contract_validated = _frame_stage1_contract_ready(metadata, record)
     retention_reason = "stage1_complete" if stage1_contract_validated else str(reason or "idle_processed")
-    # Fail closed for frame evidence: no retention marker unless Stage1 contract is complete.
-    if (not is_frame) or bool(stage1_id):
+    # Fail closed for frame evidence: no retention marker unless Stage1 contract
+    # is fully validated (Stage1 complete + required plugin outputs present).
+    if (not is_frame) or bool(stage1_contract_validated):
         retention_id = mark_evidence_retention_eligible(
             metadata,
             record_id,
             record,
             reason=retention_reason,
             stage1_contract_validated=bool(stage1_contract_validated),
-            quarantine_pending=bool(is_frame and not stage1_contract_validated),
+            quarantine_pending=False,
             ts_utc=ts_utc,
             event_builder=event_builder,
             logger=logger,

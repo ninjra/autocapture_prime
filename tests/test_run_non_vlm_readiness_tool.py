@@ -116,22 +116,63 @@ class RunNonVlmReadinessToolTests(unittest.TestCase):
         mod = _load_module("tools/run_non_vlm_readiness.py", "run_non_vlm_readiness_tool_8")
         with mock.patch.object(mod, "_http_preflight", autospec=True) as http_pre, mock.patch.object(
             mod, "_metadata_db_preflight", autospec=True
-        ) as db_pre:
+        ) as db_pre, mock.patch.object(mod, "_popup_query_preflight", autospec=True) as popup_pre:
             http_pre.side_effect = [
                 {"ok": True, "status": 200},
                 {"ok": True, "status": 200},
             ]
             db_pre.return_value = {"ok": True, "record_count": 1}
+            popup_pre.return_value = {"ok": True, "popup_state": "ok"}
             out = mod._run_preflight(  # noqa: SLF001
                 db_path=Path("/tmp/x.db"),
                 sidecar_url="http://127.0.0.1:7411/health",
                 vlm_url="http://127.0.0.1:8000/health",
+                popup_base_url="http://127.0.0.1:7411",
+                popup_path="/api/query/popup",
+                auth_token_path="/api/auth/token",
+                popup_query="status check",
+                popup_max_citations=6,
                 timeout_s=1.0,
             )
         self.assertTrue(bool(out.get("ok", False)))
         self.assertIn("sidecar_7411", out)
         self.assertIn("vlm_8000", out)
         self.assertIn("metadata_db", out)
+        self.assertIn("popup_query", out)
+
+    def test_popup_preflight_fails_on_forbidden_block_reason(self) -> None:
+        mod = _load_module("tools/run_non_vlm_readiness.py", "run_non_vlm_readiness_tool_8b")
+        with mock.patch.object(mod, "_http_json_request", autospec=True) as req:
+            req.side_effect = [
+                {
+                    "ok": True,
+                    "status": 200,
+                    "json": {"token": "tok_test"},
+                    "body": "{\"token\":\"tok_test\"}",
+                },
+                {
+                    "ok": True,
+                    "status": 200,
+                    "json": {
+                        "ok": True,
+                        "state": "not_available_yet",
+                        "processing_blocked_reason": "query_compute_disabled",
+                    },
+                    "body": "{}",
+                },
+            ]
+            out = mod._popup_query_preflight(  # noqa: SLF001
+                sidecar_base_url="http://127.0.0.1:7411",
+                popup_path="/api/query/popup",
+                auth_token_path="/api/auth/token",
+                query_text="status check",
+                max_citations=6,
+                timeout_s=1.0,
+            )
+        self.assertFalse(bool(out.get("ok", True)))
+        self.assertEqual(str(out.get("error") or ""), "popup_forbidden_block_reason")
+        reasons = set(out.get("forbidden_reasons", []))
+        self.assertIn("query_compute_disabled", reasons)
 
     def test_main_returns_preflight_failed_when_required(self) -> None:
         mod = _load_module("tools/run_non_vlm_readiness.py", "run_non_vlm_readiness_tool_9")
@@ -165,6 +206,30 @@ class RunNonVlmReadinessToolTests(unittest.TestCase):
             self.assertEqual(rc, 3)
             payload = json.loads(out_path.read_text(encoding="utf-8"))
             self.assertEqual(str(payload.get("error") or ""), "preflight_failed")
+
+    def test_metadata_db_preflight_retries_transient_errors(self) -> None:
+        mod = _load_module("tools/run_non_vlm_readiness.py", "run_non_vlm_readiness_tool_10")
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "metadata.db"
+            con = sqlite3.connect(db)
+            con.execute("create table metadata(record_type text)")
+            con.commit()
+            con.close()
+
+            real_connect = sqlite3.connect
+            calls = {"n": 0}
+
+            def _connect(*args, **kwargs):  # type: ignore[no-untyped-def]
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise sqlite3.OperationalError("disk I/O error")
+                return real_connect(*args, **kwargs)
+
+            with mock.patch.object(mod.sqlite3, "connect", side_effect=_connect):
+                out = mod._metadata_db_preflight(db)  # noqa: SLF001
+            self.assertTrue(bool(out.get("ok", False)))
+            self.assertEqual(int(out.get("attempts", 0) or 0), 2)
+            self.assertTrue(bool(out.get("retried", False)))
 
 
 if __name__ == "__main__":
