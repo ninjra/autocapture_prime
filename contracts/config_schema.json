@@ -3419,6 +3419,12 @@
         "metadata_path": {
           "type": "string"
         },
+        "metadata_fallback_paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "metadata_require_db": {
           "type": "boolean"
         },

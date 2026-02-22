@@ -1,0 +1,205 @@
+{
+  "schema": "autocapture.real_corpus_expected_answers.v1",
+  "version": "v1",
+  "generated_utc": "2026-02-22T00:00:00Z",
+  "owner": "autocapture_prime",
+  "strict": {
+    "blocking_suite": "advanced20",
+    "expected_total": 20,
+    "source_policy": {
+      "require_real_corpus": true,
+      "disallowed_substrings": [
+        "/artifacts/single_image_runs/",
+        "_uia_synthetic_",
+        "/synthetic/"
+      ]
+    },
+    "cases": [
+      {
+        "id": "Q1",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "Q2",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "Q3",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "Q4",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "Q5",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "Q6",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "Q7",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "Q8",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "Q9",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "Q10",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "H1",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "H2",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "H3",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "H4",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "H5",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "H6",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "H7",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "H8",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "H9",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      },
+      {
+        "id": "H10",
+        "suite": "advanced20",
+        "allow_indeterminate": false,
+        "require_citations": true,
+        "allowed_answer_states": [
+          "ok"
+        ]
+      }
+    ]
+  },
+  "generic_policy": {
+    "suite": "generic20",
+    "blocking": false,
+    "informational_only": true
+  }
+}

@@ -144,7 +144,7 @@
           "repro_runs": 3,
           "timezone": "UTC"
         },
-        "enable_synthesizer": false,
+        "enable_synthesizer": true,
         "profile_id": "golden_full_v1",
         "required_plugins": [
           "builtin.anchor.basic",
@@ -176,6 +176,9 @@
         "base_url": "http://127.0.0.1:8000/v1",
         "max_evidence_chars": 3600,
         "max_tokens": 768,
+        "system_prompt_path": "promptops/prompts/answer_synth_system.txt",
+        "query_context_pre_path": "promptops/prompts/answer_synth_query_pre.txt",
+        "query_context_post_path": "promptops/prompts/answer_synth_query_post.txt",
         "promptops": {
           "enabled": true,
           "metrics": {

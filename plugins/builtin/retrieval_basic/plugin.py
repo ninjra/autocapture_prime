@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
 from datetime import datetime
+import json
+import re
+import time
 from typing import Any
 
 from autocapture.indexing.factory import build_indexes
@@ -28,6 +31,12 @@ class RetrievalStrategy(PluginBase):
         self._rerankers: list[tuple[str, Any]] = []
         self._last_trace: list[dict[str, Any]] = []
         self._index_meta: dict[str, Any] = {}
+        self._latency_hist_edges_ms: tuple[float, ...] = (5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0, 5000.0)
+        self._latency_hist_counts: dict[str, int] = {f"le_{int(edge)}ms": 0 for edge in self._latency_hist_edges_ms}
+        self._latency_hist_counts["gt_5000ms"] = 0
+        self._search_calls = 0
+        self._records_scanned_total = 0
+        self._results_returned_total = 0
         try:
             cap = context.get_capability("retrieval.reranker")
         except Exception:
@@ -42,6 +51,7 @@ class RetrievalStrategy(PluginBase):
         return list(self._last_trace)
 
     def search(self, query: str, time_window: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        started = time.perf_counter()
         store = self.context.get_capability("storage.metadata")
         if store is None:
             return []
@@ -49,7 +59,13 @@ class RetrievalStrategy(PluginBase):
         if not query_text:
             return []
         retrieval_cfg = self._config.get("retrieval", {}) if isinstance(self._config, dict) else {}
+        try:
+            max_return = int(retrieval_cfg.get("result_limit", retrieval_cfg.get("limit", 25)) or 25)
+        except Exception:
+            max_return = 25
+        max_return = max(1, max_return)
         trace: list[dict[str, Any]] = []
+        scan_stats: dict[str, int] = {"records_scanned": 0}
         candidate_ids = _time_window_candidates(store, time_window, self._config)
         if candidate_ids is not None:
             trace.append(
@@ -64,12 +80,30 @@ class RetrievalStrategy(PluginBase):
         if not results:
             retrieval_cfg = self._config.get("retrieval", {}) if isinstance(self._config, dict) else {}
             allow_full_scan = bool(retrieval_cfg.get("allow_full_scan", False))
+            latest_scan_on_miss = bool(retrieval_cfg.get("latest_scan_on_miss", True))
+            try:
+                latest_scan_limit = int(retrieval_cfg.get("latest_scan_limit", 2000) or 2000)
+            except Exception:
+                latest_scan_limit = 2000
+            latest_scan_limit = max(0, latest_scan_limit)
+            latest_scan_record_types = retrieval_cfg.get("latest_scan_record_types")
             if candidate_ids is not None:
-                results = _scan_metadata(store, query_text.lower(), time_window, candidate_ids)
+                results = _scan_metadata(store, query_text, time_window, candidate_ids, stats=scan_stats, stop_after=max_return)
                 trace.append({"tier": "CANDIDATE_SCAN", "result_count": len(results)})
             elif allow_full_scan:
-                results = _scan_metadata(store, query_text.lower(), time_window, candidate_ids)
+                results = _scan_metadata(store, query_text, time_window, candidate_ids, stats=scan_stats, stop_after=max_return)
                 trace.append({"tier": "FULL_SCAN", "result_count": len(results)})
+            elif latest_scan_on_miss and latest_scan_limit > 0:
+                results = _scan_metadata_latest(
+                    store,
+                    query_text,
+                    time_window,
+                    limit=latest_scan_limit,
+                    record_types=latest_scan_record_types,
+                    stats=scan_stats,
+                    stop_after=max_return,
+                )
+                trace.append({"tier": "LATEST_SCAN", "result_count": len(results), "limit": int(latest_scan_limit)})
             else:
                 trace.append({"tier": "FULL_SCAN_SKIPPED", "reason": "disabled"})
         results.sort(
@@ -81,12 +115,44 @@ class RetrievalStrategy(PluginBase):
                 str(r.get("derived_id", "")),
             )
         )
+        if len(results) > max_return:
+            trace.append({"tier": "RESULT_TRUNCATE", "from": len(results), "to": int(max_return)})
+            results = results[:max_return]
         if bool(retrieval_cfg.get("attach_timelines", True)):
             timeline_limit = int(retrieval_cfg.get("timeline_scan_limit", 5000))
             window_events, input_summaries, cursor_samples = _collect_timelines(store, limit=timeline_limit)
             _attach_timelines(results, store, window_events, input_summaries, cursor_samples)
+        elapsed_ms = float((time.perf_counter() - started) * 1000.0)
+        self._record_perf(elapsed_ms=elapsed_ms, scanned=int(scan_stats.get("records_scanned", 0) or 0), returned=int(len(results)))
+        elapsed_s = max(1e-9, elapsed_ms / 1000.0)
+        trace.append(
+            {
+                "tier": "PERF",
+                "search_ms": float(round(elapsed_ms, 3)),
+                "records_scanned": int(scan_stats.get("records_scanned", 0) or 0),
+                "results_returned": int(len(results)),
+                "throughput_results_per_s": float(round(float(len(results)) / elapsed_s, 3)),
+                "throughput_scanned_per_s": float(round(float(scan_stats.get("records_scanned", 0) or 0) / elapsed_s, 3)),
+                "latency_histogram_ms": dict(self._latency_hist_counts),
+                "search_calls_total": int(self._search_calls),
+                "records_scanned_total": int(self._records_scanned_total),
+                "results_returned_total": int(self._results_returned_total),
+            }
+        )
         self._last_trace = trace
         return results
+
+    def _record_perf(self, *, elapsed_ms: float, scanned: int, returned: int) -> None:
+        self._search_calls += 1
+        self._records_scanned_total += max(0, int(scanned))
+        self._results_returned_total += max(0, int(returned))
+        value = max(0.0, float(elapsed_ms))
+        bucket = "gt_5000ms"
+        for edge in self._latency_hist_edges_ms:
+            if value <= float(edge):
+                bucket = f"le_{int(edge)}ms"
+                break
+        self._latency_hist_counts[bucket] = int(self._latency_hist_counts.get(bucket, 0) or 0) + 1
 
     def _ensure_indexes(self) -> None:
         if self._indexes_ready:
@@ -124,7 +190,7 @@ class RetrievalStrategy(PluginBase):
             except Exception:
                 record = {}
             if isinstance(record, dict):
-                return str(record.get("source_id") or doc_id)
+                return str(record.get("source_id") or record.get("source_record_id") or doc_id)
             return str(doc_id)
 
         self._ensure_indexes()
@@ -318,31 +384,132 @@ def _within_window(ts: str | None, time_window: dict[str, Any] | None) -> bool:
 
 def _scan_metadata(
     store: Any,
-    query_lower: str,
+    query_text: str,
     time_window: dict[str, Any] | None,
     candidate_ids: set[str] | None = None,
+    *,
+    stats: dict[str, int] | None = None,
+    stop_after: int = 0,
 ) -> list[dict[str, Any]]:
+    query_lower = str(query_text or "").strip().lower()
+    if not query_lower:
+        return []
+    query_tokens = _query_tokens(query_lower)
     results: list[dict[str, Any]] = []
     record_ids = _store_keys_safe(store)
     if candidate_ids is not None:
         record_ids = [rid for rid in record_ids if rid in candidate_ids]
     for record_id in record_ids:
+        if isinstance(stats, dict):
+            stats["records_scanned"] = int(stats.get("records_scanned", 0) or 0) + 1
         record = _store_get_safe(store, record_id, {})
-        if not isinstance(record, dict):
-            continue
-        text = str(record.get("text", "")).lower()
-        if not query_lower or query_lower not in text:
-            continue
-        ts = record.get("ts_utc")
-        if not _within_window(ts, time_window):
-            continue
-        source_id = record.get("source_id") or record_id
-        derived_id = record_id if source_id != record_id else None
-        result = {"record_id": source_id, "score": 1.0, "ts_utc": ts}
-        if derived_id:
-            result["derived_id"] = derived_id
-        results.append(result)
+        row = _scan_metadata_match_row(
+            str(record_id),
+            record,
+            query_lower=query_lower,
+            query_tokens=query_tokens,
+            time_window=time_window,
+        )
+        if row:
+            results.append(row)
+            if int(stop_after) > 0 and len(results) >= int(stop_after):
+                break
     return results
+
+
+def _scan_metadata_latest(
+    store: Any,
+    query_text: str,
+    time_window: dict[str, Any] | None,
+    *,
+    limit: int,
+    record_types: Any,
+    stats: dict[str, int] | None = None,
+    stop_after: int = 0,
+) -> list[dict[str, Any]]:
+    cap = max(0, int(limit or 0))
+    if cap <= 0:
+        return []
+    if not hasattr(store, "latest"):
+        return []
+    record_type_list = _resolve_latest_scan_record_types(record_types)
+    if not record_type_list:
+        return []
+    per_type = max(1, cap // max(1, len(record_type_list)))
+    query_lower = str(query_text or "").strip().lower()
+    if not query_lower:
+        return []
+    query_tokens = _query_tokens(query_lower)
+    rows_out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for record_type in record_type_list:
+        try:
+            rows = store.latest(str(record_type), limit=per_type)
+        except Exception:
+            continue
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            record_id = str(row.get("record_id") or "").strip()
+            if not record_id or record_id in seen:
+                continue
+            seen.add(record_id)
+            if isinstance(stats, dict):
+                stats["records_scanned"] = int(stats.get("records_scanned", 0) or 0) + 1
+            record = row.get("record")
+            if not isinstance(record, dict):
+                record = _store_get_safe(store, record_id, {})
+            match = _scan_metadata_match_row(
+                record_id,
+                record,
+                query_lower=query_lower,
+                query_tokens=query_tokens,
+                time_window=time_window,
+            )
+            if match:
+                rows_out.append(match)
+                if int(stop_after) > 0 and len(rows_out) >= int(stop_after):
+                    return rows_out
+            if len(seen) >= cap:
+                break
+        if len(seen) >= cap:
+            break
+    return rows_out
+
+
+def _scan_metadata_match_row(
+    record_id: str,
+    record: Any,
+    *,
+    query_lower: str,
+    query_tokens: list[str],
+    time_window: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(record, dict):
+        return None
+    search_blob = _record_search_blob(record)
+    if not search_blob:
+        return None
+    matched, score, snippet = _match_query_in_blob(search_blob, query_lower=query_lower, query_tokens=query_tokens)
+    if not matched:
+        return None
+    ts = record.get("ts_utc")
+    if not _within_window(ts, time_window):
+        return None
+    source_id = record.get("source_id") or record.get("source_record_id") or record_id
+    derived_id = str(record_id) if str(source_id) != str(record_id) else None
+    result: dict[str, Any] = {
+        "record_id": str(source_id),
+        "score": float(score),
+        "ts_utc": ts,
+        "record_type": str(record.get("record_type") or ""),
+        "snippet": snippet,
+    }
+    if derived_id:
+        result["derived_id"] = derived_id
+    return result
 
 
 def _map_candidates(
@@ -406,7 +573,7 @@ def _map_candidates(
                 pass
         if not record:
             continue
-        source_id = record.get("source_id") or doc_id
+        source_id = record.get("source_id") or record.get("source_record_id") or doc_id
         source_record = record if source_id == doc_id else _store_get_safe(store, str(source_id), {})
         if not isinstance(source_record, dict):
             source_record = {}
@@ -544,6 +711,180 @@ def _store_get_safe(store: Any, record_id: str, default: Any) -> Any:
         return store.get(record_id, default)
     except Exception:
         return default
+
+
+_DEFAULT_LATEST_SCAN_RECORD_TYPES = (
+    "derived.text.ocr",
+    "derived.text.vlm",
+    "derived.sst.text",
+    "obs.uia.focus",
+    "obs.uia.context",
+    "obs.uia.operable",
+    "evidence.window.meta",
+    "evidence.uia.snapshot",
+    "evidence.capture.frame",
+    "derived.input.summary",
+)
+
+
+def _resolve_latest_scan_record_types(value: Any) -> list[str]:
+    if isinstance(value, list):
+        out: list[str] = []
+        for item in value:
+            item_str = str(item or "").strip()
+            if not item_str:
+                continue
+            out.append(item_str)
+        if out:
+            return out
+    return list(_DEFAULT_LATEST_SCAN_RECORD_TYPES)
+
+
+def _query_tokens(query_lower: str) -> list[str]:
+    tokens = [tok for tok in re.findall(r"[a-z0-9]{2,}", str(query_lower or "").lower()) if tok]
+    # Preserve stable order while removing duplicates.
+    seen: set[str] = set()
+    out: list[str] = []
+    for token in tokens:
+        if token in seen:
+            continue
+        seen.add(token)
+        out.append(token)
+    return out
+
+
+def _clip_text(text: Any, limit: int = 400) -> str:
+    s = str(text or "").strip()
+    if not s:
+        return ""
+    cap = max(16, int(limit))
+    if len(s) <= cap:
+        return s
+    return s[: cap - 3] + "..."
+
+
+def _append_node_text(parts: list[str], node: Any, *, max_name_chars: int = 180) -> None:
+    if not isinstance(node, dict):
+        return
+    for key in ("name", "role", "class", "aid", "eid", "hot"):
+        if key not in node:
+            continue
+        limit = max_name_chars if key == "name" else 96
+        value = _clip_text(node.get(key), limit=limit)
+        if value:
+            parts.append(value)
+
+
+def _record_search_blob(record: dict[str, Any]) -> str:
+    parts: list[str] = []
+
+    def _add(value: Any, *, limit: int = 320) -> None:
+        text = _clip_text(value, limit=limit)
+        if text:
+            parts.append(text)
+
+    record_type = str(record.get("record_type") or "")
+    _add(record_type, limit=128)
+    _add(record.get("text"), limit=4000)
+
+    window = record.get("window")
+    if isinstance(window, dict):
+        _add(window.get("title"), limit=400)
+        _add(window.get("process_path"), limit=260)
+        _add(window.get("pid"), limit=32)
+
+    window_ref = record.get("window_ref")
+    if isinstance(window_ref, dict):
+        _add(window_ref.get("record_id"), limit=200)
+        nested_window = window_ref.get("window")
+        if isinstance(nested_window, dict):
+            _add(nested_window.get("title"), limit=400)
+            _add(nested_window.get("process_path"), limit=260)
+            _add(nested_window.get("pid"), limit=32)
+
+    input_ref = record.get("input_ref")
+    if isinstance(input_ref, dict):
+        _add(input_ref.get("record_id"), limit=200)
+
+    meta = record.get("meta")
+    if isinstance(meta, dict):
+        _add(meta.get("window_title"), limit=420)
+        _add(meta.get("window_pid"), limit=32)
+        _add(meta.get("hwnd"), limit=64)
+        nodes = meta.get("uia_nodes")
+        if isinstance(nodes, list):
+            for node in nodes[:24]:
+                _append_node_text(parts, node)
+
+    if record_type == "evidence.uia.snapshot":
+        for section in ("focus_path", "context_peers", "operables"):
+            rows = record.get(section)
+            if not isinstance(rows, list):
+                continue
+            for node in rows[:24]:
+                _append_node_text(parts, node)
+
+    if record_type.startswith("obs.uia."):
+        nodes = record.get("nodes")
+        if isinstance(nodes, list):
+            for node in nodes[:24]:
+                _append_node_text(parts, node)
+
+    if record_type == "evidence.capture.frame":
+        uia_ref = record.get("uia_ref")
+        if isinstance(uia_ref, dict):
+            _add(uia_ref.get("record_id"), limit=220)
+            _add(uia_ref.get("content_hash"), limit=96)
+
+    if not parts:
+        try:
+            raw = json.dumps(record, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        except Exception:
+            raw = ""
+        _add(raw, limit=4000)
+
+    return "\n".join(part for part in parts if part).strip()
+
+
+def _match_query_in_blob(search_blob: str, *, query_lower: str, query_tokens: list[str]) -> tuple[bool, float, str]:
+    blob = str(search_blob or "").strip()
+    if not blob:
+        return False, 0.0, ""
+    blob_lower = blob.lower()
+    direct = bool(query_lower and query_lower in blob_lower)
+    token_hits: list[str] = [tok for tok in query_tokens if tok and tok in blob_lower]
+    if not direct and not token_hits:
+        return False, 0.0, ""
+    token_ratio = float(len(token_hits)) / float(len(query_tokens)) if query_tokens else 0.0
+    score = 1.0 + (0.5 * token_ratio) + (0.5 if direct else 0.0)
+    snippet = _build_match_snippet(blob, blob_lower=blob_lower, query_lower=query_lower, token_hits=token_hits)
+    return True, float(round(score, 6)), snippet
+
+
+def _build_match_snippet(blob: str, *, blob_lower: str, query_lower: str, token_hits: list[str]) -> str:
+    pivot = -1
+    needle = ""
+    if query_lower:
+        pivot = blob_lower.find(query_lower)
+        needle = query_lower
+    if pivot < 0:
+        for token in token_hits:
+            idx = blob_lower.find(token)
+            if idx >= 0:
+                pivot = idx
+                needle = token
+                break
+    if pivot < 0:
+        return _clip_text(blob, limit=260)
+    width = max(80, min(260, 80 + len(needle) * 2))
+    start = max(0, pivot - (width // 2))
+    end = min(len(blob), start + width)
+    snippet = blob[start:end].strip()
+    if start > 0:
+        snippet = "..." + snippet
+    if end < len(blob):
+        snippet = snippet + "..."
+    return snippet
 
 
 def _allow_vector(context: PluginContext, config: dict[str, Any]) -> tuple[bool, str]:

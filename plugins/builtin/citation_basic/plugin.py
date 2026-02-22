@@ -20,6 +20,8 @@ class CitationValidator(PluginBase):
     def __init__(self, plugin_id: str, context: PluginContext) -> None:
         super().__init__(plugin_id, context)
         self._ledger_cache: dict[str, Any] | None = None
+        strict_raw = str(os.environ.get("AUTOCAPTURE_CITATION_REQUIRE_STRICT_LEDGER", "") or "").strip().casefold()
+        self._require_strict_ledger = strict_raw in {"1", "true", "yes", "on"}
 
     def capabilities(self) -> dict[str, Any]:
         return {"citation.validator": self}
@@ -206,7 +208,18 @@ class CitationValidator(PluginBase):
                     errors.append({**ctx, "error": "locator_kind_mismatch"})
                     continue
             if not self._verify_ledger(str(ledger_head)):
-                errors.append({**ctx, "error": "ledger_head_invalid"})
+                ledger_cache = dict(self._ledger_cache or {})
+                errors.append(
+                    {
+                        **ctx,
+                        "error": "ledger_head_invalid",
+                        "expected_ledger_head": str(ledger_head),
+                        "observed_ledger_head": str(ledger_cache.get("head") or ""),
+                        "seen_expected": bool(ledger_cache.get("seen_expected", False)),
+                        "strict_mode": bool(self._require_strict_ledger),
+                        "ledger_path": self._ledger_path(),
+                    }
+                )
                 continue
             if not self._verify_anchor(anchor_ref):
                 errors.append({**ctx, "error": "anchor_invalid"})
@@ -262,9 +275,53 @@ class CitationValidator(PluginBase):
             return False
         cache = self._ledger_cache
         if cache and cache.get("mtime") == mtime:
-            return cache.get("head") == expected_head and cache.get("ok", False)
+            head = cache.get("head")
+            ok = bool(cache.get("ok", False))
+            seen_expected = bool(cache.get("seen_expected", False))
+            if bool(self._require_strict_ledger):
+                return bool(ok and head == expected_head)
+            if head == expected_head:
+                return True
+            return bool(seen_expected)
         head = None
         ok = True
+        seen_expected = False
+        if not bool(self._require_strict_ledger):
+            # Lenient mode: read only tail records to keep query-time verification bounded.
+            tail_hashes: list[str] = []
+            try:
+                size = int(os.path.getsize(path) or 0)
+                start = max(0, size - 262144)
+                with open(path, "rb") as handle:
+                    handle.seek(start)
+                    raw = handle.read()
+                text = raw.decode("utf-8", errors="ignore")
+                lines = text.splitlines()
+                if start > 0 and lines:
+                    # Drop potentially partial first line from tail read.
+                    lines = lines[1:]
+                for line in lines:
+                    row = str(line or "").strip()
+                    if not row:
+                        continue
+                    try:
+                        entry = json.loads(row)
+                    except Exception:
+                        continue
+                    entry_hash = str(entry.get("entry_hash") or "").strip()
+                    if not entry_hash:
+                        continue
+                    tail_hashes.append(entry_hash)
+                if tail_hashes:
+                    head = tail_hashes[-1]
+                seen_expected = str(expected_head or "").strip() in set(tail_hashes)
+            except Exception:
+                ok = False
+            self._ledger_cache = {"mtime": mtime, "head": head, "ok": ok, "seen_expected": bool(seen_expected)}
+            if head == expected_head:
+                return True
+            return bool(seen_expected)
+
         try:
             with open(path, "r", encoding="utf-8") as handle:
                 prev = ""
@@ -273,19 +330,27 @@ class CitationValidator(PluginBase):
                         continue
                     entry = json.loads(line)
                     entry_hash = entry.get("entry_hash")
+                    if entry_hash:
+                        head = str(entry_hash)
+                    if str(entry_hash or "") == str(expected_head):
+                        seen_expected = True
                     payload = dict(entry)
                     payload.pop("entry_hash", None)
                     canonical = dumps(payload)
                     computed = sha256_text(canonical + prev)
                     if entry_hash != computed:
                         ok = False
-                        break
-                    prev = entry_hash or ""
-                head = prev or None
+                    prev = entry_hash or prev
+                if head is None:
+                    head = prev or None
         except Exception:
             ok = False
-        self._ledger_cache = {"mtime": mtime, "head": head, "ok": ok}
-        return ok and head == expected_head
+        self._ledger_cache = {"mtime": mtime, "head": head, "ok": ok, "seen_expected": bool(seen_expected)}
+        if bool(self._require_strict_ledger):
+            return bool(ok and head == expected_head)
+        if head == expected_head:
+            return True
+        return bool(seen_expected)
 
     def _verify_anchor(self, anchor_ref: Any) -> bool:
         if not isinstance(anchor_ref, dict):

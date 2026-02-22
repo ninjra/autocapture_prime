@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 from typing import Any
 
+from autocapture_nx.kernel.paths import resolve_repo_path
 from autocapture_nx.inference.openai_compat import OpenAICompatClient
 from autocapture_nx.inference.vllm_endpoint import EXTERNAL_VLLM_BASE_URL, enforce_external_vllm_base_url
 from autocapture_nx.plugin_system.api import PluginBase, PluginContext
@@ -21,6 +23,45 @@ _SYSTEM_PROMPT = (
     "Every claim MUST be backed by at least one exact quote that appears verbatim in an evidence snippet. "
     "If you cannot answer from evidence, return an empty claims list."
 )
+_QUERY_CONTEXT_PRE_FALLBACK = (
+    "Use the user question exactly as written below; do not rewrite intent or entities."
+)
+_QUERY_CONTEXT_POST_FALLBACK = (
+    "After reading the question, answer only from cited evidence snippets and do not invent facts."
+)
+
+_DEFAULT_SYSTEM_PROMPT_PATH = "promptops/prompts/answer_synth_system.txt"
+_DEFAULT_QUERY_CONTEXT_PRE_PATH = "promptops/prompts/answer_synth_query_pre.txt"
+_DEFAULT_QUERY_CONTEXT_POST_PATH = "promptops/prompts/answer_synth_query_post.txt"
+
+
+def _load_prompt_file(path_hint: str, fallback: str) -> str:
+    candidate = str(path_hint or "").strip()
+    if not candidate:
+        return str(fallback or "")
+    paths: list[Path] = []
+    raw = Path(candidate)
+    paths.append(raw)
+    try:
+        repo_path = resolve_repo_path(candidate)
+        paths.append(repo_path)
+    except Exception:
+        pass
+    seen: set[str] = set()
+    for path in paths:
+        marker = str(path)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        try:
+            if not path.exists() or not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8").strip()
+            if text:
+                return text
+        except Exception:
+            continue
+    return str(fallback or "")
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -45,6 +86,18 @@ class VllmAnswerSynthesizer(PluginBase):
         self._timeout_s = float(cfg.get("timeout_s") or 30.0)
         self._max_tokens = int(cfg.get("max_tokens") or 512)
         self._max_evidence_chars = int(cfg.get("max_evidence_chars") or 2400)
+        self._system_prompt = _load_prompt_file(
+            str(cfg.get("system_prompt_path") or _DEFAULT_SYSTEM_PROMPT_PATH),
+            _SYSTEM_PROMPT,
+        )
+        self._query_context_pre = _load_prompt_file(
+            str(cfg.get("query_context_pre_path") or _DEFAULT_QUERY_CONTEXT_PRE_PATH),
+            _QUERY_CONTEXT_PRE_FALLBACK,
+        )
+        self._query_context_post = _load_prompt_file(
+            str(cfg.get("query_context_post_path") or _DEFAULT_QUERY_CONTEXT_POST_PATH),
+            _QUERY_CONTEXT_POST_FALLBACK,
+        )
         self._client: OpenAICompatClient | None = None
         self._promptops = None
         self._promptops_cfg = cfg.get("promptops", {}) if isinstance(cfg.get("promptops", {}), dict) else {}
@@ -109,7 +162,7 @@ class VllmAnswerSynthesizer(PluginBase):
                 break
         user_prompt_raw = (
             "Question:\n"
-            f"{q}\n\n"
+            f"{self._query_context_pre}\n{q}\n{self._query_context_post}\n\n"
             "Evidence snippets:\n"
             + ("\n".join(ev_lines) if ev_lines else "(none)\n")
             + "\n"
@@ -127,12 +180,15 @@ class VllmAnswerSynthesizer(PluginBase):
             "- at least 1 evidence item per claim\n"
             f"- at most {int(max_claims)} claims\n"
         )
-        system_prompt = _SYSTEM_PROMPT
+        system_prompt = self._system_prompt
         user_prompt = user_prompt_raw
         promptops_meta: dict[str, Any] = {
             "used": bool(self._promptops is not None),
             "applied": False,
             "strategy": str(self._promptops_cfg.get("model_strategy", "model_contract")),
+            "query_context_injected": bool(self._query_context_pre or self._query_context_post),
+            "query_context_pre_injected": bool(self._query_context_pre),
+            "query_context_post_injected": bool(self._query_context_post),
         }
         if self._promptops is not None:
             try:

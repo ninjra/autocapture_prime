@@ -49,6 +49,96 @@ def _sqlcipher_available() -> tuple[bool, str | None]:
     return True, None
 
 
+def _dedupe_paths(paths: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in paths:
+        candidate = str(raw or "").strip()
+        if not candidate:
+            continue
+        marker = os.path.normcase(os.path.abspath(candidate))
+        if marker in seen:
+            continue
+        seen.add(marker)
+        out.append(candidate)
+    return out
+
+
+def _probe_sqlite_readable(path: str) -> tuple[bool, str]:
+    target = str(path or "").strip()
+    if not target:
+        return False, "empty_path"
+    if not os.path.exists(target):
+        return False, "missing"
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = sqlite3.connect(target, timeout=0.5)
+        conn.execute("PRAGMA query_only = ON")
+        conn.execute("PRAGMA schema_version")
+        return True, "ok"
+    except Exception as exc:
+        return False, f"{type(exc).__name__}:{exc}"
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _resolve_metadata_path(
+    storage_cfg: dict[str, Any],
+    *,
+    data_dir: str,
+    legacy_meta_path: str,
+    logger: Any = None,
+    probe_readable: bool = True,
+) -> str:
+    configured_primary = str(storage_cfg.get("metadata_path") or "").strip()
+    primary = configured_primary or str(legacy_meta_path)
+    fallback_cfg = storage_cfg.get("metadata_fallback_paths")
+    configured_fallbacks = fallback_cfg if isinstance(fallback_cfg, list) else []
+    auto_fallbacks = [
+        os.path.join(str(data_dir), "metadata.live.db"),
+        os.path.join(os.path.dirname(primary), "metadata.live.db"),
+    ]
+    candidates = _dedupe_paths([primary] + [str(x) for x in configured_fallbacks] + auto_fallbacks)
+    if not candidates:
+        return primary
+
+    if not probe_readable:
+        if os.path.exists(primary):
+            return primary
+        for candidate in candidates[1:]:
+            if os.path.exists(candidate):
+                return candidate
+        return primary
+
+    primary_ok, primary_reason = _probe_sqlite_readable(primary)
+    if primary_ok:
+        return primary
+
+    for candidate in candidates[1:]:
+        ok, reason = _probe_sqlite_readable(candidate)
+        if not ok:
+            continue
+        if logger is not None:
+            try:
+                logger(
+                    "storage.metadata_path_fallback",
+                    {
+                        "primary_path": primary,
+                        "primary_probe_error": primary_reason,
+                        "fallback_path": candidate,
+                        "fallback_probe": reason,
+                    },
+                )
+            except Exception:
+                pass
+        return candidate
+    return primary
+
+
 def sqlcipher_available() -> bool:
     ok, _reason = _sqlcipher_available()
     return ok
@@ -1454,13 +1544,16 @@ class SQLCipherStoragePlugin(PluginBase):
         run_id = str(context.config.get("runtime", {}).get("run_id", "run"))
         fsync_policy = _FsyncPolicy.normalize(storage_cfg.get("fsync_policy"))
         require_decrypt = bool(encryption_required)
+        sqlcipher_cfg = storage_cfg.get("sqlcipher", {})
+        self._sqlcipher_enabled = bool(sqlcipher_cfg.get("enabled", False))
         legacy_meta_path = os.path.join(data_dir, "metadata", "metadata.db")
-        metadata_path = storage_cfg.get("metadata_path")
-        if metadata_path:
-            if not os.path.exists(metadata_path) and os.path.exists(legacy_meta_path):
-                metadata_path = legacy_meta_path
-        else:
-            metadata_path = legacy_meta_path
+        metadata_path = _resolve_metadata_path(
+            storage_cfg if isinstance(storage_cfg, dict) else {},
+            data_dir=str(data_dir),
+            legacy_meta_path=str(legacy_meta_path),
+            logger=getattr(self.context, "logger", None),
+            probe_readable=not self._sqlcipher_enabled,
+        )
         self._metadata_dir = storage_cfg.get("metadata_dir") or os.path.join(data_dir, "metadata")
         self._metadata_path = metadata_path
         self._data_dir = data_dir
@@ -1472,8 +1565,6 @@ class SQLCipherStoragePlugin(PluginBase):
         self._entity_persist = storage_cfg.get("entity_map", {}).get("persist", True)
         self._metadata_require_db = bool(storage_cfg.get("metadata_require_db", False))
         self._encryption_enabled = bool(encryption_enabled)
-        sqlcipher_cfg = storage_cfg.get("sqlcipher", {})
-        self._sqlcipher_enabled = bool(sqlcipher_cfg.get("enabled", False))
         self._lazy = _LazyStores(self._build_stores)
         self._metadata = _LazyProxy(self._lazy, "metadata")
         self._entity_map = _LazyProxy(self._lazy, "entity_map")

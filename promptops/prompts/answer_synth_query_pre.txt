@@ -1,0 +1,2 @@
+Treat the following user query as an evidence retrieval intent.
+Resolve wording ambiguity into concrete entities, times, and applications only when grounded in evidence.

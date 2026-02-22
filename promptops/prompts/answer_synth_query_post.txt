@@ -1,0 +1,2 @@
+When uncertain, prefer no claim over speculation.
+Return strict JSON only, with citations represented as exact quotes in evidence entries.

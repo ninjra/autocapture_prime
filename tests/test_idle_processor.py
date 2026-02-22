@@ -2,10 +2,11 @@ import io
 import tempfile
 import unittest
 import zipfile
+from pathlib import Path
 
 from autocapture.core.hashing import hash_text, normalize_text
 from autocapture_nx.kernel.derived_records import derived_text_record_id
-from autocapture_nx.processing.idle import IdleProcessor
+from autocapture_nx.processing.idle import IdleProcessor, _get_media_blob
 from autocapture.storage.retention import retention_eligibility_record_id
 from autocapture.storage.stage1 import stage1_complete_record_id
 
@@ -33,7 +34,7 @@ class _MetadataStore:
 
 class _CheckpointFailMetadataStore(_MetadataStore):
     def put(self, record_id: str, value: dict) -> None:
-        if record_id.endswith("/derived.idle.checkpoint"):
+        if record_id.endswith("idle.checkpoint"):
             raise ValueError("checkpoint_write_blocked")
         super().put(record_id, value)
 
@@ -54,6 +55,15 @@ class _Extractor:
     def extract(self, _frame: bytes):
         self.calls += 1
         return {"text": self._text}
+
+
+class _EmptyExtractor:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def extract(self, _frame: bytes):
+        self.calls += 1
+        return {"text": ""}
 
 
 class _EventBuilder:
@@ -89,6 +99,74 @@ class _System:
 
 
 class IdleProcessorTests(unittest.TestCase):
+    def test_media_blob_fallback_reads_orphan_legacy_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rel = "media/rid_test/evidence/2026/02/22/rid_test/evidence.capture.frame/1.blob"
+            legacy = Path(tmp) / "legacy" / "media.orphan_runs.20260222T000000Z" / rel[len("media/") :]
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            payload = b"\x89PNG\r\n\x1a\nlegacy"
+            legacy.write_bytes(payload)
+
+            blob = _get_media_blob(
+                _MediaStore({}),
+                "run1/evidence.capture.frame/1",
+                record={"blob_path": rel},
+                config={"storage": {"data_dir": tmp}},
+            )
+            self.assertEqual(blob, payload)
+
+    def test_idle_processor_uses_blob_path_fallback_when_media_store_misses(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = {
+                "runtime": {"run_id": "run1"},
+                "storage": {"data_dir": tmp},
+                "processing": {
+                    "idle": {
+                        "enabled": True,
+                        "auto_start": False,
+                        "max_items_per_run": 5,
+                        "max_seconds_per_run": 5,
+                        "sleep_ms": 1,
+                        "max_concurrency_cpu": 1,
+                        "max_concurrency_gpu": 0,
+                        "extractors": {"ocr": True, "vlm": False},
+                    },
+                    "sst": {"enabled": False},
+                },
+            }
+            record_id = "run1/evidence.capture.frame/1"
+            rel = "media/rid_test/evidence/2026/02/22/rid_test/evidence.capture.frame/1.blob"
+            legacy = Path(tmp) / "legacy" / "media.orphan_runs.20260222T000000Z" / rel[len("media/") :]
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            legacy.write_bytes(b"\x89PNG\r\n\x1a\nframe")
+
+            metadata = _MetadataStore()
+            metadata.put(
+                record_id,
+                {
+                    "record_type": "evidence.capture.frame",
+                    "ts_utc": "2026-02-22T00:00:00+00:00",
+                    "content_type": "image/png",
+                    "blob_path": rel,
+                },
+            )
+            events = _EventBuilder()
+            system = _System(config, metadata, _MediaStore({}), _Extractor("fallback ocr"), None, events)
+
+            processor = IdleProcessor(system)
+            stats = processor.process()
+
+            ocr_id = derived_text_record_id(
+                kind="ocr",
+                run_id="run1",
+                provider_id="ocr.engine",
+                source_id=record_id,
+                config=config,
+            )
+            self.assertIn(ocr_id, metadata.data)
+            self.assertGreaterEqual(stats.processed, 1)
+            self.assertEqual(stats.errors, 0)
+
     def test_checkpoint_id_is_stable_and_loads_legacy_record(self) -> None:
         config = {"runtime": {"run_id": "run1"}, "processing": {"idle": {"extractors": {"ocr": False, "vlm": False}}}}
         metadata = _MetadataStore()
@@ -105,7 +183,7 @@ class IdleProcessorTests(unittest.TestCase):
         system = _System(config, metadata, _MediaStore({}), None, None, _EventBuilder())
         processor = IdleProcessor(system)
 
-        self.assertEqual(processor._checkpoint_id(), "system/derived.idle.checkpoint")
+        self.assertEqual(processor._checkpoint_id(), "system/state.idle.checkpoint")
         checkpoint = processor._load_checkpoint()
         self.assertIsNotNone(checkpoint)
         self.assertEqual(checkpoint.last_record_id, "run1/evidence.capture.frame/123")
@@ -197,6 +275,57 @@ class IdleProcessorTests(unittest.TestCase):
             marker_id = retention_eligibility_record_id(record_id)
             self.assertIn(marker_id, metadata.data)
             self.assertEqual(metadata.data[marker_id].get("record_type"), "retention.eligible")
+
+    def test_idle_processor_persists_empty_extractor_outputs_as_placeholders(self) -> None:
+        with tempfile.TemporaryDirectory():
+            config = {
+                "runtime": {"run_id": "run1"},
+                "processing": {
+                    "idle": {
+                        "enabled": True,
+                        "auto_start": False,
+                        "max_items_per_run": 10,
+                        "max_seconds_per_run": 5,
+                        "sleep_ms": 1,
+                        "max_concurrency_cpu": 1,
+                        "max_concurrency_gpu": 0,
+                        "extractors": {"ocr": True, "vlm": False},
+                    },
+                    "sst": {"enabled": False},
+                },
+            }
+            metadata = _MetadataStore()
+            record_id = "run1/segment/0"
+            metadata.put(
+                record_id,
+                {
+                    "record_type": "evidence.capture.segment",
+                    "ts_utc": "2024-01-01T00:00:00+00:00",
+                    "container": {"type": "zip"},
+                },
+            )
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as zf:
+                zf.writestr("frame_0.jpg", b"frame")
+            media = _MediaStore({record_id: buf.getvalue()})
+            events = _EventBuilder()
+            empty = _EmptyExtractor()
+            system = _System(config, metadata, media, empty, None, events)
+
+            processor = IdleProcessor(system)
+            stats = processor.process()
+            self.assertEqual(empty.calls, 1)
+            self.assertGreaterEqual(stats.processed, 1)
+            ocr_id = derived_text_record_id(
+                kind="ocr",
+                run_id="run1",
+                provider_id="ocr.engine",
+                source_id=record_id,
+                config=config,
+            )
+            self.assertIn(ocr_id, metadata.data)
+            self.assertEqual(metadata.data[ocr_id].get("text"), "")
+            self.assertEqual(metadata.data[ocr_id].get("extraction_status"), "empty")
 
     def test_checkpoint_write_failure_is_fail_open(self) -> None:
         config = {
