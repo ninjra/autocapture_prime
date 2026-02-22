@@ -42,7 +42,7 @@ class RetrievalFullScanGuardTests(unittest.TestCase):
             config = {
                 "storage": {"lexical_path": str(Path(tmp) / "lexical.db"), "vector_path": str(Path(tmp) / "vector.db")},
                 "indexing": {"vector_backend": "sqlite"},
-                "retrieval": {"vector_enabled": False},
+                "retrieval": {"vector_enabled": False, "latest_scan_on_miss": False},
             }
             ctx = PluginContext(config=config, get_capability=lambda _k: store, logger=lambda _m: None)
             retrieval = RetrievalStrategy("retrieval", ctx)

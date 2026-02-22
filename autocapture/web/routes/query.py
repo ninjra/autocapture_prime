@@ -20,6 +20,10 @@ class PopupQueryRequest(BaseModel):
     max_citations: int = 8
 
 
+_POPUP_FORBIDDEN_BLOCK_REASON = "query_compute_disabled"
+_POPUP_FORBIDDEN_STATE = "not_available_yet"
+
+
 def _compact_citations(result: dict[str, Any], max_items: int) -> list[dict[str, Any]]:
     answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
     claims = answer.get("claims", []) if isinstance(answer.get("claims", []), list) else []
@@ -53,6 +57,18 @@ def _compact_citations(result: dict[str, Any], max_items: int) -> list[dict[str,
     return out
 
 
+def _popup_has_corpus_hits(result: dict[str, Any]) -> bool:
+    answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
+    claims = answer.get("claims", []) if isinstance(answer.get("claims", []), list) else []
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        citations = claim.get("citations", []) if isinstance(claim.get("citations", []), list) else []
+        if citations:
+            return True
+    return False
+
+
 def _popup_payload(query: str, result: dict[str, Any], max_citations: int) -> dict[str, Any]:
     answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
     display = answer.get("display", {}) if isinstance(answer.get("display", {}), dict) else {}
@@ -71,18 +87,29 @@ def _popup_payload(query: str, result: dict[str, Any], max_citations: int) -> di
             confidence_pct = value * 100.0 if 0.0 <= value <= 1.0 else value
     except Exception:
         confidence_pct = None
+    state = str(answer.get("state") or "")
+    blocked_reason = str(extraction.get("blocked_reason") or "")
     requires_processing = bool(extraction.get("blocked", False))
+    # Guard popup contract: once corpus-backed claims exist, response must not
+    # degrade into upstream "not available" placeholders.
+    if _popup_has_corpus_hits(result) and (
+        state.strip().casefold() == _POPUP_FORBIDDEN_STATE
+        or blocked_reason.strip().casefold() == _POPUP_FORBIDDEN_BLOCK_REASON
+    ):
+        state = "ok"
+        blocked_reason = ""
+        requires_processing = False
     return {
         "ok": bool(result.get("ok", True)),
         "query": str(query),
         "query_run_id": str(trace.get("query_run_id") or ""),
-        "state": str(answer.get("state") or ""),
+        "state": state,
         "summary": summary,
         "bullets": bullets,
         "topic": str(display.get("topic") or ""),
         "confidence_pct": confidence_pct,
         "needs_processing": requires_processing,
-        "processing_blocked_reason": str(extraction.get("blocked_reason") or ""),
+        "processing_blocked_reason": blocked_reason,
         "scheduled_extract_job_id": str(result.get("scheduled_extract_job_id") or extraction.get("scheduled_extract_job_id") or ""),
         "latency_ms_total": float(stage_ms.get("total") or 0.0),
         "citations": _compact_citations(result, max_items=max_citations),

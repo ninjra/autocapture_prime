@@ -426,6 +426,120 @@ class RunAdvanced10ExpectedEvalTests(unittest.TestCase):
                 rc = mod.main(["--report", str(report), "--cases", str(cases), "--output", str(root / "out.json")])
             self.assertEqual(rc, 2)
 
+    def test_main_runtime_mode_rejects_report_conflict(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            report = root / "report.json"
+            report.write_text(json.dumps({"config_dir": "/tmp/cfg", "data_dir": "/tmp/data"}), encoding="utf-8")
+            cases = root / "cases.json"
+            cases.write_text("[]", encoding="utf-8")
+            with mock.patch.object(mod, "_repo_root", return_value=root):
+                rc = mod.main(
+                    [
+                        "--report",
+                        str(report),
+                        "--config-dir",
+                        "/tmp/cfg",
+                        "--data-dir",
+                        "/tmp/data",
+                        "--cases",
+                        str(cases),
+                    ]
+                )
+            self.assertEqual(rc, 2)
+
+    def test_main_runtime_mode_uses_config_data_without_report(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            cfg = root / "cfg"
+            data = root / "data"
+            cfg.mkdir(parents=True, exist_ok=True)
+            data.mkdir(parents=True, exist_ok=True)
+            cases = root / "cases.json"
+            cases.write_text("[]", encoding="utf-8")
+            output = root / "out.json"
+            source_report = root / "runtime_source.json"
+            with (
+                mock.patch.object(mod, "_repo_root", return_value=root),
+                mock.patch.object(mod, "check_external_vllm_ready", return_value={"ok": True, "models": ["m"]}),
+            ):
+                rc = mod.main(
+                    [
+                        "--config-dir",
+                        str(cfg),
+                        "--data-dir",
+                        str(data),
+                        "--source-report",
+                        str(source_report),
+                        "--cases",
+                        str(cases),
+                        "--output",
+                        str(output),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            parsed = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(str(parsed.get("report") or ""), str(source_report))
+            self.assertEqual(str(parsed.get("source_report") or ""), str(source_report))
+
+    def test_main_strict_runtime_mode_uses_profile_sha(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "config" / "profiles").mkdir(parents=True, exist_ok=True)
+            profile = root / "config" / "profiles" / "golden_full.json"
+            profile.write_text(json.dumps({"profile": "golden"}), encoding="utf-8")
+            cfg = root / "cfg"
+            data = root / "data"
+            cfg.mkdir(parents=True, exist_ok=True)
+            data.mkdir(parents=True, exist_ok=True)
+            cases = root / "cases.json"
+            cases.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "X1",
+                            "question": "q1",
+                            "requires_vlm": False,
+                            "expected_contains_all": ["ok"],
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            output = root / "out.json"
+            with (
+                mock.patch.object(mod, "_repo_root", return_value=root),
+                mock.patch.object(mod, "check_external_vllm_ready", return_value={"ok": True, "models": ["m"]}),
+                mock.patch.object(
+                    mod,
+                    "_run_query",
+                    return_value={
+                        "ok": True,
+                        "answer": {"state": "ok", "display": {"summary": "ok", "bullets": []}},
+                        "processing": {"query_trace": {"stage_ms": {"total": 1.0}}},
+                    },
+                ),
+            ):
+                rc = mod.main(
+                    [
+                        "--config-dir",
+                        str(cfg),
+                        "--data-dir",
+                        str(data),
+                        "--cases",
+                        str(cases),
+                        "--metadata-only",
+                        "--strict-all",
+                        "--output",
+                        str(output),
+                    ]
+                )
+            self.assertNotEqual(rc, 2)
+            self.assertTrue(output.exists())
+
     def test_main_can_continue_when_vllm_unavailable_if_allowed(self) -> None:
         mod = _load_module()
         with tempfile.TemporaryDirectory() as tmp:

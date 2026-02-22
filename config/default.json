@@ -783,6 +783,7 @@
     "default_pack": [
       "builtin.anchor.basic",
       "builtin.answer.basic",
+      "builtin.answer.synth_vllm_localhost",
       "builtin.backpressure.basic",
       "builtin.capture.audio.windows",
       "builtin.capture.screenshot.windows",
@@ -841,6 +842,7 @@
     "enabled": {
       "builtin.anchor.basic": true,
       "builtin.answer.basic": true,
+      "builtin.answer.synth_vllm_localhost": true,
       "builtin.backpressure.basic": true,
       "builtin.capture.audio.windows": false,
       "builtin.capture.basic": false,
@@ -912,6 +914,29 @@
       "builtin.window.metadata.windows": false
     },
     "settings": {
+      "__golden_profile": {
+        "enable_synthesizer": true
+      },
+      "builtin.answer.synth_vllm_localhost": {
+        "base_url": "http://127.0.0.1:8000/v1",
+        "model": "internvl3_5_8b",
+        "system_prompt_path": "promptops/prompts/answer_synth_system.txt",
+        "query_context_pre_path": "promptops/prompts/answer_synth_query_pre.txt",
+        "query_context_post_path": "promptops/prompts/answer_synth_query_post.txt",
+        "promptops": {
+          "enabled": true,
+          "mode": "auto_apply",
+          "model_strategy": "model_contract",
+          "metrics": {
+            "enabled": true
+          },
+          "review": {
+            "enabled": true,
+            "on_failure_only": true,
+            "persist_prompts": true
+          }
+        }
+      },
       "builtin.processing.sst.uia_context": {
         "dataroot": "/mnt/d/autocapture",
         "allow_latest_snapshot_fallback": true,
@@ -1735,6 +1760,9 @@
     "media_dir": "data/media",
     "metadata_require_db": true,
     "metadata_path": "data/metadata.db",
+    "metadata_fallback_paths": [
+      "data/metadata.live.db"
+    ],
     "state_tape_path": "data/state/state_tape.db",
     "state_vector_path": "data/state/state_vector.db",
     "audit_db_path": "data/audit/kernel_audit.db",

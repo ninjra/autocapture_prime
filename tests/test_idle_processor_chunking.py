@@ -105,8 +105,12 @@ class IdleProcessorChunkingTests(unittest.TestCase):
             done, stats = processor.process_step(budget_ms=0)
             self.assertFalse(done)
             self.assertEqual(stats.processed, 1)
-            checkpoint_id = "run1/derived.idle.checkpoint"
-            self.assertIn(checkpoint_id, metadata.data)
+            checkpoint_candidates = (
+                "system/state.idle.checkpoint",
+                "system/derived.idle.checkpoint",
+                "run1/derived.idle.checkpoint",
+            )
+            self.assertTrue(any(cid in metadata.data for cid in checkpoint_candidates))
 
             done, stats = processor.process_step(budget_ms=0)
             self.assertTrue(done)

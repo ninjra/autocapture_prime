@@ -87,6 +87,9 @@
       "source_guard_applied": true,
       "source_rejections": [],
       "source_rejections_count": 0
+    },
+    "retrieval": {
+      "trace": []
     }
   },
   "provenance": {

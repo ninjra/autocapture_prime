@@ -35,6 +35,25 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _truthy(value: str | None) -> bool:
+    raw = str(value or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _expected_total_from_contract(path: Path, fallback: int = 20) -> int:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            strict = payload.get("strict", {})
+            if isinstance(strict, dict):
+                value = strict.get("expected_total")
+                if value is not None:
+                    return int(value)
+    except Exception:
+        pass
+    return int(fallback)
+
+
 def _default_manifest(py: str) -> list[GateStep]:
     steps: list[GateStep] = [
         GateStep("gate_phase0", [py, "tools/gate_phase0.py"], "artifacts/phase0/gate_phase0.json"),
@@ -72,6 +91,41 @@ def _default_manifest(py: str) -> list[GateStep]:
         ),
         GateStep("run_mod021_low_resource", ["bash", "tools/run_mod021_low_resource.sh"], None),
     ]
+    real_corpus_disabled = _truthy(os.environ.get("REAL_CORPUS_STRICT_DISABLED"))
+    real_corpus_report = os.environ.get("REAL_CORPUS_STRICT_REPORT", "").strip()
+    real_corpus_contract = os.environ.get("REAL_CORPUS_STRICT_CONTRACT", "docs/contracts/real_corpus_expected_answers_v1.json").strip()
+    real_corpus_advanced = os.environ.get("REAL_CORPUS_ADVANCED_JSON", "").strip()
+    real_corpus_generic = os.environ.get("REAL_CORPUS_GENERIC_JSON", "").strip()
+    real_out = Path(real_corpus_report) if real_corpus_report else Path("artifacts/real_corpus_gauntlet/latest/strict_matrix.json")
+    contract_path = Path(real_corpus_contract)
+    expected_total = int(os.environ.get("REAL_CORPUS_STRICT_EXPECTED_TOTAL", "").strip() or _expected_total_from_contract(contract_path, fallback=20))
+    if not real_corpus_disabled:
+        readiness_cmd = [py, "tools/run_real_corpus_readiness.py", "--contract", str(contract_path), "--out", str(real_out)]
+        if real_corpus_advanced:
+            readiness_cmd.extend(["--advanced-json", real_corpus_advanced])
+        if real_corpus_generic:
+            readiness_cmd.extend(["--generic-json", real_corpus_generic])
+        steps.append(
+            GateStep(
+                "run_real_corpus_readiness",
+                readiness_cmd,
+                str(real_out),
+            )
+        )
+        steps.append(
+            GateStep(
+                "gate_real_corpus_strict",
+                [
+                    py,
+                    "tools/gate_real_corpus_strict.py",
+                    "--report",
+                    str(real_out),
+                    "--expected-total",
+                    str(expected_total),
+                ],
+                "artifacts/real_corpus/gate_real_corpus_strict.json",
+            )
+        )
     q40_report = os.environ.get("Q40_STRICT_REPORT", "").strip()
     if q40_report:
         steps.append(
@@ -79,6 +133,32 @@ def _default_manifest(py: str) -> list[GateStep]:
                 "gate_q40_strict",
                 [py, "tools/gate_q40_strict.py", "--report", q40_report],
                 "artifacts/q40/gate_q40_strict.json",
+            )
+        )
+    if _truthy(os.environ.get("REAL_CORPUS_DETERMINISM_ENABLED")):
+        det_runs = int(os.environ.get("REAL_CORPUS_DETERMINISM_RUNS", "5").strip() or 5)
+        det_out = os.environ.get("REAL_CORPUS_DETERMINISM_OUT", "artifacts/real_corpus/gate_real_corpus_determinism.json").strip()
+        det_cmd = [
+            py,
+            "tools/gate_real_corpus_determinism.py",
+            "--runs",
+            str(max(1, det_runs)),
+            "--expected-total",
+            str(expected_total),
+            "--out",
+            str(det_out),
+            "--contract",
+            str(contract_path),
+        ]
+        if real_corpus_advanced:
+            det_cmd.extend(["--advanced-json", real_corpus_advanced])
+        if real_corpus_generic:
+            det_cmd.extend(["--generic-json", real_corpus_generic])
+        steps.append(
+            GateStep(
+                "gate_real_corpus_determinism",
+                det_cmd,
+                str(det_out),
             )
         )
     return steps

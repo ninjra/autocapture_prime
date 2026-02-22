@@ -98,6 +98,15 @@ def _startup_profile_enabled() -> bool:
     return os.getenv("AUTOCAPTURE_STARTUP_PROFILE", "").lower() in {"1", "true", "yes"}
 
 
+def _env_true(name: str, default: bool = False) -> bool:
+    raw = str(os.environ.get(name) or "").strip().casefold()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
 class StartupProfiler:
     def __init__(self, *, enabled: bool) -> None:
         self.enabled = bool(enabled)
@@ -607,7 +616,10 @@ class Kernel:
                 builder = None
             if builder is not None:
                 run_id = str(getattr(builder, "run_id", run_id) or run_id)
-                summary = self._summarize_journal(run_id)
+                if _env_true("AUTOCAPTURE_SKIP_SHUTDOWN_JOURNAL_SUMMARY", default=False):
+                    summary = {"records_processed": 0, "errors": 0, "warnings": 0, "summary_skipped": 1}
+                else:
+                    summary = self._summarize_journal(run_id)
                 try:
                     self._record_storage_manifest_final(builder, summary, duration_ms, ts_utc)
                 except Exception:

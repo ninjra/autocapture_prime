@@ -98,8 +98,24 @@ class QueryArbitrationTests(unittest.TestCase):
         append_metric.assert_called()
         self.assertEqual(append_metric.call_args.kwargs.get("method"), "classic_arbitrated")
 
-    def test_metadata_only_skips_secondary_path(self) -> None:
+    def test_metadata_only_still_allows_secondary_by_default(self) -> None:
         system = _System()
+        weak_state = _result("", state="no_evidence", coverage=0.0)
+        strong_classic = _result("Observation: quorum_message_collaborator=Nikki M", coverage=1.0)
+        with (
+            mock.patch.dict("os.environ", {"AUTOCAPTURE_QUERY_METADATA_ONLY": "1"}, clear=False),
+            mock.patch.object(query_mod, "run_state_query", return_value=weak_state),
+            mock.patch.object(query_mod, "run_query_without_state", return_value=strong_classic) as run_classic,
+            mock.patch.object(query_mod, "_append_query_metric"),
+        ):
+            out = query_mod.run_query(system, "summarize current work session")
+        arb = out.get("processing", {}).get("arbitration", {})
+        self.assertGreaterEqual(int(run_classic.call_count), 1)
+        self.assertNotEqual(str(arb.get("secondary_reason") or ""), "metadata_only_skip_secondary")
+
+    def test_metadata_only_can_skip_secondary_when_flag_enabled(self) -> None:
+        system = _System()
+        system.config["processing"]["state_layer"]["arbitration"] = {"skip_secondary_when_metadata_only": True}
         weak_state = _result("", state="no_evidence", coverage=0.0)
         with (
             mock.patch.dict("os.environ", {"AUTOCAPTURE_QUERY_METADATA_ONLY": "1"}, clear=False),

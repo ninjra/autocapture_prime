@@ -11,6 +11,8 @@
     "max_evidence_chars": 2400,
     "max_tokens": 512,
     "model": "internvl3_5_8b",
+    "query_context_post_path": "promptops/prompts/answer_synth_query_post.txt",
+    "query_context_pre_path": "promptops/prompts/answer_synth_query_pre.txt",
     "promptops": {
       "enabled": true,
       "metrics": {
@@ -25,6 +27,7 @@
         "persist_prompts": true
       }
     },
+    "system_prompt_path": "promptops/prompts/answer_synth_system.txt",
     "timeout_s": 30.0
   },
   "depends_on": [],
@@ -72,6 +75,12 @@
       "model": {
         "type": "string"
       },
+      "query_context_post_path": {
+        "type": "string"
+      },
+      "query_context_pre_path": {
+        "type": "string"
+      },
       "promptops": {
         "additionalProperties": true,
         "properties": {
@@ -100,6 +109,9 @@
           }
         },
         "type": "object"
+      },
+      "system_prompt_path": {
+        "type": "string"
       },
       "timeout_s": {
         "type": "number"

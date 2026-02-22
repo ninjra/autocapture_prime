@@ -9,6 +9,7 @@ from plugins.builtin.storage_sqlcipher.plugin import (
     EncryptedSQLiteStore,
     PlainSQLiteStore,
     SQLCipherStoragePlugin,
+    _resolve_metadata_path,
 )
 
 
@@ -21,6 +22,15 @@ class _TestProvider:
 
 
 class SQLCipherStoreTests(unittest.TestCase):
+    @staticmethod
+    def _create_metadata_db(path: str) -> None:
+        conn = sqlite3.connect(path)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS metadata (id TEXT PRIMARY KEY, payload TEXT NOT NULL, record_type TEXT, ts_utc TEXT, run_id TEXT)"
+        )
+        conn.commit()
+        conn.close()
+
     def test_sqlcipher_put_get_or_skip(self):
         with tempfile.TemporaryDirectory() as tmp:
             config = {
@@ -231,6 +241,52 @@ class SQLCipherStoreTests(unittest.TestCase):
             self.assertEqual((row or ("", "", "", ""))[0], "")
             self.assertTrue(bool((row or ("", "", "", ""))[1]))
             self.assertTrue(bool((row or ("", "", "", ""))[2]))
+
+    def test_resolve_metadata_path_uses_primary_when_readable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            primary = os.path.join(tmp, "metadata.db")
+            fallback = os.path.join(tmp, "metadata.live.db")
+            self._create_metadata_db(primary)
+            self._create_metadata_db(fallback)
+            out = _resolve_metadata_path(
+                {"metadata_path": primary, "metadata_fallback_paths": [fallback]},
+                data_dir=tmp,
+                legacy_meta_path=primary,
+            )
+            self.assertEqual(out, primary)
+
+    def test_resolve_metadata_path_uses_fallback_when_primary_unreadable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            primary = os.path.join(tmp, "metadata.db")
+            fallback = os.path.join(tmp, "metadata.live.db")
+            self._create_metadata_db(primary)
+            self._create_metadata_db(fallback)
+            real_connect = sqlite3.connect
+
+            def flaky_connect(target, *args, **kwargs):
+                if os.path.abspath(str(target)) == os.path.abspath(primary):
+                    raise sqlite3.OperationalError("disk I/O error")
+                return real_connect(target, *args, **kwargs)
+
+            with patch("plugins.builtin.storage_sqlcipher.plugin.sqlite3.connect", side_effect=flaky_connect):
+                out = _resolve_metadata_path(
+                    {"metadata_path": primary, "metadata_fallback_paths": [fallback]},
+                    data_dir=tmp,
+                    legacy_meta_path=primary,
+                )
+            self.assertEqual(out, fallback)
+
+    def test_resolve_metadata_path_uses_existing_fallback_when_primary_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            primary = os.path.join(tmp, "metadata.db")
+            fallback = os.path.join(tmp, "metadata.live.db")
+            self._create_metadata_db(fallback)
+            out = _resolve_metadata_path(
+                {"metadata_path": primary, "metadata_fallback_paths": [fallback]},
+                data_dir=tmp,
+                legacy_meta_path=primary,
+            )
+            self.assertEqual(out, fallback)
 
 
 if __name__ == "__main__":

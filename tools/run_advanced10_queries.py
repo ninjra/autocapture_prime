@@ -227,6 +227,14 @@ def _contractize_query_failure(result: dict[str, Any], *, query: str, case_id: s
     reason = "query_failed"
     if "timeout" in raw_error.casefold():
         reason = "query_timeout"
+    latency_total_ms = 0.0
+    if reason == "query_timeout":
+        m = re.search(r"query_timeout:([0-9]+(?:\.[0-9]+)?)s", raw_error, flags=re.IGNORECASE)
+        if m:
+            try:
+                latency_total_ms = max(0.0, float(m.group(1)) * 1000.0)
+            except Exception:
+                latency_total_ms = 0.0
     digest = hashlib.sha256(f"{case_id}|{query}".encode("utf-8")).hexdigest()[:16]
     query_run_id = f"qry_degraded_{digest}"
     summary = f"Not available yet ({reason})."
@@ -248,6 +256,11 @@ def _contractize_query_failure(result: dict[str, Any], *, query: str, case_id: s
             "claims": [],
         },
         "processing": {
+            "query_contract_metrics": {
+                "query_extractor_launch_total": 0,
+                "query_schedule_extract_requests_total": 0,
+                "query_raw_media_reads_total": 0,
+            },
             "extraction": {
                 "blocked": True,
                 "blocked_reason": reason,
@@ -257,7 +270,12 @@ def _contractize_query_failure(result: dict[str, Any], *, query: str, case_id: s
                 "query_run_id": query_run_id,
                 "method": "metadata_only_degraded",
                 "winner": "",
-                "stage_ms": {"total": 0.0},
+                "query_contract_metrics": {
+                    "query_extractor_launch_total": 0,
+                    "query_schedule_extract_requests_total": 0,
+                    "query_raw_media_reads_total": 0,
+                },
+                "stage_ms": {"total": float(latency_total_ms)},
             },
             "attribution": {"providers": []},
         },
@@ -337,6 +355,30 @@ def _canonical_signature(result: dict[str, Any], summary: str, bullets: list[str
     }
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
+
+
+def _query_contract_metrics(result: dict[str, Any]) -> dict[str, int]:
+    processing = result.get("processing", {}) if isinstance(result.get("processing", {}), dict) else {}
+    trace = processing.get("query_trace", {}) if isinstance(processing.get("query_trace", {}), dict) else {}
+    metrics = trace.get("query_contract_metrics", {}) if isinstance(trace.get("query_contract_metrics", {}), dict) else {}
+    if not metrics:
+        metrics = (
+            processing.get("query_contract_metrics", {})
+            if isinstance(processing.get("query_contract_metrics", {}), dict)
+            else {}
+        )
+    if not metrics:
+        extraction = processing.get("extraction", {}) if isinstance(processing.get("extraction", {}), dict) else {}
+        metrics = {
+            "query_extractor_launch_total": extraction.get("query_extractor_launch_total", 0),
+            "query_schedule_extract_requests_total": extraction.get("query_schedule_extract_requests_total", 0),
+            "query_raw_media_reads_total": extraction.get("query_raw_media_reads_total", 0),
+        }
+    return {
+        "query_extractor_launch_total": int(metrics.get("query_extractor_launch_total", 0) or 0),
+        "query_schedule_extract_requests_total": int(metrics.get("query_schedule_extract_requests_total", 0) or 0),
+        "query_raw_media_reads_total": int(metrics.get("query_raw_media_reads_total", 0) or 0),
+    }
 
 
 def _flatten_expected(prefix: str, value: Any, out: list[tuple[str, str]]) -> None:
@@ -1013,6 +1055,13 @@ def main(argv: list[str] | None = None) -> int:
     root = _repo_root()
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", default="", help="Path to report.json (defaults to latest single-image report).")
+    parser.add_argument("--config-dir", default="", help="Runtime config dir for real-corpus mode (report-free).")
+    parser.add_argument("--data-dir", default="", help="Runtime data dir for real-corpus mode (report-free).")
+    parser.add_argument(
+        "--source-report",
+        default="",
+        help="Provenance source path to stamp in output rows for real-corpus mode (defaults to <data-dir>/metadata.db).",
+    )
     parser.add_argument("--cases", default="docs/query_eval_cases_advanced20.json", help="Path to advanced case list.")
     parser.add_argument("--profile", default="config/profiles/golden_full.json", help="Expected profile JSON path.")
     parser.add_argument("--output", default="", help="Optional output file path.")
@@ -1067,19 +1116,51 @@ def main(argv: list[str] | None = None) -> int:
         lock_retries=int(args.lock_retries),
     )
 
-    report_path = Path(str(args.report or "").strip()) if str(args.report or "").strip() else _latest_report(root)
-    if not report_path.exists():
-        print(json.dumps({"ok": False, "error": "report_not_found", "report": str(report_path)}))
+    runtime_cfg = str(args.config_dir or "").strip() or str(os.environ.get("AUTOCAPTURE_CONFIG_DIR") or "").strip()
+    runtime_data = str(args.data_dir or "").strip() or str(os.environ.get("AUTOCAPTURE_DATA_DIR") or "").strip()
+    use_runtime_mode = bool(runtime_cfg and runtime_data)
+    if use_runtime_mode and str(args.report or "").strip():
+        print(json.dumps({"ok": False, "error": "invalid_args_report_and_runtime_mode_conflict"}))
         return 2
-    report_raw = report_path.read_text(encoding="utf-8")
-    report = json.loads(report_raw)
-    source_report_sha256 = hashlib.sha256(report_raw.encode("utf-8")).hexdigest()
-    source_report_run_id = str(report.get("run_id") or "").strip()
-    cfg = str(report.get("config_dir") or "").strip()
-    data = str(report.get("data_dir") or "").strip()
-    if not cfg or not data:
-        print(json.dumps({"ok": False, "error": "report_missing_config_or_data", "report": str(report_path)}))
-        return 2
+
+    source_report_path_str = ""
+    source_report_sha256 = ""
+    source_report_run_id = ""
+    report: dict[str, Any] = {}
+    report_path = Path("")
+    if use_runtime_mode:
+        cfg = str(runtime_cfg)
+        data = str(runtime_data)
+        source_report_path_str = str(args.source_report or "").strip() or str((Path(data) / "metadata.db"))
+        source_report_path = Path(source_report_path_str).expanduser()
+        if source_report_path.exists() and source_report_path.is_file():
+            source_report_sha256 = hashlib.sha256(source_report_path.read_bytes()).hexdigest()
+        else:
+            source_report_sha256 = hashlib.sha256(source_report_path_str.encode("utf-8")).hexdigest()
+        report = {
+            "run_id": "runtime",
+            "config_dir": cfg,
+            "data_dir": data,
+            "plugins": {},
+            "determinism_contract": {},
+            "profile_sha256": "",
+            "image_path": "",
+        }
+    else:
+        report_path = Path(str(args.report or "").strip()) if str(args.report or "").strip() else _latest_report(root)
+        if not report_path.exists():
+            print(json.dumps({"ok": False, "error": "report_not_found", "report": str(report_path)}))
+            return 2
+        report_raw = report_path.read_text(encoding="utf-8")
+        report = json.loads(report_raw)
+        source_report_sha256 = hashlib.sha256(report_raw.encode("utf-8")).hexdigest()
+        source_report_run_id = str(report.get("run_id") or "").strip()
+        cfg = str(report.get("config_dir") or "").strip()
+        data = str(report.get("data_dir") or "").strip()
+        if not cfg or not data:
+            print(json.dumps({"ok": False, "error": "report_missing_config_or_data", "report": str(report_path)}))
+            return 2
+        source_report_path_str = str(report_path)
     if not str(os.environ.get("AUTOCAPTURE_VLM_API_KEY") or "").strip():
         api_key = _configured_vlm_api_key(Path(cfg))
         if api_key:
@@ -1106,7 +1187,7 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "ok": False,
                     "error": "required_plugin_gate_failed",
-                    "report": str(report_path),
+                    "report": str(source_report_path_str),
                     "required_gate": required_gate,
                 }
             )
@@ -1128,13 +1209,15 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     profile_sha = hashlib.sha256(profile_path.read_bytes()).hexdigest() if profile_path.exists() else ""
     report_profile_sha = str(report.get("profile_sha256") or "").strip()
+    if args.strict_all and use_runtime_mode and not report_profile_sha:
+        report_profile_sha = str(profile_sha)
     if args.strict_all and not report_profile_sha:
         print(
             json.dumps(
                 {
                     "ok": False,
                     "error": "report_missing_profile_sha256",
-                    "report": str(report_path),
+                    "report": str(source_report_path_str),
                 }
             )
         )
@@ -1289,9 +1372,17 @@ def main(argv: list[str] | None = None) -> int:
                     "method": "skip",
                     "winner": "",
                     "stage_ms": {},
+                    "query_extractor_launch_total": 0,
+                    "query_schedule_extract_requests_total": 0,
+                    "query_raw_media_reads_total": 0,
+                    "query_contract_metrics": {
+                        "query_extractor_launch_total": 0,
+                        "query_schedule_extract_requests_total": 0,
+                        "query_raw_media_reads_total": 0,
+                    },
                     "providers": [],
                     "hard_vlm": {},
-                    "source_report": str(report_path),
+                    "source_report": str(source_report_path_str),
                     "source_report_sha256": str(source_report_sha256),
                     "source_report_run_id": str(source_report_run_id),
                     "determinism_repro": {
@@ -1332,7 +1423,7 @@ def main(argv: list[str] | None = None) -> int:
             determinism=determinism,
             metadata_only=bool(args.metadata_only),
         )
-        if bool(args.metadata_only) and (not bool(result.get("ok", False))) and str(case_id or "").upper().startswith("GQ"):
+        if bool(args.metadata_only) and (not bool(result.get("ok", False))):
             result = _contractize_query_failure(result, query=question, case_id=str(case_id or "GQ"))
         summary, bullets = _display(result)
         signatures = [_canonical_signature(result, summary, bullets)]
@@ -1355,7 +1446,7 @@ def main(argv: list[str] | None = None) -> int:
                 determinism=determinism,
                 metadata_only=bool(args.metadata_only),
             )
-            if bool(args.metadata_only) and (not bool(rerun.get("ok", False))) and str(case_id or "").upper().startswith("GQ"):
+            if bool(args.metadata_only) and (not bool(rerun.get("ok", False))):
                 rerun = _contractize_query_failure(rerun, query=question, case_id=str(case_id or "GQ"))
             rsum, rbul = _display(rerun)
             signatures.append(_canonical_signature(rerun, rsum, rbul))
@@ -1411,6 +1502,7 @@ def main(argv: list[str] | None = None) -> int:
         trace = processing.get("query_trace", {}) if isinstance(processing.get("query_trace", {}), dict) else {}
         attribution = processing.get("attribution", {}) if isinstance(processing.get("attribution", {}), dict) else {}
         answer = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
+        query_contract = _query_contract_metrics(result)
         rows.append(
             {
                 "id": case_id,
@@ -1428,9 +1520,13 @@ def main(argv: list[str] | None = None) -> int:
                 "method": str(trace.get("method") or ""),
                 "winner": str(trace.get("winner") or ""),
                 "stage_ms": trace.get("stage_ms", {}),
+                "query_extractor_launch_total": int(query_contract.get("query_extractor_launch_total", 0) or 0),
+                "query_schedule_extract_requests_total": int(query_contract.get("query_schedule_extract_requests_total", 0) or 0),
+                "query_raw_media_reads_total": int(query_contract.get("query_raw_media_reads_total", 0) or 0),
+                "query_contract_metrics": query_contract,
                 "providers": attribution.get("providers", []),
                 "hard_vlm": processing.get("hard_vlm", {}),
-                "source_report": str(report_path),
+                "source_report": str(source_report_path_str),
                 "source_report_sha256": str(source_report_sha256),
                 "source_report_run_id": str(source_report_run_id),
                 "determinism_repro": repro_check,
@@ -1459,11 +1555,22 @@ def main(argv: list[str] | None = None) -> int:
         if int(evaluated_total) != int(len(rows)):
             strict_failure_reasons.append("strict_evaluated_mismatch")
     strict_ok = len(strict_failure_reasons) == 0
+    query_contract_totals = {
+        "query_extractor_launch_total": int(
+            sum(int((row.get("query_extractor_launch_total", 0) or 0)) for row in rows if isinstance(row, dict))
+        ),
+        "query_schedule_extract_requests_total": int(
+            sum(int((row.get("query_schedule_extract_requests_total", 0) or 0)) for row in rows if isinstance(row, dict))
+        ),
+        "query_raw_media_reads_total": int(
+            sum(int((row.get("query_raw_media_reads_total", 0) or 0)) for row in rows if isinstance(row, dict))
+        ),
+    }
     out = {
         "ok": bool(all_rows_passed and (strict_ok if bool(args.strict_all) else True)),
         "generated_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "report": str(report_path),
-        "source_report": str(report_path),
+        "report": str(source_report_path_str),
+        "source_report": str(source_report_path_str),
         "source_report_sha256": str(source_report_sha256),
         "source_report_run_id": str(source_report_run_id),
         "config_dir": cfg,
@@ -1483,6 +1590,7 @@ def main(argv: list[str] | None = None) -> int:
         "strict_all": bool(args.strict_all),
         "strict_ok": bool(strict_ok),
         "strict_failure_reasons": [str(x) for x in strict_failure_reasons],
+        "query_contract_totals": query_contract_totals,
         "rows": rows,
     }
     case_prefix = f"advanced{len(rows)}"

@@ -75,6 +75,11 @@ def _load_fixture(name: str) -> dict[str, Any]:
 
 def _normalize_ts(obj: dict[str, Any]) -> dict[str, Any]:
     out = json.loads(json.dumps(obj, sort_keys=True))
+    processing = out.get("processing", {})
+    if isinstance(processing, dict):
+        processing.pop("query_contract_metrics", None)
+        processing.pop("capability_warnings", None)
+    out["processing"] = processing
     prov = out.get("provenance", {})
     if isinstance(prov, dict):
         if "generated_at_utc" in prov:

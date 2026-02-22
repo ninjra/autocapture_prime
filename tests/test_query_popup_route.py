@@ -178,6 +178,78 @@ class QueryPopupRouteTests(unittest.TestCase):
                 else:
                     os.environ["AUTOCAPTURE_DATA_DIR"] = original_data
 
+    def test_popup_route_forbids_query_compute_disabled_when_claims_exist(self) -> None:
+        TestClient, get_app, load_or_create_token = self._require_fastapi_stack()
+        with tempfile.TemporaryDirectory() as tmp:
+            original_config = os.environ.get("AUTOCAPTURE_CONFIG_DIR")
+            original_data = os.environ.get("AUTOCAPTURE_DATA_DIR")
+            os.environ["AUTOCAPTURE_CONFIG_DIR"] = tmp
+            os.environ["AUTOCAPTURE_DATA_DIR"] = tmp
+            app = None
+            try:
+                app = get_app()
+                token = load_or_create_token(app.state.facade.config).token
+
+                def _fake_query(_text: str, *, schedule_extract: bool = False):
+                    self.assertFalse(schedule_extract)
+                    return {
+                        "ok": True,
+                        "scheduled_extract_job_id": "",
+                        "answer": {
+                            "state": "not_available_yet",
+                            "display": {"summary": "Song: Sunlight", "bullets": ["source: siriusxm window"]},
+                            "claims": [
+                                {
+                                    "text": "Song: Sunlight",
+                                    "citations": [
+                                        {
+                                            "record_id": "run1/derived.text.vlm/1",
+                                            "record_type": "derived.text.vlm",
+                                            "source": "hard_vlm.direct",
+                                            "span_kind": "record",
+                                            "offset_start": 0,
+                                            "offset_end": 14,
+                                            "stale": False,
+                                            "stale_reason": "",
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                        "processing": {
+                            "extraction": {"blocked": True, "blocked_reason": "query_compute_disabled"},
+                            "query_trace": {"query_run_id": "qry_popup_3", "stage_ms": {"total": 19.0}},
+                        },
+                    }
+
+                app.state.facade.query = _fake_query
+                client = TestClient(app)
+                resp = client.post(
+                    "/api/query/popup",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={"query": "what song is playing"},
+                )
+                self.assertEqual(resp.status_code, 200)
+                payload = resp.json()
+                self.assertEqual(payload.get("state"), "ok")
+                self.assertEqual(payload.get("needs_processing"), False)
+                self.assertEqual(payload.get("processing_blocked_reason"), "")
+                self.assertGreaterEqual(len(payload.get("citations", [])), 1)
+            finally:
+                try:
+                    if app is not None:
+                        app.state.facade.shutdown()
+                except Exception:
+                    pass
+                if original_config is None:
+                    os.environ.pop("AUTOCAPTURE_CONFIG_DIR", None)
+                else:
+                    os.environ["AUTOCAPTURE_CONFIG_DIR"] = original_config
+                if original_data is None:
+                    os.environ.pop("AUTOCAPTURE_DATA_DIR", None)
+                else:
+                    os.environ["AUTOCAPTURE_DATA_DIR"] = original_data
+
 
 if __name__ == "__main__":
     unittest.main()

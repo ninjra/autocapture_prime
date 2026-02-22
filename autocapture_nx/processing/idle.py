@@ -13,16 +13,20 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 
+from autocapture.core.hashing import TEXT_NORM_VERSION, hash_text, normalize_text
 from autocapture_nx.kernel.derived_records import (
     build_derivation_edge,
     build_artifact_manifest,
+    build_span_ref,
     build_text_record,
     artifact_manifest_id,
     derived_text_record_id,
     derivation_edge_id,
+    model_identity,
 )
 from autocapture_nx.kernel.frame_evidence import ensure_frame_evidence
 from autocapture.indexing.factory import build_indexes
@@ -284,9 +288,112 @@ def _extract_frame(blob: bytes, record: dict[str, Any], *, config: dict[str, Any
         return None
 
 
-def _get_media_blob(store: Any, record_id: str) -> bytes | None:
+def _resolve_data_dir(config: dict[str, Any] | None) -> str:
+    if isinstance(config, dict):
+        storage_cfg = config.get("storage", {}) if isinstance(config.get("storage", {}), dict) else {}
+        candidate = str(storage_cfg.get("data_dir") or "").strip()
+        if candidate:
+            return candidate
+    candidate = str(os.environ.get("AUTOCAPTURE_DATA_DIR") or "").strip()
+    if candidate:
+        return candidate
+    return "data"
+
+
+@lru_cache(maxsize=8)
+def _legacy_media_roots(dataroot: str) -> tuple[str, ...]:
+    root = os.path.abspath(str(dataroot or "data"))
+    legacy_root = os.path.join(root, "legacy")
+    if not os.path.isdir(legacy_root):
+        return ()
+    out: list[str] = []
+    try:
+        for name in os.listdir(legacy_root):
+            if not str(name).startswith("media.orphan_runs."):
+                continue
+            candidate = os.path.join(legacy_root, str(name))
+            if os.path.isdir(candidate):
+                out.append(candidate)
+    except OSError:
+        return ()
+    out.sort(reverse=True)
+    return tuple(out)
+
+
+@lru_cache(maxsize=4096)
+def _legacy_root_for_media_prefix(dataroot: str, media_prefix: str) -> str:
+    prefix = str(media_prefix or "").strip().strip("/")
+    if not prefix:
+        return ""
+    for legacy_root in _legacy_media_roots(dataroot):
+        try:
+            if os.path.isdir(os.path.join(legacy_root, prefix)):
+                return legacy_root
+        except OSError:
+            continue
+    return ""
+
+
+def _record_blob_path(record: dict[str, Any] | None) -> str:
+    if not isinstance(record, dict):
+        return ""
+    for key in ("blob_path", "media_path", "media_relpath"):
+        value = record.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _candidate_blob_paths(*, dataroot: str, blob_path: str) -> list[str]:
+    raw = str(blob_path or "").strip()
+    if not raw:
+        return []
+    normalized = raw.replace("\\", "/").strip()
+    if not normalized:
+        return []
+    if os.path.isabs(normalized):
+        return [normalized]
+    rel = normalized.lstrip("./")
+    candidates = [os.path.join(dataroot, rel)]
+    if rel.startswith("media/"):
+        orphan_rel = rel[len("media/") :]
+        prefix = orphan_rel.split("/", 1)[0]
+        legacy_root = _legacy_root_for_media_prefix(dataroot, prefix)
+        if legacy_root:
+            candidates.append(os.path.join(legacy_root, orphan_rel))
+    return candidates
+
+
+def _read_blob_path(path: str) -> bytes | None:
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read()
+        return data if data else None
+    except OSError:
+        return None
+
+
+def _get_media_blob(
+    store: Any,
+    record_id: str,
+    *,
+    record: dict[str, Any] | None = None,
+    config: dict[str, Any] | None = None,
+) -> bytes | None:
+    blob_path = _record_blob_path(record)
+    if blob_path:
+        dataroot = _resolve_data_dir(config)
+        for candidate in _candidate_blob_paths(dataroot=dataroot, blob_path=blob_path):
+            blob = _read_blob_path(candidate)
+            if blob:
+                return blob
+        # Hypervisor sidecar contract publishes blob_path as the canonical frame location.
+        # Avoid expensive store scans on misses when the path does not exist.
+        return None
     if hasattr(store, "get"):
-        return store.get(record_id)
+        blob = store.get(record_id)
+        if isinstance(blob, (bytes, bytearray)) and blob:
+            return bytes(blob)
     if hasattr(store, "get_stream"):
         handle = store.get_stream(record_id)
         if hasattr(handle, "read"):
@@ -296,7 +403,8 @@ def _get_media_blob(store: Any, record_id: str) -> bytes | None:
                     handle.close()
                 except Exception:
                     pass
-            return data
+            if isinstance(data, (bytes, bytearray)) and data:
+                return bytes(data)
     return None
 
 
@@ -382,10 +490,12 @@ class IdleProcessor:
         return None
 
     def _checkpoint_id(self) -> str:
-        return "system/derived.idle.checkpoint"
+        return "system/state.idle.checkpoint"
 
     def _checkpoint_candidates(self) -> list[str]:
         candidates = [self._checkpoint_id()]
+        # Legacy global checkpoint id used prior to strict evidence/schema gates.
+        candidates.append("system/derived.idle.checkpoint")
         runtime_run_id = str(self._config.get("runtime", {}).get("run_id", "") or "").strip()
         if runtime_run_id:
             candidates.append(f"{runtime_run_id}/derived.idle.checkpoint")
@@ -400,15 +510,27 @@ class IdleProcessor:
             out.append(candidate)
         return out
 
+    def _checkpoint_store(self) -> Any | None:
+        # Persist checkpoints in the stage1 derived overlay when available so
+        # strict evidence schema validation on ingest metadata does not block
+        # idle progress tracking.
+        store = self._stage1_store
+        if store is not None and hasattr(store, "get"):
+            return store
+        return self._metadata
+
     def _load_checkpoint(self) -> IdleCheckpoint | None:
         if self._checkpoint_loaded:
             return self._checkpoint
         self._checkpoint_loaded = True
-        if self._metadata is None:
+        store = self._checkpoint_store()
+        if store is None:
             return None
         for checkpoint_id in self._checkpoint_candidates():
-            record = self._metadata.get(checkpoint_id, None)
-            if not (isinstance(record, dict) and record.get("record_type") == "derived.idle.checkpoint"):
+            record = store.get(checkpoint_id, None)
+            if not isinstance(record, dict):
+                continue
+            if str(record.get("record_type") or "") not in {"derived.idle.checkpoint", "system.idle.checkpoint"}:
                 continue
             last_record_id = record.get("last_record_id")
             processed_total = int(record.get("processed_total", 0) or 0)
@@ -419,25 +541,26 @@ class IdleProcessor:
         return self._checkpoint
 
     def _store_checkpoint(self, last_record_id: str, processed_total: int) -> None:
-        if self._metadata is None:
+        store = self._checkpoint_store()
+        if store is None:
             return
         ts_utc = datetime.now(timezone.utc).isoformat()
         run_id = str(self._config.get("runtime", {}).get("run_id", "") or "").strip() or "run"
         payload = {
-            "record_type": "derived.idle.checkpoint",
+            "record_type": "system.idle.checkpoint",
             "run_id": run_id,
             "ts_utc": ts_utc,
             "last_record_id": last_record_id,
             "processed_total": int(processed_total),
         }
         try:
-            if hasattr(self._metadata, "put_replace"):
+            if hasattr(store, "put_replace"):
                 try:
-                    self._metadata.put_replace(self._checkpoint_id(), payload)
+                    store.put_replace(self._checkpoint_id(), payload)
                 except Exception:
-                    self._metadata.put(self._checkpoint_id(), payload)
+                    store.put(self._checkpoint_id(), payload)
             else:
-                self._metadata.put(self._checkpoint_id(), payload)
+                store.put(self._checkpoint_id(), payload)
         except Exception as exc:
             if self._logger is not None:
                 self._logger.log("idle.checkpoint_error", {"error": str(exc)})
@@ -904,6 +1027,7 @@ class IdleProcessor:
         should_abort: Callable[[], bool] | None,
         expired: Callable[[], bool],
         pipeline_enabled: bool,
+        pipeline_required_for_completion: bool,
         stats: IdleProcessStats,
     ) -> tuple[list[_IdleWorkItem], str | None, bool, int]:
         metadata = self._metadata
@@ -942,7 +1066,7 @@ class IdleProcessor:
             stats.scanned += 1
             if max_items > 0 and planned >= max_items:
                 break
-            blob = _get_media_blob(self._media, record_id)
+            blob = _get_media_blob(self._media, record_id, record=record, config=self._config)
             if not blob:
                 stats.errors += 1
                 last_record_id = source_record_id
@@ -1022,7 +1146,7 @@ class IdleProcessor:
                 frame_id = f"{run_id}/derived.sst.frame/{frame_component}"
                 if _is_missing_metadata_record(metadata.get(frame_id)):
                     needs_pipeline = True
-            if missing_count == 0 and not needs_pipeline:
+            if missing_count == 0 and (not needs_pipeline or not pipeline_required_for_completion):
                 self._mark_stage1_retention(record_id, record, reason="already_processed", stats=stats)
                 last_record_id = source_record_id
                 continue
@@ -1073,6 +1197,39 @@ class IdleProcessor:
             return 0
         processed = 0
         scheduled_records: set[str] = set()
+
+        def _placeholder_payload(*, item: _IdleWorkItem, provider_id: str, status: str, response: Any) -> dict[str, Any]:
+            normalized = normalize_text("")
+            identity = model_identity(kind, provider_id, self._config)
+            payload: dict[str, Any] = {
+                "schema_version": 1,
+                "record_type": f"derived.text.{kind}",
+                "run_id": (item.record.get("run_id") or item.record_id.split("/", 1)[0]),
+                "ts_utc": item.ts_utc,
+                "text": "",
+                "text_normalized": normalized,
+                "text_norm_version": TEXT_NORM_VERSION,
+                "source_id": item.record_id,
+                "parent_evidence_id": item.record_id,
+                "span_ref": build_span_ref(item.record, item.record_id),
+                "method": kind,
+                "provider_id": provider_id,
+                "model_id": identity["model_id"],
+                "model_digest": identity["model_digest"],
+                "model_provider": identity["model_provider"],
+                "parameters": identity["parameters"],
+                "content_hash": hash_text(normalized),
+                "extraction_status": status,
+            }
+            if isinstance(response, dict):
+                backend = str(response.get("backend") or "").strip()
+                model_error = str(response.get("model_error") or "").strip()
+                if backend:
+                    payload["extractor_backend"] = backend
+                if model_error:
+                    payload["extractor_model_error"] = model_error
+            return payload
+
         for provider_id, extractor in providers:
             if should_abort and should_abort():
                 break
@@ -1116,12 +1273,30 @@ class IdleProcessor:
                 for (item, derived_id), response in zip(batch, outputs):
                     if should_abort and should_abort():
                         return processed
-                    if expired():
-                        return processed
+                    stop_after_item = expired()
                     if max_items > 0 and stats.processed >= max_items:
                         return processed
                     if response is None:
                         stats.errors += 1
+                        payload = _placeholder_payload(
+                            item=item,
+                            provider_id=str(provider_id),
+                            status="error",
+                            response=None,
+                        )
+                        payload["extractor_error"] = "null_response"
+                        stored = self._store_derived_text(
+                            derived_id=derived_id,
+                            payload=payload,
+                            record_id=item.record_id,
+                            record=item.record,
+                            kind=kind,
+                            stats=stats,
+                        )
+                        if stored:
+                            processed += 1
+                        if stop_after_item or expired():
+                            return processed
                         continue
                     texts = _response_texts(response)
                     if not texts:
@@ -1138,6 +1313,24 @@ class IdleProcessor:
                                 )
                             except Exception:
                                 pass
+                        payload = _placeholder_payload(
+                            item=item,
+                            provider_id=str(provider_id),
+                            status="empty",
+                            response=response,
+                        )
+                        stored = self._store_derived_text(
+                            derived_id=derived_id,
+                            payload=payload,
+                            record_id=item.record_id,
+                            record=item.record,
+                            kind=kind,
+                            stats=stats,
+                        )
+                        if stored:
+                            processed += 1
+                        if stop_after_item or expired():
+                            return processed
                         continue
                     text = "\n\n".join(texts)
                     payload = build_text_record(
@@ -1150,6 +1343,8 @@ class IdleProcessor:
                         ts_utc=item.ts_utc,
                     )
                     if not payload:
+                        if stop_after_item or expired():
+                            return processed
                         continue
                     stored = self._store_derived_text(
                         derived_id=derived_id,
@@ -1191,6 +1386,8 @@ class IdleProcessor:
                             _ = append_fact_line(self._config, rel_path="model_outputs.ndjson", payload=out_payload)
                         except Exception:
                             pass
+                    if stop_after_item or expired():
+                        return processed
         return processed
 
     def _materialize_deferred_vlm(
@@ -1303,9 +1500,10 @@ class IdleProcessor:
         if max_gpu <= 0:
             allow_vlm = False
         sst_cfg = self._config.get("processing", {}).get("sst", {})
-        pipeline_enabled = bool(sst_cfg.get("enabled", True)) and self._pipeline is not None
+        pipeline_enabled = bool(sst_cfg.get("enabled", True)) and callable(getattr(self._pipeline, "process_record", None))
         pipeline_allow_ocr = bool(sst_cfg.get("allow_ocr", allow_ocr))
         pipeline_allow_vlm = bool(sst_cfg.get("allow_vlm", allow_vlm))
+        pipeline_required_for_completion = bool(idle_cfg.get("pipeline_required_for_stage1", False))
         if max_gpu <= 0:
             pipeline_allow_vlm = False
         start_mono = time.monotonic()
@@ -1317,12 +1515,28 @@ class IdleProcessor:
         if budget_ms and budget_ms > 0:
             budget_mono = start_mono + (budget_ms / 1000.0)
             budget_wall = start_wall + (budget_ms / 1000.0)
+        collect_budget_fraction = float(idle_cfg.get("collect_budget_fraction", 0.4) or 0.4)
+        if collect_budget_fraction < 0.1:
+            collect_budget_fraction = 0.1
+        if collect_budget_fraction > 0.95:
+            collect_budget_fraction = 0.95
+        collect_budget_mono = None
+        if budget_mono is not None:
+            collect_budget_mono = start_mono + ((budget_mono - start_mono) * collect_budget_fraction)
 
         def _expired() -> bool:
             now = time.monotonic()
             if now >= deadline_mono:
                 return True
             if budget_mono is not None and now >= budget_mono:
+                return True
+            return False
+
+        def _collect_expired() -> bool:
+            now = time.monotonic()
+            if now >= deadline_mono:
+                return True
+            if collect_budget_mono is not None and now >= collect_budget_mono:
                 return True
             return False
 
@@ -1354,18 +1568,6 @@ class IdleProcessor:
         processed_total = checkpoint.processed_total if checkpoint else 0
         last_record_id: str | None = None
         aborted = False
-        if stage1_backfill_enabled and start_index > 0 and stage1_backfill_max_records > 0 and not _expired():
-            self._backfill_stage1_markers(
-                evidence_ids=evidence_ids,
-                start_index=start_index,
-                allow_ocr=allow_ocr,
-                allow_vlm=allow_vlm,
-                pipeline_enabled=pipeline_enabled,
-                max_records=stage1_backfill_max_records,
-                should_abort=should_abort,
-                expired=_expired,
-                stats=stats,
-            )
         ocr_providers = _capability_providers(self._ocr, "ocr.engine") if (allow_ocr and self._ocr is not None) else []
         vlm_providers = _capability_providers(self._vlm, "vision.extractor") if (allow_vlm and self._vlm is not None) else []
         items, last_record_id, aborted, _planned = self._collect_work_items(
@@ -1378,11 +1580,12 @@ class IdleProcessor:
             intelligent_enabled=intelligent_enabled,
             defer_vlm_on_hash_repeat=defer_vlm_on_hash_repeat,
             hash_repeat_window=hash_repeat_window,
-            should_abort=should_abort,
-            expired=_expired,
-            pipeline_enabled=pipeline_enabled,
-            stats=stats,
-        )
+                should_abort=should_abort,
+                expired=_collect_expired,
+                pipeline_enabled=pipeline_enabled,
+                pipeline_required_for_completion=pipeline_required_for_completion,
+                stats=stats,
+            )
         stats.records_planned = int(len(items))
         if items and not aborted and not _expired():
             max_cpu = int(idle_cfg.get("max_concurrency_cpu", 1) or 1)
@@ -1490,12 +1693,30 @@ class IdleProcessor:
                     item.record if isinstance(item.record, dict) else {},
                     allow_ocr,
                     allow_vlm,
-                    pipeline_enabled,
+                    pipeline_enabled if pipeline_required_for_completion else False,
                 ):
                     continue
                 self._mark_stage1_retention(item.record_id, item.record, reason="idle_processed", stats=stats)
                 stats.records_completed += 1
             last_record_id = last_record_id or (items[-1].source_id if items else None)
+        if (
+            stage1_backfill_enabled
+            and start_index > 0
+            and stage1_backfill_max_records > 0
+            and not aborted
+            and not _expired()
+        ):
+            self._backfill_stage1_markers(
+                evidence_ids=evidence_ids,
+                start_index=start_index,
+                allow_ocr=allow_ocr,
+                allow_vlm=allow_vlm,
+                pipeline_enabled=pipeline_enabled if pipeline_required_for_completion else False,
+                max_records=stage1_backfill_max_records,
+                should_abort=should_abort,
+                expired=_expired,
+                stats=stats,
+            )
 
         state_done = True
         state_cfg = self._config.get("processing", {}).get("state_layer", {}) if isinstance(self._config, dict) else {}
