@@ -225,6 +225,92 @@ class RepairQueryabilityOfflineTests(unittest.TestCase):
             reasons = set(payload.get("failure_reasons", []))
             self.assertIn("queryable_ratio_below_threshold", reasons)
 
+    def test_repair_fills_missing_retention_when_stage1_marker_already_exists(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            db_path = root / "metadata.db"
+            derived_db = root / "derived" / "stage1_derived.db"
+            out = root / "repair.json"
+            _init_db(db_path)
+
+            frame_id = "run2/evidence.capture.frame/1"
+            snapshot_id = "run2/evidence.uia.snapshot/1"
+            _put(
+                db_path,
+                frame_id,
+                {
+                    "schema_version": 1,
+                    "record_type": "evidence.capture.frame",
+                    "run_id": "run2",
+                    "ts_utc": "2026-02-20T00:00:00Z",
+                    "width": 320,
+                    "height": 180,
+                    "blob_path": "captures/f.png",
+                    "content_hash": "frame_hash_2",
+                    # missing input_ref on purpose (legacy frame shape)
+                    "uia_ref": {"record_id": snapshot_id, "content_hash": "uia_hash_2"},
+                },
+            )
+            _put(db_path, snapshot_id, _snapshot(snapshot_id, "uia_hash_2"))
+
+            # Seed stage1/UIA docs in derived but no retention marker.
+            derived_db.parent.mkdir(parents=True, exist_ok=True)
+            _init_db(derived_db)
+            from autocapture.storage.stage1 import stage1_complete_record_id
+            _put(
+                derived_db,
+                stage1_complete_record_id(frame_id),
+                {
+                    "schema_version": 1,
+                    "record_type": "derived.ingest.stage1.complete",
+                    "run_id": "run2",
+                    "ts_utc": "2026-02-20T00:00:01Z",
+                    "source_record_id": frame_id,
+                    "source_record_type": "evidence.capture.frame",
+                    "uia_record_id": snapshot_id,
+                    "uia_content_hash": "uia_hash_2",
+                    "complete": True,
+                },
+            )
+            from autocapture_nx.ingest.uia_obs_docs import _frame_uia_expected_ids
+            for kind, doc_id in _frame_uia_expected_ids(snapshot_id).items():
+                _put(
+                    derived_db,
+                    doc_id,
+                    {
+                        "schema_version": 1,
+                        "record_type": kind,
+                        "run_id": "run2",
+                        "ts_utc": "2026-02-20T00:00:01Z",
+                        "source_record_id": frame_id,
+                        "uia_record_id": snapshot_id,
+                        "uia_content_hash": "uia_hash_2",
+                        "hwnd": "0x123",
+                        "window_title": "Inbox",
+                        "window_pid": 4242,
+                        "bboxes": [[0, 0, 10, 10]],
+                    },
+                )
+
+            rc = mod.main(
+                [
+                    "--db",
+                    str(db_path),
+                    "--derived-db",
+                    str(derived_db),
+                    "--dataroot",
+                    str(root),
+                    "--out",
+                    str(out),
+                ]
+            )
+            self.assertEqual(rc, 0)
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            repaired = int(payload.get("backfill_stage1_retention", {}).get("retention_repaired_missing", 0) or 0)
+            self.assertGreaterEqual(repaired, 1)
+            self.assertEqual(_count(derived_db, "retention.eligible"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

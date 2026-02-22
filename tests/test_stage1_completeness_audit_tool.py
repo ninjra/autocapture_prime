@@ -268,6 +268,97 @@ class Stage1CompletenessAuditToolTests(unittest.TestCase):
             issues = out.get("issue_counts", {}) if isinstance(out.get("issue_counts"), dict) else {}
             self.assertGreater(int(issues.get("obs_uia_focus_missing_or_invalid", 0) or 0), 0)
 
+    def test_shared_uia_snapshot_allows_obs_source_from_sibling_frame(self) -> None:
+        mod = _load_module("tools/soak/stage1_completeness_audit.py", "stage1_completeness_audit_tool_3b")
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "metadata.db"
+            derived = Path(td) / "derived" / "stage1_derived.db"
+            derived.parent.mkdir(parents=True, exist_ok=True)
+            conn = _open_db(db)
+            dconn = _open_db(derived)
+            uia_record_id = "run3b/evidence.uia.snapshot/1"
+            frame_a = "run3b/evidence.capture.frame/1"
+            frame_b = "run3b/evidence.capture.frame/2"
+            for frame_id, ts in ((frame_a, "2026-02-21T03:00:00Z"), (frame_b, "2026-02-21T03:00:10Z")):
+                _put(
+                    conn,
+                    frame_id,
+                    {
+                        "record_type": "evidence.capture.frame",
+                        "run_id": "run3b",
+                        "ts_utc": ts,
+                        "blob_path": f"media/{frame_id.split('/')[-1]}.png",
+                        "content_hash": f"frame_hash_{frame_id.split('/')[-1]}",
+                        "uia_ref": {"record_id": uia_record_id, "content_hash": "uia_hash_3b"},
+                        "input_ref": {"record_id": f"run3b/evidence.input.keyboard/{frame_id.split('/')[-1]}"},
+                    },
+                )
+                _put(
+                    dconn,
+                    stage1_complete_record_id(frame_id),
+                    {
+                        "record_type": "derived.ingest.stage1.complete",
+                        "run_id": "run3b",
+                        "ts_utc": ts,
+                        "source_record_id": frame_id,
+                        "source_record_type": "evidence.capture.frame",
+                        "complete": True,
+                        "uia_record_id": uia_record_id,
+                        "uia_content_hash": "uia_hash_3b",
+                    },
+                )
+                _put(
+                    dconn,
+                    retention_eligibility_record_id(frame_id),
+                    {
+                        "record_type": "retention.eligible",
+                        "run_id": "run3b",
+                        "ts_utc": ts,
+                        "source_record_id": frame_id,
+                        "source_record_type": "evidence.capture.frame",
+                        "stage1_contract_validated": True,
+                        "quarantine_pending": False,
+                    },
+                )
+            _put(
+                conn,
+                uia_record_id,
+                {
+                    "record_type": "evidence.uia.snapshot",
+                    "run_id": "run3b",
+                    "ts_utc": "2026-02-21T03:00:00Z",
+                    "record_id": uia_record_id,
+                },
+            )
+            for kind, doc_id in _frame_uia_expected_ids(uia_record_id).items():
+                _put(
+                    dconn,
+                    doc_id,
+                    {
+                        "record_type": kind,
+                        "run_id": "run3b",
+                        "ts_utc": "2026-02-21T03:00:00Z",
+                        # Deterministic doc id is keyed by uia_record_id, so source links
+                        # can point at one sibling frame when a snapshot is reused.
+                        "source_record_id": frame_a,
+                        "uia_record_id": uia_record_id,
+                        "uia_content_hash": "uia_hash_3b",
+                        "hwnd": "0x777",
+                        "window_title": "Shared UIA",
+                        "window_pid": 9090,
+                        "bboxes": [[0, 0, 100, 100]],
+                    },
+                )
+            conn.close()
+            dconn.close()
+
+            out = mod.run_audit(db, derived_db_path=derived, gap_seconds=60, sample_limit=3)
+            summary = out.get("summary", {}) if isinstance(out.get("summary"), dict) else {}
+            self.assertEqual(int(summary.get("frames_total") or 0), 2)
+            self.assertEqual(int(summary.get("frames_queryable") or 0), 2)
+            issues = out.get("issue_counts", {}) if isinstance(out.get("issue_counts"), dict) else {}
+            self.assertEqual(int(issues.get("obs_uia_focus_missing_or_invalid", 0) or 0), 0)
+
     def test_frame_lineage_limit_is_enforced(self) -> None:
         mod = _load_module("tools/soak/stage1_completeness_audit.py", "stage1_completeness_audit_tool_4")
         with tempfile.TemporaryDirectory() as td:

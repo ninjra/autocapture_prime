@@ -202,12 +202,17 @@ def _obs_payload_ok(
     frame_ts: datetime | None,
     uia_record_id: str,
     uia_hash: str,
+    allowed_source_ids: set[str] | None = None,
 ) -> bool:
     if not isinstance(payload, dict):
         return False
     if str(payload.get("record_type") or "") != str(kind):
         return False
-    if str(payload.get("source_record_id") or "") != str(frame_id):
+    source_record_id = str(payload.get("source_record_id") or "")
+    if isinstance(allowed_source_ids, set) and allowed_source_ids:
+        if source_record_id not in allowed_source_ids:
+            return False
+    elif source_record_id != str(frame_id):
         return False
     if str(payload.get("uia_record_id") or "") != str(uia_record_id):
         return False
@@ -381,15 +386,26 @@ def run_audit(
         sample_blocked: list[dict[str, Any]] = []
 
         sql = f"SELECT {id_col}, {payload_col} FROM {table} WHERE record_type = ? ORDER BY {id_col}"
+        frame_rows: list[dict[str, Any]] = []
+        uia_source_ids: dict[str, set[str]] = {}
         for row in conn.execute(sql, ("evidence.capture.frame",)):
             frame_id = str(row[id_col] or "")
             frame = _parse_payload(row[payload_col]) or {}
+            uia_ref = frame.get("uia_ref") if isinstance(frame.get("uia_ref"), dict) else {}
+            uia_record_id = str(uia_ref.get("record_id") or "").strip()
+            if uia_record_id:
+                uia_source_ids.setdefault(uia_record_id, set()).add(frame_id)
+            frame_rows.append({"frame_id": frame_id, "frame": frame, "uia_record_id": uia_record_id})
+
+        for frame_row in frame_rows:
+            frame_id = str(frame_row.get("frame_id") or "")
+            frame = frame_row.get("frame") if isinstance(frame_row.get("frame"), dict) else {}
             ts_utc = str(frame.get("ts_utc") or "")
             ts_obj = _parse_ts_utc(ts_utc)
 
             issues: list[str] = []
             uia_ref = frame.get("uia_ref") if isinstance(frame.get("uia_ref"), dict) else {}
-            uia_record_id = str(uia_ref.get("record_id") or "").strip()
+            uia_record_id = str(frame_row.get("uia_record_id") or "").strip()
             uia_hash = str(uia_ref.get("content_hash") or "").strip()
 
             plugin_required_counts["stage1_complete"] += 1
@@ -486,6 +502,7 @@ def run_audit(
                         frame_ts=ts_obj,
                         uia_record_id=uia_record_id,
                         uia_hash=uia_hash,
+                        allowed_source_ids=uia_source_ids.get(uia_record_id),
                     ):
                         plugin_ok_counts[key] += 1
                         if key == "obs_uia_focus":

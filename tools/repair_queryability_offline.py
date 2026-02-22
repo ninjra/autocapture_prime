@@ -103,6 +103,7 @@ def _backfill_stage1_and_retention(
         "retention_before": 0,
         "retention_after": 0,
         "retention_inserted": 0,
+        "retention_repaired_missing": 0,
         "retention_missing_after": 0,
         "retention_validated_after": 0,
     }
@@ -154,6 +155,33 @@ def _backfill_stage1_and_retention(
             retention_after_payload = metadata.get(retention_id, None)
             stage1_after = isinstance(stage1_after_payload, dict) and str(stage1_after_payload.get("record_type") or "") == "derived.ingest.stage1.complete"
             retention_after = isinstance(retention_after_payload, dict) and str(retention_after_payload.get("record_type") or "") == "retention.eligible"
+            if stage1_after and (not retention_after):
+                run_id = str(
+                    payload.get("run_id")
+                    or (stage1_after_payload.get("run_id") if isinstance(stage1_after_payload, dict) else "")
+                    or (frame_id.split("/", 1)[0] if "/" in frame_id else "run")
+                )
+                ts_utc = str(payload.get("ts_utc") or datetime.now(timezone.utc).isoformat())
+                repaired_payload = {
+                    "schema_version": 1,
+                    "record_type": "retention.eligible",
+                    "run_id": run_id,
+                    "ts_utc": ts_utc,
+                    "source_record_id": frame_id,
+                    "source_record_type": "evidence.capture.frame",
+                    "reason": str(reason or "offline_queryability_repair"),
+                    "eligible": True,
+                    "stage1_contract_validated": True,
+                    "quarantine_pending": False,
+                }
+                if hasattr(metadata, "put_replace"):
+                    metadata.put_replace(retention_id, repaired_payload)
+                elif hasattr(metadata, "put"):
+                    metadata.put(retention_id, repaired_payload)
+                retention_after_payload = metadata.get(retention_id, None)
+                retention_after = isinstance(retention_after_payload, dict) and str(retention_after_payload.get("record_type") or "") == "retention.eligible"
+                if retention_after:
+                    summary["retention_repaired_missing"] = int(summary.get("retention_repaired_missing", 0) or 0) + 1
             if stage1_after:
                 summary["stage1_after"] = int(summary.get("stage1_after", 0) or 0) + 1
             if retention_after:
@@ -341,4 +369,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
