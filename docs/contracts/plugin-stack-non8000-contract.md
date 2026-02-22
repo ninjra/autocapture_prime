@@ -41,7 +41,13 @@ Define the default plugin posture when Hypervisor owns capture and local `:8000`
 - `builtin.sst.persist`
 - `builtin.sst.index`
 - `builtin.sst.qa.answers`
+- `builtin.state.jepa_like`
 - `builtin.state.vector.linear`
+- `builtin.state.vector.sqlite_ts`
+- `builtin.state.vector.hnsw`
+- `builtin.state.evidence.compiler`
+- `builtin.state.retrieval`
+- `builtin.state.policy`
 - `builtin.state.workflow.miner`
 - `builtin.state.anomaly`
 - `builtin.state.jepa.training`
@@ -52,5 +58,7 @@ Define the default plugin posture when Hypervisor owns capture and local `:8000`
 
 ## Enforcement
 - Gate: `tools/gate_config_matrix.py`
+- Gate: `tools/gate_plugin_enablement.py`
 - Doctor check: `capture_plugins_deprecated` in `autocapture_nx/kernel/loader.py`
 - Output artifact: `artifacts/config/gate_config_matrix.json`
+- Output artifact: `artifacts/plugin_enablement/gate_plugin_enablement.json`

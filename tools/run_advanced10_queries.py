@@ -24,6 +24,8 @@ STRICT_DISALLOWED_ANSWER_PROVIDERS = frozenset(
     }
 )
 
+_INPROC_QUERY_RUNNER: dict[str, Any] | None = None
+
 
 def _utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -60,6 +62,10 @@ def _emit_progress(stage: str, **fields: Any) -> None:
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
+
+
+def _truthy(value: Any) -> bool:
+    return str(value or "").strip().casefold() in {"1", "true", "yes", "on"}
 
 
 def _latest_report(root: Path) -> Path:
@@ -130,6 +136,8 @@ def _run_query_once(
             env["AUTOCAPTURE_VLM_MODEL"] = model
     existing = str(env.get("PYTHONPATH") or "").strip()
     env["PYTHONPATH"] = f"{root}{os.pathsep}{existing}" if existing else str(root)
+    if bool(metadata_only) and _truthy(env.get("AUTOCAPTURE_ADV_QUERY_INPROC")):
+        return _run_query_inproc(root=root, query=query, env=env)
     try:
         proc = subprocess.run(
             [str(py), "-m", "autocapture_nx", "query", str(query)],
@@ -164,6 +172,91 @@ def _run_query_once(
         return {"ok": False, "error": f"query_output_not_json:{type(exc).__name__}:{exc}", "answer": {}, "processing": {}}
     if not isinstance(out, dict):
         return {"ok": False, "error": "query_output_invalid", "answer": {}, "processing": {}}
+    out["ok"] = True
+    return out
+
+
+def _inproc_session_key(env: dict[str, str]) -> str:
+    keys = [
+        "AUTOCAPTURE_CONFIG_DIR",
+        "AUTOCAPTURE_DATA_DIR",
+        "AUTOCAPTURE_QUERY_METADATA_ONLY",
+        "AUTOCAPTURE_ADV_HARD_VLM_MODE",
+        "AUTOCAPTURE_QUERY_METADATA_ONLY_ALLOW_HARD_VLM",
+        "AUTOCAPTURE_QUERY_IMAGE_PATH",
+        "PYTHONHASHSEED",
+        "TZ",
+        "LANG",
+        "LC_ALL",
+    ]
+    payload = {k: str(env.get(k) or "") for k in keys}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _shutdown_inproc_runner() -> None:
+    global _INPROC_QUERY_RUNNER
+    runner = _INPROC_QUERY_RUNNER
+    _INPROC_QUERY_RUNNER = None
+    if not isinstance(runner, dict):
+        return
+    facade = runner.get("facade")
+    if facade is None:
+        return
+    try:
+        shutdown = getattr(facade, "shutdown", None)
+        if callable(shutdown):
+            shutdown()
+    except Exception:
+        pass
+
+
+def _run_query_inproc(*, root: Path, query: str, env: dict[str, str]) -> dict[str, Any]:
+    global _INPROC_QUERY_RUNNER
+    _ = root
+    session_key = _inproc_session_key(env)
+    if not isinstance(_INPROC_QUERY_RUNNER, dict) or str(_INPROC_QUERY_RUNNER.get("key") or "") != session_key:
+        _shutdown_inproc_runner()
+        previous: dict[str, str | None] = {}
+        for key, value in env.items():
+            previous[key] = os.environ.get(key)
+            os.environ[key] = str(value)
+        try:
+            from autocapture_nx.ux.facade import create_facade
+
+            facade = create_facade(
+                persistent=True,
+                safe_mode=False,
+                start_conductor=False,
+                auto_start_capture=False,
+            )
+        except Exception as exc:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            return {
+                "ok": False,
+                "error": f"inproc_boot_failed:{type(exc).__name__}:{exc}",
+                "answer": {},
+                "processing": {},
+            }
+        _INPROC_QUERY_RUNNER = {"key": session_key, "facade": facade}
+    runner = _INPROC_QUERY_RUNNER if isinstance(_INPROC_QUERY_RUNNER, dict) else {}
+    facade = runner.get("facade")
+    if facade is None:
+        return {"ok": False, "error": "inproc_runner_missing", "answer": {}, "processing": {}}
+    try:
+        out = facade.query(str(query), schedule_extract=False)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"inproc_query_failed:{type(exc).__name__}:{exc}",
+            "answer": {},
+            "processing": {},
+        }
+    if not isinstance(out, dict):
+        return {"ok": False, "error": "inproc_query_output_invalid", "answer": {}, "processing": {}}
     out["ok"] = True
     return out
 
@@ -1610,6 +1703,7 @@ def main(argv: list[str] | None = None) -> int:
         output=str(output_path),
     )
     print(json.dumps({"ok": True, "output": str(output_path), "rows": len(rows)}))
+    _shutdown_inproc_runner()
     if bool(args.strict_all):
         if not strict_ok:
             return 1

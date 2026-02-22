@@ -55,7 +55,13 @@ NON8000_DEFAULT_REQUIRED_PLUGIN_IDS = (
     "builtin.sst.persist",
     "builtin.sst.index",
     "builtin.sst.qa.answers",
+    "builtin.state.jepa_like",
     "builtin.state.vector.linear",
+    "builtin.state.vector.sqlite_ts",
+    "builtin.state.vector.hnsw",
+    "builtin.state.evidence.compiler",
+    "builtin.state.retrieval",
+    "builtin.state.policy",
     "builtin.state.workflow.miner",
     "builtin.state.anomaly",
     "builtin.state.jepa.training",
@@ -87,6 +93,7 @@ def validate_config_matrix(default_cfg: dict[str, Any], safe_cfg: dict[str, Any]
     research = default_cfg.get("research", {}) if isinstance(default_cfg, dict) else {}
     plugins = default_cfg.get("plugins", {}) if isinstance(default_cfg, dict) else {}
     enabled = plugins.get("enabled", {}) if isinstance(plugins, dict) else {}
+    allowlist = plugins.get("allowlist", []) if isinstance(plugins, dict) else []
     safe_plugins = safe_cfg.get("plugins", {}) if isinstance(safe_cfg, dict) else {}
 
     checks.append({"name": "promptops_enabled", "ok": bool(promptops.get("enabled", False))})
@@ -140,6 +147,7 @@ def validate_config_matrix(default_cfg: dict[str, Any], safe_cfg: dict[str, Any]
     checks.append({"name": "safe_mode_forced_in_safe_cfg", "ok": bool(safe_plugins.get("safe_mode", False))})
 
     enabled_set = {pid for pid, is_on in enabled.items() if bool(is_on)}
+    allowlist_set = {str(pid).strip() for pid in allowlist if str(pid).strip()} if isinstance(allowlist, list) else set()
     enabled_capture = sorted(pid for pid in CAPTURE_DEPRECATED_PLUGIN_IDS if pid in enabled_set)
     checks.append(
         {
@@ -155,6 +163,14 @@ def validate_config_matrix(default_cfg: dict[str, Any], safe_cfg: dict[str, Any]
             "name": "non8000_required_plugins_enabled",
             "ok": len(missing_non8000) == 0,
             "value": missing_non8000,
+        }
+    )
+    missing_non8000_allowlisted = sorted(pid for pid in NON8000_DEFAULT_REQUIRED_PLUGIN_IDS if pid not in allowlist_set)
+    checks.append(
+        {
+            "name": "non8000_required_plugins_allowlisted",
+            "ok": len(missing_non8000_allowlisted) == 0,
+            "value": missing_non8000_allowlisted,
         }
     )
 
@@ -200,12 +216,15 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     plugins = default_cfg.get("plugins", {}) if isinstance(default_cfg, dict) else {}
     enabled = plugins.get("enabled", {}) if isinstance(plugins, dict) else {}
+    allowlist = plugins.get("allowlist", []) if isinstance(plugins, dict) else []
+    allowlist_set = {str(pid).strip() for pid in allowlist if str(pid).strip()} if isinstance(allowlist, list) else set()
     enabled_set = {pid for pid, is_on in enabled.items() if bool(is_on)}
     plugin_stack_non8000 = {
         "capture_deprecated": sorted(CAPTURE_DEPRECATED_PLUGIN_IDS),
         "requires_8000": sorted(REQUIRES_8000_PLUGIN_IDS),
         "required_non8000_enabled": sorted(NON8000_DEFAULT_REQUIRED_PLUGIN_IDS),
         "missing_required_non8000": sorted(pid for pid in NON8000_DEFAULT_REQUIRED_PLUGIN_IDS if pid not in enabled_set),
+        "missing_required_non8000_allowlisted": sorted(pid for pid in NON8000_DEFAULT_REQUIRED_PLUGIN_IDS if pid not in allowlist_set),
         "enabled_requires_8000": sorted(pid for pid in REQUIRES_8000_PLUGIN_IDS if pid in enabled_set),
     }
     out.write_text(

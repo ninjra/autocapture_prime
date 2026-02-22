@@ -63,7 +63,10 @@ class RunAdvanced10ExpectedEvalTests(unittest.TestCase):
             captured["AUTOCAPTURE_QUERY_IMAGE_PATH"] = str(env.get("AUTOCAPTURE_QUERY_IMAGE_PATH") or "")
             return _Proc()
 
-        with mock.patch.object(mod.subprocess, "run", side_effect=_fake_run):
+        with (
+            mock.patch.dict(os.environ, {"AUTOCAPTURE_ADV_QUERY_INPROC": "0"}, clear=False),
+            mock.patch.object(mod.subprocess, "run", side_effect=_fake_run),
+        ):
             out = mod._run_query_once(
                 pathlib.Path("."),
                 cfg="/tmp/cfg",
@@ -78,6 +81,57 @@ class RunAdvanced10ExpectedEvalTests(unittest.TestCase):
         self.assertEqual(captured.get("AUTOCAPTURE_ADV_HARD_VLM_MODE"), "off")
         self.assertEqual(captured.get("AUTOCAPTURE_QUERY_METADATA_ONLY_ALLOW_HARD_VLM"), "0")
         self.assertEqual(captured.get("AUTOCAPTURE_QUERY_IMAGE_PATH"), "")
+
+    def test_run_query_once_uses_inproc_runner_when_enabled(self) -> None:
+        mod = _load_module()
+        with (
+            mock.patch.dict(os.environ, {"AUTOCAPTURE_ADV_QUERY_INPROC": "1"}, clear=False),
+            mock.patch.object(mod, "_run_query_inproc", return_value={"ok": True, "answer": {}, "processing": {}}) as inproc_mock,
+            mock.patch.object(mod.subprocess, "run") as subproc_mock,
+        ):
+            out = mod._run_query_once(
+                pathlib.Path("."),
+                cfg="/tmp/cfg",
+                data="/tmp/data",
+                query="q",
+                image_path="/tmp/frame.png",
+                metadata_only=True,
+                timeout_s=1.0,
+            )
+        self.assertTrue(bool(out.get("ok", False)))
+        inproc_mock.assert_called_once()
+        subproc_mock.assert_not_called()
+
+    def test_run_query_inproc_reuses_single_facade_session(self) -> None:
+        mod = _load_module()
+
+        class _Facade:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, bool]] = []
+                self.closed = False
+
+            def query(self, text: str, *, schedule_extract: bool = False) -> dict[str, object]:
+                self.calls.append((str(text), bool(schedule_extract)))
+                return {"answer": {"display": {"summary": str(text), "bullets": []}}, "processing": {}}
+
+            def shutdown(self) -> None:
+                self.closed = True
+
+        facade = _Facade()
+        env = {
+            "AUTOCAPTURE_CONFIG_DIR": "/tmp/cfg",
+            "AUTOCAPTURE_DATA_DIR": "/tmp/data",
+            "AUTOCAPTURE_QUERY_METADATA_ONLY": "1",
+        }
+        with mock.patch("autocapture_nx.ux.facade.create_facade", return_value=facade) as create_mock:
+            out1 = mod._run_query_inproc(root=pathlib.Path("."), query="q1", env=env)
+            out2 = mod._run_query_inproc(root=pathlib.Path("."), query="q2", env=env)
+            mod._shutdown_inproc_runner()
+        self.assertTrue(bool(out1.get("ok", False)))
+        self.assertTrue(bool(out2.get("ok", False)))
+        self.assertEqual(create_mock.call_count, 1)
+        self.assertEqual(len(facade.calls), 2)
+        self.assertTrue(bool(facade.closed))
 
     def test_instance_lock_detection_from_stderr(self) -> None:
         mod = _load_module()

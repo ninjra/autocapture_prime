@@ -45,7 +45,7 @@ class GateConfigMatrixTests(unittest.TestCase):
                 },
             },
             "research": {"enabled": False, "owner": "hypervisor"},
-            "plugins": {"enabled": enabled},
+            "plugins": {"enabled": enabled, "allowlist": list(mod.NON8000_DEFAULT_REQUIRED_PLUGIN_IDS)},
             "processing": {
                 "idle": {"extractors": {"vlm": False}},
                 "sst": {"ui_vlm": {"enabled": False}},
@@ -55,6 +55,7 @@ class GateConfigMatrixTests(unittest.TestCase):
         checks = mod.validate_config_matrix(default_cfg, safe_cfg)
         self.assertTrue(bool(_find_check(checks, "capture_plugins_deprecated").get("ok", False)))
         self.assertTrue(bool(_find_check(checks, "non8000_required_plugins_enabled").get("ok", False)))
+        self.assertTrue(bool(_find_check(checks, "non8000_required_plugins_allowlisted").get("ok", False)))
         self.assertTrue(bool(_find_check(checks, "requires_8000_plugins_disabled").get("ok", False)))
         self.assertTrue(bool(_find_check(checks, "idle_vlm_extractor_disabled_non8000").get("ok", False)))
         self.assertTrue(bool(_find_check(checks, "sst_ui_vlm_disabled_non8000").get("ok", False)))
@@ -88,6 +89,22 @@ class GateConfigMatrixTests(unittest.TestCase):
         safe_cfg = {"plugins": {"safe_mode": True}}
         checks = mod.validate_config_matrix(default_cfg, safe_cfg)
         self.assertFalse(bool(_find_check(checks, "requires_8000_plugins_disabled").get("ok", True)))
+
+    def test_non8000_required_plugin_not_allowlisted_fails_contract(self) -> None:
+        mod = _load_module()
+        enabled = {pid: True for pid in mod.NON8000_DEFAULT_REQUIRED_PLUGIN_IDS}
+        enabled.update({pid: False for pid in mod.CAPTURE_DEPRECATED_PLUGIN_IDS})
+        enabled.update({pid: False for pid in mod.REQUIRES_8000_PLUGIN_IDS})
+        allowlist = [pid for pid in mod.NON8000_DEFAULT_REQUIRED_PLUGIN_IDS if pid != "builtin.state.retrieval"]
+        default_cfg = {
+            "promptops": {"review": {"base_url": "http://127.0.0.1/v1", "model": mod.EXTERNAL_VLLM_EXPECTED_MODEL}},
+            "research": {"enabled": False, "owner": "hypervisor"},
+            "plugins": {"enabled": enabled, "allowlist": allowlist},
+            "processing": {"idle": {"extractors": {"vlm": False}}, "sst": {"ui_vlm": {"enabled": False}}},
+        }
+        safe_cfg = {"plugins": {"safe_mode": True}}
+        checks = mod.validate_config_matrix(default_cfg, safe_cfg)
+        self.assertFalse(bool(_find_check(checks, "non8000_required_plugins_allowlisted").get("ok", True)))
 
 
 if __name__ == "__main__":
