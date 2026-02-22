@@ -517,6 +517,75 @@ class RealCorpusReadinessTests(unittest.TestCase):
             self.assertEqual(int(cause_counts.get("citation_invalid", 0)), 1)
             self.assertEqual(int(cause_counts.get("upstream_unreachable", 0)), 1)
             self.assertEqual(int(cause_counts.get("retrieval_miss", 0)), 1)
+            causes = payload.get("strict_failure_causes", {})
+            by_case = causes.get("by_case", []) if isinstance(causes.get("by_case", []), list) else []
+            self.assertTrue(bool(by_case))
+            case_q1 = next((row for row in by_case if str(row.get("id") or "") == "Q1"), {})
+            self.assertEqual(str(case_q1.get("cause") or ""), "citation_invalid")
+            self.assertIn("citation_linkage", case_q1)
+            linkage = case_q1.get("citation_linkage", {}) if isinstance(case_q1.get("citation_linkage", {}), dict) else {}
+            issues = set(str(x) for x in (linkage.get("issues") or []))
+            self.assertIn("providers_claims_without_citations", issues)
+            providers = case_q1.get("provider_diagnostics", [])
+            self.assertTrue(isinstance(providers, list) and bool(providers))
+
+    def test_main_fails_when_queryability_ratio_below_threshold(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            contract = root / "contract.json"
+            adv = root / "advanced.json"
+            gen = root / "generic.json"
+            lineage = root / "lineage.json"
+            out = root / "strict_matrix.json"
+            contract.write_text(
+                json.dumps(
+                    {
+                        "schema": "autocapture.real_corpus_expected_answers.v1",
+                        "strict": {
+                            "expected_total": 1,
+                            "cases": [
+                                {"id": "Q1", "suite": "advanced20", "allow_indeterminate": False, "require_citations": True, "allowed_answer_states": ["ok"]}
+                            ],
+                        },
+                        "generic_policy": {"suite": "generic20", "blocking": False},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            adv.write_text(json.dumps({"rows": [_mk_row(case_id="Q1")]}), encoding="utf-8")
+            gen.write_text(json.dumps({"rows": [_mk_row(case_id="GQ1")]}), encoding="utf-8")
+            lineage.write_text(
+                json.dumps({"summary": {"frames_total": 100, "frames_queryable": 50}}),
+                encoding="utf-8",
+            )
+            rc = mod.main(
+                [
+                    "--contract",
+                    str(contract),
+                    "--advanced-json",
+                    str(adv),
+                    "--generic-json",
+                    str(gen),
+                    "--lineage-json",
+                    str(lineage),
+                    "--min-queryable-ratio",
+                    "0.95",
+                    "--out",
+                    str(out),
+                    "--latest-report-md",
+                    str(root / "latest.md"),
+                ]
+            )
+            self.assertEqual(rc, 1)
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            reasons = set(payload.get("failure_reasons", []))
+            self.assertIn("queryability_slo_ratio_below_threshold", reasons)
+            qslo = payload.get("queryability_slo", {}) if isinstance(payload.get("queryability_slo", {}), dict) else {}
+            self.assertTrue(bool(qslo.get("enabled", False)))
+            self.assertEqual(int(qslo.get("frames_total", 0) or 0), 100)
+            self.assertEqual(int(qslo.get("frames_queryable", 0) or 0), 50)
+            self.assertAlmostEqual(float(qslo.get("required_min_ratio", 0.0) or 0.0), 0.95, places=6)
 
 
 if __name__ == "__main__":

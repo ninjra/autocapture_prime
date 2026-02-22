@@ -96,6 +96,8 @@ def _default_manifest(py: str) -> list[GateStep]:
     real_corpus_contract = os.environ.get("REAL_CORPUS_STRICT_CONTRACT", "docs/contracts/real_corpus_expected_answers_v1.json").strip()
     real_corpus_advanced = os.environ.get("REAL_CORPUS_ADVANCED_JSON", "").strip()
     real_corpus_generic = os.environ.get("REAL_CORPUS_GENERIC_JSON", "").strip()
+    real_corpus_lineage = os.environ.get("REAL_CORPUS_LINEAGE_JSON", "").strip()
+    real_corpus_queryable_min_ratio = os.environ.get("REAL_CORPUS_QUERYABLE_MIN_RATIO", "0.95").strip()
     real_out = Path(real_corpus_report) if real_corpus_report else Path("artifacts/real_corpus_gauntlet/latest/strict_matrix.json")
     contract_path = Path(real_corpus_contract)
     expected_total = int(os.environ.get("REAL_CORPUS_STRICT_EXPECTED_TOTAL", "").strip() or _expected_total_from_contract(contract_path, fallback=20))
@@ -105,6 +107,10 @@ def _default_manifest(py: str) -> list[GateStep]:
             readiness_cmd.extend(["--advanced-json", real_corpus_advanced])
         if real_corpus_generic:
             readiness_cmd.extend(["--generic-json", real_corpus_generic])
+        if real_corpus_lineage:
+            readiness_cmd.extend(["--lineage-json", real_corpus_lineage])
+        if real_corpus_queryable_min_ratio:
+            readiness_cmd.extend(["--min-queryable-ratio", real_corpus_queryable_min_ratio])
         steps.append(
             GateStep(
                 "run_real_corpus_readiness",

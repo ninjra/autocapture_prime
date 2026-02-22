@@ -89,3 +89,23 @@ def test_manifest_adds_real_corpus_determinism_when_enabled() -> None:
         steps = mod._default_manifest(sys.executable)
     ids = [step.id for step in steps]
     assert "gate_real_corpus_determinism" in ids
+
+
+def test_manifest_passes_queryability_slo_args_to_real_corpus_readiness() -> None:
+    mod = _load_module()
+    with mock.patch.dict(
+        mod.os.environ,
+        {
+            "REAL_CORPUS_LINEAGE_JSON": "/tmp/lineage.json",
+            "REAL_CORPUS_QUERYABLE_MIN_RATIO": "0.97",
+        },
+        clear=False,
+    ):
+        steps = mod._default_manifest(sys.executable)
+    readiness = [step for step in steps if step.id == "run_real_corpus_readiness"]
+    assert len(readiness) == 1
+    cmd = readiness[0].cmd
+    assert "--lineage-json" in cmd
+    assert "/tmp/lineage.json" in cmd
+    assert "--min-queryable-ratio" in cmd
+    assert "0.97" in cmd
