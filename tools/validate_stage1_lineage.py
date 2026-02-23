@@ -126,7 +126,7 @@ def _validate_obs_payload(
         issues.append(f"{expected_kind}.hwnd_missing")
     if "window_title" not in payload or not isinstance(payload.get("window_title"), str):
         issues.append(f"{expected_kind}.window_title_missing")
-    if _safe_int(payload.get("window_pid")) <= 0:
+    if "window_pid" not in payload or _safe_int(payload.get("window_pid")) < 0:
         issues.append(f"{expected_kind}.window_pid_invalid")
     if not _valid_bboxes(payload.get("bboxes")):
         issues.append(f"{expected_kind}.bbox_invalid")
