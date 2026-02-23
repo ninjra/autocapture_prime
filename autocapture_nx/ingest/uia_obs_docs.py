@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 
@@ -58,6 +61,8 @@ def _ensure_frame_uia_docs(
     record: dict[str, Any],
     dataroot: str,
     snapshot_metadata: Any | None = None,
+    allow_latest_snapshot_fallback: bool = True,
+    require_hash_match: bool = True,
 ) -> dict[str, Any]:
     if not isinstance(record, dict):
         return {"required": False, "ok": True, "inserted": 0, "reason": "invalid_record"}
@@ -75,13 +80,69 @@ def _ensure_frame_uia_docs(
     if all(existing_by_kind.values()):
         return {"required": True, "ok": True, "inserted": 0, "reason": "already_present"}
 
+    try:
+        from plugins.builtin.processing_sst_uia_context.plugin import _fallback_hash_ok as _uia_fallback_hash_ok
+        from plugins.builtin.processing_sst_uia_context.plugin import _matches_uia_ref as _uia_matches_uia_ref
+    except Exception:
+        return {"required": True, "ok": False, "inserted": 0, "reason": "snapshot_plugin_unavailable"}
+
+    snapshot: dict[str, Any] | None = None
     snapshot_source = snapshot_metadata if snapshot_metadata is not None else metadata
-    snapshot_value = snapshot_source.get(uia_record_id, None) if hasattr(snapshot_source, "get") else None
-    snapshot = _uia_extract_snapshot_dict(snapshot_value)
+    metadata_status = "lookup_failed"
+    snapshot_value = None
+    if hasattr(snapshot_source, "get"):
+        try:
+            snapshot_value = snapshot_source.get(uia_record_id, None)
+        except Exception:
+            snapshot_value = None
+            metadata_status = "lookup_failed"
+    if snapshot_value is not None:
+        parsed_snapshot = _uia_extract_snapshot_dict(snapshot_value)
+        if isinstance(parsed_snapshot, dict):
+            record_type = str(parsed_snapshot.get("record_type") or "").strip()
+            if record_type in {"", "evidence.uia.snapshot"} and _uia_matches_uia_ref(
+                parsed_snapshot,
+                uia_ref,
+                require_hash=bool(require_hash_match),
+            ):
+                snapshot = parsed_snapshot
+                metadata_status = "ok"
+            else:
+                metadata_status = "invalid"
+        else:
+            metadata_status = "invalid"
+
+    # Metadata-first contract: fallback is only allowed when metadata lookup
+    # fails (missing/unavailable), never when metadata is present but invalid.
+    if snapshot is None and metadata_status == "lookup_failed" and bool(allow_latest_snapshot_fallback):
+        latest_path = Path(str(dataroot)) / "uia" / "latest.snap.json"
+        if latest_path.exists():
+            try:
+                raw_bytes = latest_path.read_bytes()
+                file_hash = hashlib.sha256(raw_bytes).hexdigest().lower()
+                parsed = json.loads(raw_bytes.decode("utf-8"))
+            except Exception:
+                return {"required": True, "ok": False, "inserted": 0, "reason": "fallback_parse_failed"}
+            fallback_snapshot = _uia_extract_snapshot_dict(parsed)
+            if not isinstance(fallback_snapshot, dict):
+                return {"required": True, "ok": False, "inserted": 0, "reason": "fallback_snapshot_missing"}
+            fallback_record_type = str(fallback_snapshot.get("record_type") or "").strip()
+            if fallback_record_type not in {"", "evidence.uia.snapshot"}:
+                return {"required": True, "ok": False, "inserted": 0, "reason": "fallback_record_type_invalid"}
+            hash_ok = _uia_fallback_hash_ok(
+                snapshot=fallback_snapshot,
+                uia_ref=uia_ref,
+                require_hash=bool(require_hash_match),
+                file_hash=file_hash,
+                hash_file_path=latest_path.with_suffix(".sha256"),
+            )
+            if not bool(hash_ok):
+                return {"required": True, "ok": False, "inserted": 0, "reason": "fallback_hash_mismatch"}
+            snapshot = fallback_snapshot
+
     if not isinstance(snapshot, dict):
-        return {"required": True, "ok": False, "inserted": 0, "reason": "snapshot_missing"}
-    if str(snapshot.get("record_type") or "").strip() not in {"", "evidence.uia.snapshot"}:
-        return {"required": True, "ok": False, "inserted": 0, "reason": "snapshot_record_type_invalid"}
+        reason = "snapshot_missing" if metadata_status == "lookup_failed" else "snapshot_invalid"
+        return {"required": True, "ok": False, "inserted": 0, "reason": reason}
 
     try:
         from plugins.builtin.processing_sst_uia_context.plugin import _parse_settings as _uia_parse_settings
@@ -96,7 +157,13 @@ def _ensure_frame_uia_docs(
         frame_height=int(height),
         uia_ref=uia_ref,
         snapshot=snapshot,
-        cfg=_uia_parse_settings({"dataroot": str(dataroot)}),
+        cfg=_uia_parse_settings(
+            {
+                "dataroot": str(dataroot),
+                "allow_latest_snapshot_fallback": bool(allow_latest_snapshot_fallback),
+                "require_hash_match": bool(require_hash_match),
+            }
+        ),
     )
     if not docs:
         return {"required": True, "ok": False, "inserted": 0, "reason": "snapshot_to_docs_empty"}

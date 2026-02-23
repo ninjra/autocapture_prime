@@ -1,4 +1,6 @@
+import hashlib
 import io
+import json
 import tempfile
 import unittest
 import zipfile
@@ -8,7 +10,7 @@ from autocapture.core.hashing import hash_text, normalize_text
 from autocapture_nx.kernel.derived_records import derived_text_record_id
 from autocapture_nx.processing.idle import IdleProcessor, _get_media_blob
 from autocapture.storage.retention import retention_eligibility_record_id
-from autocapture.storage.stage1 import stage1_complete_record_id
+from autocapture.storage.stage1 import stage1_complete_record_id, stage2_complete_record_id
 
 
 class _MetadataStore:
@@ -805,6 +807,136 @@ class IdleProcessorTests(unittest.TestCase):
         ]
         self.assertGreaterEqual(len(obs_rows), 3)
         self.assertGreaterEqual(int(stats.stage1_uia_docs_inserted), 3)
+        self.assertIn(stage2_complete_record_id(frame_id), metadata.data)
+        self.assertGreaterEqual(int(stats.stage2_projection_generated_states), 1)
+
+    def test_stage1_backfill_uses_plugin_uia_dataroot_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            synth_root = Path(tmpdir) / "synthetic_uia"
+            uia_dir = synth_root / "uia"
+            uia_dir.mkdir(parents=True, exist_ok=True)
+            uia_id = "run1/evidence.uia.snapshot/fallback"
+            snapshot_payload = {
+                "record_type": "evidence.uia.snapshot",
+                "record_id": uia_id,
+                "run_id": "run1",
+                "ts_utc": "2024-01-01T00:00:00+00:00",
+                "unix_ms_utc": 1704067200000,
+                "hwnd": "101",
+                "window": {"title": "Outlook", "process_path": "outlook.exe", "pid": 1234},
+                "focus_path": [{"eid": "n1", "role": "button", "name": "Complete", "rect": [10, 10, 80, 30], "enabled": True, "offscreen": False}],
+                "context_peers": [],
+                "operables": [{"eid": "n2", "role": "button", "name": "View", "rect": [90, 10, 150, 30], "enabled": True, "offscreen": False}],
+                "stats": {"walk_ms": 2, "nodes_emitted": 2, "failures": 0},
+                "content_hash": "uia_hash_0",
+            }
+            raw = json.dumps(snapshot_payload, sort_keys=True).encode("utf-8")
+            (uia_dir / "latest.snap.json").write_bytes(raw)
+            (uia_dir / "latest.snap.sha256").write_text(f"{hashlib.sha256(raw).hexdigest()}  latest.snap.json\n", encoding="utf-8")
+
+            config = {
+                "runtime": {"run_id": "run1"},
+                "storage": {"data_dir": str(Path(tmpdir) / "unrelated_data_root")},
+                "plugins": {
+                    "settings": {
+                        "builtin.processing.sst.uia_context": {
+                            "dataroot": str(synth_root),
+                            "allow_latest_snapshot_fallback": True,
+                            "require_hash_match": True,
+                        }
+                    }
+                },
+                "processing": {
+                    "idle": {
+                        "enabled": True,
+                        "auto_start": False,
+                        "max_items_per_run": 10,
+                        "max_seconds_per_run": 5,
+                        "max_concurrency_cpu": 1,
+                        "max_concurrency_gpu": 0,
+                        "extractors": {"ocr": True, "vlm": False},
+                        "stage1_marker_backfill": {"enabled": True, "max_records_per_run": 10},
+                    },
+                    "sst": {"enabled": False},
+                },
+            }
+            metadata = _MetadataStore()
+            frame_id = "run1/evidence.capture.frame/0"
+            metadata.put(
+                frame_id,
+                {
+                    "record_type": "evidence.capture.frame",
+                    "run_id": "run1",
+                    "ts_utc": "2024-01-01T00:00:00+00:00",
+                    "blob_path": "media/frame0.png",
+                    "content_hash": "hash_frame_0",
+                    "uia_ref": {"record_id": uia_id, "content_hash": "uia_hash_0"},
+                    "content_type": "image/png",
+                    "desktop_rect": [0, 0, 1920, 1080],
+                },
+            )
+            metadata.put(
+                stage1_complete_record_id(frame_id),
+                {
+                    "record_type": "derived.ingest.stage1.complete",
+                    "run_id": "run1",
+                    "source_record_id": frame_id,
+                    "complete": True,
+                },
+            )
+            metadata.put(
+                retention_eligibility_record_id(frame_id),
+                {
+                    "record_type": "retention.eligible",
+                    "run_id": "run1",
+                    "source_record_id": frame_id,
+                    "source_record_type": "evidence.capture.frame",
+                    "eligible": True,
+                    "stage1_contract_validated": True,
+                    "quarantine_pending": False,
+                },
+            )
+            metadata.put(
+                "system/derived.idle.checkpoint",
+                {
+                    "record_type": "derived.idle.checkpoint",
+                    "run_id": "run1",
+                    "ts_utc": "2024-01-01T00:00:01+00:00",
+                    "last_record_id": frame_id,
+                    "processed_total": 1,
+                },
+            )
+            ocr_id = derived_text_record_id(
+                kind="ocr",
+                run_id="run1",
+                provider_id="ocr.engine",
+                source_id=frame_id,
+                config=config,
+            )
+            metadata.put(
+                ocr_id,
+                {
+                    "record_type": "derived.text.ocr",
+                    "run_id": "run1",
+                    "source_record_id": frame_id,
+                    "text": "already complete",
+                },
+            )
+            media = _MediaStore({frame_id: b"\x89PNG\r\n\x1a\nframe"})
+            system = _System(config, metadata, media, _Extractor("unused"), None, _EventBuilder())
+
+            processor = IdleProcessor(system)
+            done, stats = processor.process_step(budget_ms=0)
+
+            self.assertTrue(done)
+            self.assertEqual(int(stats.stage1_uia_frames_missing_count), 0)
+            self.assertGreaterEqual(int(stats.stage1_uia_docs_inserted), 3)
+            obs_rows = [
+                row
+                for row in metadata.data.values()
+                if isinstance(row, dict) and str(row.get("record_type") or "").startswith("obs.uia.")
+            ]
+            self.assertGreaterEqual(len(obs_rows), 3)
 
 
 if __name__ == "__main__":

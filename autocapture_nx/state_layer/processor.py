@@ -10,6 +10,7 @@ from typing import Any
 from autocapture_nx.kernel.audit import append_audit_event
 from autocapture_nx.kernel.hashing import sha256_canonical
 from autocapture_nx.plugin_system.api import PluginContext
+from autocapture_nx.storage.stage1_derived_store import build_stage1_overlay_store
 
 from .builder_jepa import JEPAStateBuilder
 from .contracts import validate_state_edge, validate_state_span
@@ -57,6 +58,12 @@ class StateTapeProcessor:
         self._training = self._cap("state.training")
         self._logger = self._cap("observability.logger")
         self._events = self._cap("event.builder")
+        self._metadata, _stage1_derived = build_stage1_overlay_store(
+            config=self._config if isinstance(self._config, dict) else {},
+            metadata=self._metadata,
+            logger=self._logger,
+        )
+        _ = _stage1_derived
         # Builder construction may need the logger, so resolve it after logger is available.
         self._builder = self._resolve_builder()
 

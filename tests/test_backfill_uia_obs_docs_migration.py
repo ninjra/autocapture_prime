@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import sqlite3
 import tempfile
@@ -62,6 +63,17 @@ def _count(path: Path, record_type: str) -> int:
         return int(row[0]) if row else 0
     finally:
         con.close()
+
+
+def _write_fallback_snapshot(root: Path, snapshot_payload: dict[str, object], *, hash_override: str | None = None) -> None:
+    uia_dir = root / "uia"
+    uia_dir.mkdir(parents=True, exist_ok=True)
+    latest_json = uia_dir / "latest.snap.json"
+    latest_sha = uia_dir / "latest.snap.sha256"
+    raw = json.dumps(snapshot_payload, sort_keys=True).encode("utf-8")
+    latest_json.write_bytes(raw)
+    digest = str(hash_override or hashlib.sha256(raw).hexdigest()).strip()
+    latest_sha.write_text(f"{digest}  latest.snap.json\n", encoding="utf-8")
 
 
 def _snapshot(record_id: str, content_hash: str) -> dict[str, object]:
@@ -236,6 +248,103 @@ class BackfillUIAObsDocsMigrationTests(unittest.TestCase):
                 t.join(timeout=0.5)
             self.assertFalse(bool(result.get("stable")))
             self.assertEqual(str(result.get("reason")), "timeout")
+
+    def test_backfill_uses_fallback_when_metadata_snapshot_missing(self) -> None:
+        mod = _load_module("tools/migrations/backfill_uia_obs_docs.py", "backfill_uia_obs_docs_fallback_ok")
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "metadata.db"
+            _init_db(db_path)
+            frame_id = "run1/evidence.capture.frame/fallback_1"
+            snapshot_id = "run1/evidence.uia.snapshot/fallback_1"
+            content_hash = "uia_hash_fallback_ok"
+            _put(
+                db_path,
+                frame_id,
+                {
+                    "schema_version": 1,
+                    "record_type": "evidence.capture.frame",
+                    "run_id": "run1",
+                    "ts_utc": "2026-02-20T00:00:00Z",
+                    "width": 320,
+                    "height": 180,
+                    "uia_ref": {"record_id": snapshot_id, "content_hash": content_hash},
+                },
+            )
+            _write_fallback_snapshot(Path(tmp), _snapshot(snapshot_id, content_hash))
+
+            summary = mod.backfill_uia_obs_docs(db_path, dataroot=tmp, dry_run=False)
+
+            self.assertEqual(int(summary.get("required_frames") or 0), 1)
+            self.assertEqual(int(summary.get("ok_frames") or 0), 1)
+            self.assertEqual(int(summary.get("missing_frames") or 0), 0)
+            self.assertEqual(_count(db_path, "obs.uia.focus"), 1)
+            self.assertEqual(_count(db_path, "obs.uia.context"), 1)
+            self.assertEqual(_count(db_path, "obs.uia.operable"), 1)
+
+    def test_backfill_rejects_fallback_hash_mismatch(self) -> None:
+        mod = _load_module("tools/migrations/backfill_uia_obs_docs.py", "backfill_uia_obs_docs_fallback_bad_hash")
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "metadata.db"
+            _init_db(db_path)
+            frame_id = "run1/evidence.capture.frame/fallback_2"
+            snapshot_id = "run1/evidence.uia.snapshot/fallback_2"
+            content_hash = "uia_hash_fallback_bad"
+            _put(
+                db_path,
+                frame_id,
+                {
+                    "schema_version": 1,
+                    "record_type": "evidence.capture.frame",
+                    "run_id": "run1",
+                    "ts_utc": "2026-02-20T00:00:00Z",
+                    "width": 320,
+                    "height": 180,
+                    "uia_ref": {"record_id": snapshot_id, "content_hash": content_hash},
+                },
+            )
+            _write_fallback_snapshot(Path(tmp), _snapshot(snapshot_id, content_hash), hash_override=("0" * 64))
+
+            summary = mod.backfill_uia_obs_docs(db_path, dataroot=tmp, dry_run=False)
+
+            self.assertEqual(int(summary.get("required_frames") or 0), 1)
+            self.assertEqual(int(summary.get("ok_frames") or 0), 0)
+            self.assertEqual(int(summary.get("missing_frames") or 0), 1)
+            self.assertEqual(_count(db_path, "obs.uia.focus"), 0)
+            self.assertEqual(_count(db_path, "obs.uia.context"), 0)
+            self.assertEqual(_count(db_path, "obs.uia.operable"), 0)
+
+    def test_metadata_first_wins_over_bad_fallback(self) -> None:
+        mod = _load_module("tools/migrations/backfill_uia_obs_docs.py", "backfill_uia_obs_docs_metadata_wins")
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "metadata.db"
+            _init_db(db_path)
+            frame_id = "run1/evidence.capture.frame/fallback_3"
+            snapshot_id = "run1/evidence.uia.snapshot/fallback_3"
+            content_hash = "uia_hash_metadata_wins"
+            _put(
+                db_path,
+                frame_id,
+                {
+                    "schema_version": 1,
+                    "record_type": "evidence.capture.frame",
+                    "run_id": "run1",
+                    "ts_utc": "2026-02-20T00:00:00Z",
+                    "width": 320,
+                    "height": 180,
+                    "uia_ref": {"record_id": snapshot_id, "content_hash": content_hash},
+                },
+            )
+            _put(db_path, snapshot_id, _snapshot(snapshot_id, content_hash))
+            _write_fallback_snapshot(Path(tmp), _snapshot(snapshot_id, "mismatch_hash"), hash_override=("0" * 64))
+
+            summary = mod.backfill_uia_obs_docs(db_path, dataroot=tmp, dry_run=False)
+
+            self.assertEqual(int(summary.get("required_frames") or 0), 1)
+            self.assertEqual(int(summary.get("ok_frames") or 0), 1)
+            self.assertEqual(int(summary.get("missing_frames") or 0), 0)
+            self.assertEqual(_count(db_path, "obs.uia.focus"), 1)
+            self.assertEqual(_count(db_path, "obs.uia.context"), 1)
+            self.assertEqual(_count(db_path, "obs.uia.operable"), 1)
 
 
 if __name__ == "__main__":

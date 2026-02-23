@@ -17,6 +17,12 @@ def stage1_complete_record_id(record_id: str) -> str:
     return f"{run_id}/derived.ingest.stage1.complete/{component}"
 
 
+def stage2_complete_record_id(record_id: str) -> str:
+    run_id = str(record_id).split("/", 1)[0] if "/" in str(record_id) else "run"
+    component = encode_record_id_component(str(record_id))
+    return f"{run_id}/derived.ingest.stage2.complete/{component}"
+
+
 def is_stage1_complete_record(record_id: str, record: dict[str, Any]) -> bool:
     if not isinstance(record, dict):
         return False
@@ -248,3 +254,102 @@ def mark_stage1_and_retention(
         "retention_record_id": retention_id,
         "retention_missing": retention_id is None,
     }
+
+
+def mark_stage2_complete(
+    metadata: Any,
+    record_id: str,
+    record: dict[str, Any],
+    *,
+    projection: dict[str, Any] | None = None,
+    ts_utc: str | None = None,
+    reason: str = "stage2_projection",
+    event_builder: Any | None = None,
+    logger: Any | None = None,
+) -> tuple[str | None, bool]:
+    if metadata is None:
+        return None, False
+    if not isinstance(record, dict):
+        return None, False
+    if str(record.get("record_type") or "") != "evidence.capture.frame":
+        return None, False
+
+    rid = stage2_complete_record_id(record_id)
+    run_id = str(record.get("run_id") or (record_id.split("/", 1)[0] if "/" in record_id else "run"))
+    ts_val = str(ts_utc or datetime.now(timezone.utc).isoformat())
+    projection_row = projection if isinstance(projection, dict) else {}
+    projection_errors = _safe_int(projection_row.get("errors", 0))
+    projection_ok = bool(projection_row.get("ok", False)) and projection_errors == 0
+    uia_ref = record.get("uia_ref") if isinstance(record.get("uia_ref"), dict) else {}
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "record_type": "derived.ingest.stage2.complete",
+        "run_id": run_id,
+        "ts_utc": ts_val,
+        "source_record_id": str(record_id),
+        "source_record_type": str(record.get("record_type") or ""),
+        "reason": str(reason or "stage2_projection"),
+        "uia_record_id": str(uia_ref.get("record_id") or ""),
+        "uia_content_hash": str(uia_ref.get("content_hash") or ""),
+        "projection_ok": bool(projection_ok),
+        "generated_docs": _safe_int(projection_row.get("generated_docs", 0)),
+        "inserted_docs": _safe_int(projection_row.get("inserted_docs", 0)),
+        "generated_states": _safe_int(projection_row.get("generated_states", 0)),
+        "inserted_states": _safe_int(projection_row.get("inserted_states", 0)),
+        "projection_errors": int(projection_errors),
+        "projection_reason": str(projection_row.get("reason") or ""),
+        "complete": bool(projection_ok),
+    }
+    payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
+
+    existing = metadata.get(rid, None) if hasattr(metadata, "get") else None
+    if isinstance(existing, dict) and str(existing.get("payload_hash") or "") == str(payload.get("payload_hash") or ""):
+        return rid, False
+
+    try:
+        if hasattr(metadata, "put_replace"):
+            metadata.put_replace(rid, payload)
+        else:
+            metadata.put(rid, payload)
+    except Exception as exc:
+        if logger is not None:
+            try:
+                logger.log(
+                    "ingest.stage2.complete.write_error",
+                    {
+                        "source_record_id": str(record_id),
+                        "stage2_record_id": str(rid),
+                        "error": f"{type(exc).__name__}: {exc}",
+                    },
+                )
+            except Exception:
+                pass
+        return None, False
+
+    if event_builder is not None:
+        try:
+            event_builder.journal_event("ingest.stage2.complete", payload, event_id=rid, ts_utc=ts_val)
+            event_builder.ledger_entry(
+                "ingest.stage2.complete",
+                inputs=[str(record_id)],
+                outputs=[rid],
+                payload=payload,
+                entry_id=rid,
+                ts_utc=ts_val,
+            )
+        except Exception:
+            pass
+    if logger is not None:
+        try:
+            logger.log(
+                "ingest.stage2.complete",
+                {
+                    "source_record_id": str(record_id),
+                    "projection_ok": bool(projection_ok),
+                    "generated_docs": int(payload.get("generated_docs", 0)),
+                    "generated_states": int(payload.get("generated_states", 0)),
+                },
+            )
+        except Exception:
+            pass
+    return rid, True

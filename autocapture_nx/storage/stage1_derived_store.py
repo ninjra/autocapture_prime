@@ -166,6 +166,31 @@ class Stage1OverlayStore:
     def put_replace(self, record_id: str, value: dict[str, Any]) -> None:
         self._derived_write.put_replace(record_id, value)
 
+    def keys(self) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        if self._metadata_read is not None and hasattr(self._metadata_read, "keys"):
+            try:
+                for key in self._metadata_read.keys():
+                    token = str(key)
+                    if token in seen:
+                        continue
+                    seen.add(token)
+                    out.append(token)
+            except Exception:
+                pass
+        try:
+            for key in self._derived_write.keys():
+                token = str(key)
+                if token in seen:
+                    continue
+                seen.add(token)
+                out.append(token)
+        except Exception:
+            pass
+        out.sort()
+        return out
+
 
 def build_stage1_overlay_store(
     *,

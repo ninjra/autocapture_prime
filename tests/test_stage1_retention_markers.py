@@ -7,7 +7,12 @@ from autocapture_nx.ingest.uia_obs_docs import _frame_uia_expected_ids
 from autocapture.storage.retention import mark_evidence_retention_eligible
 from autocapture.storage.retention import retention_eligibility_record_id
 from autocapture.storage.stage1 import mark_stage1_complete
-from autocapture.storage.stage1 import mark_stage1_and_retention, stage1_complete_record_id
+from autocapture.storage.stage1 import (
+    mark_stage1_and_retention,
+    mark_stage2_complete,
+    stage1_complete_record_id,
+    stage2_complete_record_id,
+)
 
 
 class _MetadataStore:
@@ -175,6 +180,56 @@ class Stage1RetentionMarkerTests(unittest.TestCase):
         self.assertIsNone(rid)
         names = [name for name, _payload in logger.rows]
         self.assertIn("storage.retention.eligible.write_error", names)
+
+    def test_stage2_marker_written_and_complete_when_projection_ok(self) -> None:
+        metadata = _MetadataStore()
+        record_id = "run_test/evidence.capture.frame/6"
+        payload = {
+            "record_type": "evidence.capture.frame",
+            "run_id": "run_test",
+            "ts_utc": "2026-02-20T00:00:00Z",
+            "blob_path": "media/rid_frame_6.blob",
+            "content_hash": "abc666",
+            "uia_ref": {"record_id": "run_test/evidence.uia.snapshot/6", "content_hash": "uia666"},
+            "input_ref": {"record_id": "run_test/evidence.input.batch/6"},
+        }
+        rid, inserted = mark_stage2_complete(
+            metadata,
+            record_id,
+            payload,
+            projection={"ok": True, "generated_docs": 2, "inserted_docs": 2, "generated_states": 1, "inserted_states": 1, "errors": 0},
+            reason="idle_processed",
+        )
+        self.assertTrue(inserted)
+        self.assertEqual(rid, stage2_complete_record_id(record_id))
+        row = metadata.get(rid, {})
+        self.assertTrue(bool(row.get("complete", False)))
+        self.assertEqual(int(row.get("generated_states", 0) or 0), 1)
+        self.assertEqual(int(row.get("inserted_docs", 0) or 0), 2)
+
+    def test_stage2_marker_is_incomplete_when_projection_errors(self) -> None:
+        metadata = _MetadataStore()
+        record_id = "run_test/evidence.capture.frame/7"
+        payload = {
+            "record_type": "evidence.capture.frame",
+            "run_id": "run_test",
+            "ts_utc": "2026-02-20T00:00:00Z",
+            "blob_path": "media/rid_frame_7.blob",
+            "content_hash": "abc777",
+            "uia_ref": {"record_id": "run_test/evidence.uia.snapshot/7", "content_hash": "uia777"},
+            "input_ref": {"record_id": "run_test/evidence.input.batch/7"},
+        }
+        rid, inserted = mark_stage2_complete(
+            metadata,
+            record_id,
+            payload,
+            projection={"ok": False, "generated_docs": 0, "inserted_docs": 0, "generated_states": 1, "inserted_states": 0, "errors": 1},
+            reason="idle_processed",
+        )
+        self.assertTrue(inserted)
+        self.assertEqual(rid, stage2_complete_record_id(record_id))
+        row = metadata.get(rid, {})
+        self.assertFalse(bool(row.get("complete", True)))
 
 
 if __name__ == "__main__":

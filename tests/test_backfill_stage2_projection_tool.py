@@ -77,8 +77,14 @@ def test_backfill_stage2_projection_docs_writes_derived_extra_docs() -> None:
 
         first = backfill_stage2_projection_docs(db_path, dry_run=False, limit=None, snapshot_read=True)
         assert int(first.get("inserted_docs", 0) or 0) >= 1
+        assert int(first.get("inserted_states", 0) or 0) == 1
+        assert int(first.get("stage2_marker_inserted", 0) or 0) == 1
+        assert int(first.get("stage2_marker_complete", 0) or 0) == 1
         assert int(first.get("error_frames", 0) or 0) == 0
         assert _count_rows(db_path, "derived.sst.text.extra") >= 1
+        assert _count_rows(db_path, "derived.sst.state") == 1
+        assert _count_rows(db_path, "derived.ingest.stage2.complete") == 1
 
         second = backfill_stage2_projection_docs(db_path, dry_run=False, limit=None, snapshot_read=True)
         assert int(second.get("inserted_docs", 0) or 0) == 0
+        assert int(second.get("inserted_states", 0) or 0) == 0

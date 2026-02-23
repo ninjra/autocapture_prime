@@ -72,13 +72,21 @@ def test_stage2_projection_docs_deterministic_and_idempotent() -> None:
     assert bool(first.get("ok", False))
     assert int(first.get("generated_docs", 0) or 0) >= 1
     assert int(first.get("inserted_docs", 0) or 0) >= 1
+    assert int(first.get("generated_states", 0) or 0) == 1
+    assert int(first.get("inserted_states", 0) or 0) == 1
     first_ids = sorted([rid for rid, row in store.data.items() if str(row.get("record_type") or "") == "derived.sst.text.extra"])
+    first_state_ids = sorted([rid for rid, row in store.data.items() if str(row.get("record_type") or "") == "derived.sst.state"])
     assert len(first_ids) >= 1
+    assert len(first_state_ids) == 1
 
     second = project_stage2_docs_for_frame(store, source_record_id=frame_id, frame_record=frame, read_store=store, dry_run=False)
     assert bool(second.get("ok", False))
+    assert int(second.get("generated_states", 0) or 0) == 1
+    assert int(second.get("inserted_states", 0) or 0) == 0
     second_ids = sorted([rid for rid, row in store.data.items() if str(row.get("record_type") or "") == "derived.sst.text.extra"])
+    second_state_ids = sorted([rid for rid, row in store.data.items() if str(row.get("record_type") or "") == "derived.sst.state"])
     assert second_ids == first_ids
+    assert second_state_ids == first_state_ids
 
 
 def test_stage2_projection_docs_missing_uia_ref_is_safe_noop() -> None:

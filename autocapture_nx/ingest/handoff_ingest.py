@@ -21,7 +21,7 @@ from autocapture_nx.ingest.uia_obs_docs import _ensure_frame_uia_docs
 from autocapture_nx.storage.stage1_derived_store import Stage1DerivedSqliteStore
 from autocapture_nx.storage.stage1_derived_store import Stage1OverlayStore
 from autocapture_nx.storage.stage1_derived_store import default_stage1_derived_db_path
-from autocapture.storage.stage1 import mark_stage1_and_retention
+from autocapture.storage.stage1 import mark_stage1_and_retention, mark_stage2_complete
 
 _REAP_MARKER = "reap_eligible.json"
 _REAP_SCHEMA = "autocapture.handoff.reap_eligible.v1"
@@ -201,6 +201,7 @@ class IngestResult:
     stage2_projection_generated_docs: int
     stage2_projection_inserted_docs: int
     stage2_projection_errors: int
+    stage2_complete_records: int
     ack_path: str
     journal_record_id: str
     errors: list[str]
@@ -347,6 +348,7 @@ class HandoffIngestor:
         stage2_projection_generated_docs = 0
         stage2_projection_inserted_docs = 0
         stage2_projection_errors = 0
+        stage2_complete_records = 0
         journal_record_id = ""
         errors: list[str] = []
 
@@ -478,6 +480,21 @@ class HandoffIngestor:
                         stage2_projection_errors += _safe_int(projection.get("errors", 0))
                     except Exception:
                         stage2_projection_errors += 1
+                        projection = {"ok": False, "errors": 1, "reason": "projection_exception"}
+                    try:
+                        stage2_id, stage2_inserted = mark_stage2_complete(
+                            stage1_store,
+                            source_record_id,
+                            source_payload,
+                            projection=projection if isinstance(projection, dict) else None,
+                            reason="handoff_ingest",
+                        )
+                        if stage2_id and stage2_inserted:
+                            stage2_marker = stage1_store.get(stage2_id, None) if hasattr(stage1_store, "get") else None
+                            if isinstance(stage2_marker, dict) and bool(stage2_marker.get("complete", False)):
+                                stage2_complete_records += 1
+                    except Exception:
+                        stage2_projection_errors += 1
                     try:
                         result = mark_stage1_and_retention(
                             stage1_store,
@@ -519,6 +536,7 @@ class HandoffIngestor:
                         "stage2_projection_generated_docs": int(stage2_projection_generated_docs),
                         "stage2_projection_inserted_docs": int(stage2_projection_inserted_docs),
                         "stage2_projection_errors": int(stage2_projection_errors),
+                        "stage2_complete_records": int(stage2_complete_records),
                     },
                     "errors": [],
                 }
@@ -569,6 +587,7 @@ class HandoffIngestor:
                 "stage2_projection_generated_docs": int(stage2_projection_generated_docs),
                 "stage2_projection_inserted_docs": int(stage2_projection_inserted_docs),
                 "stage2_projection_errors": int(stage2_projection_errors),
+                "stage2_complete_records": int(stage2_complete_records),
             },
             "integrity": {
                 "dest_metadata_db_sha256": sha256_file(self._dest_data_root / "metadata.db"),
@@ -594,6 +613,7 @@ class HandoffIngestor:
             stage2_projection_generated_docs=int(stage2_projection_generated_docs),
             stage2_projection_inserted_docs=int(stage2_projection_inserted_docs),
             stage2_projection_errors=int(stage2_projection_errors),
+            stage2_complete_records=int(stage2_complete_records),
             ack_path=str(ack_path),
             journal_record_id=journal_record_id,
             errors=list(errors),
@@ -702,6 +722,7 @@ def auto_drain_handoff_spool(
     stage2_projection_generated_docs = 0
     stage2_projection_inserted_docs = 0
     stage2_projection_errors = 0
+    stage2_complete_records = 0
     for row in results:
         if not isinstance(row, dict):
             continue
@@ -713,6 +734,7 @@ def auto_drain_handoff_spool(
         stage2_projection_generated_docs += _safe_int(row.get("stage2_projection_generated_docs", 0))
         stage2_projection_inserted_docs += _safe_int(row.get("stage2_projection_inserted_docs", 0))
         stage2_projection_errors += _safe_int(row.get("stage2_projection_errors", 0))
+        stage2_complete_records += _safe_int(row.get("stage2_complete_records", 0))
     return {
         "ok": len(drained.errors) == 0,
         "enabled": True,
@@ -729,4 +751,5 @@ def auto_drain_handoff_spool(
         "stage2_projection_generated_docs": int(stage2_projection_generated_docs),
         "stage2_projection_inserted_docs": int(stage2_projection_inserted_docs),
         "stage2_projection_errors": int(stage2_projection_errors),
+        "stage2_complete_records": int(stage2_complete_records),
     }

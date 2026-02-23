@@ -14,6 +14,7 @@ from autocapture_nx.ingest.handoff_ingest import _choose_source_table
 from autocapture_nx.ingest.handoff_ingest import _table_columns
 from autocapture_nx.ingest.stage2_projection_docs import project_stage2_docs_for_frame
 from autocapture_nx.kernel.sqlite_reads import open_sqlite_reader
+from autocapture.storage.stage1 import mark_stage2_complete
 
 
 def _decode_payload(payload_text: str | None) -> dict[str, Any] | None:
@@ -43,6 +44,12 @@ class _ReadWriteAdapter:
         self._write.put_new(record_id, value)
 
     def put(self, record_id: str, value: dict[str, Any]) -> None:
+        self._write.put(record_id, value)
+
+    def put_replace(self, record_id: str, value: dict[str, Any]) -> None:
+        if hasattr(self._write, "put_replace"):
+            self._write.put_replace(record_id, value)
+            return
         self._write.put(record_id, value)
 
 
@@ -118,6 +125,7 @@ def backfill_stage2_projection_docs(
     dry_run: bool = False,
     limit: int | None = None,
     snapshot_read: bool = True,
+    mark_stage2: bool = True,
 ) -> dict[str, Any]:
     source_conn, source_read = open_sqlite_reader(
         db_path,
@@ -137,6 +145,10 @@ def backfill_stage2_projection_docs(
         "error_frames": 0,
         "generated_docs": 0,
         "inserted_docs": 0,
+        "generated_states": 0,
+        "inserted_states": 0,
+        "stage2_marker_inserted": 0,
+        "stage2_marker_complete": 0,
     }
     try:
         source_table = _choose_source_table(source_conn)
@@ -187,6 +199,22 @@ def backfill_stage2_projection_docs(
                 summary["error_frames"] = int(summary.get("error_frames", 0) or 0) + 1
             summary["generated_docs"] = int(summary.get("generated_docs", 0) or 0) + int(status.get("generated_docs", 0) or 0)
             summary["inserted_docs"] = int(summary.get("inserted_docs", 0) or 0) + int(status.get("inserted_docs", 0) or 0)
+            summary["generated_states"] = int(summary.get("generated_states", 0) or 0) + int(status.get("generated_states", 0) or 0)
+            summary["inserted_states"] = int(summary.get("inserted_states", 0) or 0) + int(status.get("inserted_states", 0) or 0)
+            if (not dry_run) and bool(mark_stage2):
+                stage2_id, stage2_inserted = mark_stage2_complete(
+                    write_store,
+                    source_record_id,
+                    payload,
+                    projection=status if isinstance(status, dict) else None,
+                    reason="stage2_projection_backfill",
+                )
+                if stage2_inserted:
+                    summary["stage2_marker_inserted"] = int(summary.get("stage2_marker_inserted", 0) or 0) + 1
+                if stage2_id:
+                    marker = write_store.get(stage2_id, {})
+                    if isinstance(marker, dict) and bool(marker.get("complete", False)):
+                        summary["stage2_marker_complete"] = int(summary.get("stage2_marker_complete", 0) or 0) + 1
         if write_conn is not None:
             write_conn.commit()
     finally:
@@ -204,6 +232,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--snapshot-read", dest="snapshot_read", action="store_true", help="Allow read snapshot fallback.")
     parser.add_argument("--no-snapshot-read", dest="snapshot_read", action="store_false", help="Read DB directly without snapshot fallback.")
     parser.set_defaults(snapshot_read=True)
+    parser.add_argument("--mark-stage2", dest="mark_stage2", action="store_true", help="Write derived.ingest.stage2.complete markers.")
+    parser.add_argument("--no-mark-stage2", dest="mark_stage2", action="store_false", help="Do not write stage2 completion markers.")
+    parser.set_defaults(mark_stage2=True)
     parser.add_argument("--wait-stable-seconds", type=float, default=0.0, help="Wait until metadata DB is unchanged for this duration.")
     parser.add_argument("--wait-timeout-seconds", type=float, default=0.0, help="Max wait budget for --wait-stable-seconds (0 = no timeout).")
     parser.add_argument("--poll-interval-ms", type=int, default=250, help="Polling interval for stability wait.")
@@ -244,6 +275,7 @@ def main() -> int:
             dry_run=bool(args.dry_run),
             limit=int(args.limit) if int(args.limit) > 0 else None,
             snapshot_read=bool(args.snapshot_read),
+            mark_stage2=bool(args.mark_stage2),
         )
     except Exception as exc:
         print(json.dumps({"ok": False, "error": f"{type(exc).__name__}:{exc}", "db": str(db_path)}, sort_keys=True))

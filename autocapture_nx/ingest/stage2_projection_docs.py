@@ -18,6 +18,18 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _ts_utc_to_ms(ts_utc: str) -> int:
+    raw = str(ts_utc or "").strip()
+    if not raw:
+        return 0
+    if raw.endswith("Z"):
+        raw = f"{raw[:-1]}+00:00"
+    try:
+        return int(datetime.fromisoformat(raw).timestamp() * 1000.0)
+    except Exception:
+        return 0
+
+
 def _safe_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)
@@ -216,6 +228,144 @@ def _make_payload(
     }
 
 
+def _projected_state_record_id(run_id: str, source_record_id: str) -> str:
+    component = encode_record_id_component(f"proj_rid_{sha256_text(str(source_record_id))}")
+    return f"{run_id}/derived.sst.state/{component}"
+
+
+def _projected_state_id(source_record_id: str) -> str:
+    return f"state_proj_{sha256_text(str(source_record_id))[:24]}"
+
+
+def _state_tokens_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = payload.get("tokens_raw") if isinstance(payload.get("tokens_raw"), list) else []
+    out: list[dict[str, Any]] = []
+    for idx, row in enumerate(raw):
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("text") or "").strip()
+        if not text:
+            continue
+        bbox = _normalized_bbox(row.get("bbox"))
+        token: dict[str, Any] = {
+            "token_id": f"tok_{idx}",
+            "text": text,
+            "norm_text": text.lower(),
+        }
+        if bbox is not None:
+            token["bbox"] = [int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])]
+        out.append(token)
+    return out
+
+
+def _project_state_for_frame(
+    write_store: Any,
+    *,
+    source_record_id: str,
+    frame_record: dict[str, Any],
+    payload: dict[str, Any],
+    dry_run: bool,
+) -> dict[str, Any]:
+    run_id = _run_id_for_frame(str(source_record_id), frame_record)
+    ts_utc = _ts_for_frame(frame_record)
+    state_record_id = _projected_state_record_id(run_id, str(source_record_id))
+    state_id = _projected_state_id(str(source_record_id))
+    existing = write_store.get(state_record_id, None) if hasattr(write_store, "get") else None
+    if isinstance(existing, dict):
+        return {
+            "generated_states": 1,
+            "inserted_states": 0,
+            "state_record_id": state_record_id,
+            "state_id": state_id,
+            "errors": 0,
+        }
+
+    width = max(1, _safe_int(frame_record.get("width") or frame_record.get("frame_width"), default=1920))
+    height = max(1, _safe_int(frame_record.get("height") or frame_record.get("frame_height"), default=1080))
+    ts_ms = int(_ts_utc_to_ms(ts_utc))
+    tokens = _state_tokens_from_payload(payload)
+    element_graph = payload.get("element_graph") if isinstance(payload.get("element_graph"), dict) else {}
+    windows = (
+        (element_graph.get("ui_state") or {}).get("windows")
+        if isinstance(element_graph.get("ui_state"), dict)
+        else []
+    )
+    app_hint = ""
+    if isinstance(windows, list) and windows:
+        first = windows[0] if isinstance(windows[0], dict) else {}
+        app_hint = str(first.get("app") or first.get("label") or "").strip()
+    screen_state: dict[str, Any] = {
+        "state_id": state_id,
+        "frame_id": str(source_record_id),
+        "ts_ms": int(ts_ms),
+        "width": int(width),
+        "height": int(height),
+        "image_sha256": str(frame_record.get("content_hash") or ""),
+        "phash": "",
+        "visible_apps": [app_hint] if app_hint else [],
+        "focus_element_id": "",
+        "tokens": tokens,
+        "element_graph": element_graph,
+    }
+    payload_state: dict[str, Any] = {
+        "schema_version": 1,
+        "record_type": "derived.sst.state",
+        "run_id": run_id,
+        "ts_utc": ts_utc,
+        "record_id": state_record_id,
+        "artifact_id": state_record_id,
+        "source_record_id": str(source_record_id),
+        "frame_id": str(source_record_id),
+        "screen_state": screen_state,
+        "summary": {
+            "visible_apps": tuple(screen_state.get("visible_apps", [])),
+            "focus_element_id": str(screen_state.get("focus_element_id") or ""),
+            "token_count": len(tokens),
+            "table_count": 0,
+            "spreadsheet_count": 0,
+            "code_count": 0,
+            "chart_count": 0,
+        },
+    }
+    payload_state["payload_hash"] = sha256_canonical({k: v for k, v in payload_state.items() if k != "payload_hash"})
+    if dry_run:
+        return {
+            "generated_states": 1,
+            "inserted_states": 1,
+            "state_record_id": state_record_id,
+            "state_id": state_id,
+            "errors": 0,
+        }
+    try:
+        if hasattr(write_store, "put_new"):
+            write_store.put_new(state_record_id, payload_state)
+        else:
+            write_store.put(state_record_id, payload_state)
+    except FileExistsError:
+        return {
+            "generated_states": 1,
+            "inserted_states": 0,
+            "state_record_id": state_record_id,
+            "state_id": state_id,
+            "errors": 0,
+        }
+    except Exception:
+        return {
+            "generated_states": 1,
+            "inserted_states": 0,
+            "state_record_id": state_record_id,
+            "state_id": state_id,
+            "errors": 1,
+        }
+    return {
+        "generated_states": 1,
+        "inserted_states": 1,
+        "state_record_id": state_record_id,
+        "state_id": state_id,
+        "errors": 0,
+    }
+
+
 def project_stage2_docs_for_frame(
     write_store: Any,
     *,
@@ -238,8 +388,27 @@ def project_stage2_docs_for_frame(
         snapshot=snapshot,
         read_store=reader,
     )
+    state_row = _project_state_for_frame(
+        write_store,
+        source_record_id=str(source_record_id),
+        frame_record=frame_record,
+        payload=payload,
+        dry_run=bool(dry_run),
+    )
+    generated_states = int(state_row.get("generated_states", 0) or 0)
+    inserted_states = int(state_row.get("inserted_states", 0) or 0)
+    state_errors = int(state_row.get("errors", 0) or 0)
     if not isinstance(payload.get("text_lines"), list) or not payload.get("text_lines"):
-        return {"required": True, "ok": True, "generated_docs": 0, "inserted_docs": 0, "errors": 0, "reason": "empty_payload"}
+        return {
+            "required": True,
+            "ok": state_errors == 0,
+            "generated_docs": 0,
+            "inserted_docs": 0,
+            "generated_states": int(generated_states),
+            "inserted_states": int(inserted_states),
+            "errors": int(state_errors),
+            "reason": "empty_payload",
+        }
 
     plugin = ObservationGraphPlugin(
         "builtin.observation.graph",
@@ -257,12 +426,23 @@ def project_stage2_docs_for_frame(
             "ok": False,
             "generated_docs": 0,
             "inserted_docs": 0,
-            "errors": 1,
+            "generated_states": int(generated_states),
+            "inserted_states": int(inserted_states),
+            "errors": int(1 + state_errors),
             "reason": f"plugin_error:{type(exc).__name__}",
         }
     docs = result.get("extra_docs") if isinstance(result, dict) and isinstance(result.get("extra_docs"), list) else []
     if not docs:
-        return {"required": True, "ok": True, "generated_docs": 0, "inserted_docs": 0, "errors": 0, "reason": "no_docs"}
+        return {
+            "required": True,
+            "ok": state_errors == 0,
+            "generated_docs": 0,
+            "inserted_docs": 0,
+            "generated_states": int(generated_states),
+            "inserted_states": int(inserted_states),
+            "errors": int(state_errors),
+            "reason": "no_docs",
+        }
 
     normalized_docs: list[tuple[str, str, dict[str, Any]]] = []
     for doc in docs:
@@ -277,7 +457,16 @@ def project_stage2_docs_for_frame(
             continue
         normalized_docs.append((doc_kind, text, dict(doc)))
     if not normalized_docs:
-        return {"required": True, "ok": True, "generated_docs": 0, "inserted_docs": 0, "errors": 0, "reason": "filtered_docs_empty"}
+        return {
+            "required": True,
+            "ok": state_errors == 0,
+            "generated_docs": 0,
+            "inserted_docs": 0,
+            "generated_states": int(generated_states),
+            "inserted_states": int(inserted_states),
+            "errors": int(state_errors),
+            "reason": "filtered_docs_empty",
+        }
 
     normalized_docs.sort(key=lambda item: (item[0], item[1]))
     run_id = _run_id_for_frame(str(source_record_id), frame_record)
@@ -327,9 +516,11 @@ def project_stage2_docs_for_frame(
 
     return {
         "required": True,
-        "ok": errors == 0,
+        "ok": errors == 0 and state_errors == 0,
         "generated_docs": int(generated),
         "inserted_docs": int(inserted),
-        "errors": int(errors),
-        "reason": "ok" if errors == 0 else "insert_failed",
+        "generated_states": int(generated_states),
+        "inserted_states": int(inserted_states),
+        "errors": int(errors + state_errors),
+        "reason": "ok" if errors == 0 and state_errors == 0 else "insert_failed",
     }

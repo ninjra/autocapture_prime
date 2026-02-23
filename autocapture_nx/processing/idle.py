@@ -41,10 +41,16 @@ from autocapture_nx.ingest.uia_obs_docs import (
     _frame_uia_expected_ids,
     _uia_extract_snapshot_dict,
 )
+from autocapture_nx.ingest.stage2_projection_docs import project_stage2_docs_for_frame
 from autocapture_nx.storage.stage1_derived_store import build_stage1_overlay_store
 from autocapture_nx.storage.facts_ndjson import append_fact_line
 from autocapture.storage.retention import retention_eligibility_record_id
-from autocapture.storage.stage1 import mark_stage1_and_retention, stage1_complete_record_id
+from autocapture.storage.stage1 import (
+    mark_stage1_and_retention,
+    mark_stage2_complete,
+    stage1_complete_record_id,
+    stage2_complete_record_id,
+)
 
 
 @dataclass
@@ -76,6 +82,12 @@ class IdleProcessStats:
     stage1_backfill_marked_records: int = 0
     stage1_uia_docs_inserted: int = 0
     stage1_uia_frames_missing_count: int = 0
+    stage2_projection_generated_docs: int = 0
+    stage2_projection_inserted_docs: int = 0
+    stage2_projection_generated_states: int = 0
+    stage2_projection_inserted_states: int = 0
+    stage2_projection_errors: int = 0
+    stage2_complete_records: int = 0
 
 
 @dataclass
@@ -716,8 +728,58 @@ class IdleProcessor:
                     stats.stage1_missing_retention_marker_count += 1
                 else:
                     stats.stage1_retention_marked_records += 1
+                try:
+                    self._ensure_stage2_projection(record_id, record, reason=reason, stats=stats)
+                except Exception:
+                    pass
         except Exception:
             pass
+
+    def _ensure_stage2_projection(self, record_id: str, record: dict[str, Any], *, reason: str, stats: IdleProcessStats) -> None:
+        if self._stage1_store is None:
+            return
+        if not isinstance(record, dict):
+            return
+        if str(record.get("record_type") or "") != "evidence.capture.frame":
+            return
+        projection: dict[str, Any]
+        try:
+            projection = project_stage2_docs_for_frame(
+                self._stage1_store,
+                source_record_id=str(record_id),
+                frame_record=record,
+                read_store=self._stage1_store,
+                dry_run=False,
+            )
+        except Exception as exc:
+            stats.stage2_projection_errors += 1
+            if self._logger is not None:
+                try:
+                    self._logger.log(
+                        "stage2.projection.error",
+                        {"source_record_id": str(record_id), "error": f"{type(exc).__name__}:{exc}"},
+                    )
+                except Exception:
+                    pass
+            return
+        stats.stage2_projection_generated_docs += int(projection.get("generated_docs", 0) or 0)
+        stats.stage2_projection_inserted_docs += int(projection.get("inserted_docs", 0) or 0)
+        stats.stage2_projection_generated_states += int(projection.get("generated_states", 0) or 0)
+        stats.stage2_projection_inserted_states += int(projection.get("inserted_states", 0) or 0)
+        stats.stage2_projection_errors += int(projection.get("errors", 0) or 0)
+        stage2_id, stage2_inserted = mark_stage2_complete(
+            self._stage1_store,
+            str(record_id),
+            record,
+            projection=projection,
+            reason=reason,
+            event_builder=self._events,
+            logger=self._logger,
+        )
+        if stage2_id and stage2_inserted:
+            marker = self._stage1_store.get(stage2_id, {})
+            if isinstance(marker, dict) and bool(marker.get("complete", False)):
+                stats.stage2_complete_records += 1
 
     def _ensure_stage1_uia_docs(self, record_id: str, record: dict[str, Any], *, stats: IdleProcessStats) -> None:
         if self._stage1_store is None:
@@ -726,8 +788,22 @@ class IdleProcessor:
             return
         if str(record.get("record_type") or "") != "evidence.capture.frame":
             return
+        plugins_cfg = self._config.get("plugins", {}) if isinstance(self._config, dict) else {}
+        settings_cfg = plugins_cfg.get("settings", {}) if isinstance(plugins_cfg, dict) else {}
+        uia_cfg = (
+            settings_cfg.get("builtin.processing.sst.uia_context", {})
+            if isinstance(settings_cfg, dict)
+            else {}
+        )
+        allow_fallback = True
+        require_hash_match = True
+        if isinstance(uia_cfg, dict):
+            allow_fallback = bool(uia_cfg.get("allow_latest_snapshot_fallback", True))
+            require_hash_match = bool(uia_cfg.get("require_hash_match", True))
+        dataroot = str(uia_cfg.get("dataroot") or "").strip() if isinstance(uia_cfg, dict) else ""
         storage_cfg = self._config.get("storage", {}) if isinstance(self._config, dict) else {}
-        dataroot = str(storage_cfg.get("data_dir") or "").strip()
+        if not dataroot:
+            dataroot = str(storage_cfg.get("data_dir") or "").strip()
         if not dataroot:
             dataroot = str(os.environ.get("AUTOCAPTURE_DATA_DIR") or "").strip()
         if not dataroot:
@@ -738,6 +814,8 @@ class IdleProcessor:
             record=record,
             dataroot=str(dataroot),
             snapshot_metadata=self._metadata,
+            allow_latest_snapshot_fallback=bool(allow_fallback),
+            require_hash_match=bool(require_hash_match),
         )
         stats.stage1_uia_docs_inserted += int(status.get("inserted", 0) or 0)
         if bool(status.get("required", False)) and not bool(status.get("ok", False)):
@@ -788,6 +866,12 @@ class IdleProcessor:
                 return False
         if not self._has_stage1_uia_docs(record):
             return False
+        if str(record.get("record_type") or "") == "evidence.capture.frame":
+            stage2_marker = self._stage1_store.get(stage2_complete_record_id(record_id), None)
+            if _is_missing_metadata_record(stage2_marker):
+                return False
+            if not bool(stage2_marker.get("complete", False)):
+                return False
         return True
 
     def _backfill_stage1_markers(
@@ -1495,7 +1579,7 @@ class IdleProcessor:
         max_pipeline_records_per_run = max(0, int(intelligent_cfg.get("max_pipeline_records_per_run", 0) or 0))
         stage1_backfill_cfg = idle_cfg.get("stage1_marker_backfill", {}) if isinstance(idle_cfg.get("stage1_marker_backfill", {}), dict) else {}
         stage1_backfill_enabled = bool(stage1_backfill_cfg.get("enabled", True))
-        default_stage1_backfill_max = max(32, int(max_items * 2) if max_items > 0 else 64)
+        default_stage1_backfill_max = max(256, int(max_items * 4) if max_items > 0 else 512)
         stage1_backfill_max_records = max(0, int(stage1_backfill_cfg.get("max_records_per_run", default_stage1_backfill_max) or 0))
         if max_gpu <= 0:
             allow_vlm = False

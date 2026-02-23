@@ -735,6 +735,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Fail closed when VLM preflight fails.",
     )
     parsed = parser.parse_args(args)
+    # Synthetic UIA gauntlet runs should always execute under fixture override,
+    # independent of live activity state.
+    force_idle_runtime = bool(parsed.force_idle) or str(parsed.uia_synthetic) in {"metadata", "fallback"}
 
     image_path = Path(str(parsed.image))
     _emit_progress(
@@ -745,6 +748,7 @@ def main(argv: list[str] | None = None) -> int:
         max_idle_steps=int(parsed.max_idle_steps),
         synthetic_hid=str(parsed.synthetic_hid),
         uia_synthetic=str(parsed.uia_synthetic),
+        force_idle_runtime=bool(force_idle_runtime),
         skip_vllm_unstable=bool(parsed.skip_vllm_unstable),
     )
     if not image_path.exists():
@@ -841,7 +845,7 @@ def main(argv: list[str] | None = None) -> int:
     base_cfg.setdefault("runtime", {})
     if isinstance(base_cfg["runtime"], dict):
         enforce_cfg = base_cfg["runtime"].setdefault("mode_enforcement", {})
-        if isinstance(enforce_cfg, dict) and bool(parsed.force_idle):
+        if isinstance(enforce_cfg, dict) and bool(force_idle_runtime):
             enforce_cfg["fixture_override"] = True
             enforce_cfg["fixture_override_reason"] = "process_single_screenshot_force_idle"
     base_cfg.setdefault("processing", {})
@@ -1093,18 +1097,25 @@ def main(argv: list[str] | None = None) -> int:
             idle_cfg["max_concurrency_gpu"] = int(idle_cfg.get("max_concurrency_gpu", 1) or 1)
             extractors_cfg = idle_cfg.setdefault("extractors", {})
             if isinstance(extractors_cfg, dict):
-                # Strict golden single-image mode should use SST as the single
-                # metadata path. Direct idle OCR/VLM extractors duplicate work
-                # and can consume most of the per-step budget before SST runs.
-                extractors_cfg["ocr"] = False
-                extractors_cfg["vlm"] = False
+                if str(parsed.uia_synthetic) in {"metadata", "fallback"}:
+                    # Synthetic gauntlet mode needs active extractor passes so
+                    # the SST pipeline is guaranteed to execute in this run.
+                    extractors_cfg["ocr"] = True
+                    extractors_cfg["vlm"] = False
+                else:
+                    # Strict golden single-image mode should use SST as the
+                    # single metadata path. Direct idle OCR/VLM extractors
+                    # duplicate work and can consume most of the per-step
+                    # budget before SST runs.
+                    extractors_cfg["ocr"] = False
+                    extractors_cfg["vlm"] = False
         sst_cfg = processing_cfg.setdefault("sst", {})
         if isinstance(sst_cfg, dict):
             sst_cfg["enabled"] = True
             # Option A contract: metadata quality must come from ingest-time
             # extraction, not query-time image calls.
             sst_cfg["allow_ocr"] = True
-            sst_cfg["allow_vlm"] = True
+            sst_cfg["allow_vlm"] = str(parsed.uia_synthetic) not in {"metadata", "fallback"}
             ui_parse_cfg = sst_cfg.setdefault("ui_parse", {})
             if isinstance(ui_parse_cfg, dict):
                 ui_parse_cfg["enabled"] = True
@@ -1139,7 +1150,7 @@ def main(argv: list[str] | None = None) -> int:
         "record_id": record_id,
         "image_path": str(image_path),
         "started_utc": ts_utc,
-        "force_idle": bool(parsed.force_idle),
+        "force_idle": bool(force_idle_runtime),
         "profile_path": str(profile_path),
         "strict_golden": bool(strict_golden),
         "uia_injection": {
@@ -1245,7 +1256,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         vlm_degraded = False
         vlm_degraded_reason = ""
-        if _should_require_vlm(required_plugins):
+        synthetic_uia_mode = str(parsed.uia_synthetic) in {"metadata", "fallback"}
+        if _should_require_vlm(required_plugins) and not synthetic_uia_mode:
             _emit_progress("vlm.preflight.begin", base_url=EXTERNAL_VLLM_BASE_URL)
             plugin_settings = (base_cfg.get("plugins") or {}).get("settings", {}) if isinstance(base_cfg, dict) else {}
             vllm_cfg = plugin_settings.get("builtin.vlm.vllm_localhost", {}) if isinstance(plugin_settings, dict) else {}
@@ -1287,6 +1299,12 @@ def main(argv: list[str] | None = None) -> int:
                     raise RuntimeError(
                         f"strict_golden_model_not_served:selected={selected_model}:available={','.join(models)}"
                     )
+        elif synthetic_uia_mode:
+            report["vllm_status"] = {
+                "ok": True,
+                "degraded_mode": True,
+                "degraded_reason": "synthetic_uia_metadata_only",
+            }
         try:
             ocr_cap = system.get("ocr.engine") if getattr(system, "has", lambda _n: False)("ocr.engine") else None
             vlm_cap = system.get("vision.extractor") if getattr(system, "has", lambda _n: False)("vision.extractor") else None

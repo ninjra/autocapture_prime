@@ -36,6 +36,7 @@ from autocapture_nx.kernel.providers import capability_providers
 from autocapture_nx.kernel.schema_registry import SchemaRegistry
 from autocapture_nx.kernel.telemetry import record_telemetry
 from autocapture_nx.kernel.sqlite_reads import open_sqlite_reader
+from autocapture_nx.storage.stage1_derived_store import build_stage1_overlay_store
 from autocapture_nx.storage.facts_ndjson import append_fact_line
 from autocapture_nx.state_layer.policy_gate import StatePolicyGate, normalize_state_policy_decision
 from autocapture_nx.state_layer.evidence_compiler import EvidenceCompiler
@@ -884,6 +885,15 @@ def run_state_query(system, query: str) -> dict[str, Any]:
             policy_gate = None
     answer = system.get("answer.builder")
     metadata = system.get("storage.metadata")
+    try:
+        metadata, _stage1_derived = build_stage1_overlay_store(
+            config=system.config if hasattr(system, "config") and isinstance(system.config, dict) else {},
+            metadata=metadata,
+            logger=None,
+        )
+        _ = _stage1_derived
+    except Exception:
+        pass
     event_builder = None
     if hasattr(system, "get"):
         try:

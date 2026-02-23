@@ -3,13 +3,18 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PY="${PYTHON_BIN:-$ROOT/.venv/bin/python}"
-IMG="${1:-$ROOT/docs/test sample/Screenshot 2026-02-02 113519.png}"
+DEFAULT_IMG="$ROOT/docs/test sample/Screenshot 2026-02-02 113519.png"
+IMG="$DEFAULT_IMG"
+if [[ -n "${1:-}" && "${1:-}" != "--dry-run" ]]; then
+  IMG="$1"
+fi
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 OUT_DIR="${AUTOCAPTURE_Q40_SYNTH_OUT_DIR:-$ROOT/artifacts/q40_uia_synthetic}"
 SYNTH_MODE="${AUTOCAPTURE_Q40_SYNTH_UIA_MODE:-fallback}"
 HASH_MODE="${AUTOCAPTURE_Q40_SYNTH_HASH_MODE:-match}"
 DRY_RUN="${AUTOCAPTURE_Q40_SYNTH_DRY_RUN:-0}"
-if [[ "${2:-}" == "--dry-run" ]]; then
+SINGLE_TIMEOUT_S="${AUTOCAPTURE_Q40_SYNTH_SINGLE_TIMEOUT_S:-420}"
+if [[ "${1:-}" == "--dry-run" || "${2:-}" == "--dry-run" ]]; then
   DRY_RUN="1"
 fi
 
@@ -91,18 +96,35 @@ fi
 
 single_log="$synth_root/single_image.log"
 set +e
-"$PY" "$ROOT/tools/process_single_screenshot.py" \
-  --image "$IMG" \
-  --output-dir "artifacts/single_image_runs" \
-  --profile "config/profiles/golden_full.json" \
-  --synthetic-hid "minimal" \
-  --uia-synthetic "$SYNTH_MODE" \
-  --uia-synthetic-pack-json "$pack_json" \
-  --uia-synthetic-dataroot "$synth_root" >"$single_log" 2>&1
+if command -v timeout >/dev/null 2>&1; then
+  timeout --signal=TERM --kill-after=10 "${SINGLE_TIMEOUT_S}" "$PY" "$ROOT/tools/process_single_screenshot.py" \
+    --image "$IMG" \
+    --output-dir "artifacts/single_image_runs" \
+    --profile "config/profiles/golden_full.json" \
+    --synthetic-hid "minimal" \
+    --uia-synthetic "$SYNTH_MODE" \
+    --uia-synthetic-pack-json "$pack_json" \
+    --uia-synthetic-dataroot "$synth_root" \
+    --force-idle >"$single_log" 2>&1
+else
+  "$PY" "$ROOT/tools/process_single_screenshot.py" \
+    --image "$IMG" \
+    --output-dir "artifacts/single_image_runs" \
+    --profile "config/profiles/golden_full.json" \
+    --synthetic-hid "minimal" \
+    --uia-synthetic "$SYNTH_MODE" \
+    --uia-synthetic-pack-json "$pack_json" \
+    --uia-synthetic-dataroot "$synth_root" \
+    --force-idle >"$single_log" 2>&1
+fi
 single_rc=$?
 set -e
 single_json="$(extract_last_json "$single_log")"
 report_path="$("$PY" -c "import json,sys; print((json.loads(sys.argv[1]) if sys.argv[1].strip() else {}).get('report',''))" "$single_json")"
+if [[ $single_rc -eq 124 || $single_rc -eq 137 || $single_rc -eq 143 ]]; then
+  echo "{\"ok\":false,\"error\":\"single_image_timeout\",\"timeout_s\":${SINGLE_TIMEOUT_S},\"log\":\"$single_log\"}"
+  exit 1
+fi
 if [[ $single_rc -ne 0 || -z "$report_path" || ! -f "$report_path" ]]; then
   echo "{\"ok\":false,\"error\":\"single_image_failed\",\"detail\":$single_json,\"log\":\"$single_log\"}"
   exit 1
