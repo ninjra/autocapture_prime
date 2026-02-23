@@ -416,6 +416,30 @@ class Stage1CompletenessAuditToolTests(unittest.TestCase):
                 out = mod.run_audit(db, derived_db_path=None, gap_seconds=60, sample_limit=3)
             self.assertTrue(bool(out.get("ok", False)))
 
+    def test_obs_payload_allows_unknown_window_pid_zero(self) -> None:
+        mod = _load_module("tools/soak/stage1_completeness_audit.py", "stage1_completeness_audit_tool_6")
+        payload = {
+            "record_type": "obs.uia.focus",
+            "source_record_id": "run6/evidence.capture.frame/1",
+            "uia_record_id": "run6/evidence.uia.snapshot/1",
+            "uia_content_hash": "uia_hash_6",
+            "hwnd": "0xABC",
+            "window_title": "",
+            "window_pid": 0,
+            "ts_utc": "2026-02-21T06:00:00Z",
+            "bboxes": [[0, 0, 1, 1]],
+        }
+        self.assertTrue(
+            mod._obs_payload_ok(
+                payload,
+                kind="obs.uia.focus",
+                frame_id="run6/evidence.capture.frame/1",
+                frame_ts=None,
+                uia_record_id="run6/evidence.uia.snapshot/1",
+                uia_hash="uia_hash_6",
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

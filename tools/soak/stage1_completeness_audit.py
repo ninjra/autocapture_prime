@@ -222,7 +222,7 @@ def _obs_payload_ok(
         return False
     if "window_title" not in payload or not isinstance(payload.get("window_title"), str):
         return False
-    if _safe_int(payload.get("window_pid")) <= 0:
+    if "window_pid" not in payload or _safe_int(payload.get("window_pid")) < 0:
         return False
     payload_ts = _parse_ts_utc(payload.get("ts_utc"))
     if payload_ts is None:
