@@ -6492,6 +6492,23 @@ def _fallback_claim_sources_for_topic(topic: str, metadata: Any | None) -> list[
     if not kinds:
         return []
     out: list[dict[str, Any]] = []
+    vlm_source_ids: set[str] | None = None
+
+    def _has_vlm_source(source_id: str) -> bool:
+        nonlocal vlm_source_ids
+        sid = str(source_id or "").strip()
+        if not sid:
+            return False
+        if vlm_source_ids is None:
+            vlm_source_ids = set()
+            for _rid, vlm_record in _metadata_rows_for_record_type(metadata, "derived.text.vlm", limit=512):
+                if not isinstance(vlm_record, dict):
+                    continue
+                row_sid = str(vlm_record.get("source_id") or "").strip()
+                if row_sid:
+                    vlm_source_ids.add(row_sid)
+        return sid in vlm_source_ids
+
     for record_id, record in _metadata_rows_for_record_type(metadata, "derived.sst.text.extra", limit=512):
         doc_kind = str(record.get("doc_kind") or "").strip()
         if doc_kind not in kinds:
@@ -6504,12 +6521,12 @@ def _fallback_claim_sources_for_topic(topic: str, metadata: Any | None) -> list[
         raw_meta = record.get("meta", {})
         if isinstance(raw_meta, dict):
             meta.update(raw_meta)
-        if doc_kind.startswith(("adv.", "obs.")) and provider_id == "builtin.observation.graph":
+        if doc_kind.startswith("adv.") and provider_id == "builtin.observation.graph":
             # Derived advanced docs are produced in persist.bundle after VLM parse.
             # Some store backends drop nested metadata fields; recover grounding so
             # strict advanced display routing can still evaluate these records.
             if "source_modality" not in meta:
-                if _source_has_vlm_record(metadata, source_id):
+                if _has_vlm_source(source_id):
                     meta["source_modality"] = "vlm"
                     meta["source_state_id"] = "vlm"
                     meta.setdefault("source_backend", "observation_graph_fallback")
@@ -6529,6 +6546,10 @@ def _fallback_claim_sources_for_topic(topic: str, metadata: Any | None) -> list[
                 else:
                     meta["source_modality"] = "ocr"
                     meta["source_state_id"] = "ocr"
+        elif doc_kind.startswith("obs.") and provider_id == "builtin.observation.graph":
+            # Signal topics should not trigger expensive VLM source probing.
+            meta.setdefault("source_modality", "ocr")
+            meta.setdefault("source_state_id", "ocr")
         out.append(
             {
                 "claim_index": -1,
@@ -7291,7 +7312,14 @@ def _build_answer_display(
 ) -> dict[str, Any]:
     intent_obj = query_intent if isinstance(query_intent, dict) else _query_intent(query)
     query_topic = str(intent_obj.get("topic") or _query_topic(query))
-    display_sources = _augment_claim_sources_for_display(query_topic, claim_sources, metadata)
+    has_claim_sources = any(isinstance(src, dict) for src in claim_sources)
+    # Metadata-only query mode must stay deterministic and low-latency.
+    # When retrieval produced no claim sources, avoid expensive fallback scans
+    # across derived rows in display formatting.
+    if _metadata_only_query_enabled() and not has_claim_sources:
+        display_sources = [src for src in claim_sources if isinstance(src, dict)]
+    else:
+        display_sources = _augment_claim_sources_for_display(query_topic, claim_sources, metadata)
     signal_map = _signal_candidates(display_sources)
     hard_vlm_map = _normalize_hard_fields_for_topic(query_topic, hard_vlm if isinstance(hard_vlm, dict) else {})
 
@@ -8378,8 +8406,12 @@ def _apply_answer_display(
     claim_sources = _claim_sources(result, metadata)
     intent_obj = query_intent if isinstance(query_intent, dict) else _query_intent(query)
     query_topic = str(intent_obj.get("topic") or _query_topic(query))
-    display_sources = _augment_claim_sources_for_display(query_topic, claim_sources, metadata)
     metadata_only_query = _metadata_only_query_enabled()
+    has_claim_sources = any(isinstance(src, dict) for src in claim_sources)
+    if metadata_only_query and not has_claim_sources:
+        display_sources = [src for src in claim_sources if isinstance(src, dict)]
+    else:
+        display_sources = _augment_claim_sources_for_display(query_topic, claim_sources, metadata)
     metadata_only_allow_hard_vlm = (
         metadata_only_query
         and str(os.environ.get("AUTOCAPTURE_QUERY_METADATA_ONLY_ALLOW_HARD_VLM") or "").strip().casefold()

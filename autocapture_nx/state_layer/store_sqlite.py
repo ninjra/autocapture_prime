@@ -405,6 +405,32 @@ class StateTapeStore:
             sql += " LIMIT ?"
             params.append(int(limit))
         rows = conn.execute(sql, tuple(params)).fetchall()
+        return self._rows_to_spans(rows)
+
+    def get_spans_by_ids(self, state_ids: Iterable[str]) -> list[dict[str, Any]]:
+        self._ensure()
+        conn = self._conn
+        ids = [str(item).strip() for item in state_ids if str(item).strip()]
+        if conn is None or not ids:
+            return []
+        rows: list[tuple[Any, ...]] = []
+        chunk_size = 900
+        for idx in range(0, len(ids), chunk_size):
+            chunk = ids[idx : idx + chunk_size]
+            if not chunk:
+                continue
+            placeholders = ",".join("?" for _ in chunk)
+            sql = (
+                "SELECT state_id, session_id, ts_start_ms, ts_end_ms, z_embedding, z_dim, z_dtype, app, "
+                "window_title_hash, top_entities_json, provenance_json FROM state_span "
+                f"WHERE state_id IN ({placeholders})"
+            )
+            chunk_rows = conn.execute(sql, tuple(chunk)).fetchall()
+            if chunk_rows:
+                rows.extend(chunk_rows)
+        return self._rows_to_spans(rows)
+
+    def _rows_to_spans(self, rows: list[tuple[Any, ...]]) -> list[dict[str, Any]]:
         span_ids = [row[0] for row in rows]
         evidence_map = self._fetch_evidence("span", span_ids)
         spans: list[dict[str, Any]] = []

@@ -68,13 +68,43 @@ class StateRetrieval(PluginBase):
         cfg_index = self._config.get("index", {}) if isinstance(self._config.get("index", {}), dict) else {}
         k = int(limit or cfg_index.get("top_k", 5) or 5)
         min_score = float(cfg_index.get("min_score", 0.0) or 0.0)
+        max_candidates = int(cfg_index.get("max_candidates", 512) or 512)
+        max_candidates = max(64, min(max_candidates, 5000))
         filters = _filters_from_window(time_window, app_filter)
-        spans_by_id = {span.get("state_id"): span for span in store.get_spans(
-            session_id=filters.get("session_id"),
-            start_ms=filters.get("start_ms"),
-            end_ms=filters.get("end_ms"),
-            app=filters.get("app"),
-        )}
+
+        def _spans_by_id_for_hits(hit_ids: list[str]) -> dict[str, dict[str, Any]]:
+            ids = [str(state_id) for state_id in hit_ids if str(state_id).strip()]
+            if not ids:
+                return {}
+            if hasattr(store, "get_spans_by_ids"):
+                try:
+                    rows = store.get_spans_by_ids(ids)  # type: ignore[attr-defined]
+                    return {
+                        str(span.get("state_id")): span
+                        for span in rows
+                        if isinstance(span, dict) and str(span.get("state_id") or "").strip()
+                    }
+                except Exception:
+                    pass
+            # Compatibility fallback for older stores: constrained scan only.
+            # Never call unbounded get_spans here.
+            try:
+                fallback_limit = max(int(len(ids) * 4), int(k * 16), 256)
+            except Exception:
+                fallback_limit = 256
+            rows = store.get_spans(
+                session_id=filters.get("session_id"),
+                start_ms=filters.get("start_ms"),
+                end_ms=filters.get("end_ms"),
+                app=filters.get("app"),
+                limit=int(fallback_limit),
+            )
+            by_id = {
+                str(span.get("state_id")): span
+                for span in rows
+                if isinstance(span, dict) and str(span.get("state_id") or "").strip()
+            }
+            return {state_id: by_id[state_id] for state_id in ids if state_id in by_id}
 
         def _search_with_vector(vec: list[float], *, model_filter: str | None, exclude_model: str | None, tier_label: str) -> list[dict[str, Any]]:
             hits = []
@@ -93,14 +123,15 @@ class StateRetrieval(PluginBase):
                     hits = []
                     trace.append({"tier": f"{tier_label}_ERROR"})
             if not hits:
+                linear_limit = int(filters.get("limit") or max(int(k * 16), int(max_candidates)))
                 spans = store.get_spans(
                     session_id=filters.get("session_id"),
                     start_ms=filters.get("start_ms"),
                     end_ms=filters.get("end_ms"),
                     app=filters.get("app"),
-                    limit=filters.get("limit"),
+                    limit=linear_limit,
                 )
-                trace.append({"tier": f"{tier_label}_LINEAR", "count": len(spans)})
+                trace.append({"tier": f"{tier_label}_LINEAR", "count": len(spans), "limit": int(linear_limit)})
                 for span in spans:
                     z_vec = _unpack_embedding(span.get("z_embedding", {}))
                     score = _cosine(vec, z_vec)
@@ -126,8 +157,9 @@ class StateRetrieval(PluginBase):
                 edge_evidence = {}
 
             results: list[dict[str, Any]] = []
+            span_lookup = _spans_by_id_for_hits([str(hit.get("state_id")) for hit in hits if hit.get("state_id")])
             for hit in hits:
-                span_record: dict[str, Any] | None = spans_by_id.get(hit["state_id"])
+                span_record: dict[str, Any] | None = span_lookup.get(str(hit.get("state_id") or ""))
                 if not isinstance(span_record, dict):
                     continue
                 if not self._policy_gate.app_allowed(span_record.get("summary_features", {}).get("app"), policy):
