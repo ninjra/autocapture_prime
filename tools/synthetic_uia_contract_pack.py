@@ -8,6 +8,74 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+_ANCHOR_TEXTS: tuple[str, ...] = (
+    "Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476",
+    "Permian Resources Service Desk",
+    "permian.xyz.com",
+    "Your record was updated on Feb 02, 2026 - 12:08pm CST",
+    "Mary Mata created the incident on Feb 02, 2026 - 12:08pm CST",
+    "State changed from New to Assigned",
+    "For videos, ping you in 5 - 10 mins?",
+    "gwatt",
+    "Summary column derived from payload fields",
+    "src/statistic_harness/v4/templates/vectors.html",
+    "src/statistic_harness/v4/server.py",
+    "PYTHONPATH=src /tmp/stat_harness_venv/bin/python -m pytest -q",
+    "Write-Host \"Using WSL IP endpoint $saltEndpoint for $projectId\" -ForegroundColor Yellow",
+    "statistic_harness",
+    "chatgpt.com",
+    "listen.siriusxm.com",
+    "Remote Desktop Web Client",
+    "SiriusXM",
+    "Slack",
+    "ChatGPT",
+    "8",
+    "16",
+    "Yes",
+    "white dialog/window",
+    "blue background",
+)
+
+_SECTION_ANCHORS: dict[str, tuple[str, ...]] = {
+    "focus": (
+        "Slack",
+        "ChatGPT",
+        "Remote Desktop Web Client",
+        "SiriusXM",
+        "Permian Resources Service Desk",
+        "Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476",
+        "COMPLETE",
+        "VIEW DETAILS",
+        "Yes",
+    ),
+    "context": (
+        "Summary column derived from payload fields",
+        "src/statistic_harness/v4/templates/vectors.html",
+        "src/statistic_harness/v4/server.py",
+        "PYTHONPATH=src /tmp/stat_harness_venv/bin/python -m pytest -q",
+        "Write-Host \"Using WSL IP endpoint $saltEndpoint for $projectId\" -ForegroundColor Yellow",
+        "k presets: 32, 64, 128",
+        "clamp range inclusive: [1, 200]",
+        "For videos, ping you in 5 - 10 mins?",
+        "gwatt",
+        "[x] Implement vector store pagination",
+        "[x] Execute tests and verify report",
+        "[x] Improve docs readability",
+        "[x] Remove stale assumptions",
+        "[x] Validate strict matrix output",
+        "Running test coverage mapping (in 3s - esc to interrupt)",
+        "January 2026",
+        "Selected date: Feb 02, 2026",
+        "12:00pm - Assigned task review",
+        "12:08pm - Incident update",
+        "12:10pm - State changed to Assigned",
+    ),
+    "operable": (
+        "COMPLETE",
+        "VIEW DETAILS",
+    ),
+}
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -20,15 +88,25 @@ def _canonical_bytes(payload: dict[str, Any]) -> bytes:
 def _build_nodes(section: str, count: int) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     base_role = {"focus": "Edit", "context": "ListItem", "operable": "Button"}[section]
+    section_anchors = _SECTION_ANCHORS.get(section, ())
     for idx in range(max(0, int(count))):
         left = 10 + (idx * 17)
         top = 20 + (idx * 13)
         right = left + 140
         bottom = top + 36
+        anchor = ""
+        if idx < len(section_anchors):
+            anchor = str(section_anchors[idx])
+        elif _ANCHOR_TEXTS:
+            anchor = _ANCHOR_TEXTS[idx % len(_ANCHOR_TEXTS)]
+        if section == "operable" and idx == 0:
+            left, top, right, bottom = 1534, 191, 1583, 204
+        elif section == "operable" and idx == 1:
+            left, top, right, bottom = 1587, 191, 1637, 204
         node: dict[str, Any] = {
             "eid": f"{section}-{idx}",
             "role": base_role,
-            "name": f"{section.title()} Node {idx}",
+            "name": f"{section.title()} Node {idx}: {anchor}" if anchor else f"{section.title()} Node {idx}",
             "aid": f"{section}.aid.{idx}",
             "class": f"{base_role}Class",
             "rect": [left, top, right, bottom],
@@ -94,7 +172,7 @@ def build_contract_pack(
         run_id=run_id,
         ts_utc=ts_utc,
         hwnd="0x001A01",
-        window_title="Synthetic Window",
+        window_title="Remote Desktop Web Client | Slack | ChatGPT | SiriusXM | Permian Resources Service Desk",
         process_path="C:\\Synthetic\\App.exe",
         pid=4242,
         focus_nodes=focus_nodes,

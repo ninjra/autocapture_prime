@@ -14,6 +14,8 @@ SYNTH_MODE="${AUTOCAPTURE_Q40_SYNTH_UIA_MODE:-fallback}"
 HASH_MODE="${AUTOCAPTURE_Q40_SYNTH_HASH_MODE:-match}"
 DRY_RUN="${AUTOCAPTURE_Q40_SYNTH_DRY_RUN:-0}"
 SINGLE_TIMEOUT_S="${AUTOCAPTURE_Q40_SYNTH_SINGLE_TIMEOUT_S:-420}"
+SINGLE_BUDGET_MS="${AUTOCAPTURE_Q40_SYNTH_SINGLE_BUDGET_MS:-30000}"
+SINGLE_MAX_IDLE_STEPS="${AUTOCAPTURE_Q40_SYNTH_MAX_IDLE_STEPS:-8}"
 if [[ "${1:-}" == "--dry-run" || "${2:-}" == "--dry-run" ]]; then
   DRY_RUN="1"
 fi
@@ -67,6 +69,9 @@ pack_json="$synth_root/synthetic_uia_contract_pack.json"
 run_cmd "$PY" "$ROOT/tools/synthetic_uia_contract_pack.py" \
   --out-dir "$synth_root" \
   --run-id "run_q40_uia_${STAMP}" \
+  --focus-nodes 8 \
+  --context-nodes 24 \
+  --operable-nodes 24 \
   --hash-mode "$HASH_MODE" >"$synth_log"
 
 if [[ "${DRY_RUN}" == "1" ]]; then
@@ -101,6 +106,8 @@ if command -v timeout >/dev/null 2>&1; then
     --image "$IMG" \
     --output-dir "artifacts/single_image_runs" \
     --profile "config/profiles/golden_full.json" \
+    --budget-ms "${SINGLE_BUDGET_MS}" \
+    --max-idle-steps "${SINGLE_MAX_IDLE_STEPS}" \
     --synthetic-hid "minimal" \
     --uia-synthetic "$SYNTH_MODE" \
     --uia-synthetic-pack-json "$pack_json" \
@@ -111,6 +118,8 @@ else
     --image "$IMG" \
     --output-dir "artifacts/single_image_runs" \
     --profile "config/profiles/golden_full.json" \
+    --budget-ms "${SINGLE_BUDGET_MS}" \
+    --max-idle-steps "${SINGLE_MAX_IDLE_STEPS}" \
     --synthetic-hid "minimal" \
     --uia-synthetic "$SYNTH_MODE" \
     --uia-synthetic-pack-json "$pack_json" \

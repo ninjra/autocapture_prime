@@ -75,6 +75,29 @@ class SyntheticUIAContractPackTests(unittest.TestCase):
         )
         self.assertNotEqual(pack["uia_ref"]["content_hash"], pack["snapshot"]["content_hash"])
 
+    def test_snapshot_contains_anchor_texts_for_synthetic_retrieval(self) -> None:
+        mod = _load_module()
+        pack = mod.build_contract_pack(
+            run_id="run_d",
+            uia_record_id="run_d/uia/0",
+            ts_utc="2026-02-19T00:00:00Z",
+            hash_mode="match",
+            focus_nodes=4,
+            context_nodes=8,
+            operable_nodes=8,
+        )
+        snapshot = pack["snapshot"]
+        window = snapshot.get("window") if isinstance(snapshot.get("window"), dict) else {}
+        self.assertIn("Remote Desktop Web Client", str(window.get("title") or ""))
+        names: list[str] = []
+        for section in ("focus_path", "context_peers", "operables"):
+            rows = snapshot.get(section) if isinstance(snapshot.get(section), list) else []
+            names.extend(str(n.get("name") or "") for n in rows if isinstance(n, dict))
+        joined = " ".join(names)
+        self.assertIn("Slack", joined)
+        self.assertIn("Summary column derived from payload fields", joined)
+        self.assertIn("COMPLETE", joined)
+
 
 if __name__ == "__main__":
     unittest.main()
