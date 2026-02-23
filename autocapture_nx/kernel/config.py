@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -174,6 +175,81 @@ class SchemaLiteValidator:
 validator = SchemaLiteValidator()
 
 
+def _env_flag(name: str, *, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    text = str(raw).strip().casefold()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _apply_storage_env_overrides(config: dict[str, Any]) -> dict[str, Any]:
+    storage = config.get("storage")
+    if not isinstance(storage, dict):
+        return config
+
+    explicit_metadata_path = str(os.environ.get("AUTOCAPTURE_STORAGE_METADATA_PATH") or "").strip()
+    if explicit_metadata_path:
+        storage["metadata_path"] = explicit_metadata_path
+        return config
+
+    # Metadata-only query mode should avoid hot metadata.db stalls when a live
+    # read replica is available. Keep opt-out for diagnostics.
+    allow_live_metadata = _env_flag("AUTOCAPTURE_QUERY_METADATA_USE_LIVE_DB", default=True)
+    if _env_flag("AUTOCAPTURE_QUERY_METADATA_ONLY", default=False) and allow_live_metadata:
+        metadata_path = str(storage.get("metadata_path") or "").strip()
+        if metadata_path:
+            live_candidate = Path(metadata_path).with_name("metadata.live.db")
+            if live_candidate.exists():
+                storage["metadata_path"] = str(live_candidate)
+    return config
+
+
+def _apply_metadata_only_query_profile(config: dict[str, Any]) -> dict[str, Any]:
+    if not _env_flag("AUTOCAPTURE_QUERY_METADATA_ONLY", default=False):
+        return config
+    if not _env_flag("AUTOCAPTURE_QUERY_MINIMAL_PLUGINS", default=True):
+        return config
+
+    plugins = config.get("plugins")
+    if not isinstance(plugins, dict):
+        plugins = {}
+        config["plugins"] = plugins
+    plugins["safe_mode"] = True
+    plugins["safe_mode_minimal"] = True
+
+    kernel = config.get("kernel")
+    if not isinstance(kernel, dict):
+        kernel = {}
+        config["kernel"] = kernel
+
+    # Query metadata-only runtime needs only read/query capabilities.
+    kernel["safe_mode_required_capabilities"] = [
+        "storage.keyring",
+        "storage.metadata",
+        "storage.media",
+        "ledger.writer",
+        "journal.writer",
+        "anchor.writer",
+        "time.intent_parser",
+        "retrieval.strategy",
+        "answer.builder",
+        "citation.validator",
+    ]
+
+    retrieval = config.get("retrieval")
+    if not isinstance(retrieval, dict):
+        retrieval = {}
+        config["retrieval"] = retrieval
+    # Keep query path deterministic and low-latency in metadata-only mode.
+    retrieval["vector_enabled"] = False
+    return config
+
+
 def validate_config(schema_path: Path, data: dict[str, Any]) -> None:
     schema = _load_json(schema_path)
     validator.validate(schema, data)
@@ -192,6 +268,8 @@ def load_config(paths: ConfigPaths, safe_mode: bool) -> dict[str, Any]:
     config = _apply_capture_preset(config)
     if safe_mode:
         config = _apply_safe_mode_overrides(config)
+    config = _apply_metadata_only_query_profile(config)
+    config = _apply_storage_env_overrides(config)
     merged_data_dir = config.get("storage", {}).get("data_dir")
     config = apply_path_defaults(config, user_overrides=user_config)
     legacy_dirs = [value for value in (defaults_data_dir, merged_data_dir) if isinstance(value, str)]

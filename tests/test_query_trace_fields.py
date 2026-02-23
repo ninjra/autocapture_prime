@@ -321,11 +321,32 @@ class QueryTraceFieldsTests(unittest.TestCase):
         self.assertEqual(str(fields.get("evidence_count") or ""), "2")
 
     def test_apply_display_returns_partial_with_citation_when_display_sources_exist(self) -> None:
+        evidence_id = "run_test/evidence.capture.frame/9"
         system = _System(
             config={"runtime": {"run_id": "run_test"}},
-            caps={"storage.metadata": _Meta({})},
+            caps={
+                "storage.metadata": _Meta(
+                    {
+                        evidence_id: {
+                            "record_id": evidence_id,
+                            "record_type": "evidence.capture.frame",
+                            "content_hash": "frame_hash_9",
+                        }
+                    }
+                )
+            },
         )
         base_result = {
+            "provenance": {
+                "query_ledger_head": "ledger_hash_9",
+                "anchor_ref": {
+                    "record_type": "system.anchor",
+                    "schema_version": 1,
+                    "anchor_seq": 9,
+                    "ledger_head_hash": "ledger_hash_9",
+                    "ts_utc": "2026-02-23T00:00:00Z",
+                },
+            },
             "answer": {
                 "state": "error",
                 "claims": [],
@@ -344,7 +365,7 @@ class QueryTraceFieldsTests(unittest.TestCase):
         display_sources = [
             {
                 "provider_id": "builtin.observation.graph",
-                "record_id": "run_test/evidence.capture.frame/9",
+                "record_id": evidence_id,
                 "record_type": "evidence.capture.frame",
                 "signal_pairs": {"topic": "runtime"},
             }
@@ -366,6 +387,93 @@ class QueryTraceFieldsTests(unittest.TestCase):
         citations = first.get("citations", []) if isinstance(first.get("citations"), list) else []
         self.assertTrue(bool(citations))
         self.assertNotIn("notice", answer)
+
+    def test_apply_display_promotes_advanced_fallback_with_support_snippets(self) -> None:
+        evidence_id = "run_test/evidence.capture.frame/42"
+        system = _System(
+            config={"runtime": {"run_id": "run_test"}},
+            caps={
+                "storage.metadata": _Meta(
+                    {
+                        evidence_id: {
+                            "record_id": evidence_id,
+                            "record_type": "evidence.capture.frame",
+                            "content_hash": "frame_hash_42",
+                        }
+                    }
+                )
+            },
+        )
+        base_result = {
+            "answer": {"state": "no_evidence", "claims": [], "errors": []},
+            "processing": {"query_trace": {"winner": "classic", "method": "classic"}},
+        }
+        display = {
+            "schema_version": 1,
+            "summary": "Fallback extracted signals are available while structured advanced records are incomplete.",
+            "bullets": [
+                "required_source: structured adv.* records for this topic",
+                "fallback_status: no structured advanced records available yet",
+                "evidence: Slack window visible",
+                "evidence: Remote Desktop Web Client visible",
+            ],
+            "fields": {
+                "required_doc_kind": "adv.window.inventory",
+                "support_snippets": ["Slack window visible", "Remote Desktop Web Client visible"],
+                "support_snippet_count": 2,
+            },
+            "topic": "adv_window_inventory",
+        }
+        with mock.patch.object(query_mod, "_build_answer_display", return_value=display), mock.patch.object(
+            query_mod, "_augment_claim_sources_for_display", return_value=[]
+        ):
+            out = query_mod._apply_answer_display(
+                system,
+                "Enumerate visible top-level windows.",
+                base_result,
+                query_intent={"topic": "adv_window_inventory", "family": "advanced"},
+            )
+        answer = out.get("answer", {}) if isinstance(out.get("answer"), dict) else {}
+        self.assertEqual(str(answer.get("state") or ""), "ok")
+        processing = out.get("processing", {}) if isinstance(out.get("processing"), dict) else {}
+        attribution = processing.get("attribution", {}) if isinstance(processing.get("attribution"), dict) else {}
+        providers = attribution.get("providers", []) if isinstance(attribution.get("providers"), list) else []
+        graph_provider = next(
+            (
+                row
+                for row in providers
+                if isinstance(row, dict) and str(row.get("provider_id") or "") == "builtin.observation.graph"
+            ),
+            {},
+        )
+        self.assertEqual(int(graph_provider.get("contribution_bp", 0) or 0), 10000)
+
+    def test_apply_display_hydrates_summary_when_display_and_claims_are_empty(self) -> None:
+        system = _System(config={"runtime": {"run_id": "run_test"}}, caps={"storage.metadata": _Meta({})})
+        base_result = {
+            "answer": {"state": "no_evidence", "claims": [], "errors": []},
+            "processing": {"query_trace": {"winner": "state", "method": "state_primary"}},
+        }
+        display = {
+            "schema_version": 1,
+            "summary": "",
+            "bullets": [],
+            "fields": {},
+            "topic": "generic",
+        }
+        with mock.patch.object(query_mod, "_build_answer_display", return_value=display), mock.patch.object(
+            query_mod, "_augment_claim_sources_for_display", return_value=[]
+        ):
+            out = query_mod._apply_answer_display(
+                system,
+                "status check",
+                base_result,
+                query_intent={"topic": "generic", "family": "generic"},
+            )
+        answer = out.get("answer", {}) if isinstance(out.get("answer"), dict) else {}
+        display_out = answer.get("display", {}) if isinstance(answer.get("display"), dict) else {}
+        self.assertTrue(str(answer.get("summary") or "").strip())
+        self.assertTrue(str(display_out.get("summary") or "").strip())
 
     def test_latest_evidence_record_id_falls_back_from_metadata(self) -> None:
         system = _System(
@@ -395,6 +503,22 @@ class QueryTraceFieldsTests(unittest.TestCase):
         )
         rid = query_mod._latest_evidence_record_id(system)
         self.assertEqual(rid, "run_b/evidence.capture.frame/0")
+
+    def test_latest_evidence_record_id_skips_full_scan_in_metadata_only_mode(self) -> None:
+        class _NoScanMeta:
+            def latest(self, record_type=None, limit=1):  # noqa: ARG002
+                raise AssertionError("latest should not be called in metadata-only fast mode")
+
+            def keys(self):
+                raise AssertionError("keys should not be called in metadata-only fast mode")
+
+            def get(self, _key, default=None):
+                return default
+
+        system = _System(config={}, caps={"storage.metadata": _NoScanMeta()})
+        with mock.patch.dict("os.environ", {"AUTOCAPTURE_QUERY_METADATA_ONLY": "1"}, clear=False):
+            rid = query_mod._latest_evidence_record_id(system)
+        self.assertEqual(rid, "")
 
     def test_apply_display_skips_hard_vlm_when_structured_adv_source_present_in_fallback_mode(self) -> None:
         system = _System(

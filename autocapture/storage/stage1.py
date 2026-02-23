@@ -156,7 +156,19 @@ def mark_stage1_complete(
             metadata.put_new(rid, payload)
         else:
             metadata.put(rid, payload)
-    except Exception:
+    except Exception as exc:
+        if logger is not None:
+            try:
+                logger.log(
+                    "ingest.stage1.complete.write_error",
+                    {
+                        "source_record_id": str(record_id),
+                        "stage1_record_id": str(rid),
+                        "error": f"{type(exc).__name__}: {exc}",
+                    },
+                )
+            except Exception:
+                pass
         return None, False
 
     if event_builder is not None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 
@@ -178,3 +179,117 @@ def test_retrieval_trace_includes_perf_histogram() -> None:
         assert int(perf.get("records_scanned", 0) or 0) >= 1
         hist = perf.get("latency_histogram_ms", {})
         assert isinstance(hist, dict) and bool(hist)
+
+
+def test_retrieval_latest_scan_limit_env_override_applies() -> None:
+    store = _Store(
+        {
+            "run1/evidence.window.meta/2": {
+                "record_type": "evidence.window.meta",
+                "ts_utc": "2026-02-22T01:02:04Z",
+                "window": {"title": "Remote Desktop Web Client"},
+            },
+            "run1/evidence.window.meta/1": {
+                "record_type": "evidence.window.meta",
+                "ts_utc": "2026-02-22T01:02:03Z",
+                "window": {"title": "Remote Desktop Web Client"},
+            },
+        }
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = {
+            "storage": {
+                "lexical_path": str(Path(tmp) / "lexical.db"),
+                "vector_path": str(Path(tmp) / "vector.db"),
+            },
+            "indexing": {"vector_backend": "sqlite"},
+            "retrieval": {
+                "vector_enabled": False,
+                "allow_full_scan": False,
+                "latest_scan_on_miss": True,
+                "latest_scan_limit": 100,
+            },
+        }
+
+        def _cap(name: str):
+            if name == "storage.metadata":
+                return store
+            return None
+
+        ctx = PluginContext(config=cfg, get_capability=_cap, logger=lambda _m, _p=None: None)
+        retrieval = RetrievalStrategy("retrieval", ctx)
+        prev = os.environ.get("AUTOCAPTURE_RETRIEVAL_LATEST_SCAN_LIMIT")
+        try:
+            os.environ["AUTOCAPTURE_RETRIEVAL_LATEST_SCAN_LIMIT"] = "1"
+            results = retrieval.search("remote desktop", time_window=None)
+        finally:
+            if prev is None:
+                os.environ.pop("AUTOCAPTURE_RETRIEVAL_LATEST_SCAN_LIMIT", None)
+            else:
+                os.environ["AUTOCAPTURE_RETRIEVAL_LATEST_SCAN_LIMIT"] = prev
+        assert len(results) <= 1
+        trace = retrieval.trace()
+        latest_rows = [row for row in trace if str(row.get("tier") or "") == "LATEST_SCAN"]
+        assert latest_rows and int(latest_rows[0].get("limit", 0) or 0) == 1
+
+
+def test_retrieval_latest_scan_uses_single_pass_for_expensive_filtered_latest() -> None:
+    calls: list[str | None] = []
+
+    class _ExpensiveStore(_Store):
+        _latest_filtered_expensive = True
+
+        def latest(self, record_type: str | None, limit: int = 100):  # type: ignore[override]
+            calls.append(record_type)
+            out: list[dict] = []
+            for record_id in sorted(self._records.keys(), reverse=True):
+                record = self._records[record_id]
+                if record_type is not None and str(record.get("record_type") or "") != str(record_type):
+                    continue
+                out.append({"record_id": record_id, "record": record})
+                if len(out) >= int(limit):
+                    break
+            return out
+
+    store = _ExpensiveStore(
+        {
+            "run1/derived.text.ocr/2": {
+                "record_type": "derived.text.ocr",
+                "ts_utc": "2026-02-22T01:02:05Z",
+                "text": "NCAAW game starts at 8:00 PM",
+            },
+            "run1/evidence.window.meta/1": {
+                "record_type": "evidence.window.meta",
+                "ts_utc": "2026-02-22T01:02:03Z",
+                "window": {"title": "Remote Desktop Web Client"},
+            },
+        }
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = {
+            "storage": {
+                "lexical_path": str(Path(tmp) / "lexical.db"),
+                "vector_path": str(Path(tmp) / "vector.db"),
+            },
+            "indexing": {"vector_backend": "sqlite"},
+            "retrieval": {
+                "vector_enabled": False,
+                "allow_full_scan": False,
+                "latest_scan_on_miss": True,
+                "latest_scan_limit": 100,
+                "attach_timelines": False,
+            },
+        }
+
+        def _cap(name: str):
+            if name == "storage.metadata":
+                return store
+            return None
+
+        ctx = PluginContext(config=cfg, get_capability=_cap, logger=lambda _m, _p=None: None)
+        retrieval = RetrievalStrategy("retrieval", ctx)
+        results = retrieval.search("ncaaw", time_window=None)
+        assert len(results) == 1
+        assert calls
+        assert calls[0] is None
+        assert all(call is None for call in calls)

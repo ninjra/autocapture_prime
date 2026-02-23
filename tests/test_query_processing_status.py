@@ -29,7 +29,7 @@ class QueryProcessingStatusTests(unittest.TestCase):
                     self.assertIn("ran", extraction)
                     self.assertIn("blocked", extraction)
                     self.assertEqual(extraction.get("allowed"), False)
-                    self.assertEqual(extraction.get("blocked_reason"), "disabled")
+                    self.assertEqual(extraction.get("blocked_reason"), "query_compute_disabled")
                 finally:
                     kernel.shutdown()
             finally:

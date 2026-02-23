@@ -92,6 +92,9 @@ class CrashLoopSafeModeTests(unittest.TestCase):
                     self.assertTrue(kernel.safe_mode)
                     self.assertEqual(kernel.safe_mode_reason, "crash_loop")
                     self.assertFalse(kernel.config["processing"]["idle"]["enabled"])
+                    checks = {item.name: item for item in kernel.doctor()}
+                    self.assertIn("capture_plugins_deprecated", checks)
+                    self.assertTrue(bool(checks["capture_plugins_deprecated"].ok))
                     crash_status = kernel.crash_loop_status()
                     self.assertIsInstance(crash_status, dict)
                     self.assertGreaterEqual(int(crash_status.get("crash_count", 0)), 1)

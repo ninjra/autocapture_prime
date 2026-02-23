@@ -144,7 +144,20 @@ def mark_evidence_retention_eligible(
                 metadata.put(rid, upgraded)
             else:
                 return None
-        except Exception:
+        except Exception as exc:
+            if logger is not None:
+                try:
+                    logger.log(
+                        "storage.retention.eligible.write_error",
+                        {
+                            "source_record_id": str(record_id),
+                            "retention_record_id": str(rid),
+                            "mode": "upgrade",
+                            "error": f"{type(exc).__name__}: {exc}",
+                        },
+                    )
+                except Exception:
+                    pass
             return None
         return rid
     payload: dict[str, Any] = {
@@ -164,7 +177,20 @@ def mark_evidence_retention_eligible(
             metadata.put_new(rid, payload)
         else:
             metadata.put(rid, payload)
-    except Exception:
+    except Exception as exc:
+        if logger is not None:
+            try:
+                logger.log(
+                    "storage.retention.eligible.write_error",
+                    {
+                        "source_record_id": str(record_id),
+                        "retention_record_id": str(rid),
+                        "mode": "insert",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    },
+                )
+            except Exception:
+                pass
         return None
     if event_builder is not None:
         try:

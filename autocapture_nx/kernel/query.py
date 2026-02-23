@@ -8962,6 +8962,13 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
 
         processing = result.get("processing", {}) if isinstance(result.get("processing", {}), dict) else {}
         processing = dict(processing)
+        extraction = processing.get("extraction", {}) if isinstance(processing.get("extraction", {}), dict) else {}
+        extraction = dict(extraction)
+        extraction.setdefault("allowed", False)
+        extraction.setdefault("ran", False)
+        extraction.setdefault("blocked", True)
+        extraction.setdefault("blocked_reason", "query_compute_disabled")
+        processing["extraction"] = extraction
         answer_obj = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
         answer_state = str(answer_obj.get("state") or "").strip().casefold()
         errors = answer_obj.get("errors", []) if isinstance(answer_obj.get("errors", []), list) else []

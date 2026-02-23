@@ -16,6 +16,7 @@ from autocapture_nx.kernel.atomic_write import atomic_write_json
 from autocapture_nx.kernel.hashing import sha256_file
 from autocapture_nx.kernel.ids import encode_record_id_component
 from autocapture_nx.kernel.instance_lock import acquire_instance_lock
+from autocapture_nx.ingest.stage2_projection_docs import project_stage2_docs_for_frame
 from autocapture_nx.ingest.uia_obs_docs import _ensure_frame_uia_docs
 from autocapture_nx.storage.stage1_derived_store import Stage1DerivedSqliteStore
 from autocapture_nx.storage.stage1_derived_store import Stage1OverlayStore
@@ -170,6 +171,17 @@ def _safe_int(value: Any) -> int:
         return 0
 
 
+def _marker_requires_retry(payload: dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if str(payload.get("schema") or "") != _REAP_SCHEMA:
+        return False
+    counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
+    missing_retention = _safe_int(counts.get("stage1_missing_retention_marker_count", 0)) > 0
+    missing_uia = _safe_int(counts.get("stage1_uia_frames_missing_count", 0)) > 0
+    return bool(missing_retention or missing_uia)
+
+
 @dataclass(frozen=True)
 class IngestResult:
     handoff_root: str
@@ -186,6 +198,9 @@ class IngestResult:
     stage1_missing_retention_marker_count: int
     stage1_uia_docs_inserted: int
     stage1_uia_frames_missing_count: int
+    stage2_projection_generated_docs: int
+    stage2_projection_inserted_docs: int
+    stage2_projection_errors: int
     ack_path: str
     journal_record_id: str
     errors: list[str]
@@ -329,6 +344,9 @@ class HandoffIngestor:
         stage1_missing_retention_marker_count = 0
         stage1_uia_docs_inserted = 0
         stage1_uia_frames_missing_count = 0
+        stage2_projection_generated_docs = 0
+        stage2_projection_inserted_docs = 0
+        stage2_projection_errors = 0
         journal_record_id = ""
         errors: list[str] = []
 
@@ -448,6 +466,19 @@ class HandoffIngestor:
                         stage1_missing_retention_marker_count += 1
                         continue
                     try:
+                        projection = project_stage2_docs_for_frame(
+                            stage1_read_store,
+                            source_record_id=source_record_id,
+                            frame_record=source_payload,
+                            read_store=stage1_store,
+                            dry_run=False,
+                        )
+                        stage2_projection_generated_docs += _safe_int(projection.get("generated_docs", 0))
+                        stage2_projection_inserted_docs += _safe_int(projection.get("inserted_docs", 0))
+                        stage2_projection_errors += _safe_int(projection.get("errors", 0))
+                    except Exception:
+                        stage2_projection_errors += 1
+                    try:
                         result = mark_stage1_and_retention(
                             stage1_store,
                             source_record_id,
@@ -485,6 +516,9 @@ class HandoffIngestor:
                         "stage1_missing_retention_marker_count": int(stage1_missing_retention_marker_count),
                         "stage1_uia_docs_inserted": int(stage1_uia_docs_inserted),
                         "stage1_uia_frames_missing_count": int(stage1_uia_frames_missing_count),
+                        "stage2_projection_generated_docs": int(stage2_projection_generated_docs),
+                        "stage2_projection_inserted_docs": int(stage2_projection_inserted_docs),
+                        "stage2_projection_errors": int(stage2_projection_errors),
                     },
                     "errors": [],
                 }
@@ -532,6 +566,9 @@ class HandoffIngestor:
                 "stage1_missing_retention_marker_count": int(stage1_missing_retention_marker_count),
                 "stage1_uia_docs_inserted": int(stage1_uia_docs_inserted),
                 "stage1_uia_frames_missing_count": int(stage1_uia_frames_missing_count),
+                "stage2_projection_generated_docs": int(stage2_projection_generated_docs),
+                "stage2_projection_inserted_docs": int(stage2_projection_inserted_docs),
+                "stage2_projection_errors": int(stage2_projection_errors),
             },
             "integrity": {
                 "dest_metadata_db_sha256": sha256_file(self._dest_data_root / "metadata.db"),
@@ -554,6 +591,9 @@ class HandoffIngestor:
             stage1_missing_retention_marker_count=int(stage1_missing_retention_marker_count),
             stage1_uia_docs_inserted=int(stage1_uia_docs_inserted),
             stage1_uia_frames_missing_count=int(stage1_uia_frames_missing_count),
+            stage2_projection_generated_docs=int(stage2_projection_generated_docs),
+            stage2_projection_inserted_docs=int(stage2_projection_inserted_docs),
+            stage2_projection_errors=int(stage2_projection_errors),
             ack_path=str(ack_path),
             journal_record_id=journal_record_id,
             errors=list(errors),
@@ -577,7 +617,7 @@ class HandoffIngestor:
                     payload = json.loads(marker_path.read_text(encoding="utf-8"))
                 except Exception:
                     payload = {}
-                if isinstance(payload, dict) and str(payload.get("schema") or "") == _REAP_SCHEMA:
+                if isinstance(payload, dict) and str(payload.get("schema") or "") == _REAP_SCHEMA and not _marker_requires_retry(payload):
                     skipped_marked += 1
                     continue
             try:
@@ -659,6 +699,9 @@ def auto_drain_handoff_spool(
     stage1_missing_retention_marker_count = 0
     stage1_uia_docs_inserted = 0
     stage1_uia_frames_missing_count = 0
+    stage2_projection_generated_docs = 0
+    stage2_projection_inserted_docs = 0
+    stage2_projection_errors = 0
     for row in results:
         if not isinstance(row, dict):
             continue
@@ -667,6 +710,9 @@ def auto_drain_handoff_spool(
         stage1_missing_retention_marker_count += _safe_int(row.get("stage1_missing_retention_marker_count", 0))
         stage1_uia_docs_inserted += _safe_int(row.get("stage1_uia_docs_inserted", 0))
         stage1_uia_frames_missing_count += _safe_int(row.get("stage1_uia_frames_missing_count", 0))
+        stage2_projection_generated_docs += _safe_int(row.get("stage2_projection_generated_docs", 0))
+        stage2_projection_inserted_docs += _safe_int(row.get("stage2_projection_inserted_docs", 0))
+        stage2_projection_errors += _safe_int(row.get("stage2_projection_errors", 0))
     return {
         "ok": len(drained.errors) == 0,
         "enabled": True,
@@ -680,4 +726,7 @@ def auto_drain_handoff_spool(
         "stage1_missing_retention_marker_count": int(stage1_missing_retention_marker_count),
         "stage1_uia_docs_inserted": int(stage1_uia_docs_inserted),
         "stage1_uia_frames_missing_count": int(stage1_uia_frames_missing_count),
+        "stage2_projection_generated_docs": int(stage2_projection_generated_docs),
+        "stage2_projection_inserted_docs": int(stage2_projection_inserted_docs),
+        "stage2_projection_errors": int(stage2_projection_errors),
     }

@@ -58,27 +58,70 @@ class LedgerWriter(PluginBase):
         if fallback != self._path:
             self._path = fallback
 
+    @staticmethod
+    def _parse_head_hash_from_line(text: str) -> str | None:
+        line = str(text or "").strip()
+        if not line:
+            return None
+        if " " in line and line.split(" ", 1)[0].isalnum():
+            try:
+                entry = line.split(" ", 1)[1]
+                return hashlib.sha256(entry.encode("utf-8")).hexdigest()
+            except Exception:
+                return None
+        try:
+            entry = json.loads(line)
+        except Exception:
+            return None
+        value = entry.get("entry_hash")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
+
+    def _load_last_hash_bounded(self, *, window_bytes: int, max_scan_bytes: int) -> str | None:
+        if window_bytes <= 0 or max_scan_bytes <= 0:
+            return None
+        scanned = 0
+        carry = b""
+        with open(self._path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            pos = handle.tell()
+            while pos > 0 and scanned < max_scan_bytes:
+                to_read = min(int(window_bytes), int(pos), int(max_scan_bytes - scanned))
+                pos -= to_read
+                handle.seek(pos, os.SEEK_SET)
+                chunk = handle.read(to_read)
+                scanned += len(chunk)
+                merged = chunk + carry
+                lines = merged.splitlines()
+                if pos > 0 and lines:
+                    carry = lines[0]
+                    lines = lines[1:]
+                else:
+                    carry = b""
+                for raw in reversed(lines):
+                    try:
+                        text = raw.decode("utf-8")
+                    except Exception:
+                        text = raw.decode("utf-8", errors="replace")
+                    parsed = self._parse_head_hash_from_line(text)
+                    if parsed:
+                        return parsed
+            if carry:
+                try:
+                    text = carry.decode("utf-8")
+                except Exception:
+                    text = carry.decode("utf-8", errors="replace")
+                return self._parse_head_hash_from_line(text)
+        return None
+
     def _load_last_hash(self) -> None:
         if not os.path.exists(self._path):
             return
         try:
-            with open(self._path, "r", encoding="utf-8") as handle:
-                for line in handle:
-                    if not line.strip():
-                        continue
-                    text = line.strip()
-                    if " " in text and text.split(" ", 1)[0].isalnum():
-                        try:
-                            entry = text.split(" ", 1)[1]
-                            self._last_hash = hashlib.sha256(entry.encode("utf-8")).hexdigest()
-                            continue
-                        except Exception:
-                            pass
-                    try:
-                        entry = json.loads(text)
-                        self._last_hash = entry.get("entry_hash", self._last_hash)
-                    except Exception:
-                        continue
+            window = int(os.environ.get("AUTOCAPTURE_LEDGER_LAST_HASH_WINDOW_BYTES") or 262144)
+            max_scan = int(os.environ.get("AUTOCAPTURE_LEDGER_LAST_HASH_MAX_SCAN_BYTES") or 4194304)
+            self._last_hash = self._load_last_hash_bounded(window_bytes=window, max_scan_bytes=max_scan)
         except Exception as exc:
             if self._is_perm_error(exc):
                 self._use_fallback_path()

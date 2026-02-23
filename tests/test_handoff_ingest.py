@@ -58,6 +58,44 @@ def _count_dest_records(db_path: Path, record_type: str) -> int:
         conn.close()
 
 
+def _fetch_dest_record_ids(db_path: Path, record_type: str) -> list[str]:
+    if not db_path.exists():
+        return []
+    conn = sqlite3.connect(str(db_path))
+    try:
+        cur = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='metadata'"
+        )
+        has_table = cur.fetchone()
+        if not has_table or int(has_table[0] or 0) <= 0:
+            return []
+        rows = conn.execute(
+            "SELECT id FROM metadata WHERE record_type = ? ORDER BY id",
+            (record_type,),
+        ).fetchall()
+        return [str(row[0]) for row in rows]
+    finally:
+        conn.close()
+
+
+def _insert_dest_metadata_payload(db_path: Path, record_id: str, payload: dict) -> None:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO metadata (id, record_type, ts_utc, payload, run_id) VALUES (?, ?, ?, ?, ?)",
+            (
+                str(record_id),
+                str(payload.get("record_type") or ""),
+                str(payload.get("ts_utc") or ""),
+                json.dumps(payload, sort_keys=True),
+                str(payload.get("run_id") or ""),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _uia_snapshot_payload(record_id: str, content_hash: str) -> dict:
     return {
         "schema_version": 1,
@@ -130,6 +168,8 @@ class HandoffIngestTests(unittest.TestCase):
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.focus"), 1)
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.context"), 1)
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.operable"), 1)
+            first_projection_ids = _fetch_dest_record_ids(dest / "metadata.db", "derived.sst.text.extra")
+            self.assertGreaterEqual(len(first_projection_ids), 1)
             self.assertEqual(_count_dest_records(dest / "metadata.db", "system.ingest.handoff.completed"), 1)
 
             second = ingestor.ingest_handoff_dir(handoff)
@@ -143,6 +183,8 @@ class HandoffIngestTests(unittest.TestCase):
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.focus"), 1)
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.context"), 1)
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.operable"), 1)
+            second_projection_ids = _fetch_dest_record_ids(dest / "metadata.db", "derived.sst.text.extra")
+            self.assertEqual(second_projection_ids, first_projection_ids)
             self.assertEqual(_count_dest_records(dest / "metadata.db", "system.ingest.handoff.completed"), 1)
 
     def test_handoff_ingest_missing_media_fails_no_marker(self) -> None:
@@ -246,6 +288,7 @@ class HandoffIngestTests(unittest.TestCase):
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.focus"), 1)
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.context"), 1)
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.operable"), 1)
+            self.assertGreaterEqual(_count_dest_records(dest / "metadata.db", "derived.sst.text.extra"), 1)
 
             second = auto_drain_handoff_spool(cfg)
             self.assertTrue(bool(second.get("ok", False)))
@@ -282,6 +325,60 @@ class HandoffIngestTests(unittest.TestCase):
             self.assertEqual(result.stage1_uia_frames_missing_count, 1)
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "derived.ingest.stage1.complete"), 0)
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "retention.eligible"), 0)
+
+    def test_auto_drain_retries_marked_handoff_when_stage1_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            spool = root / "spool"
+            handoff = spool / "handoff-1"
+            dest = root / "dest"
+            (handoff / "media").mkdir(parents=True, exist_ok=True)
+            (handoff / "media" / "rid_frame_1.blob").write_bytes(b"frame-bytes")
+            frame_payload = {
+                "schema_version": 1,
+                "record_type": "evidence.capture.frame",
+                "run_id": "run_test",
+                "ts_utc": "2026-02-20T00:00:00Z",
+                "blob_path": "media/rid_frame_1.blob",
+                "content_hash": "frame_hash_1",
+                "uia_ref": {"record_id": "run_test/evidence.uia.snapshot/late", "content_hash": "uia_hash_late"},
+                "input_ref": {"record_id": "run_test/evidence.input.batch/1"},
+            }
+            _write_handoff_metadata(handoff / "metadata.db", [("run_test/evidence.capture.frame/1", frame_payload)])
+            cfg = {
+                "storage": {"data_dir": str(dest), "spool_dir": str(spool)},
+                "processing": {"idle": {"handoff_ingest": {"enabled": True, "mode": "copy", "strict": True}}},
+            }
+
+            first = auto_drain_handoff_spool(cfg)
+            self.assertTrue(bool(first.get("ok", False)))
+            self.assertEqual(int(first.get("processed", 0)), 1)
+            self.assertEqual(int(first.get("stage1_complete_records", 0)), 0)
+            self.assertEqual(int(first.get("stage1_missing_retention_marker_count", 0)), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "derived.ingest.stage1.complete"), 0)
+            self.assertTrue((handoff / "reap_eligible.json").exists())
+
+            _insert_dest_metadata_payload(
+                dest / "metadata.db",
+                "run_test/evidence.uia.snapshot/late",
+                _uia_snapshot_payload("run_test/evidence.uia.snapshot/late", "uia_hash_late"),
+            )
+
+            second = auto_drain_handoff_spool(cfg)
+            self.assertTrue(bool(second.get("ok", False)))
+            self.assertEqual(int(second.get("processed", 0)), 1)
+            self.assertEqual(int(second.get("stage1_complete_records", 0)), 1)
+            self.assertEqual(int(second.get("stage1_retention_marked_records", 0)), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "derived.ingest.stage1.complete"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "retention.eligible"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.focus"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.context"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.operable"), 1)
+
+            third = auto_drain_handoff_spool(cfg)
+            self.assertTrue(bool(third.get("ok", False)))
+            self.assertEqual(int(third.get("processed", 0)), 0)
+            self.assertGreaterEqual(int(third.get("skipped_marked", 0)), 1)
 
 
 if __name__ == "__main__":

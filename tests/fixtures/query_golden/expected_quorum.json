@@ -54,7 +54,7 @@
   },
   "evaluation": {
     "blocked_extract": true,
-    "blocked_reason": "disabled",
+    "blocked_reason": "query_compute_disabled",
     "candidate_count": 1,
     "coverage_ratio": 1.0,
     "freshness_newest_ts_utc": null,
@@ -72,7 +72,7 @@
     "extraction": {
       "allowed": false,
       "blocked": true,
-      "blocked_reason": "disabled",
+      "blocked_reason": "query_compute_disabled",
       "candidate_count": 1,
       "extracted_count": 0,
       "idle_seconds": null,

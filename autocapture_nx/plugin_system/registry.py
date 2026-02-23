@@ -43,6 +43,15 @@ DEFAULT_CAPABILITY_POLICY: dict[str, Any] = {
     "failure_ordering": {},
 }
 
+# Hypervisor owns capture. Keep legacy local capture plugins permanently
+# disabled even during crash-loop safe-mode/default-pack fallback.
+DEPRECATED_CAPTURE_PLUGIN_IDS: set[str] = {
+    "builtin.capture.audio.windows",
+    "builtin.capture.screenshot.windows",
+    "builtin.capture.basic",
+    "builtin.capture.windows",
+}
+
 
 def _normalize_pair(a: str, b: str) -> tuple[str, str]:
     if a <= b:
@@ -1838,6 +1847,8 @@ class PluginRegistry:
         loaded_ids: set[str] = set()
 
         def is_enabled(pid: str, manifest: dict[str, Any]) -> bool:
+            if pid in DEPRECATED_CAPTURE_PLUGIN_IDS:
+                return False
             if self.config.get("plugins", {}).get("safe_mode", False):
                 return pid in default_pack
             if pid in enabled_map:
@@ -2139,28 +2150,37 @@ class PluginRegistry:
                     providers_by_cap.setdefault(cap_name, []).extend(items)
                 loaded.extend(local_loaded)
                 loaded_ids.add(plugin_id)
-                try:
-                    self._audit_log.record_plugin_metadata(
-                        plugin_id=plugin_id,
-                        version=str(manifest.get("version", "")) if manifest else None,
-                        code_hash=code_hash,
-                        settings_hash=settings_hash,
-                        capability_tags=_normalize_tags(manifest.get("capability_tags")),
-                        provides=[str(item) for item in manifest.get("provides", []) if str(item).strip()],
-                        entrypoints=[
-                            {
-                                "kind": str(entry.get("kind", "")),
-                                "id": str(entry.get("id", "")),
-                                "path": str(entry.get("path", "")),
-                                "callable": str(entry.get("callable", "")),
-                            }
-                            for entry in entrypoints
-                        ],
-                        permissions=dict(manifest.get("permissions", {})) if isinstance(manifest.get("permissions"), dict) else None,
-                        manifest_path=str(manifest_path),
-                    )
-                except Exception:
-                    pass
+                audit_metadata_enabled = str(os.environ.get("AUTOCAPTURE_AUDIT_PLUGIN_METADATA") or "1").strip().casefold() not in {
+                    "0",
+                    "false",
+                    "no",
+                    "off",
+                }
+                if audit_metadata_enabled:
+                    try:
+                        self._audit_log.record_plugin_metadata(
+                            plugin_id=plugin_id,
+                            version=str(manifest.get("version", "")) if manifest else None,
+                            code_hash=code_hash,
+                            settings_hash=settings_hash,
+                            capability_tags=_normalize_tags(manifest.get("capability_tags")),
+                            provides=[str(item) for item in manifest.get("provides", []) if str(item).strip()],
+                            entrypoints=[
+                                {
+                                    "kind": str(entry.get("kind", "")),
+                                    "id": str(entry.get("id", "")),
+                                    "path": str(entry.get("path", "")),
+                                    "callable": str(entry.get("callable", "")),
+                                }
+                                for entry in entrypoints
+                            ],
+                            permissions=dict(manifest.get("permissions", {}))
+                            if isinstance(manifest.get("permissions"), dict)
+                            else None,
+                            manifest_path=str(manifest_path),
+                        )
+                    except Exception:
+                        pass
                 resolved = self._resolve_capabilities(providers_by_cap)
                 capabilities.replace_all(resolved.all())
             except Exception as exc:

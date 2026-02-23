@@ -92,13 +92,14 @@ class RunNonVlmReadinessToolTests(unittest.TestCase):
                 base_env={"AUTOCAPTURE_CONFIG_DIR": str(cfg_dir), "AUTOCAPTURE_DATA_DIR": str(dataroot)},
                 run_dir=root / "run",
                 dataroot=dataroot,
+                metadata_db_path=dataroot / "metadata.live.db",
             )
             self.assertIn("AUTOCAPTURE_CONFIG_DIR", env)
             self.assertIn("AUTOCAPTURE_DATA_DIR", env)
             self.assertNotEqual(str(env["AUTOCAPTURE_DATA_DIR"]), str(dataroot))
             user_payload = json.loads((Path(env["AUTOCAPTURE_CONFIG_DIR"]) / "user.json").read_text(encoding="utf-8"))
             storage = user_payload.get("storage", {})
-            self.assertEqual(str(storage.get("metadata_path") or ""), str(dataroot / "metadata.db"))
+            self.assertEqual(str(storage.get("metadata_path") or ""), str(dataroot / "metadata.live.db"))
             plugins = user_payload.get("plugins", {})
             locks = plugins.get("locks", {}) if isinstance(plugins, dict) else {}
             self.assertFalse(bool(locks.get("enforce", True)))

@@ -564,6 +564,8 @@ def cmd_devtools_ast_ir(args: argparse.Namespace) -> int:
 def cmd_query(args: argparse.Namespace) -> int:
     os.environ.setdefault("AUTOCAPTURE_QUERY_METADATA_ONLY", "1")
     os.environ.setdefault("AUTOCAPTURE_ADV_HARD_VLM_MODE", "off")
+    os.environ.setdefault("AUTOCAPTURE_AUDIT_PLUGIN_METADATA", "0")
+    os.environ.setdefault("AUTOCAPTURE_RETRIEVAL_LATEST_SCAN_LIMIT", "250")
     facade = create_facade(safe_mode=args.safe_mode)
     result = facade.query(args.text)
     _print_json(result)

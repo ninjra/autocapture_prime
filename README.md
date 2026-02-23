@@ -40,8 +40,14 @@ Windows (PowerShell):
 ```
 
 ## Docs
+- `REPO_TOC.md` (quick orientation and canonical map)
 - `docs/plugin_model.md`
 - `docs/configuration.md`
 - `docs/safe_mode.md`
 - `docs/devtools.md`
 - `docs/windows_setup.md`
+
+Refresh repo TOC:
+```bash
+python3 tools/generate_repo_toc.py
+```

@@ -41,7 +41,7 @@ class QueryUiBlockedExtractTests(unittest.TestCase):
                 payload = resp.json()
                 extraction = payload.get("processing", {}).get("extraction", {})
                 self.assertTrue(extraction.get("blocked"), extraction)
-                self.assertEqual(extraction.get("blocked_reason"), "disabled")
+                self.assertEqual(extraction.get("blocked_reason"), "query_compute_disabled")
 
                 html = client.get("/ui/index.html").text
                 self.assertIn("queryStatus", html)
@@ -64,4 +64,3 @@ class QueryUiBlockedExtractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

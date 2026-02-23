@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -108,13 +109,30 @@ def _run_query_once(
         # Option A contract: no query-time hard VLM/image dependency in metadata mode.
         env["AUTOCAPTURE_ADV_HARD_VLM_MODE"] = "off"
         env["AUTOCAPTURE_QUERY_METADATA_ONLY_ALLOW_HARD_VLM"] = "0"
+        env.setdefault("AUTOCAPTURE_ADV_QUERY_INPROC", "0")
         env.pop("AUTOCAPTURE_QUERY_IMAGE_PATH", None)
+        # Query subprocesses must not contend for Hypervisor's writer lock.
+        # Use an isolated local data dir, while reading metadata from the live DB.
+        shadow_key = hashlib.sha256(f"{cfg}|{data}".encode("utf-8")).hexdigest()[:16]
+        shadow_dir = Path(tempfile.gettempdir()) / "autocapture_query_shadow" / shadow_key
+        shadow_dir.mkdir(parents=True, exist_ok=True)
+        env["AUTOCAPTURE_DATA_DIR"] = str(shadow_dir)
+        live_meta = Path(str(data)) / "metadata.live.db"
+        if not live_meta.exists():
+            live_meta = Path(str(data)) / "metadata.db"
+        if live_meta.exists():
+            env["AUTOCAPTURE_STORAGE_METADATA_PATH"] = str(live_meta)
+            env["AUTOCAPTURE_QUERY_METADATA_USE_LIVE_DB"] = "0"
         # Keep metadata-only strict runs bounded; defaults remain overrideable.
         env.setdefault("AUTOCAPTURE_HARD_VLM_MAX_CANDIDATES", "1")
         env.setdefault("AUTOCAPTURE_HARD_VLM_MAX_TOKENS", "256")
         env.setdefault("AUTOCAPTURE_HARD_VLM_TIMEOUT_S", "12")
         env.setdefault("AUTOCAPTURE_HARD_VLM_BUDGET_S", "20")
         env.setdefault("AUTOCAPTURE_HARD_VLM_RETRIES", "2")
+        env.setdefault("AUTOCAPTURE_AUDIT_PLUGIN_METADATA", "0")
+        env.setdefault("AUTOCAPTURE_RETRIEVAL_ATTACH_TIMELINES", "0")
+        env.setdefault("AUTOCAPTURE_QUERY_METADATA_ROWS_LIMIT", "48")
+        env.setdefault("AUTOCAPTURE_RETRIEVAL_LATEST_SCAN_LIMIT", "250")
     base_url_raw = str(env.get("AUTOCAPTURE_VLM_BASE_URL") or "").strip() or "http://127.0.0.1:8000/v1"
     try:
         env["AUTOCAPTURE_VLM_BASE_URL"] = enforce_external_vllm_base_url(base_url_raw)

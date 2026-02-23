@@ -5,6 +5,7 @@ from __future__ import annotations
 from bisect import bisect_left, bisect_right
 from datetime import datetime
 import json
+import os
 import re
 import time
 from typing import Any
@@ -85,6 +86,17 @@ class RetrievalStrategy(PluginBase):
                 latest_scan_limit = int(retrieval_cfg.get("latest_scan_limit", 2000) or 2000)
             except Exception:
                 latest_scan_limit = 2000
+            env_latest_on_miss = str(os.environ.get("AUTOCAPTURE_RETRIEVAL_LATEST_SCAN_ON_MISS") or "").strip().casefold()
+            if env_latest_on_miss in {"1", "true", "yes", "on"}:
+                latest_scan_on_miss = True
+            elif env_latest_on_miss in {"0", "false", "no", "off"}:
+                latest_scan_on_miss = False
+            env_latest_limit = str(os.environ.get("AUTOCAPTURE_RETRIEVAL_LATEST_SCAN_LIMIT") or "").strip()
+            if env_latest_limit:
+                try:
+                    latest_scan_limit = int(env_latest_limit)
+                except Exception:
+                    pass
             latest_scan_limit = max(0, latest_scan_limit)
             latest_scan_record_types = retrieval_cfg.get("latest_scan_record_types")
             if candidate_ids is not None:
@@ -118,8 +130,26 @@ class RetrievalStrategy(PluginBase):
         if len(results) > max_return:
             trace.append({"tier": "RESULT_TRUNCATE", "from": len(results), "to": int(max_return)})
             results = results[:max_return]
-        if bool(retrieval_cfg.get("attach_timelines", True)):
-            timeline_limit = int(retrieval_cfg.get("timeline_scan_limit", 5000))
+        attach_timelines = bool(retrieval_cfg.get("attach_timelines", True))
+        env_attach_timelines = str(os.environ.get("AUTOCAPTURE_RETRIEVAL_ATTACH_TIMELINES") or "").strip().casefold()
+        if env_attach_timelines in {"1", "true", "yes", "on"}:
+            attach_timelines = True
+        elif env_attach_timelines in {"0", "false", "no", "off"}:
+            attach_timelines = False
+        elif str(os.environ.get("AUTOCAPTURE_QUERY_METADATA_ONLY") or "").strip().casefold() in {"1", "true", "yes", "on"}:
+            attach_timelines = False
+        if attach_timelines:
+            try:
+                timeline_limit = int(retrieval_cfg.get("timeline_scan_limit", 5000))
+            except Exception:
+                timeline_limit = 5000
+            env_timeline_limit = str(os.environ.get("AUTOCAPTURE_RETRIEVAL_TIMELINE_SCAN_LIMIT") or "").strip()
+            if env_timeline_limit:
+                try:
+                    timeline_limit = int(env_timeline_limit)
+                except Exception:
+                    pass
+            timeline_limit = max(0, int(timeline_limit))
             window_events, input_summaries, cursor_samples = _collect_timelines(store, limit=timeline_limit)
             _attach_timelines(results, store, window_events, input_summaries, cursor_samples)
         elapsed_ms = float((time.perf_counter() - started) * 1000.0)
@@ -442,6 +472,44 @@ def _scan_metadata_latest(
     query_tokens = _query_tokens(query_lower)
     rows_out: list[dict[str, Any]] = []
     seen: set[str] = set()
+    if _latest_filtered_scan_is_expensive(store):
+        allowed_types = {str(item) for item in record_type_list}
+        try:
+            rows = store.latest(None, limit=cap)
+        except Exception:
+            rows = []
+        if isinstance(rows, list):
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                record_id = str(row.get("record_id") or "").strip()
+                if not record_id or record_id in seen:
+                    continue
+                seen.add(record_id)
+                if isinstance(stats, dict):
+                    stats["records_scanned"] = int(stats.get("records_scanned", 0) or 0) + 1
+                record = row.get("record")
+                if not isinstance(record, dict):
+                    record = _store_get_safe(store, record_id, {})
+                if not isinstance(record, dict):
+                    continue
+                record_type_val = str(record.get("record_type") or "").strip()
+                if record_type_val not in allowed_types:
+                    continue
+                match = _scan_metadata_match_row(
+                    record_id,
+                    record,
+                    query_lower=query_lower,
+                    query_tokens=query_tokens,
+                    time_window=time_window,
+                )
+                if match:
+                    rows_out.append(match)
+                    if int(stop_after) > 0 and len(rows_out) >= int(stop_after):
+                        return rows_out
+                if len(seen) >= cap:
+                    break
+        return rows_out
     for record_type in record_type_list:
         try:
             rows = store.latest(str(record_type), limit=per_type)
@@ -477,6 +545,23 @@ def _scan_metadata_latest(
         if len(seen) >= cap:
             break
     return rows_out
+
+
+def _latest_filtered_scan_is_expensive(store: Any) -> bool:
+    target = store
+    visited: set[int] = set()
+    for _ in range(3):
+        marker = id(target)
+        if marker in visited:
+            break
+        visited.add(marker)
+        inner = getattr(target, "_store", None)
+        if inner is None or inner is target:
+            break
+        target = inner
+    if bool(getattr(target, "_latest_filtered_expensive", False)):
+        return True
+    return str(target.__class__.__name__) in {"EncryptedSQLiteStore"}
 
 
 def _scan_metadata_match_row(

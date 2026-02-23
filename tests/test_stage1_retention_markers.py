@@ -4,7 +4,9 @@ import unittest
 from typing import Any
 
 from autocapture_nx.ingest.uia_obs_docs import _frame_uia_expected_ids
+from autocapture.storage.retention import mark_evidence_retention_eligible
 from autocapture.storage.retention import retention_eligibility_record_id
+from autocapture.storage.stage1 import mark_stage1_complete
 from autocapture.storage.stage1 import mark_stage1_and_retention, stage1_complete_record_id
 
 
@@ -22,6 +24,14 @@ class _MetadataStore:
 
     def put(self, key: str, value: dict[str, Any]) -> None:
         self.data[key] = dict(value)
+
+
+class _Logger:
+    def __init__(self) -> None:
+        self.rows: list[tuple[str, dict[str, Any]]] = []
+
+    def log(self, name: str, payload: dict[str, Any]) -> None:
+        self.rows.append((str(name), dict(payload)))
 
 
 class Stage1RetentionMarkerTests(unittest.TestCase):
@@ -122,6 +132,49 @@ class Stage1RetentionMarkerTests(unittest.TestCase):
         marker_after = metadata.get(marker_id, {})
         self.assertTrue(bool(marker_after.get("stage1_contract_validated", False)))
         self.assertFalse(bool(marker_after.get("quarantine_pending", False)))
+
+    def test_stage1_write_error_is_logged(self) -> None:
+        class _WriteErrorMetadata(_MetadataStore):
+            def put_new(self, key: str, value: dict[str, Any]) -> None:
+                raise RuntimeError(f"boom:{key}")
+
+        metadata = _WriteErrorMetadata()
+        logger = _Logger()
+        record_id = "run_test/evidence.capture.frame/4"
+        payload = {
+            "record_type": "evidence.capture.frame",
+            "run_id": "run_test",
+            "ts_utc": "2026-02-20T00:00:00Z",
+            "blob_path": "media/rid_frame_4.blob",
+            "content_hash": "abc444",
+            "uia_ref": {"record_id": "run_test/evidence.uia.snapshot/4", "content_hash": "uia444"},
+            "input_ref": {"record_id": "run_test/evidence.input.batch/4"},
+        }
+        stage1_id, inserted = mark_stage1_complete(metadata, record_id, payload, logger=logger)
+        self.assertIsNone(stage1_id)
+        self.assertFalse(inserted)
+        names = [name for name, _payload in logger.rows]
+        self.assertIn("ingest.stage1.complete.write_error", names)
+
+    def test_retention_write_error_is_logged(self) -> None:
+        class _WriteErrorMetadata(_MetadataStore):
+            def put_new(self, key: str, value: dict[str, Any]) -> None:
+                raise RuntimeError(f"boom:{key}")
+
+        metadata = _WriteErrorMetadata()
+        logger = _Logger()
+        record_id = "run_test/evidence.capture.frame/5"
+        payload = {
+            "record_type": "evidence.capture.frame",
+            "run_id": "run_test",
+            "ts_utc": "2026-02-20T00:00:00Z",
+            "blob_path": "media/rid_frame_5.blob",
+            "content_hash": "abc555",
+        }
+        rid = mark_evidence_retention_eligible(metadata, record_id, payload, logger=logger)
+        self.assertIsNone(rid)
+        names = [name for name, _payload in logger.rows]
+        self.assertIn("storage.retention.eligible.write_error", names)
 
 
 if __name__ == "__main__":

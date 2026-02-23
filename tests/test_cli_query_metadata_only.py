@@ -17,6 +17,10 @@ class CliQueryMetadataOnlyTests(unittest.TestCase):
                 captured["text"] = text
                 captured["AUTOCAPTURE_QUERY_METADATA_ONLY"] = str(os.environ.get("AUTOCAPTURE_QUERY_METADATA_ONLY") or "")
                 captured["AUTOCAPTURE_ADV_HARD_VLM_MODE"] = str(os.environ.get("AUTOCAPTURE_ADV_HARD_VLM_MODE") or "")
+                captured["AUTOCAPTURE_AUDIT_PLUGIN_METADATA"] = str(os.environ.get("AUTOCAPTURE_AUDIT_PLUGIN_METADATA") or "")
+                captured["AUTOCAPTURE_RETRIEVAL_LATEST_SCAN_LIMIT"] = str(
+                    os.environ.get("AUTOCAPTURE_RETRIEVAL_LATEST_SCAN_LIMIT") or ""
+                )
                 return {"ok": True}
 
         args = argparse.Namespace(safe_mode=True, text="hello")
@@ -30,4 +34,5 @@ class CliQueryMetadataOnlyTests(unittest.TestCase):
         self.assertEqual(captured.get("text"), "hello")
         self.assertEqual(captured.get("AUTOCAPTURE_QUERY_METADATA_ONLY"), "1")
         self.assertEqual(captured.get("AUTOCAPTURE_ADV_HARD_VLM_MODE"), "off")
-
+        self.assertEqual(captured.get("AUTOCAPTURE_AUDIT_PLUGIN_METADATA"), "0")
+        self.assertEqual(captured.get("AUTOCAPTURE_RETRIEVAL_LATEST_SCAN_LIMIT"), "250")

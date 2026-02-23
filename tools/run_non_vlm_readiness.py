@@ -385,7 +385,7 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _build_query_eval_env(*, base_env: dict[str, str], run_dir: Path, dataroot: Path) -> dict[str, str]:
+def _build_query_eval_env(*, base_env: dict[str, str], run_dir: Path, dataroot: Path, metadata_db_path: Path) -> dict[str, str]:
     env = dict(base_env)
     query_data_dir = run_dir / "query_eval_data"
     query_data_dir.mkdir(parents=True, exist_ok=True)
@@ -399,7 +399,10 @@ def _build_query_eval_env(*, base_env: dict[str, str], run_dir: Path, dataroot: 
     if not isinstance(storage_cfg, dict):
         storage_cfg = {}
     storage_cfg["data_dir"] = str(query_data_dir)
-    storage_cfg["metadata_path"] = str(dataroot / "metadata.db")
+    # Honor the caller-selected DB (for example metadata.live.db) instead of
+    # hard-wiring metadata.db, so readiness query eval reflects the same corpus
+    # used by lineage and completeness checks.
+    storage_cfg["metadata_path"] = str(metadata_db_path)
     if not str(storage_cfg.get("lexical_path") or "").strip():
         storage_cfg["lexical_path"] = str(dataroot / "lexical.db")
     if not str(storage_cfg.get("vector_path") or "").strip():
@@ -492,7 +495,12 @@ def main(argv: list[str] | None = None) -> int:
     elif (dataroot / "config").exists():
         base_env["AUTOCAPTURE_CONFIG_DIR"] = str(dataroot / "config")
 
-    query_eval_env = _build_query_eval_env(base_env=base_env, run_dir=run_dir, dataroot=dataroot)
+    query_eval_env = _build_query_eval_env(
+        base_env=base_env,
+        run_dir=run_dir,
+        dataroot=dataroot,
+        metadata_db_path=db_path,
+    )
 
     steps: list[dict[str, Any]] = []
 
