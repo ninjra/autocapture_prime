@@ -1587,7 +1587,14 @@ class IdleProcessor:
         pipeline_enabled = bool(sst_cfg.get("enabled", True)) and callable(getattr(self._pipeline, "process_record", None))
         pipeline_allow_ocr = bool(sst_cfg.get("allow_ocr", allow_ocr))
         pipeline_allow_vlm = bool(sst_cfg.get("allow_vlm", allow_vlm))
-        pipeline_required_for_completion = bool(idle_cfg.get("pipeline_required_for_stage1", False))
+        pipeline_required_cfg = idle_cfg.get("pipeline_required_for_stage1", None)
+        # Stage1 completion semantics depend on SST/derived records (including UIA
+        # linkage docs). Default to requiring pipeline completion unless explicitly
+        # disabled in config.
+        if pipeline_required_cfg is None:
+            pipeline_required_for_completion = bool(pipeline_enabled)
+        else:
+            pipeline_required_for_completion = bool(pipeline_required_cfg)
         if max_gpu <= 0:
             pipeline_allow_vlm = False
         start_mono = time.monotonic()

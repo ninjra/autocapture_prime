@@ -287,8 +287,8 @@
   "processing": {
     "idle": {
       "extractors": {
-        "ocr": false,
-        "vlm": false
+        "ocr": true,
+        "vlm": true
       }
     },
     "on_query": {
