@@ -1784,6 +1784,13 @@
           ],
           "type": "object"
         },
+        "query_pipeline_mode": {
+          "enum": [
+            "legacy_arbitrated",
+            "golden_state"
+          ],
+          "type": "string"
+        },
         "sst": {
           "additionalProperties": false,
           "properties": {

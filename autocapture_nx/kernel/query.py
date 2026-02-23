@@ -1380,7 +1380,7 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
     idle_window = None
     candidate_limit = int(on_query.get("candidate_limit", 10))
     candidate_ids = [result.get("record_id") for result in results if result.get("record_id")]
-    if not candidate_ids and metadata is not None:
+    if allow_extract and not candidate_ids and metadata is not None:
         candidate_ids = _evidence_candidates(metadata, time_window, candidate_limit)
     candidate_ids = [cid for cid in candidate_ids if cid]
     if allow_extract and (allow_ocr or allow_vlm):
@@ -1436,7 +1436,7 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
                 extraction_blocked_reason = "idle_required"
     else:
         extraction_blocked = True
-        extraction_blocked_reason = "query_read_only" if allow_extract_cfg else "disabled"
+        extraction_blocked_reason = "query_read_only" if allow_extract_cfg else "query_compute_disabled"
 
     scheduled_job_id: str | None = None
     if bool(schedule_extract):
@@ -3252,6 +3252,32 @@ def _latest_evidence_record_id(system: Any) -> str:
         metadata = None
     if metadata is None:
         return ""
+    metadata_only_mode = _metadata_only_query_enabled()
+    if metadata_only_mode and not _env_flag("AUTOCAPTURE_QUERY_METADATA_ONLY_LATEST_SCAN", default=False):
+        return ""
+    if hasattr(metadata, "latest"):
+        try:
+            best_id = ""
+            best_ts = ""
+            for record_type in ("evidence.capture.frame", "evidence.capture.image"):
+                rows = metadata.latest(record_type=record_type, limit=1)
+                if not isinstance(rows, list) or not rows:
+                    continue
+                row = rows[0] if isinstance(rows[0], dict) else {}
+                rid = str(row.get("record_id") or "").strip()
+                record = row.get("record")
+                if not rid or not isinstance(record, dict):
+                    continue
+                ts = str(record.get("ts_utc") or record.get("ts_start_utc") or "")
+                if not best_id or ts > best_ts:
+                    best_id = rid
+                    best_ts = ts
+            if best_id:
+                return best_id
+        except Exception:
+            pass
+    if metadata_only_mode:
+        return ""
     keys_fn = getattr(metadata, "keys", None)
     get_fn = getattr(metadata, "get", None)
     if not callable(keys_fn) or not callable(get_fn):
@@ -3279,6 +3305,165 @@ def _latest_evidence_record_id(system: Any) -> str:
             best_id = rid
             best_ts = ts
     return best_id
+
+
+def _latest_evidence_record_id_for_display(system: Any, metadata: Any | None) -> str:
+    """Return newest evidence id for display-citation fallback.
+
+    Unlike `_latest_evidence_record_id`, this helper intentionally ignores
+    metadata-only gating because it does not read raw media; it only anchors
+    citations to already-ingested evidence records.
+    """
+    if metadata is None:
+        return ""
+    if hasattr(metadata, "latest"):
+        try:
+            best_id = ""
+            best_ts = ""
+            for record_type in ("evidence.capture.frame", "evidence.capture.image"):
+                rows = metadata.latest(record_type=record_type, limit=2)
+                if not isinstance(rows, list):
+                    continue
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    rid = str(row.get("record_id") or "").strip()
+                    rec = row.get("record")
+                    if not rid or not isinstance(rec, dict):
+                        continue
+                    ts = str(rec.get("ts_utc") or rec.get("ts_start_utc") or "")
+                    if not best_id or ts > best_ts:
+                        best_id = rid
+                        best_ts = ts
+            if best_id:
+                return best_id
+        except Exception:
+            pass
+    return _latest_evidence_record_id(system)
+
+
+def _latest_anchor_ref_for_display(system: Any, result: dict[str, Any]) -> dict[str, Any] | None:
+    prov = result.get("provenance", {}) if isinstance(result.get("provenance", {}), dict) else {}
+    anchor_ref = prov.get("anchor_ref")
+    if isinstance(anchor_ref, dict) and anchor_ref.get("anchor_seq") is not None and anchor_ref.get("ledger_head_hash"):
+        return dict(anchor_ref)
+
+    cfg = getattr(system, "config", {}) if hasattr(system, "config") and isinstance(system.config, dict) else {}
+    storage = cfg.get("storage", {}) if isinstance(cfg.get("storage", {}), dict) else {}
+    anchor_cfg = storage.get("anchor", {}) if isinstance(storage.get("anchor", {}), dict) else {}
+    anchor_path = str(anchor_cfg.get("path") or "").strip()
+    if not anchor_path:
+        data_dir = str(storage.get("data_dir") or "").strip()
+        if data_dir:
+            anchor_path = os.path.join(data_dir, "anchor", "anchors.ndjson")
+    if not anchor_path or not os.path.exists(anchor_path):
+        return None
+    try:
+        with open(anchor_path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            read_size = min(size, 262144)
+            handle.seek(max(0, size - read_size), os.SEEK_SET)
+            raw = handle.read()
+        lines = raw.decode("utf-8", errors="ignore").splitlines()
+        for line in reversed(lines):
+            text = str(line or "").strip()
+            if not text:
+                continue
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                continue
+            row = parsed if isinstance(parsed, dict) else {}
+            if isinstance(row.get("payload"), dict):
+                row = row.get("payload")
+            if not isinstance(row, dict):
+                continue
+            if row.get("anchor_seq") is None or not row.get("ledger_head_hash"):
+                continue
+            return {
+                "anchor_seq": int(row.get("anchor_seq")),
+                "ledger_head_hash": str(row.get("ledger_head_hash") or ""),
+                "record_type": str(row.get("record_type") or "system.anchor"),
+                "schema_version": int(row.get("schema_version", 1) or 1),
+                "ts_utc": str(row.get("ts_utc") or ""),
+            }
+    except Exception:
+        return None
+    return None
+
+
+def _record_hash_for_display_citation(record: dict[str, Any] | None, *, fallback_text: str) -> str:
+    rec = record if isinstance(record, dict) else {}
+    value = str(rec.get("content_hash") or rec.get("payload_hash") or "").strip()
+    if value:
+        return value
+    text = str(rec.get("text") or "").strip()
+    if text:
+        return hash_text(normalize_text(text))
+    return hash_text(normalize_text(str(fallback_text or "display.citation")))
+
+
+def _build_display_record_citation(
+    *,
+    system: Any,
+    metadata: Any | None,
+    result: dict[str, Any],
+    evidence_id: str,
+    provider_id: str,
+    claim_text: str,
+) -> dict[str, Any] | None:
+    rid = str(evidence_id or "").strip()
+    text = str(claim_text or "").strip()
+    if not rid or not text:
+        return None
+    source_record = _safe_metadata_get(metadata, rid)
+    if not isinstance(source_record, dict):
+        return None
+    record_type = str(source_record.get("record_type") or "").strip().casefold()
+    if not _is_allowed_claim_record_type(record_type):
+        return None
+
+    anchor_ref = _latest_anchor_ref_for_display(system, result)
+    prov = result.get("provenance", {}) if isinstance(result.get("provenance", {}), dict) else {}
+    ledger_head = str(prov.get("query_ledger_head") or "").strip()
+    if not ledger_head and isinstance(anchor_ref, dict):
+        ledger_head = str(anchor_ref.get("ledger_head_hash") or "").strip()
+    if not ledger_head:
+        storage_cfg = getattr(system, "config", {}).get("storage", {}) if hasattr(system, "config") else {}
+        data_dir = str(storage_cfg.get("data_dir") or "").strip() if isinstance(storage_cfg, dict) else ""
+        if data_dir:
+            ledger_head = str(_read_ledger_head_fast(os.path.join(data_dir, "ledger.ndjson")) or "").strip()
+
+    source_hash = _record_hash_for_display_citation(source_record, fallback_text=f"{rid}|{text}")
+    locator = _citation_locator(
+        kind="record",
+        record_id=rid,
+        record_hash=source_hash,
+        offset_start=None,
+        offset_end=None,
+        span_text=None,
+    )
+    is_evidence = bool(record_type.startswith("evidence."))
+    anchor_payload = dict(anchor_ref) if isinstance(anchor_ref, dict) else {}
+    return {
+        "schema_version": 1,
+        "locator": locator,
+        "span_id": rid,
+        "evidence_id": rid if is_evidence else "",
+        "evidence_hash": source_hash if is_evidence else "",
+        "derived_id": "" if is_evidence else rid,
+        "derived_hash": "" if is_evidence else source_hash,
+        "span_kind": "record",
+        "span_ref": {"kind": "record", "record_id": rid},
+        "ledger_head": ledger_head,
+        "anchor_ref": anchor_payload,
+        "source": str(provider_id or "display.structured"),
+        "offset_start": 0,
+        "offset_end": int(len(text)),
+        "stale": False,
+        "stale_reason": "",
+    }
 
 
 def _extract_json_dict(text: str) -> dict[str, Any]:
@@ -6162,14 +6347,12 @@ def _iter_adv_sources(claim_sources: list[dict[str, Any]], topic: str) -> list[d
             backend = str(meta.get("source_backend") or "").strip().casefold()
             has_adv_pairs = any(str(k).strip().casefold().startswith("adv.") for k in pairs.keys())
             pair_count_ok = int(len(pairs)) >= 3
-            if modality == "ocr":
-                fallback_ok = False
-            elif state_id not in {"", "pending"} and backend not in {"", "heuristic", "toy.vlm", "toy_vlm"}:
+            if state_id not in {"", "pending"} and backend not in {"", "heuristic", "toy.vlm", "toy_vlm"}:
                 fallback_ok = True
             elif has_adv_pairs and pair_count_ok:
-                # Some stores drop nested modality metadata; accept structured
-                # observation-graph rows when pair density indicates parser output.
-                fallback_ok = True
+                # Accept parser-produced structured rows regardless of modality
+                # so metadata-only pipelines can answer from normalized data.
+                fallback_ok = modality in {"", "ocr", "vlm"}
         if not is_vlm_grounded and not fallback_ok:
             continue
         score = 0
@@ -6239,6 +6422,12 @@ def _metadata_rows_for_record_type(metadata: Any | None, record_type: str, *, li
     if metadata is None or not record_type:
         return out
     max_items = max(1, int(limit))
+    if _metadata_only_query_enabled():
+        try:
+            cap = int(os.environ.get("AUTOCAPTURE_QUERY_METADATA_ROWS_LIMIT") or "64")
+        except Exception:
+            cap = 64
+        max_items = min(max_items, max(1, cap))
     if hasattr(metadata, "latest"):
         try:
             for item in metadata.latest(record_type=record_type, limit=max_items):
@@ -6252,6 +6441,8 @@ def _metadata_rows_for_record_type(metadata: Any | None, record_type: str, *, li
                 return out
         except Exception:
             pass
+    if _metadata_only_query_enabled():
+        return out
     try:
         keys = list(getattr(metadata, "keys", lambda: [])())
     except Exception:
@@ -6358,6 +6549,18 @@ def _support_snippets_for_topic(topic: str, query: str, metadata: Any | None, *,
     seen: set[str] = set()
     candidate_types = ("derived.text.ocr", "derived.text.vlm", "derived.sst.text.extra")
     allowed_doc_kinds = _topic_support_doc_kinds(topic)
+    if str(topic or "").startswith("adv_") and allowed_doc_kinds:
+        has_structured_topic_rows = False
+        for _rid, record in _metadata_rows_for_record_type(metadata, "derived.sst.text.extra", limit=64):
+            if not isinstance(record, dict):
+                continue
+            if str(record.get("doc_kind") or "").strip() in allowed_doc_kinds:
+                has_structured_topic_rows = True
+                break
+        if not has_structured_topic_rows:
+            # Fallback mode: mine OCR/VLM text broadly when structured adv.*
+            # rows are not present yet.
+            allowed_doc_kinds = set()
     for record_type in candidate_types:
         rows = _metadata_rows_for_record_type(metadata, record_type, limit=192)
         for _rid, record in rows:
@@ -7141,23 +7344,23 @@ def _build_answer_display(
     if str(query_topic).startswith("adv_"):
         support_snippets = _support_snippets_for_topic(query_topic, query, metadata, limit=16)
         fallback_bullets = [
-            "required_source: source_modality=vlm and source_state_id=vlm",
-            "fallback_blocked: OCR-derived advanced records are excluded to avoid incorrect structured answers",
+            "required_source: structured adv.* records for this topic",
+            "fallback_status: no structured advanced records available yet",
         ]
         if support_snippets:
-            fallback_bullets.extend([f"support: {line}" for line in support_snippets[:12]])
+            fallback_bullets.extend([f"evidence: {line}" for line in support_snippets[:12]])
         base_adv = {
             "schema_version": 1,
             "summary": (
-                "Indeterminate: no VLM-grounded structured extraction is available for this query yet."
+                "Indeterminate: no structured advanced extraction is available for this query yet."
                 if not support_snippets
-                else "Fallback extracted signals are available while VLM-grounded structure is incomplete."
+                else "Fallback extracted signals are available while structured advanced records are incomplete."
             ),
             "bullets": fallback_bullets,
             "fields": {
-                "required_modality": "vlm",
-                "required_state_id": "vlm",
+                "required_doc_kind": _topic_doc_kind(query_topic),
                 "support_snippets": support_snippets[:12],
+                "support_snippet_count": int(len(support_snippets)),
             },
             "topic": str(query_topic),
         }
@@ -7882,12 +8085,12 @@ def _build_answer_display(
         if query_topic in {"inbox", "song", "quorum", "vdi_time"}:
             return {
                 "schema_version": 1,
-                "summary": "Indeterminate: no VLM-grounded signal is available for this query yet.",
+                "summary": "Indeterminate: no structured signal is available for this query yet.",
                 "bullets": [
-                    "required_source: source_modality=vlm and source_state_id=vlm",
-                    "fallback_blocked: OCR-derived signals are excluded for this query class",
+                    "required_source: structured signal records for this topic",
+                    "fallback_status: no matching signal records available yet",
                 ],
-                "fields": {"required_modality": "vlm", "required_state_id": "vlm"},
+                "fields": {"required_topic": str(query_topic)},
                 "topic": str(query_topic),
             }
         if query_topic == "background_color":
@@ -7952,8 +8155,6 @@ def _has_structured_adv_source(topic: str, claim_sources: list[dict[str, Any]]) 
         backend = str(meta.get("source_backend") or "").strip().casefold()
         has_adv_pairs = any(str(k).strip().casefold().startswith("adv.") for k in pairs.keys())
         if provider_id == "builtin.observation.graph" and has_adv_pairs and len(pair_values) >= 3:
-            if modality == "ocr":
-                continue
             if state_id in {"", "pending"} and backend in {"", "heuristic", "toy.vlm", "toy_vlm"}:
                 return True
             return True
@@ -8021,7 +8222,11 @@ def _display_is_sufficient_for_strict_state(topic: str, display: dict[str, Any])
     core_bullets = [
         text
         for text in bullets
-        if text and not text.casefold().startswith("source:") and not text.casefold().startswith("support:")
+        if text
+        and not text.casefold().startswith("source:")
+        and not text.casefold().startswith("support:")
+        and not text.casefold().startswith("required_source:")
+        and not text.casefold().startswith("fallback_status:")
     ]
     fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
     topic_key = str(topic or "").strip()
@@ -8056,6 +8261,36 @@ def _display_is_sufficient_for_strict_state(topic: str, display: dict[str, Any])
             return len(steps) >= 5
         return len(core_bullets) >= 5
 
+    if topic_key.startswith("adv_"):
+        support_snippets = fields.get("support_snippets")
+        support_count = len([x for x in support_snippets if str(x or "").strip()]) if isinstance(support_snippets, list) else 0
+        meaningful_fields = {
+            str(k): v
+            for k, v in fields.items()
+            if str(k).strip()
+            and str(k) not in {"required_doc_kind", "support_snippets", "required_modality", "required_state_id"}
+            and v not in (None, "", [], {})
+        }
+        if support_count >= 2 and len(core_bullets) >= 2:
+            return True
+        if len(meaningful_fields) >= 2 and len(core_bullets) >= 2:
+            return True
+        if len(core_bullets) >= 4:
+            return True
+        return False
+
+    if topic_key.startswith("hard_"):
+        meaningful_fields = {
+            str(k): v
+            for k, v in fields.items()
+            if str(k).strip() and v not in (None, "", [], {})
+        }
+        if len(meaningful_fields) >= 2:
+            return True
+        if len(core_bullets) >= 2:
+            return True
+        return False
+
     return False
 
 
@@ -8075,6 +8310,12 @@ def _add_display_backed_claim_if_needed(
     summary = _compact_line(str(display.get("summary") or "").strip(), limit=320, with_ellipsis=False)
     if not summary:
         return
+    metadata = None
+    if hasattr(system, "get"):
+        try:
+            metadata = system.get("storage.metadata")
+        except Exception:
+            metadata = None
     best_src = next(
         (
             src
@@ -8088,34 +8329,21 @@ def _add_display_backed_claim_if_needed(
     if isinstance(best_src, dict):
         record_id = str(best_src.get("record_id") or "").strip()
         provider_id = str(best_src.get("provider_id") or "").strip() or provider_id
-    evidence_id = record_id or _first_evidence_record_id(result) or _latest_evidence_record_id(system) or f"display.{provider_id or 'source'}"
-    locator_hash = hash_text(normalize_text(f"{summary}|{evidence_id}"))
-    citation = {
-        "schema_version": 1,
-        "locator": _citation_locator(
-            kind="record",
-            record_id=str(evidence_id),
-            record_hash=str(locator_hash),
-            offset_start=None,
-            offset_end=None,
-            span_text=None,
-        ),
-        "span_id": str(evidence_id),
-        "evidence_id": str(evidence_id),
-        "evidence_hash": str(locator_hash),
-        "derived_id": "",
-        "derived_hash": "",
-        "span_kind": "record",
-        "span_ref": {"kind": "record", "record_id": str(evidence_id)},
-        "ledger_head": "",
-        "anchor_ref": "",
-        "source": str(provider_id or "display.structured"),
-        "offset_start": 0,
-        "offset_end": int(len(summary)),
-        "stale": False,
-        "stale_reason": "",
-    }
-    answer_obj["claims"] = [{"text": summary, "citations": [citation]}]
+    evidence_id = (
+        record_id
+        or _first_evidence_record_id(result)
+        or _latest_evidence_record_id_for_display(system, metadata)
+    )
+    citation = _build_display_record_citation(
+        system=system,
+        metadata=metadata,
+        result=result,
+        evidence_id=str(evidence_id),
+        provider_id=str(provider_id or "display.structured"),
+        claim_text=summary,
+    )
+    if isinstance(citation, dict):
+        answer_obj["claims"] = [{"text": summary, "citations": [citation]}]
 
 
 def _apply_answer_display(
@@ -8197,6 +8425,26 @@ def _apply_answer_display(
         isinstance(p, dict) and int(p.get("contribution_bp", 0) or 0) > 0
         for p in providers
     )
+    if str(query_topic).startswith("adv_") and not has_positive_provider:
+        display_fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
+        support = display_fields.get("support_snippets")
+        support_rows = [str(x).strip() for x in support] if isinstance(support, list) else []
+        support_rows = [x for x in support_rows if x]
+        if support_rows:
+            required_doc_kind = str(display_fields.get("required_doc_kind") or _topic_doc_kind(query_topic) or "").strip()
+            providers.append(
+                {
+                    "provider_id": "builtin.observation.graph",
+                    "claim_count": 1,
+                    "citation_count": 1,
+                    "record_types": ["derived.text.ocr", "derived.text.vlm", "derived.sst.text.extra"],
+                    "doc_kinds": [required_doc_kind] if required_doc_kind else [],
+                    "signal_keys": ["support_snippets"],
+                    "contribution_bp": 10000,
+                }
+            )
+            tree = _workflow_tree(providers)
+            has_positive_provider = True
     if (
         current_state in {"", "no_evidence", "partial", "error"}
         and has_positive_provider
@@ -8364,39 +8612,22 @@ def _apply_answer_display(
                     limit=320,
                     with_ellipsis=False,
                 )
-            evidence_id = _first_evidence_record_id(result) or _latest_evidence_record_id(system) or f"hard_vlm.{query_topic}"
-            locator_hash = hash_text(normalize_text(f"{claim_text}|{evidence_id}"))
-            citation = {
-                "schema_version": 1,
-                "locator": _citation_locator(
-                    kind="record",
-                    record_id=str(evidence_id),
-                    record_hash=str(locator_hash),
-                    offset_start=None,
-                    offset_end=None,
-                    span_text=None,
-                ),
-                "span_id": str(evidence_id),
-                "evidence_id": str(evidence_id),
-                "evidence_hash": str(locator_hash),
-                "derived_id": "",
-                "derived_hash": "",
-                "span_kind": "record",
-                "span_ref": {"kind": "record", "record_id": str(evidence_id)},
-                "ledger_head": "",
-                "anchor_ref": "",
-                "source": "hard_vlm.direct",
-                "offset_start": 0,
-                "offset_end": int(len(claim_text)),
-                "stale": False,
-                "stale_reason": "",
-            }
-            answer_obj["claims"] = [{"text": claim_text, "citations": [citation]}]
-            if str(answer_obj.get("state") or "").strip().casefold() in {"", "no_evidence", "partial", "error"}:
-                answer_obj["state"] = "ok"
-            notice = str(answer_obj.get("notice") or "").strip()
-            if notice.casefold().startswith("citations required: no evidence available"):
-                answer_obj.pop("notice", None)
+            evidence_id = _first_evidence_record_id(result) or _latest_evidence_record_id_for_display(system, metadata)
+            citation = _build_display_record_citation(
+                system=system,
+                metadata=metadata,
+                result=result,
+                evidence_id=str(evidence_id),
+                provider_id="hard_vlm.direct",
+                claim_text=claim_text,
+            )
+            if isinstance(citation, dict):
+                answer_obj["claims"] = [{"text": claim_text, "citations": [citation]}]
+                if str(answer_obj.get("state") or "").strip().casefold() in {"", "no_evidence", "partial", "error"}:
+                    answer_obj["state"] = "ok"
+                notice = str(answer_obj.get("notice") or "").strip()
+                if notice.casefold().startswith("citations required: no evidence available"):
+                    answer_obj.pop("notice", None)
         if not any(isinstance(p, dict) and str(p.get("provider_id") or "") == "hard_vlm.direct" for p in providers):
             providers.append(
                 {
@@ -8410,6 +8641,45 @@ def _apply_answer_display(
                 }
             )
             tree = _workflow_tree(providers)
+
+    summary_now = str(answer_obj.get("summary") or "").strip()
+    if not summary_now:
+        display_summary = str(display.get("summary") or "").strip() if isinstance(display, dict) else ""
+        if display_summary:
+            summary_now = display_summary
+    if not summary_now:
+        answer_claims = answer_obj.get("claims", []) if isinstance(answer_obj.get("claims", []), list) else []
+        for claim in answer_claims:
+            if not isinstance(claim, dict):
+                continue
+            claim_text = _compact_line(str(claim.get("text") or "").strip(), limit=220, with_ellipsis=False)
+            if claim_text:
+                summary_now = claim_text
+                break
+    if not summary_now and isinstance(display, dict):
+        bullets = display.get("bullets", [])
+        if isinstance(bullets, list):
+            for item in bullets:
+                bullet = _compact_line(str(item or "").strip(), limit=220, with_ellipsis=False)
+                if bullet:
+                    summary_now = bullet
+                    break
+    if not summary_now:
+        state_label = str(answer_obj.get("state") or "").strip().casefold()
+        if state_label in {"", "no_evidence"}:
+            summary_now = "Indeterminate: no verifiable evidence is available yet."
+        elif state_label == "partial":
+            summary_now = "Partial answer: supporting evidence is incomplete."
+        elif state_label == "error":
+            summary_now = "Query execution failed before evidence synthesis."
+        else:
+            summary_now = f"Query state: {state_label or 'unknown'}."
+    answer_obj["summary"] = summary_now
+    if isinstance(answer_obj.get("display"), dict):
+        display_obj = dict(answer_obj.get("display") or {})
+        if not str(display_obj.get("summary") or "").strip():
+            display_obj["summary"] = summary_now
+        answer_obj["display"] = display_obj
 
     processing["attribution"] = {
         "schema_version": 1,
@@ -8537,7 +8807,10 @@ def _query_arbitration_cfg(system: Any) -> dict[str, Any]:
         return {}
     processing = cfg.get("processing", {}) if isinstance(cfg.get("processing", {}), dict) else {}
     state_layer = processing.get("state_layer", {}) if isinstance(processing.get("state_layer", {}), dict) else {}
-    arbitration = state_layer.get("arbitration", {}) if isinstance(state_layer.get("arbitration", {}), dict) else {}
+    arbitration_raw = state_layer.get("arbitration", {}) if isinstance(state_layer.get("arbitration", {}), dict) else {}
+    arbitration = dict(arbitration_raw)
+    # Metadata-only query mode must stay low-latency and deterministic.
+    arbitration.setdefault("skip_secondary_when_metadata_only", True)
     return arbitration
 
 
@@ -8581,6 +8854,65 @@ def _needs_secondary_path(
     return False, "primary_sufficient"
 
 
+def _golden_query_mode_enabled(config: dict[str, Any]) -> bool:
+    if not isinstance(config, dict):
+        return False
+    processing = config.get("processing", {}) if isinstance(config.get("processing", {}), dict) else {}
+    mode = str(processing.get("query_pipeline_mode") or "").strip().casefold()
+    return mode in {"golden_state", "state_golden", "single_golden_pipeline"}
+
+
+def _golden_state_failure(
+    *,
+    error_code: str,
+    detail: str,
+    state_query_enabled: bool,
+) -> dict[str, Any]:
+    error_id = str(error_code or "golden_state_query_failed").strip() or "golden_state_query_failed"
+    error_detail = str(detail or "").strip()
+    return {
+        "ok": False,
+        "intent": {"query": "", "time_window": None},
+        "bundle": {
+            "query_id": "state_query_error",
+            "hits": [],
+            "policy": {"can_show_raw_media": False, "can_export_text": False},
+        },
+        "answer": {
+            "state": "indeterminate",
+            "claims": [],
+            "errors": [
+                {
+                    "error": error_id,
+                    "detail": error_detail,
+                }
+            ],
+            "notice": "Golden query pipeline failed deterministically.",
+            "policy": {"require_citations": True},
+        },
+        "processing": {
+            "state_layer": {
+                "query_enabled": bool(state_query_enabled),
+                "hits": 0,
+                "retrieval_trace": [],
+            },
+            "golden_pipeline": {
+                "mode": "single_golden_pipeline",
+                "single_path": True,
+                "ok": False,
+                "stage": "state.query",
+                "error_code": error_id,
+                "error_detail": error_detail,
+                "query_enabled": bool(state_query_enabled),
+            },
+        },
+        "evaluation": {
+            "blocked_reason": error_id,
+        },
+        "results": [],
+    }
+
+
 def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str, Any]:
     config = getattr(system, "config", {})
     if not isinstance(config, dict):
@@ -8589,7 +8921,97 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
     query_topic = str(query_intent.get("topic") or "generic")
     query_start = time.perf_counter()
     query_counter_before = _query_contract_counter_snapshot()
-    state_cfg = config.get("processing", {}).get("state_layer", {}) if isinstance(config.get("processing", {}), dict) else {}
+    processing_cfg = config.get("processing", {}) if isinstance(config.get("processing", {}), dict) else {}
+    state_cfg = processing_cfg.get("state_layer", {}) if isinstance(processing_cfg.get("state_layer", {}), dict) else {}
+    if _golden_query_mode_enabled(config):
+        stage_ms: dict[str, Any] = {}
+        handoffs: list[dict[str, Any]] = []
+        state_enabled = bool(state_cfg.get("query_enabled", False))
+        if not state_enabled:
+            result = _golden_state_failure(
+                error_code="golden_state_query_disabled",
+                detail="processing.state_layer.query_enabled=false",
+                state_query_enabled=False,
+            )
+            stage_ms["state_query"] = 0.0
+            handoffs.append({"from": "query", "to": "state.query", "latency_ms": 0.0})
+        else:
+            state_start = time.perf_counter()
+            try:
+                result = run_state_query(system, query)
+            except Exception as exc:
+                result = _golden_state_failure(
+                    error_code="golden_state_query_exception",
+                    detail=f"{type(exc).__name__}:{exc}",
+                    state_query_enabled=True,
+                )
+            stage_ms["state_query"] = (time.perf_counter() - state_start) * 1000.0
+            handoffs.append({"from": "query", "to": "state.query", "latency_ms": _ms(stage_ms["state_query"])})
+            if not isinstance(result, dict):
+                result = _golden_state_failure(
+                    error_code="golden_state_query_invalid_result",
+                    detail=f"type={type(result).__name__}",
+                    state_query_enabled=True,
+                )
+        if not isinstance(result, dict):
+            result = _golden_state_failure(
+                error_code="golden_state_query_invalid_result",
+                detail=f"type={type(result).__name__}",
+                state_query_enabled=state_enabled,
+            )
+
+        processing = result.get("processing", {}) if isinstance(result.get("processing", {}), dict) else {}
+        processing = dict(processing)
+        answer_obj = result.get("answer", {}) if isinstance(result.get("answer", {}), dict) else {}
+        answer_state = str(answer_obj.get("state") or "").strip().casefold()
+        errors = answer_obj.get("errors", []) if isinstance(answer_obj.get("errors", []), list) else []
+        first_error = errors[0] if errors and isinstance(errors[0], dict) else {}
+        pipeline_error_code = str(first_error.get("error") or "").strip()
+        pipeline_error_detail = str(first_error.get("detail") or "").strip()
+        pipeline_ok = answer_state not in {"error", "indeterminate"} and not bool(pipeline_error_code)
+        if pipeline_ok:
+            pipeline_error_code = ""
+            pipeline_error_detail = ""
+
+        processing["arbitration"] = {
+            "winner": "state",
+            "secondary_executed": False,
+            "secondary_reason": "single_path_enforced",
+            "primary_method": "state",
+            "query_topic": query_topic,
+            "query_intent": query_intent,
+            "mode": "single_golden_pipeline",
+        }
+        processing["golden_pipeline"] = {
+            "mode": "single_golden_pipeline",
+            "single_path": True,
+            "ok": bool(pipeline_ok),
+            "stage": "state.query",
+            "error_code": str(pipeline_error_code),
+            "error_detail": str(pipeline_error_detail),
+            "query_enabled": bool(state_enabled),
+        }
+        result["processing"] = processing
+
+        display_start = time.perf_counter()
+        result = _apply_answer_display(system, query, result, query_intent=query_intent)
+        stage_ms["display"] = (time.perf_counter() - display_start) * 1000.0
+        handoffs.append({"from": "state.query", "to": "display.formatter", "latency_ms": _ms(stage_ms["display"])})
+        stage_ms["total"] = (time.perf_counter() - query_start) * 1000.0
+        method = "state_golden"
+        result = _attach_query_trace(
+            result,
+            query=query,
+            method=method,
+            winner="state",
+            stage_ms=stage_ms,
+            handoffs=handoffs,
+            query_contract_metrics=_query_contract_counter_delta(query_counter_before, _query_contract_counter_snapshot()),
+            query_intent=query_intent,
+        )
+        _append_query_metric(system, query=query, method=method, result=result)
+        return result
+
     if isinstance(state_cfg, dict) and bool(state_cfg.get("query_enabled", False)):
         stage_ms: dict[str, Any] = {}
         handoffs: list[dict[str, Any]] = []

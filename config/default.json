@@ -1223,6 +1223,7 @@
       "max_window_minutes": 120,
       "require_idle": true
     },
+    "query_pipeline_mode": "golden_state",
     "state_layer": {
       "enabled": true,
       "query_enabled": true,
