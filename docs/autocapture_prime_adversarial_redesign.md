@@ -1,6 +1,6 @@
 # Adversarial Redesign Proposal — Autocapture Prime (repo snapshot)
 
-Source snapshot: [repomix-output.md](sandbox:/mnt/data/repomix-output.md)
+Source snapshot: [generated repository snapshot artifact](sandbox:/mnt/data/generated repository snapshot artifact)
 
 ## Assumptions
 

@@ -229,10 +229,12 @@ def _apply_adaptive_idle_parallelism(
     pending_records = 0
     if history:
         latest = history[-1]
-        idle_stats = latest.get("idle_stats") if isinstance(latest.get("idle_stats"), dict) else {}
+        idle_stats_raw = latest.get("idle_stats")
+        idle_stats: dict[str, Any] = idle_stats_raw if isinstance(idle_stats_raw, dict) else {}
         pending_records = int(idle_stats.get("pending_records", 0) or 0)
         if pending_records <= 0:
-            sla_latest = latest.get("sla") if isinstance(latest.get("sla"), dict) else {}
+            sla_latest_raw = latest.get("sla")
+            sla_latest: dict[str, Any] = sla_latest_raw if isinstance(sla_latest_raw, dict) else {}
             pending_records = int(sla_latest.get("pending_records", 0) or 0)
     consumed_values = [
         int(row.get("consumed_ms", 0) or 0)
@@ -365,7 +367,8 @@ def _estimate_sla_snapshot(config: dict[str, Any], *, steps: list[dict[str, Any]
         consumed_ms += int(row.get("consumed_ms", 0) or 0)
         if int(row.get("consumed_ms", 0) or 0) > 0:
             latencies_ms.append(int(row.get("consumed_ms", 0) or 0))
-        idle_stats = row.get("idle_stats") if isinstance(row.get("idle_stats"), dict) else {}
+        idle_stats_raw = row.get("idle_stats")
+        idle_stats: dict[str, Any] = idle_stats_raw if isinstance(idle_stats_raw, dict) else {}
         completed_records += int(idle_stats.get("records_completed", 0) or 0)
         pending_records = int(idle_stats.get("pending_records", pending_records) or pending_records)
 
@@ -510,7 +513,8 @@ def run_processing_batch(
         and bool(metadata_db_guard.get("fail_closed", True))
     )
     if guard_blocked:
-        blocked_reason = str(metadata_db_guard.get("reason") or "metadata_db_unstable")
+        guard_reason = metadata_db_guard.get("reason") if isinstance(metadata_db_guard, dict) else "metadata_db_unstable"
+        blocked_reason = str(guard_reason or "metadata_db_unstable")
 
     for loop_idx in range(max(1, int(max_loops))):
         if guard_blocked:

@@ -248,6 +248,55 @@ class HandoffIngestTests(unittest.TestCase):
             self.assertEqual(result.stage1_retention_marked_records, 1)
             self.assertTrue((dest / "media" / "rid_frame_1.blob").exists())
 
+    def test_handoff_ingest_retries_retention_marker_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            handoff = root / "handoff-retry"
+            dest = root / "dest"
+            (handoff / "media").mkdir(parents=True, exist_ok=True)
+            (handoff / "media" / "rid_frame_1.blob").write_bytes(b"frame-bytes")
+            payload = {
+                "schema_version": 1,
+                "record_type": "evidence.capture.frame",
+                "run_id": "run_test",
+                "ts_utc": "2026-02-20T00:00:00Z",
+                "blob_path": "media/rid_frame_1.blob",
+                "content_hash": "frame_hash_1",
+                "uia_ref": {"record_id": "run_test/evidence.uia.snapshot/1", "content_hash": "uia_hash_1"},
+                "input_ref": {"record_id": "run_test/evidence.input.batch/1"},
+            }
+            _write_handoff_metadata(
+                handoff / "metadata.db",
+                [
+                    ("run_test/evidence.capture.frame/1", payload),
+                    ("run_test/evidence.uia.snapshot/1", _uia_snapshot_payload("run_test/evidence.uia.snapshot/1", "uia_hash_1")),
+                ],
+            )
+            ingestor = HandoffIngestor(dest, mode="copy", strict=True)
+            first = {
+                "stage1_complete": True,
+                "stage1_inserted": True,
+                "stage1_record_id": "stage1_1",
+                "retention_record_id": None,
+                "retention_missing": True,
+            }
+            second = {
+                "stage1_complete": True,
+                "stage1_inserted": False,
+                "stage1_record_id": "stage1_1",
+                "retention_record_id": "retention_1",
+                "retention_missing": False,
+            }
+            with patch(
+                "autocapture_nx.ingest.handoff_ingest.mark_stage1_and_retention",
+                side_effect=[first, second],
+            ) as mocked:
+                result = ingestor.ingest_handoff_dir(handoff)
+            self.assertEqual(result.stage1_complete_records, 1)
+            self.assertEqual(result.stage1_retention_marked_records, 1)
+            self.assertEqual(result.stage1_missing_retention_marker_count, 0)
+            self.assertEqual(int(mocked.call_count), 2)
+
     def test_auto_drain_handoff_spool_marks_stage1(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

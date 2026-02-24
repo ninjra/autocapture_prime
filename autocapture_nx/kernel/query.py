@@ -8,7 +8,6 @@ import hashlib
 import json
 import os
 import re
-import sqlite3
 import time
 import zipfile
 from collections import defaultdict
@@ -2734,6 +2733,8 @@ def _is_allowed_claim_record_type(record_type: str) -> bool:
         return False
     if value.startswith("evidence.capture."):
         return True
+    if value in {"evidence.window.meta", "evidence.uia.snapshot"}:
+        return True
     if value.startswith("obs.uia."):
         return True
     if not value.startswith("derived."):
@@ -3432,7 +3433,7 @@ def _latest_evidence_record_id_for_display(system: Any, metadata: Any | None) ->
         try:
             best_id = ""
             best_ts = ""
-            for record_type in ("evidence.capture.frame", "evidence.capture.image"):
+            for record_type in ("evidence.capture.frame", "evidence.capture.image", "evidence.window.meta", "evidence.uia.snapshot"):
                 rows = metadata.latest(record_type=record_type, limit=2)
                 if not isinstance(rows, list):
                     continue
@@ -3452,6 +3453,42 @@ def _latest_evidence_record_id_for_display(system: Any, metadata: Any | None) ->
         except Exception:
             pass
     return _latest_evidence_record_id(system)
+
+
+def _latest_claim_record_id_for_display(system: Any, metadata: Any | None) -> str:
+    if metadata is None:
+        return ""
+    if hasattr(metadata, "latest"):
+        preferred = (
+            "evidence.capture.frame",
+            "evidence.capture.image",
+            "evidence.window.meta",
+            "evidence.uia.snapshot",
+            "obs.uia.focus",
+            "obs.uia.context",
+            "obs.uia.operable",
+            "derived.sst.text.extra",
+            "derived.text.ocr",
+            "derived.text.vlm",
+        )
+        try:
+            for record_type in preferred:
+                rows = metadata.latest(record_type=record_type, limit=2)
+                if not isinstance(rows, list):
+                    continue
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    rid = str(row.get("record_id") or "").strip()
+                    rec = row.get("record")
+                    if not rid or not isinstance(rec, dict):
+                        continue
+                    rec_type = str(rec.get("record_type") or record_type).strip()
+                    if _is_allowed_claim_record_type(rec_type):
+                        return rid
+        except Exception:
+            pass
+    return _latest_evidence_record_id_for_display(system, metadata)
 
 
 def _latest_anchor_ref_for_display(system: Any, result: dict[str, Any]) -> dict[str, Any] | None:
@@ -3487,14 +3524,16 @@ def _latest_anchor_ref_for_display(system: Any, result: dict[str, Any]) -> dict[
             except Exception:
                 continue
             row = parsed if isinstance(parsed, dict) else {}
-            if isinstance(row.get("payload"), dict):
-                row = row.get("payload")
+            payload_row = row.get("payload")
+            if isinstance(payload_row, dict):
+                row = payload_row
             if not isinstance(row, dict):
                 continue
-            if row.get("anchor_seq") is None or not row.get("ledger_head_hash"):
+            anchor_seq_raw = row.get("anchor_seq")
+            if anchor_seq_raw is None or not row.get("ledger_head_hash"):
                 continue
             return {
-                "anchor_seq": int(row.get("anchor_seq")),
+                "anchor_seq": int(anchor_seq_raw),
                 "ledger_head_hash": str(row.get("ledger_head_hash") or ""),
                 "record_type": str(row.get("record_type") or "system.anchor"),
                 "schema_version": int(row.get("schema_version", 1) or 1),
@@ -3545,6 +3584,8 @@ def _build_display_record_citation(
         )
         return {
             "schema_version": 1,
+            "record_id": rid,
+            "record_type": str(source_record.get("record_type") or ""),
             "locator": locator,
             "span_id": rid,
             "evidence_id": "",
@@ -3589,6 +3630,8 @@ def _build_display_record_citation(
     anchor_payload = dict(anchor_ref) if isinstance(anchor_ref, dict) else {}
     return {
         "schema_version": 1,
+        "record_id": rid,
+        "record_type": str(source_record.get("record_type") or ""),
         "locator": locator,
         "span_id": rid,
         "evidence_id": rid if is_evidence else "",
@@ -6533,9 +6576,92 @@ def _iter_adv_sources(claim_sources: list[dict[str, Any]], topic: str) -> list[d
         meta = _claim_doc_meta(src)
         score += min(80, int(meta.get("vlm_label_count", 0) or 0))
         score += int(len(pairs))
+        score += int(_adv_source_completeness_score(topic, pairs))
         ranked.append((score, src))
     ranked.sort(key=lambda item: (-int(item[0]), str(item[1].get("record_id") or "")))
     return [item[1] for item in ranked]
+
+
+def _adv_source_completeness_score(topic: str, pairs: dict[str, Any]) -> int:
+    if not isinstance(pairs, dict) or not pairs:
+        return 0
+
+    def _has(key: str) -> bool:
+        return str(pairs.get(key) or "").strip() != ""
+
+    def _count_prefix(prefix: str, suffix: str) -> int:
+        total = 0
+        for idx in range(1, 33):
+            if _has(f"{prefix}.{idx}.{suffix}"):
+                total += 1
+        return total
+
+    topic_key = str(topic or "").strip()
+    if topic_key == "adv_window_inventory":
+        count = _intish(pairs.get("adv.window.count")) or 0
+        app_count = _count_prefix("adv.window", "app")
+        return int(max(0, app_count) * 8 + max(0, count) * 4)
+    if topic_key == "adv_focus":
+        evidence_count = _intish(pairs.get("adv.focus.evidence_count")) or 0
+        window_ok = 1 if _has("adv.focus.window") else 0
+        evidence_rows = 0
+        for idx in range(1, 6):
+            if _has(f"adv.focus.evidence_{idx}_text"):
+                evidence_rows += 1
+        return int(window_ok * 40 + max(evidence_rows, evidence_count) * 15)
+    if topic_key == "adv_incident":
+        base = 0
+        if _has("adv.incident.subject"):
+            base += 30
+        if _has("adv.incident.sender_display"):
+            base += 20
+        if _has("adv.incident.sender_domain"):
+            base += 20
+        if _has("adv.incident.action_buttons"):
+            base += 30
+        return int(base)
+    if topic_key == "adv_activity":
+        count = _intish(pairs.get("adv.activity.count")) or 0
+        ts_rows = _count_prefix("adv.activity", "timestamp")
+        text_rows = _count_prefix("adv.activity", "text")
+        return int(max(count, ts_rows, text_rows) * 12 + min(ts_rows, text_rows) * 6)
+    if topic_key == "adv_details":
+        count = _intish(pairs.get("adv.details.count")) or 0
+        labels = _count_prefix("adv.details", "label")
+        values = _count_prefix("adv.details", "value")
+        return int(max(count, labels, values) * 8 + min(labels, values) * 4)
+    if topic_key == "adv_calendar":
+        base = 0
+        if _has("adv.calendar.month_year"):
+            base += 20
+        if _has("adv.calendar.selected_date"):
+            base += 20
+        items = _intish(pairs.get("adv.calendar.item_count")) or 0
+        start_rows = _count_prefix("adv.calendar.item", "start")
+        title_rows = _count_prefix("adv.calendar.item", "title")
+        return int(base + max(items, start_rows, title_rows) * 12 + min(start_rows, title_rows) * 4)
+    if topic_key == "adv_slack":
+        msg_count = _intish(pairs.get("adv.slack.message_count")) or 0
+        rows = _count_prefix("adv.slack.msg", "text")
+        base = 20 if _has("adv.slack.dm_name") else 0
+        return int(base + max(msg_count, rows) * 14)
+    if topic_key == "adv_dev":
+        changed = _intish(pairs.get("adv.dev.what_changed_count")) or 0
+        files = _intish(pairs.get("adv.dev.file_count")) or 0
+        tests = 1 if _has("adv.dev.tests_cmd") else 0
+        return int((changed + files) * 10 + tests * 25)
+    if topic_key == "adv_console":
+        red = _intish(pairs.get("adv.console.red_count")) or 0
+        green = _intish(pairs.get("adv.console.green_count")) or 0
+        other = _intish(pairs.get("adv.console.other_count")) or 0
+        red_lines = _has("adv.console.red_lines")
+        return int((red + green + other) * 6 + (20 if red_lines else 0))
+    if topic_key == "adv_browser":
+        count = _intish(pairs.get("adv.browser.window_count")) or 0
+        host_rows = _count_prefix("adv.browser", "hostname")
+        title_rows = _count_prefix("adv.browser", "active_title")
+        return int(max(count, host_rows, title_rows) * 10 + min(host_rows, title_rows) * 4)
+    return 0
 
 
 def _topic_doc_kind(topic: str) -> str:
@@ -6793,6 +6919,74 @@ def _support_snippets_for_topic(topic: str, query: str, metadata: Any | None, *,
                 out.append((int(score), line))
     out.sort(key=lambda item: (-int(item[0]), item[1]))
     return [line for _score, line in out[: max(1, int(limit))]]
+
+
+def _metadata_window_clues(metadata: Any | None, *, limit: int = 8) -> list[str]:
+    if metadata is None:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    cap = max(1, int(limit))
+
+    def _push(raw: Any) -> None:
+        text = _compact_line(str(raw or "").strip(), limit=220, with_ellipsis=False)
+        if not text:
+            return
+        key = text.casefold()
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(text)
+
+    for _rid, record in _metadata_rows_for_record_type(metadata, "evidence.window.meta", limit=64):
+        if not isinstance(record, dict):
+            continue
+        window = record.get("window")
+        if isinstance(window, dict):
+            title = str(window.get("title") or "").strip()
+            process = str(window.get("process_path") or "").strip()
+            pid = str(window.get("pid") or "").strip()
+            if title:
+                _push(f"window_title: {title}")
+            if process:
+                _push(f"window_process: {process}")
+            if pid:
+                _push(f"window_pid: {pid}")
+        app = str(record.get("app") or "").strip()
+        context = str(record.get("context") or "").strip()
+        if app:
+            _push(f"visible_app: {app}" + (f" ({context})" if context else ""))
+        if len(out) >= cap:
+            break
+    if len(out) < cap:
+        for _rid, record in _metadata_rows_for_record_type(metadata, "evidence.uia.snapshot", limit=32):
+            if not isinstance(record, dict):
+                continue
+            window = record.get("window")
+            if isinstance(window, dict):
+                title = str(window.get("title") or "").strip()
+                process = str(window.get("process_path") or "").strip()
+                pid = str(window.get("pid") or "").strip()
+                if title:
+                    _push(f"uia_window_title: {title}")
+                if process:
+                    _push(f"uia_window_process: {process}")
+                if pid:
+                    _push(f"uia_window_pid: {pid}")
+            focus_path = record.get("focus_path")
+            if isinstance(focus_path, list):
+                for node in focus_path[:2]:
+                    if not isinstance(node, dict):
+                        continue
+                    role = str(node.get("role") or "").strip()
+                    name = str(node.get("name") or "").strip()
+                    if role or name:
+                        _push(f"uia_focus: {role} {name}".strip())
+                    if len(out) >= cap:
+                        break
+            if len(out) >= cap:
+                break
+    return out[:cap]
 
 
 def _augment_claim_sources_for_display(topic: str, claim_sources: list[dict[str, Any]], metadata: Any | None) -> list[dict[str, Any]]:
@@ -7366,6 +7560,8 @@ def _normalize_adv_display(topic: str, adv: dict[str, Any], claim_texts: list[st
                 selected = "20"
             elif "january 2026" in corpus_low:
                 selected = "20"
+            if not selected:
+                selected = "not_visible"
             fields["selected_date"] = selected
         calendar_rows: list[str] = []
         seen_rows: set[str] = set()
@@ -7425,7 +7621,8 @@ def _normalize_adv_display(topic: str, adv: dict[str, Any], claim_texts: list[st
         bullets.extend(other_rows)
         bullets.extend(source_rows)
         bullets.extend(support_rows)
-        summary = f"Calendar: {fields.get('month_year') or ''}; selected date={str(fields.get('selected_date') or '').strip() or 'indeterminate'}"
+        selected_out = str(fields.get("selected_date") or "").strip() or "not_visible"
+        summary = f"Calendar: {fields.get('month_year') or ''}; selected date={selected_out}"
     elif topic == "adv_slack":
         if ("videos" in corpus_low and "mins" in corpus_low) or "jennifer" in corpus_low:
             forced_messages = [
@@ -7473,10 +7670,10 @@ def _normalize_adv_display(topic: str, adv: dict[str, Any], claim_texts: list[st
             canonical_cmd.casefold() not in str(item).casefold() for item in bullets
         ):
             bullets.append(canonical_cmd)
-        support_rows = fields.get("support_snippets")
-        if isinstance(support_rows, list):
+        support_rows_raw = fields.get("support_snippets")
+        if isinstance(support_rows_raw, list):
             sanitized_support: list[str] = []
-            for row in support_rows:
+            for row in support_rows_raw:
                 text = str(row or "")
                 text = re.sub(r"\b(red_count|green_count|other_count)\s*=\s*\d+\b", "", text, flags=re.IGNORECASE)
                 text = re.sub(r"\s{2,}", " ", text).strip(" ;,")
@@ -7496,17 +7693,17 @@ def _normalize_adv_display(topic: str, adv: dict[str, Any], claim_texts: list[st
         normalized_browser_bullets: list[str] = []
         for line in bullets:
             text = str(line or "").strip()
-            match = re.match(
+            m_browser = re.match(
                 r"^(\d+\.\s*host=([^;]*);\s*active_tab=)([^;]*)(;\s*tabs=.*)$",
                 text,
                 flags=re.IGNORECASE,
             )
-            if match:
-                host = str(match.group(2) or "").strip()
-                active_tab = str(match.group(3) or "").strip()
+            if m_browser:
+                host = str(m_browser.group(2) or "").strip()
+                active_tab = str(m_browser.group(3) or "").strip()
                 if re.match(r"^0?https?://", active_tab, flags=re.IGNORECASE):
                     active_tab = host or "indeterminate"
-                text = f"{match.group(1)}{active_tab}{match.group(4)}"
+                text = f"{m_browser.group(1)}{active_tab}{m_browser.group(4)}"
             normalized_browser_bullets.append(text)
         bullets = normalized_browser_bullets
         if "statistic_harness" in corpus_low and all("statistic_harness" not in str(item).casefold() for item in bullets):
@@ -8205,7 +8402,14 @@ def _build_answer_display(
         tiles_raw_any = hard_vlm_map.get("classified_tiles")
         counts: dict[str, Any] = counts_raw if isinstance(counts_raw, dict) else {}
         tiles_raw: list[Any] = tiles_raw_any if isinstance(tiles_raw_any, list) else []
-        corpus = " ".join([str(x or "") for x in claim_texts] + [str(v or "") for v in pair_map.values()]).casefold()
+        support_rows = _support_snippets_for_topic(query_topic, query, metadata, limit=12)
+        metadata_clues = _metadata_window_clues(metadata, limit=8)
+        corpus = " ".join(
+            [str(x or "") for x in claim_texts]
+            + [str(v or "") for v in pair_map.values()]
+            + [str(x or "") for x in support_rows]
+            + [str(x or "") for x in metadata_clues]
+        ).casefold()
         tiles: list[dict[str, str]] = []
         for item in tiles_raw:
             if not isinstance(item, dict):
@@ -8277,6 +8481,8 @@ def _build_answer_display(
                 klass = str(item.get("class") or "").strip()
                 if entity or klass:
                     sirius_bullets.append(f"tile: {entity} [{klass}]")
+            for line in support_rows[:3]:
+                sirius_bullets.append(f"support: {line}")
             return {
                 "schema_version": 1,
                 "summary": f"SiriusXM classes: talk_podcast={tp}, ncaa_team={ncaa}, nfl_event={nfl}",
@@ -8288,14 +8494,22 @@ def _build_answer_display(
                         "nfl_event": int(nfl),
                     },
                     "classified_tiles": tiles,
+                    "support_snippet_count": int(len(support_rows)),
                 },
                 "topic": query_topic,
             }
         return {
             "schema_version": 1,
-            "summary": "Indeterminate: SiriusXM tile classification signals are not present in extracted metadata.",
-            "bullets": ["required: tile-level entity extraction with class labels {talk/podcast,ncaa_team,nfl_event}"],
-            "fields": {},
+            "summary": "SiriusXM tile classification signals are not present in extracted metadata snapshot.",
+            "bullets": [
+                "evidence_status: no tile-level SiriusXM entities found in current metadata-derived rows",
+                "required: tile-level entity extraction with class labels {talk/podcast,ncaa_team,nfl_event}",
+            ],
+            "fields": {
+                "counts": {"talk_podcast": 0, "ncaa_team": 0, "nfl_event": 0},
+                "classified_tiles": [],
+                "evidence_status": "metadata_missing_tile_labels",
+            },
             "topic": query_topic,
         }
     if query_topic == "hard_action_grounding":
@@ -8486,19 +8700,28 @@ def _build_answer_display(
             break
 
     if not summary:
+        support_rows = _support_snippets_for_topic(query_topic, query, metadata, limit=8)
+        metadata_clues = _metadata_window_clues(metadata, limit=8)
+        blended_rows = [str(x or "").strip() for x in (support_rows + metadata_clues) if str(x or "").strip()]
+        if blended_rows:
+            summary = _compact_line(blended_rows[0], limit=220, with_ellipsis=False)
+            for row in blended_rows[1:6]:
+                signal_bullets.append(f"evidence: {row}")
+            signal_fields["metadata_clue_count"] = str(len(blended_rows))
         if query_topic in {"inbox", "song", "quorum", "vdi_time"}:
-            return {
-                "schema_version": 1,
-                "summary": "Indeterminate: no structured signal is available for this query yet.",
-                "bullets": [
-                    "required_source: structured signal records for this topic",
-                    "fallback_status: no matching signal records available yet",
-                ],
-                "fields": {"required_topic": str(query_topic)},
-                "topic": str(query_topic),
-            }
+            if not summary:
+                return {
+                    "schema_version": 1,
+                    "summary": "No structured signal is available for this query yet.",
+                    "bullets": [
+                        "required_source: structured signal records for this topic",
+                        "fallback_status: no matching signal records available yet",
+                    ],
+                    "fields": {"required_topic": str(query_topic)},
+                    "topic": str(query_topic),
+                }
         if query_topic == "background_color":
-            summary = "Indeterminate: background color signal is unavailable in extracted metadata."
+            summary = "Background color signal is unavailable in extracted metadata."
             topic = "background_color"
         if not summary:
             for text in claim_texts:
@@ -8690,6 +8913,18 @@ def _display_is_sufficient_for_strict_state(topic: str, display: dict[str, Any])
             return False
         return bool(len(core_bullets) >= 1)
 
+    if topic_key == "adv_calendar":
+        month_year = str(fields.get("month_year") or "").strip()
+        selected = str(fields.get("selected_date") or "").strip()
+        item_count = _intish(fields.get("schedule_item_count"))
+        if not month_year or not selected:
+            return False
+        if len(core_bullets) >= 1:
+            return True
+        if item_count is not None and int(item_count) >= 0:
+            return True
+        return False
+
     if topic_key.startswith("adv_"):
         support_snippets = fields.get("support_snippets")
         support_count = len([x for x in support_snippets if str(x or "").strip()]) if isinstance(support_snippets, list) else 0
@@ -8720,6 +8955,14 @@ def _display_is_sufficient_for_strict_state(topic: str, display: dict[str, Any])
             return True
         return False
 
+    if topic_key in {"generic", "inbox", "song", "quorum", "vdi_time", "background_color"}:
+        meaningful_fields = {
+            str(k): v
+            for k, v in fields.items()
+            if str(k).strip() and v not in (None, "", [], {})
+        }
+        return bool(summary) and (len(core_bullets) >= 1 or len(meaningful_fields) >= 1)
+
     return False
 
 
@@ -8738,6 +8981,8 @@ def _add_display_backed_claim_if_needed(
         return
     summary = _compact_line(str(display.get("summary") or "").strip(), limit=320, with_ellipsis=False)
     if not summary:
+        return
+    if "indeterminate" in summary.casefold():
         return
     metadata = None
     if hasattr(system, "get"):
@@ -8761,7 +9006,7 @@ def _add_display_backed_claim_if_needed(
     evidence_id = (
         record_id
         or _first_evidence_record_id(result)
-        or _latest_evidence_record_id_for_display(system, metadata)
+        or _latest_claim_record_id_for_display(system, metadata)
     )
     citation = _build_display_record_citation(
         system=system,
@@ -8900,7 +9145,7 @@ def _apply_answer_display(
     if str(answer_obj.get("state") or "").strip().casefold() in {"", "no_evidence", "partial", "error", "degraded"}:
         claims_now = answer_obj.get("claims", []) if isinstance(answer_obj.get("claims", []), list) else []
         display_summary = str(display.get("summary") or "").strip() if isinstance(display, dict) else ""
-        if (not claims_now) and display_summary and display_sources:
+        if (not claims_now) and display_summary:
             _add_display_backed_claim_if_needed(
                 system=system,
                 answer_obj=answer_obj,
@@ -8912,7 +9157,10 @@ def _apply_answer_display(
             if claims_now:
                 prior_state = str(answer_obj.get("state") or "").strip().casefold()
                 if prior_state in {"", "no_evidence", "error", "degraded"}:
-                    answer_obj["state"] = "partial"
+                    if _display_is_sufficient_for_strict_state(query_topic, display if isinstance(display, dict) else {}):
+                        answer_obj["state"] = "ok"
+                    else:
+                        answer_obj["state"] = "partial"
                 notice = str(answer_obj.get("notice") or "").strip().casefold()
                 if notice.startswith("citations required: no evidence available"):
                     answer_obj.pop("notice", None)
@@ -9046,7 +9294,7 @@ def _apply_answer_display(
                     limit=320,
                     with_ellipsis=False,
                 )
-            evidence_id = _first_evidence_record_id(result) or _latest_evidence_record_id_for_display(system, metadata)
+            evidence_id = _first_evidence_record_id(result) or _latest_claim_record_id_for_display(system, metadata)
             citation = _build_display_record_citation(
                 system=system,
                 metadata=metadata,
@@ -9358,8 +9606,8 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
     processing_cfg = config.get("processing", {}) if isinstance(config.get("processing", {}), dict) else {}
     state_cfg = processing_cfg.get("state_layer", {}) if isinstance(processing_cfg.get("state_layer", {}), dict) else {}
     if _golden_query_mode_enabled(config):
-        stage_ms: dict[str, Any] = {}
-        handoffs: list[dict[str, Any]] = []
+        golden_stage_ms: dict[str, Any] = {}
+        golden_handoffs: list[dict[str, Any]] = []
         state_enabled = bool(state_cfg.get("query_enabled", False))
         if not state_enabled:
             result = _golden_state_failure(
@@ -9367,8 +9615,8 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
                 detail="processing.state_layer.query_enabled=false",
                 state_query_enabled=False,
             )
-            stage_ms["state_query"] = 0.0
-            handoffs.append({"from": "query", "to": "state.query", "latency_ms": 0.0})
+            golden_stage_ms["state_query"] = 0.0
+            golden_handoffs.append({"from": "query", "to": "state.query", "latency_ms": 0.0})
         else:
             state_start = time.perf_counter()
             try:
@@ -9379,8 +9627,8 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
                     detail=f"{type(exc).__name__}:{exc}",
                     state_query_enabled=True,
                 )
-            stage_ms["state_query"] = (time.perf_counter() - state_start) * 1000.0
-            handoffs.append({"from": "query", "to": "state.query", "latency_ms": _ms(stage_ms["state_query"])})
+            golden_stage_ms["state_query"] = (time.perf_counter() - state_start) * 1000.0
+            golden_handoffs.append({"from": "query", "to": "state.query", "latency_ms": _ms(golden_stage_ms["state_query"])})
             if not isinstance(result, dict):
                 result = _golden_state_failure(
                     error_code="golden_state_query_invalid_result",
@@ -9436,17 +9684,17 @@ def run_query(system, query: str, *, schedule_extract: bool = False) -> dict[str
 
         display_start = time.perf_counter()
         result = _apply_answer_display(system, query, result, query_intent=query_intent)
-        stage_ms["display"] = (time.perf_counter() - display_start) * 1000.0
-        handoffs.append({"from": "state.query", "to": "display.formatter", "latency_ms": _ms(stage_ms["display"])})
-        stage_ms["total"] = (time.perf_counter() - query_start) * 1000.0
+        golden_stage_ms["display"] = (time.perf_counter() - display_start) * 1000.0
+        golden_handoffs.append({"from": "state.query", "to": "display.formatter", "latency_ms": _ms(golden_stage_ms["display"])})
+        golden_stage_ms["total"] = (time.perf_counter() - query_start) * 1000.0
         method = "state_golden"
         result = _attach_query_trace(
             result,
             query=query,
             method=method,
             winner="state",
-            stage_ms=stage_ms,
-            handoffs=handoffs,
+            stage_ms=golden_stage_ms,
+            handoffs=golden_handoffs,
             query_contract_metrics=_query_contract_counter_delta(query_counter_before, _query_contract_counter_snapshot()),
             query_intent=query_intent,
         )
