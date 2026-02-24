@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 import unittest
 
 class QueryPopupRouteTests(unittest.TestCase):
@@ -249,6 +250,61 @@ class QueryPopupRouteTests(unittest.TestCase):
                     os.environ.pop("AUTOCAPTURE_DATA_DIR", None)
                 else:
                     os.environ["AUTOCAPTURE_DATA_DIR"] = original_data
+
+    def test_popup_route_times_out_quickly_with_deterministic_contract(self) -> None:
+        TestClient, get_app, load_or_create_token = self._require_fastapi_stack()
+        with tempfile.TemporaryDirectory() as tmp:
+            original_config = os.environ.get("AUTOCAPTURE_CONFIG_DIR")
+            original_data = os.environ.get("AUTOCAPTURE_DATA_DIR")
+            original_popup_timeout = os.environ.get("AUTOCAPTURE_POPUP_QUERY_TIMEOUT_S")
+            os.environ["AUTOCAPTURE_CONFIG_DIR"] = tmp
+            os.environ["AUTOCAPTURE_DATA_DIR"] = tmp
+            os.environ["AUTOCAPTURE_POPUP_QUERY_TIMEOUT_S"] = "0.2"
+            app = None
+            try:
+                app = get_app()
+                token = load_or_create_token(app.state.facade.config).token
+
+                def _slow_query(_text: str, *, schedule_extract: bool = False):
+                    self.assertFalse(schedule_extract)
+                    time.sleep(1.0)
+                    return {"ok": True, "answer": {"state": "ok", "display": {"summary": "late"}, "claims": []}, "processing": {}}
+
+                app.state.facade.query = _slow_query
+                client = TestClient(app)
+                started = time.perf_counter()
+                resp = client.post(
+                    "/api/query/popup",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={"query": "slow query"},
+                )
+                elapsed_ms = (time.perf_counter() - started) * 1000.0
+                self.assertEqual(resp.status_code, 200)
+                payload = resp.json()
+                self.assertFalse(bool(payload.get("ok", True)))
+                self.assertEqual(str(payload.get("state") or ""), "degraded")
+                self.assertEqual(str(payload.get("processing_blocked_reason") or ""), "popup_timeout")
+                self.assertTrue(bool(payload.get("needs_processing", False)))
+                self.assertIn("timed out", str(payload.get("summary") or "").casefold())
+                self.assertLess(elapsed_ms, 1500.0)
+            finally:
+                try:
+                    if app is not None:
+                        app.state.facade.shutdown()
+                except Exception:
+                    pass
+                if original_config is None:
+                    os.environ.pop("AUTOCAPTURE_CONFIG_DIR", None)
+                else:
+                    os.environ["AUTOCAPTURE_CONFIG_DIR"] = original_config
+                if original_data is None:
+                    os.environ.pop("AUTOCAPTURE_DATA_DIR", None)
+                else:
+                    os.environ["AUTOCAPTURE_DATA_DIR"] = original_data
+                if original_popup_timeout is None:
+                    os.environ.pop("AUTOCAPTURE_POPUP_QUERY_TIMEOUT_S", None)
+                else:
+                    os.environ["AUTOCAPTURE_POPUP_QUERY_TIMEOUT_S"] = original_popup_timeout
 
 
 if __name__ == "__main__":
