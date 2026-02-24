@@ -17,8 +17,10 @@ def default_stage1_derived_db_path(dataroot: str | Path) -> Path:
 
 def resolve_stage1_derived_db_path(config: dict[str, Any] | None, *, dataroot_hint: str | None = None) -> Path | None:
     cfg = config if isinstance(config, dict) else {}
-    storage_cfg = cfg.get("storage") if isinstance(cfg.get("storage"), dict) else {}
-    stage1_cfg = storage_cfg.get("stage1_derived") if isinstance(storage_cfg.get("stage1_derived"), dict) else {}
+    storage_cfg_raw = cfg.get("storage")
+    storage_cfg: dict[str, Any] = storage_cfg_raw if isinstance(storage_cfg_raw, dict) else {}
+    stage1_cfg_raw = storage_cfg.get("stage1_derived")
+    stage1_cfg: dict[str, Any] = stage1_cfg_raw if isinstance(stage1_cfg_raw, dict) else {}
     enabled = bool(stage1_cfg.get("enabled", False))
     if not enabled:
         return None
