@@ -1,0 +1,133 @@
+{
+  "cases": [
+    {
+      "expected": {
+        "citations_min": 1,
+        "popup_ok": true,
+        "state": "ok",
+        "summary_disallow_tokens": [
+          "indeterminate"
+        ]
+      },
+      "id": "POP_MISS_01",
+      "observed": {
+        "citations_count": 0,
+        "failure_reasons": [
+          "popup_ok_false",
+          "state_not_ok",
+          "summary_empty",
+          "citations_missing"
+        ],
+        "state": "",
+        "summary": ""
+      },
+      "query": "Identify two numeric values referenced in one communication panel, infer their best matching parameter name from technical notes, and produce example request query strings using those values.",
+      "source_case_id": "GQ13",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "expected": {
+        "citations_min": 1,
+        "popup_ok": true,
+        "state": "ok",
+        "summary_disallow_tokens": [
+          "indeterminate"
+        ]
+      },
+      "id": "POP_MISS_02",
+      "observed": {
+        "citations_count": 0,
+        "failure_reasons": [
+          "popup_ok_false",
+          "state_not_ok",
+          "summary_empty",
+          "citations_missing"
+        ],
+        "state": "",
+        "summary": ""
+      },
+      "query": "In the VDI right-side calendar/schedule pane: extract the displayed month+year, the currently selected date, and then list the first 5 visible scheduled items (top-to-bottom) with start time + title.",
+      "source_case_id": "Q6",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "expected": {
+        "citations_min": 1,
+        "popup_ok": true,
+        "state": "ok",
+        "summary_disallow_tokens": [
+          "indeterminate"
+        ]
+      },
+      "id": "POP_MISS_03",
+      "observed": {
+        "citations_count": 0,
+        "failure_reasons": [
+          "popup_ok_false",
+          "state_not_ok",
+          "summary_empty",
+          "citations_missing"
+        ],
+        "state": "",
+        "summary": ""
+      },
+      "query": "Count completed checklist items in the engineering notes/log area and identify the currently running action line directly below the checklist.",
+      "source_case_id": "GQ17",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "expected": {
+        "citations_min": 1,
+        "popup_ok": true,
+        "state": "ok",
+        "summary_disallow_tokens": [
+          "indeterminate"
+        ]
+      },
+      "id": "POP_MISS_04",
+      "observed": {
+        "citations_count": 0,
+        "failure_reasons": [
+          "popup_ok_false",
+          "state_not_ok",
+          "summary_empty",
+          "citations_missing"
+        ],
+        "state": "",
+        "summary": ""
+      },
+      "query": "Extract all visible key-value fields from the details form in on-screen order, including present-but-empty fields as empty strings.",
+      "source_case_id": "GQ5",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "expected": {
+        "citations_min": 1,
+        "popup_ok": true,
+        "state": "ok",
+        "summary_disallow_tokens": [
+          "indeterminate"
+        ]
+      },
+      "id": "POP_MISS_05",
+      "observed": {
+        "citations_count": 0,
+        "failure_reasons": [
+          "popup_ok_false",
+          "state_not_ok",
+          "summary_empty",
+          "citations_missing"
+        ],
+        "state": "",
+        "summary": ""
+      },
+      "query": "Vision classification: In the SiriusXM carousel row at the bottom center, classify the 6 fully visible tiles into {talk/podcast, NCAA team, NFL event}. Return counts per class and list the titles/entities you used.",
+      "source_case_id": "H9",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    }
+  ],
+  "generated_at_utc": "2026-02-24T03:02:51.758256Z",
+  "record_type": "derived.eval.popup_regression_misses",
+  "schema_version": 1,
+  "source_report": "artifacts/query_acceptance/blind_popup_latest.json"
+}

@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "record_type": "derived.eval.popup_regression_cases",
+  "cases": [
+    {
+      "id": "POP_REG_01",
+      "query": "Identify two numeric values referenced in one communication panel, infer their best matching parameter name from technical notes, and produce example request query strings using those values.",
+      "expected": {
+        "popup_ok": true,
+        "state": "ok",
+        "citations_min": 1,
+        "summary_disallow_tokens": [
+          "indeterminate"
+        ]
+      }
+    },
+    {
+      "id": "POP_REG_02",
+      "query": "In the VDI right-side calendar/schedule pane: extract the displayed month+year, the currently selected date, and then list the first 5 visible scheduled items (top-to-bottom) with start time + title.",
+      "expected": {
+        "popup_ok": true,
+        "state": "ok",
+        "citations_min": 1,
+        "summary_disallow_tokens": [
+          "indeterminate"
+        ]
+      }
+    },
+    {
+      "id": "POP_REG_03",
+      "query": "Count completed checklist items in the engineering notes/log area and identify the currently running action line directly below the checklist.",
+      "expected": {
+        "popup_ok": true,
+        "state": "ok",
+        "citations_min": 1,
+        "summary_disallow_tokens": [
+          "indeterminate"
+        ]
+      }
+    },
+    {
+      "id": "POP_REG_04",
+      "query": "Extract all visible key-value fields from the details form in on-screen order, including present-but-empty fields as empty strings.",
+      "expected": {
+        "popup_ok": true,
+        "state": "ok",
+        "citations_min": 1,
+        "summary_disallow_tokens": [
+          "indeterminate"
+        ]
+      }
+    },
+    {
+      "id": "POP_REG_05",
+      "query": "Vision classification: In the SiriusXM carousel row at the bottom center, classify the 6 fully visible tiles into {talk/podcast, NCAA team, NFL event}. Return counts per class and list the titles/entities you used.",
+      "expected": {
+        "popup_ok": true,
+        "state": "ok",
+        "citations_min": 1,
+        "summary_disallow_tokens": [
+          "indeterminate"
+        ]
+      }
+    }
+  ]
+}
