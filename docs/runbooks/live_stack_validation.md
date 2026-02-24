@@ -25,11 +25,14 @@ Validate live sidecar data availability and localhost VLM reachability for opera
 ## Command
 - `bash tools/validate_live_chronicle_stack.sh --dataroot /mnt/d/autocapture --vllm-base-url http://127.0.0.1:8000`
 - Deterministic baseline snapshot: `bash tools/baseline.sh /mnt/d/autocapture http://127.0.0.1:8000`
+- Popup strict regression gate: `bash tools/run_popup_regression_strict.sh`
 
 ## Outputs
 - `artifacts/live_stack/preflight_latest.json`
 - `artifacts/live_stack/validation_latest.json`
 - `artifacts/baseline/baseline_snapshot_latest.json`
+- `artifacts/query_acceptance/popup_regression_latest.json`
+- `artifacts/query_acceptance/popup_regression_misses_latest.json`
 
 ## Pass Criteria
 - Preflight reports `ready=true`
@@ -42,6 +45,9 @@ Validate live sidecar data availability and localhost VLM reachability for opera
 - Baseline snapshot has:
   - `summary.present_count>0`
   - stable `summary.normalized_sha256` when rerun with unchanged inputs
+- Popup regression gate returns zero misses:
+  - `sample_count==accepted_count`
+  - `failed_count==0`
 
 ## Notes
 - Localhost-only policy remains enforced.
