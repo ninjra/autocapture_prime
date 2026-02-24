@@ -175,7 +175,8 @@ def _marker_requires_retry(payload: dict[str, Any]) -> bool:
         return False
     if str(payload.get("schema") or "") != _REAP_SCHEMA:
         return False
-    counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
+    counts_raw = payload.get("counts")
+    counts: dict[str, Any] = counts_raw if isinstance(counts_raw, dict) else {}
     missing_retention = _safe_int(counts.get("stage1_missing_retention_marker_count", 0)) > 0
     missing_uia = _safe_int(counts.get("stage1_uia_frames_missing_count", 0)) > 0
     return bool(missing_retention or missing_uia)

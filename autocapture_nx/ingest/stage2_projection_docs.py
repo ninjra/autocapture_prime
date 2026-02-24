@@ -79,7 +79,8 @@ def _line(text: str, bbox: tuple[int, int, int, int] | None = None) -> dict[str,
 
 def _snapshot_lines(snapshot: dict[str, Any], *, max_nodes: int = 256) -> list[dict[str, Any]]:
     lines: list[dict[str, Any]] = []
-    window = snapshot.get("window") if isinstance(snapshot.get("window"), dict) else {}
+    window_raw = snapshot.get("window")
+    window: dict[str, Any] = window_raw if isinstance(window_raw, dict) else {}
     window_title = str(window.get("title") or "").strip()
     process_path = str(window.get("process_path") or "").strip()
     window_pid = _safe_int(window.get("pid"), default=0)
@@ -92,7 +93,8 @@ def _snapshot_lines(snapshot: dict[str, Any], *, max_nodes: int = 256) -> list[d
 
     count = 0
     for section in ("focus_path", "context_peers", "operables"):
-        raw_nodes = snapshot.get(section) if isinstance(snapshot.get(section), list) else []
+        raw_nodes_any = snapshot.get(section)
+        raw_nodes = raw_nodes_any if isinstance(raw_nodes_any, list) else []
         for idx, node in enumerate(raw_nodes, start=1):
             if count >= max(1, int(max_nodes)):
                 return lines
@@ -120,7 +122,8 @@ def _snapshot_lines(snapshot: dict[str, Any], *, max_nodes: int = 256) -> list[d
 
 
 def _uia_obs_lines(read_store: Any, frame: dict[str, Any]) -> list[dict[str, Any]]:
-    uia_ref = frame.get("uia_ref") if isinstance(frame.get("uia_ref"), dict) else {}
+    uia_ref_raw = frame.get("uia_ref")
+    uia_ref: dict[str, Any] = uia_ref_raw if isinstance(uia_ref_raw, dict) else {}
     uia_record_id = str(uia_ref.get("record_id") or "").strip()
     if not uia_record_id:
         return []
@@ -136,7 +139,8 @@ def _uia_obs_lines(read_store: Any, frame: dict[str, Any]) -> list[dict[str, Any
 
 
 def _snapshot_for_frame(read_store: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-    uia_ref = frame.get("uia_ref") if isinstance(frame.get("uia_ref"), dict) else {}
+    uia_ref_raw = frame.get("uia_ref")
+    uia_ref: dict[str, Any] = uia_ref_raw if isinstance(uia_ref_raw, dict) else {}
     uia_record_id = str(uia_ref.get("record_id") or "").strip()
     if not uia_record_id:
         return None
@@ -150,7 +154,8 @@ def _snapshot_for_frame(read_store: Any, frame: dict[str, Any]) -> dict[str, Any
 def _ui_windows(snapshot: dict[str, Any] | None, frame: dict[str, Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     if isinstance(snapshot, dict):
-        window = snapshot.get("window") if isinstance(snapshot.get("window"), dict) else {}
+        window_raw = snapshot.get("window")
+        window: dict[str, Any] = window_raw if isinstance(window_raw, dict) else {}
         title = str(window.get("title") or "").strip()
         process_path = str(window.get("process_path") or "").strip()
         app = process_path.split("\\")[-1] if process_path else ""
@@ -238,7 +243,8 @@ def _projected_state_id(source_record_id: str) -> str:
 
 
 def _state_tokens_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    raw = payload.get("tokens_raw") if isinstance(payload.get("tokens_raw"), list) else []
+    raw_any = payload.get("tokens_raw")
+    raw = raw_any if isinstance(raw_any, list) else []
     out: list[dict[str, Any]] = []
     for idx, row in enumerate(raw):
         if not isinstance(row, dict):
@@ -284,12 +290,12 @@ def _project_state_for_frame(
     height = max(1, _safe_int(frame_record.get("height") or frame_record.get("frame_height"), default=1080))
     ts_ms = int(_ts_utc_to_ms(ts_utc))
     tokens = _state_tokens_from_payload(payload)
-    element_graph = payload.get("element_graph") if isinstance(payload.get("element_graph"), dict) else {}
-    windows = (
-        (element_graph.get("ui_state") or {}).get("windows")
-        if isinstance(element_graph.get("ui_state"), dict)
-        else []
-    )
+    element_graph_raw = payload.get("element_graph")
+    element_graph: dict[str, Any] = element_graph_raw if isinstance(element_graph_raw, dict) else {}
+    ui_state_raw = element_graph.get("ui_state")
+    ui_state: dict[str, Any] = ui_state_raw if isinstance(ui_state_raw, dict) else {}
+    windows_raw = ui_state.get("windows")
+    windows = windows_raw if isinstance(windows_raw, list) else []
     app_hint = ""
     if isinstance(windows, list) and windows:
         first = windows[0] if isinstance(windows[0], dict) else {}
