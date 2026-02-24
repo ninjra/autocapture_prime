@@ -690,7 +690,8 @@ class Kernel:
         finally:
             # Ensure subprocess plugin hosts and other plugin resources are released.
             try:
-                self.system.close()
+                if self.system is not None:
+                    self.system.close()
             except Exception:
                 pass
             try:

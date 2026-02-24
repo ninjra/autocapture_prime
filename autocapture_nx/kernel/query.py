@@ -2588,7 +2588,7 @@ def _append_query_metric(system, *, query: str, method: str, result: dict[str, A
         "promptops_latency_ms": float(round(promptops_latency_ms, 3)),
         "promptops_stage_ms": {str(k): _ms(v) for k, v in promptops_stages.items()},
         "answer_state": payload["answer_state"],
-        "claim_count": int(payload.get("claim_count", 0) or 0),
+        "claim_count": int(_intish(payload.get("claim_count")) or 0),
         "citation_count": int(_citation_count(result)),
         "provenance": {
             "plugin_id": "builtin.query.promptops.summary",
