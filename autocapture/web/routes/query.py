@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
+import time
+from uuid import uuid4
+
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from typing import Any
@@ -22,6 +27,70 @@ class PopupQueryRequest(BaseModel):
 
 _POPUP_FORBIDDEN_BLOCK_REASON = "query_compute_disabled"
 _POPUP_FORBIDDEN_STATE = "not_available_yet"
+_POPUP_TIMEOUT_REASON = "popup_timeout"
+
+
+def _popup_timeout_seconds() -> float:
+    raw = str(os.environ.get("AUTOCAPTURE_POPUP_QUERY_TIMEOUT_S") or "").strip()
+    try:
+        value = float(raw) if raw else 6.0
+    except Exception:
+        value = 6.0
+    return float(max(1.0, min(30.0, value)))
+
+
+def _popup_timeout_result(query: str, timeout_s: float) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error": "popup_query_timeout",
+        "answer": {
+            "state": "degraded",
+            "summary": "Popup query timed out before corpus retrieval completed.",
+            "display": {
+                "summary": "Popup query timed out before corpus retrieval completed.",
+                "bullets": [
+                    "Popup query timed out; retry once services are responsive.",
+                    "No extraction was scheduled from popup mode.",
+                ],
+                "topic": "runtime",
+            },
+            "claims": [],
+        },
+        "processing": {
+            "extraction": {"blocked": True, "blocked_reason": _POPUP_TIMEOUT_REASON, "scheduled_extract_job_id": ""},
+            "query_trace": {
+                "query_run_id": f"qry_popup_timeout_{uuid4().hex[:12]}",
+                "stage_ms": {"total": float(max(0.0, timeout_s) * 1000.0)},
+            },
+        },
+    }
+
+
+def _popup_error_result(query: str, error: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error": str(error or "popup_query_failed"),
+        "answer": {
+            "state": "degraded",
+            "summary": "Popup query failed before a corpus-backed answer was available.",
+            "display": {
+                "summary": "Popup query failed before a corpus-backed answer was available.",
+                "bullets": [
+                    "Runtime exception in popup query path.",
+                    "No extraction was scheduled from popup mode.",
+                ],
+                "topic": "runtime",
+            },
+            "claims": [],
+        },
+        "processing": {
+            "extraction": {"blocked": True, "blocked_reason": "popup_query_failed", "scheduled_extract_job_id": ""},
+            "query_trace": {
+                "query_run_id": f"qry_popup_error_{uuid4().hex[:12]}",
+                "stage_ms": {"total": 0.0},
+            },
+        },
+    }
 
 
 def _compact_citations(result: dict[str, Any], max_items: int) -> list[dict[str, Any]]:
@@ -123,9 +192,23 @@ def query(req: QueryRequest, request: Request):
 
 
 @router.post("/api/query/popup")
-def query_popup(req: PopupQueryRequest, request: Request):
+async def query_popup(req: PopupQueryRequest, request: Request):
     _ = req.schedule_extract
-    result = request.app.state.facade.query(req.query, schedule_extract=False)
+    timeout_s = _popup_timeout_seconds()
+    started = time.perf_counter()
+    try:
+        loop = asyncio.get_running_loop()
+        result = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: request.app.state.facade.query(req.query, schedule_extract=False),
+            ),
+            timeout=timeout_s,
+        )
+    except asyncio.TimeoutError:
+        result = _popup_timeout_result(str(req.query), timeout_s)
+    except Exception as exc:
+        result = _popup_error_result(str(req.query), f"{type(exc).__name__}:{exc}")
     if not isinstance(result, dict):
         return {
             "ok": False,
@@ -135,7 +218,14 @@ def query_popup(req: PopupQueryRequest, request: Request):
             "bullets": [],
             "citations": [],
         }
-    return _popup_payload(str(req.query), result, int(req.max_citations))
+    payload = _popup_payload(str(req.query), result, int(req.max_citations))
+    try:
+        total_ms = float(payload.get("latency_ms_total") or 0.0)
+    except Exception:
+        total_ms = 0.0
+    if total_ms <= 0.0:
+        payload["latency_ms_total"] = round((time.perf_counter() - started) * 1000.0, 3)
+    return payload
 
 
 @router.post("/api/state/query")

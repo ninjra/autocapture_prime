@@ -63,7 +63,12 @@ Use a native Windows popup/command bar in Hypervisor and send natural-language q
 - Keep query bar non-modal and fast; do not block UI thread.
 
 ## Retry/Failure Policy
-- Network timeout: 12s.
+- Service-side popup guard timeout defaults to 6s (`AUTOCAPTURE_POPUP_QUERY_TIMEOUT_S`, clamped 1..30s).
+- If service timeout is hit, response is deterministic with:
+  - `state=degraded`
+  - `needs_processing=true`
+  - `processing_blocked_reason=popup_timeout`
+- Hypervisor network timeout: 12s.
 - Retries: 2 with exponential backoff (200ms, 600ms).
 - On 401: refresh token via `/api/auth/token` and retry once.
 - On non-200:
