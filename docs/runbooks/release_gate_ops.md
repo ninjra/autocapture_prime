@@ -9,6 +9,7 @@ Run fail-closed release checks and enforce soak admission criteria for the golde
 
 ## Artifacts
 - Release gate report: `artifacts/release/release_gate_latest.json`
+- Popup go/no-go report: `artifacts/query_acceptance/popup_go_no_go_latest.json`
 - Soak precheck report: `artifacts/soak/golden_qh/admission_precheck_latest.json`
 - Soak postcheck report: `artifacts/soak/golden_qh/latest/admission_postcheck.json`
 - Deterministic baseline snapshot: `artifacts/baseline/baseline_snapshot_latest.json`
@@ -16,6 +17,7 @@ Run fail-closed release checks and enforce soak admission criteria for the golde
 ## Policy
 - Any non-pass status (`warn`, `skip`, `fail`, `error`) fails release.
 - Config matrix coherence is mandatory (`artifacts/config/gate_config_matrix.json` must be `ok=true`).
+- Popup go/no-go is mandatory (`artifacts/query_acceptance/popup_go_no_go_latest.json` must be `ok=true`).
 - Soak start is blocked unless precheck passes:
   - release gate report `ok=true`
   - latest 3 advanced20 runs are strict pass (`20/20`)

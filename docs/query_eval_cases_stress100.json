@@ -1,0 +1,624 @@
+{
+  "cases": [
+    {
+      "id": "STRESS_001",
+      "query": "Enumerate every distinct top-level window currently visible. For each, provide app/product name, host-vs-remote context, and whether it is fully visible or partially occluded. Return the list in front-to-back order where provable.",
+      "source_case_id": "GQ1",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_002",
+      "query": "Which window appears focused for keyboard input? Provide two independent visual evidence items and include exact highlighted/selected text for each evidence item.",
+      "source_case_id": "GQ2",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_003",
+      "query": "In the most prominent reading/detail pane, extract subject/title, sender/display identity, organization/domain-only value, and the labels of primary action buttons.",
+      "source_case_id": "GQ3",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_004",
+      "query": "Extract the full visible activity timeline from the active detail pane: timestamp plus associated activity text, preserving top-to-bottom order.",
+      "source_case_id": "GQ4",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_005",
+      "query": "Extract all visible key-value fields from the details form in on-screen order, including present-but-empty fields as empty strings.",
+      "source_case_id": "GQ5",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_006",
+      "query": "From the visible calendar/schedule panel, return month+year, selected date, and the first five visible schedule rows (time + title) in display order.",
+      "source_case_id": "GQ6",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_007",
+      "query": "In the visible chat/DM thread, transcribe the last two visible messages as sender, timestamp, and exact text; also provide one sentence describing the embedded thumbnail without inferring hidden content.",
+      "source_case_id": "GQ7",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_008",
+      "query": "Extract the changelog/summary section from the top-left engineering notes area, including all bullet lines, file paths, and exact test command shown.",
+      "source_case_id": "GQ8",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_009",
+      "query": "For the console area with mixed text colors, classify each visible line as red/green/other and return counts per class plus the full text of all red lines.",
+      "source_case_id": "GQ9",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_010",
+      "query": "For each visible browser window, return active tab title, address-bar hostname (hostname only), and visible tab count for that window.",
+      "source_case_id": "GQ10",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_011",
+      "query": "Compute a cross-panel elapsed-time metric using two independently visible timestamps. Return both source timestamps and elapsed minutes with a short rationale.",
+      "source_case_id": "GQ11",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_012",
+      "query": "Find numeric presets visible in one panel and verify each against any visible clamp/range rule in another panel. Return sum, range, and validity per value.",
+      "source_case_id": "GQ12",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_013",
+      "query": "Identify two numeric values referenced in one communication panel, infer their best matching parameter name from technical notes, and produce example request query strings using those values.",
+      "source_case_id": "GQ13",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_014",
+      "query": "Convert the visible control-flow script logic into pseudocode with explicit branch conditions, retry behavior, and terminal success/failure outcomes.",
+      "source_case_id": "GQ14",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_015",
+      "query": "Detect one correctness issue in a visible script/log message where the referenced variable may not match actual runtime behavior. Provide the corrected line.",
+      "source_case_id": "GQ15",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_016",
+      "query": "Normalize one ambiguous form field into a canonical schema with separate presence and value fields, and provide deterministic transformed values for the visible record.",
+      "source_case_id": "GQ16",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_017",
+      "query": "Count completed checklist items in the engineering notes/log area and identify the currently running action line directly below the checklist.",
+      "source_case_id": "GQ17",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_018",
+      "query": "In a message list region, count rows marked with an unread visual indicator for the currently selected date bucket only, excluding other buckets.",
+      "source_case_id": "GQ18",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_019",
+      "query": "Classify visible carousel/content tiles into three semantic classes and return per-class counts plus the entity title used for each classification.",
+      "source_case_id": "GQ19",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_020",
+      "query": "Return screenshot-normalized bounding boxes for two named actionable controls visible in the active detail card, with coordinates in [0,1] and deterministic ordering.",
+      "source_case_id": "GQ20",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_021",
+      "query": "Enumerate every distinct top-level window visible in the screenshot. For each window: app/product name, host-vs-VDI context, and whether it is fully visible or partially occluded. Return the list in front-to-back z-order.",
+      "source_case_id": "Q1",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_022",
+      "query": "Which window has keyboard/input focus? Provide 2 pieces of visual evidence (e.g., highlighted title bar, selected row, caret) and include the exact highlighted text for each evidence item.",
+      "source_case_id": "Q2",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_023",
+      "query": "In the VDI Outlook reading pane showing a task/incident email: extract (a) email subject, (b) sender display name, (c) sender email domain only (do not return the full address), and (d) the labels of the primary action buttons in the embedded task card.",
+      "source_case_id": "Q3",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_024",
+      "query": "From that same task/incident view, extract the complete 'Record Activity' timeline: each entry\u2019s timestamp (including timezone if shown) and its associated text, in the same top-to-bottom order displayed.",
+      "source_case_id": "Q4",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_025",
+      "query": "From the 'Details' section in the same VDI task/incident view, extract all visible field labels and their values as key-value pairs (include fields that are present-but-empty as empty strings). Preserve the on-screen ordering.",
+      "source_case_id": "Q5",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_026",
+      "query": "In the VDI right-side calendar/schedule pane: extract the displayed month+year, the currently selected date, and then list the first 5 visible scheduled items (top-to-bottom) with start time + title.",
+      "source_case_id": "Q6",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_027",
+      "query": "In the Slack DM window: transcribe the last two visible messages as (sender, timestamp, exact text). Also describe what the embedded image thumbnail depicts in 1 sentence (do not infer beyond what is visible).",
+      "source_case_id": "Q7",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_028",
+      "query": "In the upper-left dev note/terminal-summary window: extract the full 'What changed' section (each line), the 'Files:' list, and the exact 'Tests:' command shown.",
+      "source_case_id": "Q8",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_029",
+      "query": "In the console/log window that contains both red and green text: extract all visible lines and classify each line by its rendered color (red/green/other). Return counts per color and the full text of every red line.",
+      "source_case_id": "Q9",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_030",
+      "query": "For each visible browser window in the screenshot: extract the active tab title, the address-bar hostname (hostname only), and the count of visible tabs in that window\u2019s tab strip.",
+      "source_case_id": "Q10",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_031",
+      "query": "Compute the incident\u2019s time-to-assignment in minutes by using (a) the \"Opened at\" timestamp in Details and (b) the \"State changed\" update timestamp in Record Activity. Return both timestamps and the elapsed minutes.",
+      "source_case_id": "H1",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_032",
+      "query": "From the change summary, take the k preset values and compute their sum. Then verify whether each preset is valid under the documented server-side clamp range. Return sum, clamp_range, and a per-preset validity list.",
+      "source_case_id": "H2",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_033",
+      "query": "Cross-window reasoning: Slack mentions running a \"new converter\" at two sizes. Identify those two numbers from Slack, then infer the best-matching parameter in the dev note (k vs dimension). Finally, produce two example GET query strings using k=64 and those two values as the inferred parameter.",
+      "source_case_id": "H3",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_034",
+      "query": "Code reasoning: Summarize the endpoint-selection + retry logic shown in the colored script into pseudocode with explicit conditionals. Include (a) the condition that switches to $saltEndpoint and (b) the condition that triggers a retry after Invoke-Expression.",
+      "source_case_id": "H4",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_035",
+      "query": "Find one correctness bug/inconsistency in the script\u2019s final success log line and provide the exact corrected line. (Hint: which variable is referenced in the message vs which endpoint may actually have succeeded?)",
+      "source_case_id": "H5",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_036",
+      "query": "Data cleaning (Excel-like): In Details, the field label \"Cell Phone Number (Y / N)? Y / N\" has value \"NA\". Propose a normalized schema and a deterministic transform for this specific record (what values go into the normalized fields).",
+      "source_case_id": "H6",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_037",
+      "query": "Reasoning over the worklog: Count how many completed checkboxes ([x]) are visible in the bottom-left notes window, and name the currently running action shown directly underneath the checklist.",
+      "source_case_id": "H7",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_038",
+      "query": "Vision + UI semantics (not OCR-only): In the Outlook message list (Today section), count how many rows show the blue unread indicator bar. Return the count only for Today (not Thursday/Last week).",
+      "source_case_id": "H8",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_039",
+      "query": "Vision classification: In the SiriusXM carousel row at the bottom center, classify the 6 fully visible tiles into {talk/podcast, NCAA team, NFL event}. Return counts per class and list the titles/entities you used.",
+      "source_case_id": "H9",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_040",
+      "query": "Action grounding: Provide screenshot-normalized bounding boxes (x1,y1,x2,y2 in [0,1]) for the two task-card buttons in Outlook: COMPLETE and VIEW DETAILS. Coordinates are relative to the full screenshot (2048x575).",
+      "source_case_id": "H10",
+      "source_file": "docs/query_eval_cases_advanced20.json"
+    },
+    {
+      "id": "STRESS_041",
+      "query": "List all contiguous processed time windows in the last 24 hours using stage1-complete records. For each window return start_utc, end_utc, duration_s, and frame_count. If data is missing, return indeterminate with missing record types.",
+      "source_case_id": "S2Q01",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_042",
+      "query": "Return the single longest contiguous processed window in the last 24 hours with start_utc, end_utc, duration_minutes, and frame_count, plus one citation for each value.",
+      "source_case_id": "S2Q02",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_043",
+      "query": "For the latest contiguous processed window, report coverage ratio = stage1_complete_frames / capture_frames in that same span, with numerator and denominator shown.",
+      "source_case_id": "S2Q03",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_044",
+      "query": "Find gaps between contiguous processed windows in the last 24 hours and return top 5 largest gaps by duration_seconds with gap_start_utc and gap_end_utc.",
+      "source_case_id": "S2Q04",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_045",
+      "query": "Within the largest processed window, bucket frames into 5-minute bins and return frame_count per bin in chronological order.",
+      "source_case_id": "S2Q05",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_046",
+      "query": "For each contiguous processed window, return whether UIA linkage was present for at least one frame and provide counts: frames_with_uia_ref and frames_without_uia_ref.",
+      "source_case_id": "S2Q06",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_047",
+      "query": "Pick the latest processed window and return the first and last 3 frame record_ids in that window to prove deterministic ordering.",
+      "source_case_id": "S2Q07",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_048",
+      "query": "Return the UTC start and end of the most recent fully processed 60-minute span (or explain why no full hour exists).",
+      "source_case_id": "S2Q08",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_049",
+      "query": "How many characters were typed during the latest contiguous processed window? Return total_characters_typed, evidence span, and citation anchors.",
+      "source_case_id": "S2Q09",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_050",
+      "query": "For the longest contiguous processed window, compute typing speed as characters_per_minute and keys_per_minute. Include numerator/denominator values used.",
+      "source_case_id": "S2Q10",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_051",
+      "query": "Report top 10 one-minute intervals by typed characters in the last 24 hours. Return interval_start_utc, interval_end_utc, character_count.",
+      "source_case_id": "S2Q11",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_052",
+      "query": "During the most recent 30 processed minutes, how many non-printable key events occurred (modifiers/navigation) versus printable characters?",
+      "source_case_id": "S2Q12",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_053",
+      "query": "Provide cumulative characters typed over the last 6 hours at 30-minute checkpoints (time, cumulative_characters).",
+      "source_case_id": "S2Q13",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_054",
+      "query": "For each processed window in the last 12 hours, return total keystrokes, printable characters, and backspace count.",
+      "source_case_id": "S2Q14",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_055",
+      "query": "Identify the longest uninterrupted typing streak (no >5s key gap) and return streak_start_utc, streak_end_utc, characters_typed.",
+      "source_case_id": "S2Q15",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_056",
+      "query": "In the latest processed hour, what percentage of keystrokes were deletions (Backspace/Delete)? Return percentage and raw counts.",
+      "source_case_id": "S2Q16",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_057",
+      "query": "Return typed-character totals by active window title for the latest contiguous processed span, sorted descending.",
+      "source_case_id": "S2Q17",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_058",
+      "query": "Compare the latest two contiguous processed windows: characters_typed delta, keystrokes delta, and duration delta.",
+      "source_case_id": "S2Q18",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_059",
+      "query": "For the latest contiguous processed window, report mouse left_click_count, right_click_count, double_click_count, and scroll_notches.",
+      "source_case_id": "S2Q19",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_060",
+      "query": "Compute cursor travel distance in pixels for each contiguous processed window in the last 6 hours, and return top 5 windows by travel distance.",
+      "source_case_id": "S2Q20",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_061",
+      "query": "Return drag operations detected in the latest processed window with start_utc, end_utc, duration_ms, and approximate distance_px.",
+      "source_case_id": "S2Q21",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_062",
+      "query": "In the most recent 2 processed hours, break down HID activity into keyboard_seconds_active, mouse_seconds_active, and overlap_seconds.",
+      "source_case_id": "S2Q22",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_063",
+      "query": "For each 15-minute bucket in the latest processed hour, return keystrokes, characters, clicks, and scroll_notches.",
+      "source_case_id": "S2Q23",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_064",
+      "query": "Return top 5 busiest minutes by combined HID score (characters + clicks + scroll_notches) in the last 12 processed hours.",
+      "source_case_id": "S2Q24",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_065",
+      "query": "For the latest contiguous processed span, return dwell time by process_path and by window_title (top 10 each).",
+      "source_case_id": "S2Q25",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_066",
+      "query": "Count active-window switches in each contiguous processed window over the last 24 hours and return switch_rate_per_minute.",
+      "source_case_id": "S2Q26",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_067",
+      "query": "Return longest uninterrupted focus session per app in the last 12 processed hours (app, session_start_utc, session_end_utc, duration_s).",
+      "source_case_id": "S2Q27",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_068",
+      "query": "For the latest processed 90 minutes, return app transitions as an ordered list: from_app, to_app, transition_utc.",
+      "source_case_id": "S2Q28",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_069",
+      "query": "Return the top 10 URLs/domains by foreground dwell time in the last 6 processed hours; include unknown when URL cannot be derived.",
+      "source_case_id": "S2Q29",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_070",
+      "query": "For the latest contiguous window, report productivity mix: typing_time_s, pointing_time_s, reading_time_s, and uncategorized_time_s with method notes.",
+      "source_case_id": "S2Q30",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_071",
+      "query": "For a random sample of 10 processed frames from the latest window, show lineage: frame_id -> stage1_complete_id -> retention_marker_id.",
+      "source_case_id": "S2Q31",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_072",
+      "query": "For frames with uia_ref in the latest processed window, return counts of emitted obs.uia.focus, obs.uia.context, obs.uia.operable records.",
+      "source_case_id": "S2Q32",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_073",
+      "query": "If obs.uia.* records are missing, return exact reason categories and affected frame counts (missing_uia_ref, lookup_fail, hash_mismatch, parse_error).",
+      "source_case_id": "S2Q33",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_074",
+      "query": "Return plugin-completeness status for latest 100 processed frames: which Stage1 plugin outputs exist per frame and which are missing.",
+      "source_case_id": "S2Q34",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_075",
+      "query": "For latest 500 frames, compute percentage with valid normalized bbox fields for all emitted UIA-derived docs.",
+      "source_case_id": "S2Q35",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_076",
+      "query": "Show 3 deterministic linkage examples: frame -> uia_ref -> uia snapshot -> obs.uia.* -> stage1 complete -> retention eligible.",
+      "source_case_id": "S2Q36",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_077",
+      "query": "In the latest 6 processed hours, how many frames are stage1-complete but not yet retention-eligible? Return count and representative reasons.",
+      "source_case_id": "S2Q37",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_078",
+      "query": "What is projected retention risk in hours if current ingest throughput continues? Return pending_records, throughput_records_per_s, projected_lag_hours, retention_risk.",
+      "source_case_id": "S2Q38",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_079",
+      "query": "For the last 24 processed hours, return per-hour totals of frames processed, characters typed, and app switches in one table.",
+      "source_case_id": "S2Q39",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_080",
+      "query": "Answer this audit question only from normalized data: how many characters did I type between the start and end of the latest contiguous processed window? Include exact span boundaries and confidence.",
+      "source_case_id": "S2Q40",
+      "source_file": "docs/query_eval_cases_stage2_time40.json"
+    },
+    {
+      "id": "STRESS_081",
+      "query": "Identify two numeric values referenced in one communication panel, infer their best matching parameter name from technical notes, and produce example request query strings using those values.",
+      "source_case_id": "POP_REG_01",
+      "source_file": "docs/query_eval_cases_popup_regression.json"
+    },
+    {
+      "id": "STRESS_082",
+      "query": "In the VDI right-side calendar/schedule pane: extract the displayed month+year, the currently selected date, and then list the first 5 visible scheduled items (top-to-bottom) with start time + title.",
+      "source_case_id": "POP_REG_02",
+      "source_file": "docs/query_eval_cases_popup_regression.json"
+    },
+    {
+      "id": "STRESS_083",
+      "query": "Count completed checklist items in the engineering notes/log area and identify the currently running action line directly below the checklist.",
+      "source_case_id": "POP_REG_03",
+      "source_file": "docs/query_eval_cases_popup_regression.json"
+    },
+    {
+      "id": "STRESS_084",
+      "query": "Extract all visible key-value fields from the details form in on-screen order, including present-but-empty fields as empty strings.",
+      "source_case_id": "POP_REG_04",
+      "source_file": "docs/query_eval_cases_popup_regression.json"
+    },
+    {
+      "id": "STRESS_085",
+      "query": "Vision classification: In the SiriusXM carousel row at the bottom center, classify the 6 fully visible tiles into {talk/podcast, NCAA team, NFL event}. Return counts per class and list the titles/entities you used.",
+      "source_case_id": "POP_REG_05",
+      "source_file": "docs/query_eval_cases_popup_regression.json"
+    },
+    {
+      "id": "STRESS_086",
+      "query": "What is the currently focused top-level window title and which app/process owns it?",
+      "source_case_id": "POP_REG_06",
+      "source_file": "docs/query_eval_cases_popup_regression.json"
+    },
+    {
+      "id": "STRESS_087",
+      "query": "List the top three most visually prominent applications on screen right now and include one cited clue for each.",
+      "source_case_id": "POP_REG_07",
+      "source_file": "docs/query_eval_cases_popup_regression.json"
+    },
+    {
+      "id": "STRESS_088",
+      "query": "Extract every visible calendar date/time element shown in the right-side scheduling panel.",
+      "source_case_id": "POP_REG_08",
+      "source_file": "docs/query_eval_cases_popup_regression.json"
+    },
+    {
+      "id": "STRESS_089",
+      "query": "Summarize the active ticket/task currently open, including ticket identifier and current workflow status if visible.",
+      "source_case_id": "POP_REG_09",
+      "source_file": "docs/query_eval_cases_popup_regression.json"
+    },
+    {
+      "id": "STRESS_090",
+      "query": "In the communication list pane, count visible unread/new markers and name the first five senders/channels in display order.",
+      "source_case_id": "POP_REG_10",
+      "source_file": "docs/query_eval_cases_popup_regression.json"
+    },
+    {
+      "id": "STRESS_091",
+      "query": "Enumerate every distinct top-level window currently visible. For each, provide app/product name, host-vs-remote context, and whether it is fully visible or partially occluded. Return the list in front-to-back order where provable.",
+      "replay_pass": 2,
+      "source_case_id": "GQ1",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_092",
+      "query": "Which window appears focused for keyboard input? Provide two independent visual evidence items and include exact highlighted/selected text for each evidence item.",
+      "replay_pass": 2,
+      "source_case_id": "GQ2",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_093",
+      "query": "In the most prominent reading/detail pane, extract subject/title, sender/display identity, organization/domain-only value, and the labels of primary action buttons.",
+      "replay_pass": 2,
+      "source_case_id": "GQ3",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_094",
+      "query": "Extract the full visible activity timeline from the active detail pane: timestamp plus associated activity text, preserving top-to-bottom order.",
+      "replay_pass": 2,
+      "source_case_id": "GQ4",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_095",
+      "query": "Extract all visible key-value fields from the details form in on-screen order, including present-but-empty fields as empty strings.",
+      "replay_pass": 2,
+      "source_case_id": "GQ5",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_096",
+      "query": "From the visible calendar/schedule panel, return month+year, selected date, and the first five visible schedule rows (time + title) in display order.",
+      "replay_pass": 2,
+      "source_case_id": "GQ6",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_097",
+      "query": "In the visible chat/DM thread, transcribe the last two visible messages as sender, timestamp, and exact text; also provide one sentence describing the embedded thumbnail without inferring hidden content.",
+      "replay_pass": 2,
+      "source_case_id": "GQ7",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_098",
+      "query": "Extract the changelog/summary section from the top-left engineering notes area, including all bullet lines, file paths, and exact test command shown.",
+      "replay_pass": 2,
+      "source_case_id": "GQ8",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_099",
+      "query": "For the console area with mixed text colors, classify each visible line as red/green/other and return counts per class plus the full text of all red lines.",
+      "replay_pass": 2,
+      "source_case_id": "GQ9",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    },
+    {
+      "id": "STRESS_100",
+      "query": "For each visible browser window, return active tab title, address-bar hostname (hostname only), and visible tab count for that window.",
+      "replay_pass": 2,
+      "source_case_id": "GQ10",
+      "source_file": "docs/query_eval_cases_generic20.json"
+    }
+  ],
+  "generated_at_utc": "2026-02-24T14:06:21.303844Z",
+  "record_type": "derived.eval.query_stress_pack",
+  "schema_version": 1,
+  "source_files": [
+    "docs/query_eval_cases_generic20.json",
+    "docs/query_eval_cases_advanced20.json",
+    "docs/query_eval_cases_stage2_time40.json",
+    "docs/query_eval_cases_popup_regression.json"
+  ],
+  "target_count": 100
+}

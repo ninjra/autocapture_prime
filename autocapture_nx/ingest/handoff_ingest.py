@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import sqlite3
 import tempfile
 from dataclasses import asdict, dataclass
@@ -504,11 +503,28 @@ class HandoffIngestor:
                         )
                     except Exception:
                         continue
-                    if bool(result.get("stage1_complete", False)):
+                    stage1_complete_ok = bool(result.get("stage1_complete", False))
+                    retention_missing = bool(result.get("retention_missing", False))
+                    if stage1_complete_ok and retention_missing:
+                        # Retry once to absorb transient write races and keep
+                        # Stage1->retention linkage deterministic.
+                        try:
+                            retry = mark_stage1_and_retention(
+                                stage1_store,
+                                source_record_id,
+                                source_payload,
+                                reason="handoff_ingest_retry",
+                            )
+                            if isinstance(retry, dict):
+                                result = retry
+                                retention_missing = bool(result.get("retention_missing", False))
+                        except Exception:
+                            pass
+                    if stage1_complete_ok:
                         stage1_complete_records += 1
                     if bool(result.get("retention_record_id")):
                         stage1_retention_marked_records += 1
-                    if bool(result.get("retention_missing", False)):
+                    if retention_missing:
                         stage1_missing_retention_marker_count += 1
 
                 handoff_hash = sha256_file(metadata_path)

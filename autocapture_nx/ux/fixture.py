@@ -694,7 +694,6 @@ def _runtime_signals(system: Any) -> dict[str, Any]:
     cfg = getattr(system, "config", {}) if system is not None else {}
     runtime_cfg = cfg.get("runtime", {}) if isinstance(cfg, dict) else {}
     active_window_s = float(runtime_cfg.get("active_window_s", 3))
-    assume_idle = bool(runtime_cfg.get("activity", {}).get("assume_idle_when_missing", False))
     idle_seconds = 0.0
     user_active = False
     activity_score = 0.0

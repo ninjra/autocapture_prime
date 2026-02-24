@@ -107,6 +107,21 @@ def _env_true(name: str, default: bool = False) -> bool:
     return bool(default)
 
 
+def _is_readonly_write_error(exc: BaseException) -> bool:
+    if isinstance(exc, PermissionError):
+        return True
+    if isinstance(exc, OSError):
+        if exc.errno in {errno.EACCES, errno.EROFS, errno.EPERM}:
+            return True
+    text = str(exc or "").strip().lower()
+    return (
+        "readonly" in text
+        or "read-only" in text
+        or "attempt to write a readonly database" in text
+        or "permission denied" in text
+    )
+
+
 class StartupProfiler:
     def __init__(self, *, enabled: bool) -> None:
         self.enabled = bool(enabled)
@@ -289,6 +304,10 @@ class Kernel:
         # can fan out plugin work and destabilize WSL. Persistent runs (capture/web)
         # can still opt into full boot by passing fast_boot=False.
         fast_boot = computed_fast_boot if fast_boot is None else bool(fast_boot)
+        query_metadata_only = _env_true("AUTOCAPTURE_QUERY_METADATA_ONLY", default=False)
+        if query_metadata_only:
+            # Query-only workers should stay read-only and avoid heavy write-oriented boot steps.
+            fast_boot = True
         self._verify_contract_lock()
         profiler.mark("verify_contract_lock")
         allow_kernel_net = os.getenv("AUTOCAPTURE_ALLOW_KERNEL_NETWORK", "").lower() in {"1", "true", "yes"}
@@ -394,13 +413,27 @@ class Kernel:
             pass
         profiler.mark("egress_store")
         if not fast_boot:
-            self._record_storage_manifest(
-                builder,
-                capabilities,
-                plugins,
-                include_packages=True,
-                include_counts=True,
-            )
+            try:
+                self._record_storage_manifest(
+                    builder,
+                    capabilities,
+                    plugins,
+                    include_packages=True,
+                    include_counts=True,
+                )
+            except Exception as exc:
+                # Query/read-only runtimes must not fail hard when manifest persistence
+                # cannot write to metadata storage.
+                if _is_readonly_write_error(exc):
+                    record_telemetry(
+                        "storage.manifest.skipped",
+                        {
+                            "reason": "readonly_write_denied",
+                            "error": f"{type(exc).__name__}:{exc}",
+                        },
+                    )
+                else:
+                    raise
         profiler.mark("record_storage_manifest")
         self._record_run_start(builder)
         profiler.mark("record_run_start")
@@ -597,61 +630,60 @@ class Kernel:
             raise ConfigError(f"contract lock mismatch: {', '.join(mismatches[:5])}")
 
     def shutdown(self) -> None:
-        if self.system is None:
-            return
         try:
-            run_id = str(self.config.get("runtime", {}).get("run_id", "run"))
-            stop_hash = None
-            ts_utc = utc_now_z()
-            duration_ms = self._run_duration_ms(ts_utc)
-            if self._conductor is not None:
-                try:
-                    self._conductor.stop()
-                except Exception:
-                    pass
-            builder = None
-            try:
-                builder = self.system.get("event.builder")
-            except Exception:
+            if self.system is not None:
+                run_id = str(self.config.get("runtime", {}).get("run_id", "run"))
+                stop_hash = None
+                ts_utc = utc_now_z()
+                duration_ms = self._run_duration_ms(ts_utc)
+                if self._conductor is not None:
+                    try:
+                        self._conductor.stop()
+                    except Exception:
+                        pass
                 builder = None
-            if builder is not None:
-                run_id = str(getattr(builder, "run_id", run_id) or run_id)
-                if _env_true("AUTOCAPTURE_SKIP_SHUTDOWN_JOURNAL_SUMMARY", default=False):
-                    summary = {"records_processed": 0, "errors": 0, "warnings": 0, "summary_skipped": 1}
-                else:
-                    summary = self._summarize_journal(run_id)
                 try:
-                    self._record_storage_manifest_final(builder, summary, duration_ms, ts_utc)
+                    builder = self.system.get("event.builder")
                 except Exception:
-                    pass
-                payload = {
-                    "event": "system.stop",
-                    "run_id": run_id,
-                    "duration_ms": int(duration_ms),
-                    "summary": summary,
-                    "previous_ledger_head": builder.ledger_head(),
-                }
-                try:
-                    stop_hash = builder.ledger_entry(
-                        "system",
-                        inputs=[],
-                        outputs=[],
-                        payload=payload,
-                        ts_utc=ts_utc,
-                    )
-                except Exception:
-                    stop_hash = None
-            self._write_run_state(
-                run_id,
-                "stopped",
-                started_at=self._run_started_at,
-                stopped_at=ts_utc,
-                ledger_head=stop_hash,
-                locks=self._lock_hashes(),
-                config_hash=self.effective_config.effective_hash if self.effective_config else None,
-                safe_mode=self.safe_mode,
-                safe_mode_reason=self.safe_mode_reason,
-            )
+                    builder = None
+                if builder is not None:
+                    run_id = str(getattr(builder, "run_id", run_id) or run_id)
+                    if _env_true("AUTOCAPTURE_SKIP_SHUTDOWN_JOURNAL_SUMMARY", default=False):
+                        summary = {"records_processed": 0, "errors": 0, "warnings": 0, "summary_skipped": 1}
+                    else:
+                        summary = self._summarize_journal(run_id)
+                    try:
+                        self._record_storage_manifest_final(builder, summary, duration_ms, ts_utc)
+                    except Exception:
+                        pass
+                    payload = {
+                        "event": "system.stop",
+                        "run_id": run_id,
+                        "duration_ms": int(duration_ms),
+                        "summary": summary,
+                        "previous_ledger_head": builder.ledger_head(),
+                    }
+                    try:
+                        stop_hash = builder.ledger_entry(
+                            "system",
+                            inputs=[],
+                            outputs=[],
+                            payload=payload,
+                            ts_utc=ts_utc,
+                        )
+                    except Exception:
+                        stop_hash = None
+                self._write_run_state(
+                    run_id,
+                    "stopped",
+                    started_at=self._run_started_at,
+                    stopped_at=ts_utc,
+                    ledger_head=stop_hash,
+                    locks=self._lock_hashes(),
+                    config_hash=self.effective_config.effective_hash if self.effective_config else None,
+                    safe_mode=self.safe_mode,
+                    safe_mode_reason=self.safe_mode_reason,
+                )
             if self._network_deny_prev is not None:
                 set_global_network_deny(self._network_deny_prev)
                 self._network_deny_prev = None

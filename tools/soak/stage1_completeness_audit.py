@@ -159,6 +159,241 @@ def _fetch_overlay_row(
     )
 
 
+def _load_payload_map(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    id_col: str,
+    payload_col: str,
+    record_type: str,
+) -> dict[str, dict[str, Any] | None]:
+    out: dict[str, dict[str, Any] | None] = {}
+    sql = f"SELECT {id_col}, {payload_col} FROM {table} WHERE record_type = ?"
+    for row in conn.execute(sql, (str(record_type),)):
+        rid = str(row[id_col] or "")
+        out[rid] = _parse_payload(row[payload_col])
+    return out
+
+
+def _chunked_ids(values: set[str] | list[str] | tuple[str, ...], *, chunk_size: int = 900) -> list[list[str]]:
+    rows = [str(v).strip() for v in values if str(v or "").strip()]
+    if not rows:
+        return []
+    size = max(1, int(chunk_size))
+    return [rows[i : i + size] for i in range(0, len(rows), size)]
+
+
+def _load_payload_map_by_ids(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    id_col: str,
+    payload_col: str,
+    record_type: str,
+    record_ids: set[str],
+) -> dict[str, dict[str, Any] | None]:
+    out: dict[str, dict[str, Any] | None] = {}
+    for chunk in _chunked_ids(record_ids):
+        placeholders = ",".join("?" for _ in chunk)
+        sql = (
+            f"SELECT {id_col}, {payload_col} "
+            f"FROM {table} WHERE record_type = ? AND {id_col} IN ({placeholders})"
+        )
+        params: list[Any] = [str(record_type)] + [str(x) for x in chunk]
+        for row in conn.execute(sql, params):
+            rid = str(row[id_col] or "")
+            out[rid] = _parse_payload(row[payload_col])
+    return out
+
+
+def _load_frame_rows(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    id_col: str,
+    payload_col: str,
+) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    sql = (
+        f"SELECT {id_col}, "
+        f"json_extract({payload_col}, '$.ts_utc') AS frame_ts_utc, "
+        f"json_extract({payload_col}, '$.uia_ref.record_id') AS uia_record_id, "
+        f"json_extract({payload_col}, '$.uia_ref.content_hash') AS uia_content_hash "
+        f"FROM {table} WHERE record_type = ? ORDER BY {id_col}"
+    )
+    for row in conn.execute(sql, ("evidence.capture.frame",)):
+        out.append(
+            {
+                "frame_id": str(row[0] or ""),
+                "ts_utc": str(row[1] or ""),
+                "uia_record_id": str(row[2] or "").strip(),
+                "uia_content_hash": str(row[3] or "").strip(),
+            }
+        )
+    return out
+
+
+def _load_stage1_min_map_by_ids(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    id_col: str,
+    payload_col: str,
+    record_ids: set[str],
+) -> dict[str, dict[str, Any] | None]:
+    out: dict[str, dict[str, Any] | None] = {}
+    for chunk in _chunked_ids(record_ids):
+        placeholders = ",".join("?" for _ in chunk)
+        sql = (
+            f"SELECT {id_col}, "
+            f"json_extract({payload_col}, '$.record_type') AS rec_type, "
+            f"json_extract({payload_col}, '$.complete') AS complete, "
+            f"json_extract({payload_col}, '$.source_record_id') AS source_record_id, "
+            f"json_extract({payload_col}, '$.source_record_type') AS source_record_type, "
+            f"json_extract({payload_col}, '$.uia_record_id') AS uia_record_id, "
+            f"json_extract({payload_col}, '$.uia_content_hash') AS uia_content_hash, "
+            f"json_extract({payload_col}, '$.ts_utc') AS ts_utc "
+            f"FROM {table} WHERE record_type = ? AND {id_col} IN ({placeholders})"
+        )
+        params: list[Any] = ["derived.ingest.stage1.complete"] + [str(x) for x in chunk]
+        for row in conn.execute(sql, params):
+            out[str(row[0] or "")] = {
+                "record_type": str(row[1] or ""),
+                "complete": bool(row[2]),
+                "source_record_id": str(row[3] or ""),
+                "source_record_type": str(row[4] or ""),
+                "uia_record_id": str(row[5] or ""),
+                "uia_content_hash": str(row[6] or ""),
+                "ts_utc": str(row[7] or ""),
+            }
+    return out
+
+
+def _load_retention_min_map_by_ids(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    id_col: str,
+    payload_col: str,
+    record_ids: set[str],
+) -> dict[str, dict[str, Any] | None]:
+    out: dict[str, dict[str, Any] | None] = {}
+    for chunk in _chunked_ids(record_ids):
+        placeholders = ",".join("?" for _ in chunk)
+        sql = (
+            f"SELECT {id_col}, "
+            f"json_extract({payload_col}, '$.record_type') AS rec_type, "
+            f"json_extract({payload_col}, '$.source_record_id') AS source_record_id, "
+            f"json_extract({payload_col}, '$.source_record_type') AS source_record_type, "
+            f"json_extract({payload_col}, '$.stage1_contract_validated') AS stage1_contract_validated, "
+            f"json_extract({payload_col}, '$.quarantine_pending') AS quarantine_pending "
+            f"FROM {table} WHERE record_type = ? AND {id_col} IN ({placeholders})"
+        )
+        params: list[Any] = ["retention.eligible"] + [str(x) for x in chunk]
+        for row in conn.execute(sql, params):
+            out[str(row[0] or "")] = {
+                "record_type": str(row[1] or ""),
+                "source_record_id": str(row[2] or ""),
+                "source_record_type": str(row[3] or ""),
+                "stage1_contract_validated": bool(row[4]),
+                "quarantine_pending": bool(row[5]),
+            }
+    return out
+
+
+def _load_obs_min_map_by_ids(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    id_col: str,
+    payload_col: str,
+    record_type: str,
+    record_ids: set[str],
+) -> dict[str, dict[str, Any] | None]:
+    out: dict[str, dict[str, Any] | None] = {}
+    for chunk in _chunked_ids(record_ids):
+        placeholders = ",".join("?" for _ in chunk)
+        sql = (
+            f"SELECT {id_col}, "
+            f"json_extract({payload_col}, '$.record_type') AS rec_type, "
+            f"json_extract({payload_col}, '$.source_record_id') AS source_record_id, "
+            f"json_extract({payload_col}, '$.uia_record_id') AS uia_record_id, "
+            f"json_extract({payload_col}, '$.uia_content_hash') AS uia_content_hash, "
+            f"json_extract({payload_col}, '$.hwnd') AS hwnd, "
+            f"json_extract({payload_col}, '$.window_title') AS window_title, "
+            f"json_extract({payload_col}, '$.window_pid') AS window_pid, "
+            f"json_extract({payload_col}, '$.ts_utc') AS ts_utc, "
+            f"json_extract({payload_col}, '$.bboxes') AS bboxes_json "
+            f"FROM {table} WHERE record_type = ? AND {id_col} IN ({placeholders})"
+        )
+        params: list[Any] = [str(record_type)] + [str(x) for x in chunk]
+        for row in conn.execute(sql, params):
+            bboxes_val = row[9]
+            bboxes: Any = bboxes_val
+            if isinstance(bboxes_val, str):
+                try:
+                    bboxes = json.loads(bboxes_val)
+                except Exception:
+                    bboxes = bboxes_val
+            out[str(row[0] or "")] = {
+                "record_type": str(row[1] or ""),
+                "source_record_id": str(row[2] or ""),
+                "uia_record_id": str(row[3] or ""),
+                "uia_content_hash": str(row[4] or ""),
+                "hwnd": str(row[5] or ""),
+                "window_title": str(row[6] or ""),
+                "window_pid": row[7],
+                "ts_utc": str(row[8] or ""),
+                "bboxes": bboxes,
+            }
+    return out
+
+
+def _overlay_maps(
+    primary: dict[str, dict[str, Any] | None],
+    secondary: dict[str, dict[str, Any] | None] | None,
+) -> dict[str, dict[str, Any] | None]:
+    out = dict(primary)
+    if isinstance(secondary, dict):
+        out.update(secondary)
+    return out
+
+
+def _load_uia_snapshot_ids(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    id_col: str,
+) -> set[str]:
+    out: set[str] = set()
+    sql = f"SELECT {id_col} FROM {table} WHERE record_type = ?"
+    for row in conn.execute(sql, ("evidence.uia.snapshot",)):
+        rid = str(row[id_col] or "").strip()
+        if rid:
+            out.add(rid)
+    return out
+
+
+def _load_existing_ids_by_type(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    id_col: str,
+    record_type: str,
+    record_ids: set[str],
+) -> set[str]:
+    out: set[str] = set()
+    for chunk in _chunked_ids(record_ids):
+        placeholders = ",".join("?" for _ in chunk)
+        sql = f"SELECT {id_col} FROM {table} WHERE record_type = ? AND {id_col} IN ({placeholders})"
+        params: list[Any] = [str(record_type)] + [str(x) for x in chunk]
+        for row in conn.execute(sql, params):
+            rid = str(row[id_col] or "").strip()
+            if rid:
+                out.add(rid)
+    return out
+
+
 def _parse_ts_utc(value: Any) -> datetime | None:
     text = str(value or "").strip()
     if not text:
@@ -385,43 +620,208 @@ def run_audit(
         plugin_required_counts: dict[str, int] = {key: 0 for key in plugin_ok_counts}
         sample_blocked: list[dict[str, Any]] = []
 
-        sql = f"SELECT {id_col}, {payload_col} FROM {table} WHERE record_type = ? ORDER BY {id_col}"
+        frame_rows_raw = _load_frame_rows(conn, table=table, id_col=id_col, payload_col=payload_col)
         frame_rows: list[dict[str, Any]] = []
         uia_source_ids: dict[str, set[str]] = {}
-        for row in conn.execute(sql, ("evidence.capture.frame",)):
-            frame_id = str(row[id_col] or "")
-            frame = _parse_payload(row[payload_col]) or {}
-            uia_ref = frame.get("uia_ref") if isinstance(frame.get("uia_ref"), dict) else {}
-            uia_record_id = str(uia_ref.get("record_id") or "").strip()
+        stage1_ids_needed: set[str] = set()
+        retention_ids_needed: set[str] = set()
+        obs_ids_needed: dict[str, set[str]] = {
+            "obs.uia.focus": set(),
+            "obs.uia.context": set(),
+            "obs.uia.operable": set(),
+        }
+        uia_snapshot_ids_needed: set[str] = set()
+        for row in frame_rows_raw:
+            frame_id = str(row.get("frame_id") or "")
+            frame_ts_utc = str(row.get("ts_utc") or "")
+            uia_record_id = str(row.get("uia_record_id") or "").strip()
+            uia_hash = str(row.get("uia_content_hash") or "").strip()
             if uia_record_id:
                 uia_source_ids.setdefault(uia_record_id, set()).add(frame_id)
-            frame_rows.append({"frame_id": frame_id, "frame": frame, "uia_record_id": uia_record_id})
+                uia_snapshot_ids_needed.add(uia_record_id)
+                obs_expected = _frame_uia_expected_ids(uia_record_id)
+                for kind in ("obs.uia.focus", "obs.uia.context", "obs.uia.operable"):
+                    obs_id = str(obs_expected.get(kind, "")).strip()
+                    if obs_id:
+                        obs_ids_needed[kind].add(obs_id)
+            stage1_ids_needed.add(stage1_complete_record_id(frame_id))
+            retention_ids_needed.add(retention_eligibility_record_id(frame_id))
+            frame_rows.append(
+                {
+                    "frame_id": frame_id,
+                    "ts_utc": frame_ts_utc,
+                    "uia_record_id": uia_record_id,
+                    "uia_content_hash": uia_hash,
+                }
+            )
+
+        # Batch-load marker/doc rows once; avoid per-frame record-id roundtrips.
+        use_secondary_overlay = bool(derived_conn is not None and derived_table and derived_id_col and derived_payload_col)
+        stage1_primary: dict[str, dict[str, Any] | None] = {}
+        retention_primary: dict[str, dict[str, Any] | None] = {}
+        obs_focus_primary: dict[str, dict[str, Any] | None] = {}
+        obs_context_primary: dict[str, dict[str, Any] | None] = {}
+        obs_operable_primary: dict[str, dict[str, Any] | None] = {}
+        if not use_secondary_overlay:
+            stage1_primary = _load_stage1_min_map_by_ids(
+                conn,
+                table=table,
+                id_col=id_col,
+                payload_col=payload_col,
+                record_ids=stage1_ids_needed,
+            )
+            retention_primary = _load_retention_min_map_by_ids(
+                conn,
+                table=table,
+                id_col=id_col,
+                payload_col=payload_col,
+                record_ids=retention_ids_needed,
+            )
+            obs_focus_primary = _load_obs_min_map_by_ids(
+                conn,
+                table=table,
+                id_col=id_col,
+                payload_col=payload_col,
+                record_type="obs.uia.focus",
+                record_ids=obs_ids_needed.get("obs.uia.focus", set()),
+            )
+            obs_context_primary = _load_obs_min_map_by_ids(
+                conn,
+                table=table,
+                id_col=id_col,
+                payload_col=payload_col,
+                record_type="obs.uia.context",
+                record_ids=obs_ids_needed.get("obs.uia.context", set()),
+            )
+            obs_operable_primary = _load_obs_min_map_by_ids(
+                conn,
+                table=table,
+                id_col=id_col,
+                payload_col=payload_col,
+                record_type="obs.uia.operable",
+                record_ids=obs_ids_needed.get("obs.uia.operable", set()),
+            )
+        stage1_secondary: dict[str, dict[str, Any] | None] | None = None
+        retention_secondary: dict[str, dict[str, Any] | None] | None = None
+        obs_focus_secondary: dict[str, dict[str, Any] | None] | None = None
+        obs_context_secondary: dict[str, dict[str, Any] | None] | None = None
+        obs_operable_secondary: dict[str, dict[str, Any] | None] | None = None
+        if use_secondary_overlay:
+            stage1_secondary = _load_stage1_min_map_by_ids(
+                derived_conn,
+                table=derived_table,
+                id_col=derived_id_col,
+                payload_col=derived_payload_col,
+                record_ids=stage1_ids_needed,
+            )
+            retention_secondary = _load_retention_min_map_by_ids(
+                derived_conn,
+                table=derived_table,
+                id_col=derived_id_col,
+                payload_col=derived_payload_col,
+                record_ids=retention_ids_needed,
+            )
+            obs_focus_secondary = _load_obs_min_map_by_ids(
+                derived_conn,
+                table=derived_table,
+                id_col=derived_id_col,
+                payload_col=derived_payload_col,
+                record_type="obs.uia.focus",
+                record_ids=obs_ids_needed.get("obs.uia.focus", set()),
+            )
+            obs_context_secondary = _load_obs_min_map_by_ids(
+                derived_conn,
+                table=derived_table,
+                id_col=derived_id_col,
+                payload_col=derived_payload_col,
+                record_type="obs.uia.context",
+                record_ids=obs_ids_needed.get("obs.uia.context", set()),
+            )
+            obs_operable_secondary = _load_obs_min_map_by_ids(
+                derived_conn,
+                table=derived_table,
+                id_col=derived_id_col,
+                payload_col=derived_payload_col,
+                record_type="obs.uia.operable",
+                record_ids=obs_ids_needed.get("obs.uia.operable", set()),
+            )
+            missing_stage1_ids = stage1_ids_needed.difference(set(stage1_secondary.keys()))
+            missing_retention_ids = retention_ids_needed.difference(set(retention_secondary.keys()))
+            missing_focus_ids = obs_ids_needed.get("obs.uia.focus", set()).difference(set(obs_focus_secondary.keys()))
+            missing_context_ids = obs_ids_needed.get("obs.uia.context", set()).difference(set(obs_context_secondary.keys()))
+            missing_operable_ids = obs_ids_needed.get("obs.uia.operable", set()).difference(set(obs_operable_secondary.keys()))
+            if missing_stage1_ids:
+                stage1_primary = _load_stage1_min_map_by_ids(
+                    conn,
+                    table=table,
+                    id_col=id_col,
+                    payload_col=payload_col,
+                    record_ids=missing_stage1_ids,
+                )
+            if missing_retention_ids:
+                retention_primary = _load_retention_min_map_by_ids(
+                    conn,
+                    table=table,
+                    id_col=id_col,
+                    payload_col=payload_col,
+                    record_ids=missing_retention_ids,
+                )
+            if missing_focus_ids:
+                obs_focus_primary = _load_obs_min_map_by_ids(
+                    conn,
+                    table=table,
+                    id_col=id_col,
+                    payload_col=payload_col,
+                    record_type="obs.uia.focus",
+                    record_ids=missing_focus_ids,
+                )
+            if missing_context_ids:
+                obs_context_primary = _load_obs_min_map_by_ids(
+                    conn,
+                    table=table,
+                    id_col=id_col,
+                    payload_col=payload_col,
+                    record_type="obs.uia.context",
+                    record_ids=missing_context_ids,
+                )
+            if missing_operable_ids:
+                obs_operable_primary = _load_obs_min_map_by_ids(
+                    conn,
+                    table=table,
+                    id_col=id_col,
+                    payload_col=payload_col,
+                    record_type="obs.uia.operable",
+                    record_ids=missing_operable_ids,
+                )
+        stage1_map = _overlay_maps(stage1_primary, stage1_secondary)
+        retention_map = _overlay_maps(retention_primary, retention_secondary)
+        obs_map_by_kind: dict[str, dict[str, dict[str, Any] | None]] = {
+            "obs.uia.focus": _overlay_maps(obs_focus_primary, obs_focus_secondary),
+            "obs.uia.context": _overlay_maps(obs_context_primary, obs_context_secondary),
+            "obs.uia.operable": _overlay_maps(obs_operable_primary, obs_operable_secondary),
+        }
+
+        uia_snapshot_ids = _load_existing_ids_by_type(
+            conn,
+            table=table,
+            id_col=id_col,
+            record_type="evidence.uia.snapshot",
+            record_ids=uia_snapshot_ids_needed,
+        )
 
         for frame_row in frame_rows:
             frame_id = str(frame_row.get("frame_id") or "")
-            frame = frame_row.get("frame") if isinstance(frame_row.get("frame"), dict) else {}
-            ts_utc = str(frame.get("ts_utc") or "")
+            ts_utc = str(frame_row.get("ts_utc") or "")
             ts_obj = _parse_ts_utc(ts_utc)
 
             issues: list[str] = []
-            uia_ref = frame.get("uia_ref") if isinstance(frame.get("uia_ref"), dict) else {}
             uia_record_id = str(frame_row.get("uia_record_id") or "").strip()
-            uia_hash = str(uia_ref.get("content_hash") or "").strip()
+            uia_hash = str(frame_row.get("uia_content_hash") or "").strip()
 
             plugin_required_counts["stage1_complete"] += 1
             stage1_id = stage1_complete_record_id(frame_id)
-            stage1_type, stage1_payload = _fetch_overlay_row(
-                primary_conn=conn,
-                primary_table=table,
-                primary_id_col=id_col,
-                primary_payload_col=payload_col,
-                record_id=stage1_id,
-                secondary_conn=derived_conn,
-                secondary_table=derived_table,
-                secondary_id_col=derived_id_col,
-                secondary_payload_col=derived_payload_col,
-            )
-            if stage1_type == "derived.ingest.stage1.complete" and _stage1_payload_ok(
+            stage1_payload = stage1_map.get(stage1_id)
+            if _stage1_payload_ok(
                 stage1_payload,
                 frame_id=frame_id,
                 frame_ts=ts_obj,
@@ -436,18 +836,8 @@ def run_audit(
 
             plugin_required_counts["retention_eligible"] += 1
             retention_id = retention_eligibility_record_id(frame_id)
-            retention_type, retention_payload = _fetch_overlay_row(
-                primary_conn=conn,
-                primary_table=table,
-                primary_id_col=id_col,
-                primary_payload_col=payload_col,
-                record_id=retention_id,
-                secondary_conn=derived_conn,
-                secondary_table=derived_table,
-                secondary_id_col=derived_id_col,
-                secondary_payload_col=derived_payload_col,
-            )
-            retention_ok = retention_type == "retention.eligible" and _retention_payload_ok(
+            retention_payload = retention_map.get(retention_id)
+            retention_ok = _retention_payload_ok(
                 retention_payload,
                 frame_id=frame_id,
             )
@@ -463,14 +853,7 @@ def run_audit(
             obs_operable_ok = False
             if uia_record_id:
                 plugin_required_counts["uia_snapshot"] += 1
-                snap_type, _snap_payload = _fetch_row(
-                    conn,
-                    table=table,
-                    id_col=id_col,
-                    payload_col=payload_col,
-                    record_id=uia_record_id,
-                )
-                if snap_type == "evidence.uia.snapshot":
+                if uia_record_id in uia_snapshot_ids:
                     plugin_ok_counts["uia_snapshot"] += 1
                     uia_snapshot_ok = True
                 else:
@@ -484,18 +867,8 @@ def run_audit(
                 ):
                     plugin_required_counts[key] += 1
                     obs_id = obs_expected.get(kind, "")
-                    obs_type, obs_payload = _fetch_overlay_row(
-                        primary_conn=conn,
-                        primary_table=table,
-                        primary_id_col=id_col,
-                        primary_payload_col=payload_col,
-                        record_id=obs_id,
-                        secondary_conn=derived_conn,
-                        secondary_table=derived_table,
-                        secondary_id_col=derived_id_col,
-                        secondary_payload_col=derived_payload_col,
-                    )
-                    if obs_type == kind and _obs_payload_ok(
+                    obs_payload = (obs_map_by_kind.get(kind, {}) or {}).get(obs_id)
+                    if _obs_payload_ok(
                         obs_payload,
                         kind=kind,
                         frame_id=frame_id,

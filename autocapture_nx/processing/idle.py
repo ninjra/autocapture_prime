@@ -828,7 +828,8 @@ class IdleProcessor:
             return True
         if str(record.get("record_type") or "") != "evidence.capture.frame":
             return True
-        uia_ref = record.get("uia_ref") if isinstance(record.get("uia_ref"), dict) else {}
+        uia_ref_raw = record.get("uia_ref")
+        uia_ref: dict[str, Any] = uia_ref_raw if isinstance(uia_ref_raw, dict) else {}
         uia_record_id = str(uia_ref.get("record_id") or "").strip()
         if not uia_record_id:
             return True
@@ -842,7 +843,13 @@ class IdleProcessor:
         if not missing:
             return True
         # Fail-open: if snapshot is unavailable we do not block stage1 completeness.
-        snapshot_value = self._metadata.get(uia_record_id, None)
+        metadata_get = getattr(self._metadata, "get", None)
+        if not callable(metadata_get):
+            return True
+        try:
+            snapshot_value = metadata_get(uia_record_id, None)
+        except Exception:
+            return True
         snapshot = _uia_extract_snapshot_dict(snapshot_value)
         if not isinstance(snapshot, dict):
             return True
@@ -857,7 +864,14 @@ class IdleProcessor:
             return False
         if _is_missing_metadata_record(retention_marker):
             return False
-        record_raw = self._metadata.get(record_id, {})
+        metadata_get = getattr(self._metadata, "get", None)
+        if callable(metadata_get):
+            try:
+                record_raw = metadata_get(record_id, {})
+            except Exception:
+                record_raw = {}
+        else:
+            record_raw = {}
         record = record_raw if isinstance(record_raw, dict) else {}
         if str(record.get("record_type") or "") == "evidence.capture.frame":
             if not bool(retention_marker.get("stage1_contract_validated", False)):
@@ -1417,7 +1431,7 @@ class IdleProcessor:
                             return processed
                         continue
                     text = "\n\n".join(texts)
-                    payload = build_text_record(
+                    text_payload = build_text_record(
                         kind=kind,
                         text=text,
                         source_id=item.record_id,
@@ -1426,13 +1440,13 @@ class IdleProcessor:
                         config=self._config,
                         ts_utc=item.ts_utc,
                     )
-                    if not payload:
+                    if not text_payload:
                         if stop_after_item or expired():
                             return processed
                         continue
                     stored = self._store_derived_text(
                         derived_id=derived_id,
-                        payload=payload,
+                        payload=text_payload,
                         record_id=item.record_id,
                         record=item.record,
                         kind=kind,

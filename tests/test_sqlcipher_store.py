@@ -242,6 +242,97 @@ class SQLCipherStoreTests(unittest.TestCase):
             self.assertTrue(bool((row or ("", "", "", ""))[1]))
             self.assertTrue(bool((row or ("", "", "", ""))[2]))
 
+    def test_encrypted_sqlite_latest_is_bounded_by_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "metadata.db")
+            store = EncryptedSQLiteStore(
+                db_path,
+                _TestProvider(),
+                _TestProvider(),
+                "run1",
+                "none",
+            )
+            for idx in range(32):
+                store.put(
+                    f"run1/derived.test/{idx:03d}",
+                    {
+                        "record_type": "derived.test",
+                        "ts_utc": f"2026-02-22T00:00:{idx:02d}Z",
+                        "value": idx,
+                    },
+                )
+
+            calls = {"n": 0}
+            original_get = store.get
+
+            def counting_get(record_id: str, default=None):
+                calls["n"] += 1
+                return original_get(record_id, default)
+
+            with patch.object(store, "get", side_effect=counting_get):
+                rows = store.latest("derived.test", limit=5)
+            self.assertEqual(len(rows), 5)
+            self.assertLessEqual(calls["n"], 5)
+
+    def test_encrypted_sqlite_query_time_window_uses_projection_without_get_scan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "metadata.db")
+            store = EncryptedSQLiteStore(
+                db_path,
+                _TestProvider(),
+                _TestProvider(),
+                "run1",
+                "none",
+            )
+            for idx in range(12):
+                store.put(
+                    f"run1/derived.test/{idx:03d}",
+                    {
+                        "record_type": "derived.test",
+                        "ts_utc": f"2026-02-22T00:00:{idx:02d}Z",
+                        "value": idx,
+                    },
+                )
+            with patch.object(store, "get", side_effect=AssertionError("query_time_window should not call get")):
+                ids = store.query_time_window(
+                    "2026-02-22T00:00:03Z",
+                    "2026-02-22T00:00:07Z",
+                    limit=10,
+                )
+            self.assertTrue(ids)
+            plan_rows = store._conn.execute(  # noqa: SLF001
+                "EXPLAIN QUERY PLAN SELECT id FROM metadata_projection WHERE ts_epoch IS NOT NULL AND ts_epoch >= ? AND ts_epoch <= ? ORDER BY ts_epoch ASC, id ASC LIMIT ?",
+                (0.0, 9999999999.0, 10),
+            ).fetchall()
+            details = " ".join(str(row[-1]) for row in plan_rows)
+            self.assertIn("idx_metadata_projection_window", details)
+
+    def test_encrypted_sqlite_latest_lazy_backfills_projection_for_existing_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "metadata.db")
+            store = EncryptedSQLiteStore(
+                db_path,
+                _TestProvider(),
+                _TestProvider(),
+                "run1",
+                "none",
+            )
+            for idx in range(6):
+                store.put(
+                    f"run1/derived.test/{idx:03d}",
+                    {
+                        "record_type": "derived.test",
+                        "ts_utc": f"2026-02-22T00:00:{idx:02d}Z",
+                        "value": idx,
+                    },
+                )
+            store._conn.execute("DELETE FROM metadata_projection")  # noqa: SLF001
+            store._conn.commit()  # noqa: SLF001
+            rows = store.latest("derived.test", limit=3)
+            self.assertEqual(len(rows), 3)
+            projection_count = store._conn.execute("SELECT COUNT(*) FROM metadata_projection").fetchone()  # noqa: SLF001
+            self.assertGreater(int((projection_count or [0])[0]), 0)
+
     def test_resolve_metadata_path_uses_primary_when_readable(self):
         with tempfile.TemporaryDirectory() as tmp:
             primary = os.path.join(tmp, "metadata.db")

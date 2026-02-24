@@ -84,6 +84,7 @@ def _default_manifest(py: str) -> list[GateStep]:
         GateStep("gate_doctor", [py, "tools/gate_doctor.py"], None),
         GateStep("gate_full_repo_miss_matrix", [py, "tools/gate_full_repo_miss_matrix.py", "--refresh"], None),
         GateStep("gate_acceptance_coverage", [py, "tools/gate_acceptance_coverage.py"], None),
+        GateStep("gate_queryability", [py, "tools/gate_queryability.py"], "artifacts/queryability/gate_queryability.json"),
         GateStep(
             "validate_blueprint_spec",
             [py, "tools/validate_blueprint_spec.py", "docs/spec/autocapture_nx_blueprint_2026-01-24.md"],
@@ -91,6 +92,20 @@ def _default_manifest(py: str) -> list[GateStep]:
         ),
         GateStep("run_mod021_low_resource", ["bash", "tools/run_mod021_low_resource.sh"], None),
     ]
+    popup_go_no_go_disabled = _truthy(os.environ.get("POPUP_GO_NO_GO_DISABLED"))
+    popup_go_no_go_out = os.environ.get("POPUP_GO_NO_GO_OUT", "artifacts/query_acceptance/popup_go_no_go_latest.json").strip()
+    popup_go_no_go_timeout = os.environ.get("POPUP_GO_NO_GO_TIMEOUT_S", "").strip()
+    popup_go_no_go_base = os.environ.get("POPUP_GO_NO_GO_BASE_URL", "").strip()
+    popup_go_no_go_bridge = os.environ.get("POPUP_GO_NO_GO_BRIDGE_URL", "").strip()
+    if not popup_go_no_go_disabled:
+        popup_cmd = [py, "tools/popup_go_no_go.py", "--strict", "--out", popup_go_no_go_out]
+        if popup_go_no_go_timeout:
+            popup_cmd.extend(["--timeout-s", popup_go_no_go_timeout])
+        if popup_go_no_go_base:
+            popup_cmd.extend(["--base-url", popup_go_no_go_base])
+        if popup_go_no_go_bridge:
+            popup_cmd.extend(["--bridge-url", popup_go_no_go_bridge])
+        steps.append(GateStep("popup_go_no_go", popup_cmd, popup_go_no_go_out))
     real_corpus_disabled = _truthy(os.environ.get("REAL_CORPUS_STRICT_DISABLED"))
     real_corpus_report = os.environ.get("REAL_CORPUS_STRICT_REPORT", "").strip()
     real_corpus_contract = os.environ.get("REAL_CORPUS_STRICT_CONTRACT", "docs/contracts/real_corpus_expected_answers_v1.json").strip()

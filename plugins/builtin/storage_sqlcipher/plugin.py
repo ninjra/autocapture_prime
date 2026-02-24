@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
+import shutil
 import sqlite3
 import threading
 from datetime import datetime, timezone
-import shutil
 from typing import Any
 
 from dataclasses import dataclass
@@ -543,6 +544,7 @@ class PlainSQLiteStore:
         self._fsync_policy = str(fsync_policy or "").strip().lower() or "none"
         os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
         self._conn: sqlite3.Connection | None = None
+        self._read_only = False
         self._read_only = False
 
     def _is_readonly_error(self, exc: BaseException) -> bool:
@@ -1149,12 +1151,33 @@ class EncryptedSQLiteStore:
         self._fsync_policy = str(fsync_policy or "").strip().lower() or "none"
         os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
         self._conn: sqlite3.Connection | None = None
+        self._read_only = False
         self._metadata_has_payload = False
         self._metadata_payload_required = False
         self._entity_has_legacy_value = False
         self._entity_has_legacy_kind = False
         self._entity_has_legacy_key_version = False
         self._entity_has_legacy_first_seen = False
+        self._latest_filtered_expensive = False
+        try:
+            self._projection_backfill_batch = max(
+                1, int(os.environ.get("AUTOCAPTURE_METADATA_PROJECTION_BACKFILL_BATCH", "64") or 64)
+            )
+        except Exception:
+            self._projection_backfill_batch = 64
+
+    def _is_readonly_error(self, exc: BaseException) -> bool:
+        if isinstance(exc, sqlite3.OperationalError):
+            text = str(exc).lower()
+            return "readonly" in text or "read-only" in text
+        if isinstance(exc, PermissionError):
+            return True
+        if isinstance(exc, OSError):
+            return exc.errno in {getattr(errno, "EACCES", 13), getattr(errno, "EROFS", 30), getattr(errno, "EPERM", 1)}
+        return False
+
+    def _connect_read_only(self) -> sqlite3.Connection:
+        return sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
 
     def _ensure(self) -> None:
         if self._conn is None:
@@ -1163,7 +1186,19 @@ class EncryptedSQLiteStore:
             try:
                 self._apply_fsync_policy(conn)
                 self._init_schema()
-            except Exception:
+            except Exception as exc:
+                if self._is_readonly_error(exc):
+                    self._read_only = True
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    self._conn = self._connect_read_only()
+                    try:
+                        self._ensure_columns()
+                    except Exception:
+                        pass
+                    return
                 try:
                     conn.close()
                 except Exception:
@@ -1185,34 +1220,225 @@ class EncryptedSQLiteStore:
             "CREATE TABLE IF NOT EXISTS metadata (id TEXT PRIMARY KEY, nonce_b64 TEXT, ciphertext_b64 TEXT, key_id TEXT)"
         )
         self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS metadata_projection (id TEXT PRIMARY KEY, record_type TEXT, ts_utc TEXT, ts_epoch REAL)"
+        )
+        self._conn.execute(
             "CREATE TABLE IF NOT EXISTS entity_map (token TEXT PRIMARY KEY, nonce_b64 TEXT, ciphertext_b64 TEXT, key_id TEXT)"
         )
         self._ensure_columns()
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_metadata_projection_record_type_epoch_id ON metadata_projection(record_type, ts_epoch DESC, id DESC)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_metadata_projection_epoch_id ON metadata_projection(ts_epoch DESC, id DESC)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_metadata_projection_window ON metadata_projection(ts_epoch, id)"
+        )
         self._conn.commit()
 
     def _table_info(self, table: str) -> dict[str, tuple[Any, ...]]:
-        cur = self._conn.execute(f"PRAGMA table_info({table})")
+        try:
+            cur = self._conn.execute(f"PRAGMA table_info({table})")
+        except Exception:
+            return {}
         return {str(row[1]): tuple(row) for row in cur.fetchall()}
 
     def _ensure_columns(self) -> None:
         meta_cols = self._table_info("metadata")
-        for column in ("nonce_b64", "ciphertext_b64", "key_id"):
-            if column not in meta_cols:
-                self._conn.execute(f"ALTER TABLE metadata ADD COLUMN {column} TEXT")
-        meta_cols = self._table_info("metadata")
+        if not self._read_only:
+            for column in ("nonce_b64", "ciphertext_b64", "key_id"):
+                if column not in meta_cols:
+                    self._conn.execute(f"ALTER TABLE metadata ADD COLUMN {column} TEXT")
+            meta_cols = self._table_info("metadata")
         self._metadata_has_payload = "payload" in meta_cols
         payload_info = meta_cols.get("payload")
         self._metadata_payload_required = bool(payload_info and int(payload_info[3] or 0) == 1)
 
         entity_cols = self._table_info("entity_map")
-        for column in ("nonce_b64", "ciphertext_b64", "key_id"):
-            if column not in entity_cols:
-                self._conn.execute(f"ALTER TABLE entity_map ADD COLUMN {column} TEXT")
-        entity_cols = self._table_info("entity_map")
+        if not self._read_only:
+            for column in ("nonce_b64", "ciphertext_b64", "key_id"):
+                if column not in entity_cols:
+                    self._conn.execute(f"ALTER TABLE entity_map ADD COLUMN {column} TEXT")
+            entity_cols = self._table_info("entity_map")
         self._entity_has_legacy_value = "value" in entity_cols
         self._entity_has_legacy_kind = "kind" in entity_cols
         self._entity_has_legacy_key_version = "key_version" in entity_cols
         self._entity_has_legacy_first_seen = "first_seen_ts" in entity_cols
+
+    def _projection_epoch(self, ts_utc: str | None) -> float | None:
+        if not ts_utc:
+            return None
+        try:
+            return float(_parse_ts(str(ts_utc)).timestamp())
+        except Exception:
+            return None
+
+    def _projection_upsert(
+        self,
+        record_id: str,
+        *,
+        record_type: str | None,
+        ts_utc: str | None,
+        commit: bool = True,
+    ) -> None:
+        if self._read_only:
+            return
+        ts_text = str(ts_utc) if ts_utc else None
+        ts_epoch = self._projection_epoch(ts_text)
+        type_text = str(record_type) if record_type else None
+        self._conn.execute(
+            "INSERT OR REPLACE INTO metadata_projection (id, record_type, ts_utc, ts_epoch) VALUES (?, ?, ?, ?)",
+            (record_id, type_text, ts_text, ts_epoch),
+        )
+        if commit:
+            self._conn.commit()
+
+    def _projection_backfill(self, *, batch_size: int | None = None) -> int:
+        self._ensure()
+        if self._read_only:
+            return 0
+        size = max(1, int(batch_size or self._projection_backfill_batch))
+        select_cols = ["m.id", "m.nonce_b64", "m.ciphertext_b64", "m.key_id"]
+        if self._metadata_has_payload:
+            select_cols.append("m.payload")
+        cur = self._conn.execute(
+            f"""
+            SELECT {", ".join(select_cols)}
+              FROM metadata AS m
+         LEFT JOIN metadata_projection AS p
+                ON p.id = m.id
+             WHERE p.id IS NULL
+             ORDER BY m.id
+             LIMIT ?
+            """,
+            (int(size),),
+        )
+        rows = cur.fetchall()
+        if not rows:
+            return 0
+        for row in rows:
+            record_id = str(row[0] or "")
+            nonce_b64 = row[1] if len(row) > 1 else None
+            ciphertext_b64 = row[2] if len(row) > 2 else None
+            key_id = row[3] if len(row) > 3 else None
+            payload = row[4] if (self._metadata_has_payload and len(row) > 4) else None
+            record: Any = None
+            if payload:
+                try:
+                    record = json.loads(payload)
+                except Exception:
+                    record = None
+            if not isinstance(record, dict) and nonce_b64 and ciphertext_b64:
+                try:
+                    record = self._decrypt(
+                        self._meta_provider,
+                        str(nonce_b64),
+                        str(ciphertext_b64),
+                        str(key_id) if key_id is not None else None,
+                        default=None,
+                    )
+                except Exception:
+                    record = None
+            record_type = None
+            ts_utc = None
+            if isinstance(record, dict):
+                raw_type = record.get("record_type")
+                record_type = str(raw_type) if raw_type else None
+                ts_utc = _extract_ts(record)
+            self._projection_upsert(
+                record_id,
+                record_type=record_type,
+                ts_utc=ts_utc,
+                commit=False,
+            )
+        self._conn.commit()
+        return int(len(rows))
+
+    def _projection_query_time_window(
+        self,
+        *,
+        start_ts: str | None,
+        end_ts: str | None,
+        limit: int | None = None,
+    ) -> list[str]:
+        start_epoch = self._projection_epoch(start_ts)
+        end_epoch = self._projection_epoch(end_ts)
+        clauses = ["ts_epoch IS NOT NULL"]
+        params: list[Any] = []
+        if start_epoch is not None:
+            clauses.append("ts_epoch >= ?")
+            params.append(float(start_epoch))
+        if end_epoch is not None:
+            clauses.append("ts_epoch <= ?")
+            params.append(float(end_epoch))
+        sql = f"SELECT id FROM metadata_projection WHERE {' AND '.join(clauses)} ORDER BY ts_epoch ASC, id ASC"
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(int(limit))
+        cur = self._conn.execute(sql, tuple(params))
+        return [str(row[0]) for row in cur.fetchall()]
+
+    def _projection_latest_ids(self, *, record_type: str | None, limit: int) -> list[str]:
+        clauses = ["ts_epoch IS NOT NULL"]
+        params: list[Any] = []
+        if record_type:
+            clauses.append("record_type = ?")
+            params.append(str(record_type))
+        sql = f"SELECT id FROM metadata_projection WHERE {' AND '.join(clauses)} ORDER BY ts_epoch DESC, id DESC LIMIT ?"
+        params.append(int(limit))
+        cur = self._conn.execute(sql, tuple(params))
+        return [str(row[0]) for row in cur.fetchall()]
+
+    def _latest_fallback_scan(self, *, record_type: str | None, limit: int) -> list[dict[str, Any]]:
+        # Bounded fallback when projection is not populated (for example legacy/read-only DBs).
+        scan_cap = max(self._projection_backfill_batch, min(1024, int(limit) * 16))
+        select_cols = ["id", "nonce_b64", "ciphertext_b64", "key_id"]
+        if self._metadata_has_payload:
+            select_cols.append("payload")
+        try:
+            cur = self._conn.execute(
+                f"SELECT {', '.join(select_cols)} FROM metadata ORDER BY id DESC LIMIT ?",
+                (int(scan_cap),),
+            )
+            rows = cur.fetchall()
+        except Exception:
+            return []
+        out: list[tuple[float, str, dict[str, Any]]] = []
+        for row in rows:
+            record_id = str(row[0] or "")
+            nonce_b64 = row[1] if len(row) > 1 else None
+            ciphertext_b64 = row[2] if len(row) > 2 else None
+            key_id = row[3] if len(row) > 3 else None
+            payload = row[4] if (self._metadata_has_payload and len(row) > 4) else None
+            record: Any = None
+            if payload:
+                try:
+                    record = json.loads(payload)
+                except Exception:
+                    record = None
+            if not isinstance(record, dict) and nonce_b64 and ciphertext_b64:
+                try:
+                    record = self._decrypt(
+                        self._meta_provider,
+                        str(nonce_b64),
+                        str(ciphertext_b64),
+                        str(key_id) if key_id is not None else None,
+                        default=None,
+                    )
+                except Exception:
+                    record = None
+            if not isinstance(record, dict):
+                continue
+            if record_type and str(record.get("record_type") or "") != str(record_type):
+                continue
+            ts_val = _extract_ts(record)
+            ts_key = self._projection_epoch(str(ts_val) if ts_val else None) or 0.0
+            out.append((float(ts_key), record_id, record))
+            if len(out) >= int(limit):
+                break
+        out.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return [{"record_id": rid, "record": rec} for _ts, rid, rec in out[: int(limit)]]
 
     def _encrypt(self, provider: DerivedKeyProvider, payload: Any) -> tuple[str, str, str]:
         key_id, key = provider.active()
@@ -1245,6 +1471,8 @@ class EncryptedSQLiteStore:
 
     def put_replace(self, record_id: str, value: Any) -> None:
         self._ensure()
+        if self._read_only:
+            return
         nonce_b64, ciphertext_b64, key_id = self._encrypt(self._meta_provider, value)
         columns = ["id", "nonce_b64", "ciphertext_b64", "key_id"]
         params: list[Any] = [record_id, nonce_b64, ciphertext_b64, key_id]
@@ -1258,10 +1486,20 @@ class EncryptedSQLiteStore:
             f"INSERT OR REPLACE INTO metadata ({cols}) VALUES ({placeholders})",
             tuple(params),
         )
+        record_type = value.get("record_type") if isinstance(value, dict) else None
+        ts_utc = _extract_ts(value) if isinstance(value, dict) else None
+        self._projection_upsert(
+            record_id,
+            record_type=str(record_type) if record_type else None,
+            ts_utc=ts_utc,
+            commit=False,
+        )
         self._conn.commit()
 
     def put_new(self, record_id: str, value: Any) -> None:
         self._ensure()
+        if self._read_only:
+            return
         nonce_b64, ciphertext_b64, key_id = self._encrypt(self._meta_provider, value)
         columns = ["id", "nonce_b64", "ciphertext_b64", "key_id"]
         params: list[Any] = [record_id, nonce_b64, ciphertext_b64, key_id]
@@ -1274,6 +1512,14 @@ class EncryptedSQLiteStore:
             self._conn.execute(
                 f"INSERT INTO metadata ({cols}) VALUES ({placeholders})",
                 tuple(params),
+            )
+            record_type = value.get("record_type") if isinstance(value, dict) else None
+            ts_utc = _extract_ts(value) if isinstance(value, dict) else None
+            self._projection_upsert(
+                record_id,
+                record_type=str(record_type) if record_type else None,
+                ts_utc=ts_utc,
+                commit=False,
             )
             self._conn.commit()
         except sqlite3.IntegrityError as exc:
@@ -1324,56 +1570,64 @@ class EncryptedSQLiteStore:
         limit: int | None = None,
     ) -> list[str]:
         self._ensure()
-        start_key = _parse_ts(start_ts).timestamp() if start_ts else None
-        end_key = _parse_ts(end_ts).timestamp() if end_ts else None
-        matched: list[tuple[float, str]] = []
-        for record_id in self.keys():
-            record = self.get(record_id)
-            if not isinstance(record, dict):
-                continue
-            ts_val = _extract_ts(record)
-            if not ts_val:
-                continue
-            ts_key = _parse_ts(ts_val).timestamp()
-            if start_key is not None and ts_key < start_key:
-                continue
-            if end_key is not None and ts_key > end_key:
-                continue
-            matched.append((ts_key, record_id))
-        matched.sort(key=lambda item: (item[0], item[1]))
-        if limit is not None:
-            matched = matched[: int(limit)]
-        return [record_id for _ts, record_id in matched]
+        try:
+            out = self._projection_query_time_window(start_ts=start_ts, end_ts=end_ts, limit=limit)
+        except Exception:
+            out = []
+        need = int(limit) if limit is not None else 0
+        if (need <= 0 and len(out) == 0) or (need > 0 and len(out) < need):
+            try:
+                backfill_limit = self._projection_backfill_batch
+                backfilled = self._projection_backfill(batch_size=backfill_limit)
+            except Exception:
+                backfilled = 0
+            if backfilled > 0:
+                try:
+                    out = self._projection_query_time_window(start_ts=start_ts, end_ts=end_ts, limit=limit)
+                except Exception:
+                    out = []
+        return out
 
     def latest(self, record_type: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
-        import heapq
-
         limit_val = int(limit) if limit is not None else 25
         limit_val = max(1, limit_val)
-        heap: list[tuple[float, str, dict[str, Any]]] = []
-        for record_id in self.keys():
+        self._ensure()
+        try:
+            ids = self._projection_latest_ids(record_type=record_type, limit=limit_val)
+        except Exception:
+            ids = []
+        if len(ids) < limit_val:
+            try:
+                backfill_limit = self._projection_backfill_batch
+                backfilled = self._projection_backfill(batch_size=backfill_limit)
+            except Exception:
+                backfilled = 0
+            if backfilled > 0:
+                try:
+                    ids = self._projection_latest_ids(record_type=record_type, limit=limit_val)
+                except Exception:
+                    ids = []
+        if not ids:
+            return self._latest_fallback_scan(record_type=record_type, limit=limit_val)
+        out: list[dict[str, Any]] = []
+        for record_id in ids:
             record = self.get(record_id)
             if not isinstance(record, dict):
                 continue
-            if record_type and record.get("record_type") != record_type:
+            if record_type and str(record.get("record_type") or "") != str(record_type):
                 continue
-            ts_val = _extract_ts(record)
-            if not ts_val:
-                continue
-            ts_key = _parse_ts(ts_val).timestamp()
-            entry = (ts_key, record_id, record)
-            if len(heap) < limit_val:
-                heapq.heappush(heap, entry)
-            else:
-                if entry[0] > heap[0][0]:
-                    heapq.heapreplace(heap, entry)
-        heap.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        return [{"record_id": record_id, "record": record} for _ts, record_id, record in heap]
+            out.append({"record_id": str(record_id), "record": record})
+            if len(out) >= limit_val:
+                break
+        return out
 
     def delete(self, record_id: str) -> bool:
         self._ensure()
+        if self._read_only:
+            return False
         before = self._conn.total_changes
         self._conn.execute("DELETE FROM metadata WHERE id = ?", (record_id,))
+        self._conn.execute("DELETE FROM metadata_projection WHERE id = ?", (record_id,))
         self._conn.commit()
         return self._conn.total_changes > before
 
@@ -1388,6 +1642,8 @@ class EncryptedSQLiteStore:
         first_seen_ts: str | None = None,
     ) -> None:
         self._ensure()
+        if self._read_only:
+            return
         payload = {
             "value": value,
             "kind": kind,
