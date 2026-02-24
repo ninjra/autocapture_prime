@@ -1,0 +1,8 @@
+# Intentionally tracked binary assets.
+# Keep this list minimal and explicit.
+docs/test sample/Screenshot 2026-02-02 113519.png
+docs/test sample/Screenshot_chunk8_latest.png
+docs/test sample/Screenshot_latest_layout.png
+tests/fixtures/chronicle_spool/session_test-0001/frames/frame_000000.png
+tests/fixtures/chronicle_spool/session_test-0001/frames/frame_000001.png
+tests/fixtures/migrations/v1/data_dir/media/sample.bin

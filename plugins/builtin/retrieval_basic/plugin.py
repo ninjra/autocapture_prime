@@ -66,7 +66,7 @@ class RetrievalStrategy(PluginBase):
             max_return = 25
         max_return = max(1, max_return)
         trace: list[dict[str, Any]] = []
-        scan_stats: dict[str, int] = {"records_scanned": 0}
+        scan_stats: dict[str, Any] = {"records_scanned": 0}
         candidate_ids = _time_window_candidates(store, time_window, self._config)
         if candidate_ids is not None:
             trace.append(
@@ -99,6 +99,29 @@ class RetrievalStrategy(PluginBase):
                     pass
             latest_scan_limit = max(0, latest_scan_limit)
             latest_scan_record_types = retrieval_cfg.get("latest_scan_record_types")
+            try:
+                latest_scan_budget_ms = int(retrieval_cfg.get("latest_scan_budget_ms", 250) or 250)
+            except Exception:
+                latest_scan_budget_ms = 250
+            latest_scan_budget_ms = max(1, latest_scan_budget_ms)
+            try:
+                latest_scan_hard_cap = int(retrieval_cfg.get("latest_scan_hard_cap", 512) or 512)
+            except Exception:
+                latest_scan_hard_cap = 512
+            latest_scan_hard_cap = max(1, latest_scan_hard_cap)
+            env_latest_budget_ms = str(os.environ.get("AUTOCAPTURE_RETRIEVAL_LATEST_SCAN_BUDGET_MS") or "").strip()
+            if env_latest_budget_ms:
+                try:
+                    latest_scan_budget_ms = max(1, int(env_latest_budget_ms))
+                except Exception:
+                    pass
+            env_latest_hard_cap = str(os.environ.get("AUTOCAPTURE_RETRIEVAL_LATEST_SCAN_HARD_CAP") or "").strip()
+            if env_latest_hard_cap:
+                try:
+                    latest_scan_hard_cap = max(1, int(env_latest_hard_cap))
+                except Exception:
+                    pass
+            latest_scan_limit = min(latest_scan_limit, latest_scan_hard_cap)
             if candidate_ids is not None:
                 results = _scan_metadata(store, query_text, time_window, candidate_ids, stats=scan_stats, stop_after=max_return)
                 trace.append({"tier": "CANDIDATE_SCAN", "result_count": len(results)})
@@ -112,10 +135,20 @@ class RetrievalStrategy(PluginBase):
                     time_window,
                     limit=latest_scan_limit,
                     record_types=latest_scan_record_types,
+                    budget_ms=latest_scan_budget_ms,
                     stats=scan_stats,
                     stop_after=max_return,
                 )
-                trace.append({"tier": "LATEST_SCAN", "result_count": len(results), "limit": int(latest_scan_limit)})
+                latest_trace: dict[str, Any] = {
+                    "tier": "LATEST_SCAN",
+                    "result_count": len(results),
+                    "limit": int(latest_scan_limit),
+                    "budget_ms": int(latest_scan_budget_ms),
+                }
+                latest_reason = str(scan_stats.get("latest_scan_reason") or "").strip()
+                if latest_reason:
+                    latest_trace["reason"] = latest_reason
+                trace.append(latest_trace)
             else:
                 trace.append({"tier": "FULL_SCAN_SKIPPED", "reason": "disabled"})
         results.sort(
@@ -418,7 +451,7 @@ def _scan_metadata(
     time_window: dict[str, Any] | None,
     candidate_ids: set[str] | None = None,
     *,
-    stats: dict[str, int] | None = None,
+    stats: dict[str, Any] | None = None,
     stop_after: int = 0,
 ) -> list[dict[str, Any]]:
     query_lower = str(query_text or "").strip().lower()
@@ -454,12 +487,15 @@ def _scan_metadata_latest(
     *,
     limit: int,
     record_types: Any,
-    stats: dict[str, int] | None = None,
+    budget_ms: int = 250,
+    stats: dict[str, Any] | None = None,
     stop_after: int = 0,
 ) -> list[dict[str, Any]]:
     cap = max(0, int(limit or 0))
     if cap <= 0:
         return []
+    budget_ms_val = max(1, int(budget_ms or 0))
+    deadline = time.perf_counter() + (float(budget_ms_val) / 1000.0)
     if not hasattr(store, "latest"):
         return []
     record_type_list = _resolve_latest_scan_record_types(record_types)
@@ -472,7 +508,21 @@ def _scan_metadata_latest(
     query_tokens = _query_tokens(query_lower)
     rows_out: list[dict[str, Any]] = []
     seen: set[str] = set()
+
+    def _budget_exhausted() -> bool:
+        return time.perf_counter() >= deadline
+
+    def _mark_budget_exhausted() -> None:
+        if isinstance(stats, dict):
+            stats["latest_scan_reason"] = "LATEST_SCAN_BUDGET_EXCEEDED"
+
+    if isinstance(stats, dict):
+        stats["latest_scan_budget_ms"] = int(budget_ms_val)
+
     if _latest_filtered_scan_is_expensive(store):
+        if _budget_exhausted():
+            _mark_budget_exhausted()
+            return rows_out
         allowed_types = {str(item) for item in record_type_list}
         try:
             rows = store.latest(None, limit=cap)
@@ -509,8 +559,14 @@ def _scan_metadata_latest(
                         return rows_out
                 if len(seen) >= cap:
                     break
+                if _budget_exhausted():
+                    _mark_budget_exhausted()
+                    return rows_out
         return rows_out
     for record_type in record_type_list:
+        if _budget_exhausted():
+            _mark_budget_exhausted()
+            return rows_out
         try:
             rows = store.latest(str(record_type), limit=per_type)
         except Exception:
@@ -542,6 +598,9 @@ def _scan_metadata_latest(
                     return rows_out
             if len(seen) >= cap:
                 break
+            if _budget_exhausted():
+                _mark_budget_exhausted()
+                return rows_out
         if len(seen) >= cap:
             break
     return rows_out
@@ -559,9 +618,7 @@ def _latest_filtered_scan_is_expensive(store: Any) -> bool:
         if inner is None or inner is target:
             break
         target = inner
-    if bool(getattr(target, "_latest_filtered_expensive", False)):
-        return True
-    return str(target.__class__.__name__) in {"EncryptedSQLiteStore"}
+    return bool(getattr(target, "_latest_filtered_expensive", False))
 
 
 def _scan_metadata_match_row(
@@ -802,6 +859,7 @@ _DEFAULT_LATEST_SCAN_RECORD_TYPES = (
     "derived.text.ocr",
     "derived.text.vlm",
     "derived.sst.text",
+    "derived.sst.text.extra",
     "obs.uia.focus",
     "obs.uia.context",
     "obs.uia.operable",

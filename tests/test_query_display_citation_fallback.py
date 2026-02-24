@@ -16,6 +16,17 @@ class _MetaStore:
     def get(self, record_id: str, default: object | None = None) -> dict[str, object] | object | None:
         return self._rows.get(str(record_id), default)
 
+    def latest(self, record_type: str | None = None, *, limit: int = 10) -> list[dict[str, object]]:
+        out: list[dict[str, object]] = []
+        for record_id, row in self._rows.items():
+            if not isinstance(row, dict):
+                continue
+            if record_type is not None and str(row.get("record_type") or "").strip() != str(record_type):
+                continue
+            out.append({"record_id": str(record_id), "record": row})
+        out.reverse()
+        return out[: max(1, int(limit))]
+
 
 class QueryDisplayCitationFallbackTests(unittest.TestCase):
     def test_build_display_record_citation_uses_anchor_and_evidence_hash(self) -> None:
@@ -121,6 +132,101 @@ class QueryDisplayCitationFallbackTests(unittest.TestCase):
             self.assertEqual(str(citation.get("ledger_head") or ""), "h001")
             self.assertEqual(str(citation.get("evidence_hash") or ""), "frame_hash_2")
 
+    def test_add_display_backed_claim_uses_result_evidence_when_sources_missing(self) -> None:
+        evidence_id = "run/evidence.capture.frame/3"
+        metadata = _MetaStore(
+            {
+                evidence_id: {
+                    "record_type": "evidence.capture.frame",
+                    "content_hash": "frame_hash_3",
+                }
+            }
+        )
+        system = SimpleNamespace(
+            config={},
+            get=lambda name: metadata if name == "storage.metadata" else None,
+        )
+        answer_obj: dict[str, object] = {"state": "no_evidence", "claims": []}
+        result = {
+            "answer": {
+                "claims": [
+                    {
+                        "text": "seed",
+                        "citations": [
+                            {
+                                "evidence_id": evidence_id,
+                                "locator": {"record_id": evidence_id},
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+        query_mod._add_display_backed_claim_if_needed(  # noqa: SLF001
+            system=system,
+            answer_obj=answer_obj,
+            result=result,
+            display={"summary": "Detected focus on incident workspace."},
+            display_sources=[],
+        )
+        claims = answer_obj.get("claims", [])
+        self.assertTrue(isinstance(claims, list) and len(claims) == 1)
+        citation = claims[0]["citations"][0]
+        self.assertEqual(str(citation.get("evidence_id") or ""), evidence_id)
+
+    def test_add_display_backed_claim_falls_back_to_latest_citable_record(self) -> None:
+        derived_id = "run/derived.sst.text.extra/42"
+        metadata = _MetaStore(
+            {
+                derived_id: {
+                    "record_type": "derived.sst.text.extra",
+                    "content_hash": "derived_hash_42",
+                    "text": "window_title: Focused Ticket Window",
+                }
+            }
+        )
+        system = SimpleNamespace(
+            config={},
+            get=lambda name: metadata if name == "storage.metadata" else None,
+        )
+        answer_obj: dict[str, object] = {"state": "no_evidence", "claims": []}
+        query_mod._add_display_backed_claim_if_needed(  # noqa: SLF001
+            system=system,
+            answer_obj=answer_obj,
+            result={},
+            display={"summary": "Focused ticket window detected from metadata clues."},
+            display_sources=[],
+        )
+        claims = answer_obj.get("claims", [])
+        self.assertTrue(isinstance(claims, list) and len(claims) == 1)
+        citation = claims[0]["citations"][0]
+        self.assertEqual(str(citation.get("derived_id") or ""), derived_id)
+
+    def test_add_display_backed_claim_skips_indeterminate_summary(self) -> None:
+        evidence_id = "run/evidence.capture.frame/4"
+        metadata = _MetaStore(
+            {
+                evidence_id: {
+                    "record_type": "evidence.capture.frame",
+                    "content_hash": "frame_hash_4",
+                }
+            }
+        )
+        system = SimpleNamespace(
+            config={},
+            get=lambda name: metadata if name == "storage.metadata" else None,
+        )
+        answer_obj: dict[str, object] = {"state": "no_evidence", "claims": []}
+        query_mod._add_display_backed_claim_if_needed(  # noqa: SLF001
+            system=system,
+            answer_obj=answer_obj,
+            result={},
+            display={"summary": "Indeterminate: no verifiable evidence is available yet."},
+            display_sources=[{"record_id": evidence_id, "provider_id": "builtin.observation.graph"}],
+        )
+        claims = answer_obj.get("claims", [])
+        self.assertEqual(claims, [])
+
     def test_build_display_record_citation_accepts_allowed_derived_without_anchor(self) -> None:
         metadata = _MetaStore(
             {
@@ -197,6 +303,10 @@ class QueryDisplayCitationFallbackTests(unittest.TestCase):
         }
         self.assertFalse(bool(query_mod._display_is_sufficient_for_strict_state("hard_time_to_assignment", display)))  # noqa: SLF001
 
+    def test_allowed_claim_record_types_include_window_and_uia_evidence(self) -> None:
+        self.assertTrue(bool(query_mod._is_allowed_claim_record_type("evidence.window.meta")))  # noqa: SLF001
+        self.assertTrue(bool(query_mod._is_allowed_claim_record_type("evidence.uia.snapshot")))  # noqa: SLF001
+
     def test_display_strict_state_advanced_support_snippets_are_sufficient(self) -> None:
         display = {
             "summary": "Fallback extracted signals are available while structured advanced records are incomplete.",
@@ -216,6 +326,44 @@ class QueryDisplayCitationFallbackTests(unittest.TestCase):
             },
         }
         self.assertTrue(bool(query_mod._display_is_sufficient_for_strict_state("adv_window_inventory", display)))  # noqa: SLF001
+
+    def test_display_strict_state_adv_calendar_accepts_metadata_fallback(self) -> None:
+        display = {
+            "summary": "Calendar: January 2026; selected date=not_visible",
+            "bullets": [],
+            "fields": {
+                "month_year": "January 2026",
+                "selected_date": "not_visible",
+                "schedule_item_count": "0",
+            },
+        }
+        self.assertTrue(bool(query_mod._display_is_sufficient_for_strict_state("adv_calendar", display)))  # noqa: SLF001
+
+    def test_display_strict_state_generic_accepts_evidence_clues(self) -> None:
+        display = {
+            "summary": "window_title: Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476",
+            "bullets": ["evidence: window_process: msedge.exe"],
+            "fields": {"metadata_clue_count": "3"},
+        }
+        self.assertTrue(bool(query_mod._display_is_sufficient_for_strict_state("generic", display)))  # noqa: SLF001
+
+    def test_metadata_window_clues_extracts_window_and_uia_rows(self) -> None:
+        metadata = _MetaStore(
+            {
+                "run/evidence.window.meta/1": {
+                    "record_type": "evidence.window.meta",
+                    "window": {"title": "Focused Ticket Window", "process_path": "C:/Program Files/App/app.exe", "pid": 1234},
+                },
+                "run/evidence.uia.snapshot/1": {
+                    "record_type": "evidence.uia.snapshot",
+                    "window": {"title": "UIA Focused Window", "process_path": "C:/Program Files/App/uia.exe", "pid": 4321},
+                    "focus_path": [{"role": "button", "name": "View Details"}],
+                },
+            }
+        )
+        rows = query_mod._metadata_window_clues(metadata, limit=8)  # noqa: SLF001
+        self.assertTrue(any("window_title: Focused Ticket Window" in row for row in rows))
+        self.assertTrue(any("uia_window_title:" in row or "uia_focus:" in row for row in rows))
 
 
 if __name__ == "__main__":

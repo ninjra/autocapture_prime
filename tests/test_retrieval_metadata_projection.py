@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 from autocapture_nx.plugin_system.api import PluginContext
-from plugins.builtin.retrieval_basic.plugin import RetrievalStrategy, _scan_metadata
+from plugins.builtin.retrieval_basic.plugin import RetrievalStrategy, _scan_metadata, _scan_metadata_latest
 
 
 class _Store:
@@ -293,3 +293,117 @@ def test_retrieval_latest_scan_uses_single_pass_for_expensive_filtered_latest() 
         assert calls
         assert calls[0] is None
         assert all(call is None for call in calls)
+
+
+def test_scan_metadata_latest_enforces_budget_and_reason(monkeypatch) -> None:
+    class _Store:
+        def latest(self, record_type: str | None, limit: int = 100):  # noqa: ARG002
+            out: list[dict] = []
+            for idx in range(int(limit)):
+                out.append(
+                    {
+                        "record_id": f"run1/derived.text.ocr/{idx:04d}",
+                        "record": {
+                            "record_type": "derived.text.ocr",
+                            "ts_utc": "2026-02-22T01:02:03Z",
+                            "text": f"row {idx}",
+                        },
+                    }
+                )
+            return out
+
+    ticks = {"value": 0.0}
+
+    def _fake_perf_counter() -> float:
+        ticks["value"] += 0.02
+        return ticks["value"]
+
+    monkeypatch.setattr("plugins.builtin.retrieval_basic.plugin.time.perf_counter", _fake_perf_counter)
+    stats: dict[str, object] = {}
+    out = _scan_metadata_latest(
+        _Store(),
+        "nevermatches",
+        None,
+        limit=500,
+        record_types=["derived.text.ocr"],
+        budget_ms=50,
+        stats=stats,
+        stop_after=0,
+    )
+    assert out == []
+    assert str(stats.get("latest_scan_reason") or "") == "LATEST_SCAN_BUDGET_EXCEEDED"
+    assert int(stats.get("records_scanned", 0) or 0) < 500
+
+
+def test_scan_metadata_latest_defaults_include_sst_extra_docs() -> None:
+    class _Store:
+        def latest(self, record_type: str | None, limit: int = 100):  # noqa: ARG002
+            if record_type is None:
+                return []
+            if str(record_type) != "derived.sst.text.extra":
+                return []
+            return [
+                {
+                    "record_id": "run1/derived.sst.text.extra/1",
+                    "record": {
+                        "record_type": "derived.sst.text.extra",
+                        "ts_utc": "2026-02-24T01:02:03Z",
+                        "text": "Calendar panel month January 2026 and selected date February 2.",
+                    },
+                }
+            ]
+
+    out = _scan_metadata_latest(
+        _Store(),
+        "calendar month january 2026",
+        None,
+        limit=64,
+        record_types=None,
+        budget_ms=250,
+        stats={},
+        stop_after=0,
+    )
+    assert len(out) == 1
+    assert str(out[0].get("record_type") or "") == "derived.sst.text.extra"
+
+
+def test_retrieval_latest_scan_hard_cap_limits_candidates() -> None:
+    calls: list[int] = []
+
+    class _CapStore(_Store):
+        def latest(self, record_type: str | None, limit: int = 100):  # type: ignore[override]
+            calls.append(int(limit))
+            return []
+
+    store = _CapStore({})
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = {
+            "storage": {
+                "lexical_path": str(Path(tmp) / "lexical.db"),
+                "vector_path": str(Path(tmp) / "vector.db"),
+            },
+            "indexing": {"vector_backend": "sqlite"},
+            "retrieval": {
+                "vector_enabled": False,
+                "allow_full_scan": False,
+                "latest_scan_on_miss": True,
+                "latest_scan_limit": 2000,
+                "latest_scan_hard_cap": 17,
+                "attach_timelines": False,
+            },
+        }
+
+        def _cap(name: str):
+            if name == "storage.metadata":
+                return store
+            return None
+
+        ctx = PluginContext(config=cfg, get_capability=_cap, logger=lambda _m, _p=None: None)
+        retrieval = RetrievalStrategy("retrieval", ctx)
+        _ = retrieval.search("anything", time_window=None)
+        trace = retrieval.trace()
+        latest_rows = [row for row in trace if str(row.get("tier") or "") == "LATEST_SCAN"]
+        assert latest_rows
+        assert int(latest_rows[0].get("limit", 0) or 0) == 17
+        assert calls
+        assert max(calls) <= 17

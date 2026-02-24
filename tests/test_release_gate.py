@@ -62,8 +62,10 @@ def test_default_manifest_includes_required_release_steps() -> None:
     assert "gate_doctor" in ids
     assert "gate_full_repo_miss_matrix" in ids
     assert "gate_acceptance_coverage" in ids
+    assert "gate_queryability" in ids
     assert "validate_blueprint_spec" in ids
     assert "run_mod021_low_resource" in ids
+    assert "popup_go_no_go" in ids
     assert "run_real_corpus_readiness" in ids
     assert "gate_real_corpus_strict" in ids
 
@@ -75,6 +77,14 @@ def test_default_manifest_can_disable_real_corpus_steps() -> None:
     ids = {step.id for step in steps}
     assert "run_real_corpus_readiness" not in ids
     assert "gate_real_corpus_strict" not in ids
+
+
+def test_default_manifest_can_disable_popup_go_no_go() -> None:
+    mod = _load_module()
+    with mock.patch.dict(mod.os.environ, {"POPUP_GO_NO_GO_DISABLED": "1"}, clear=False):
+        steps = mod._default_manifest(sys.executable)
+    ids = {step.id for step in steps}
+    assert "popup_go_no_go" not in ids
 
 
 def test_run_release_gate_honors_max_steps(tmp_path: pathlib.Path) -> None:

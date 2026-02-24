@@ -61,6 +61,66 @@
           "indeterminate"
         ]
       }
+    },
+    {
+      "id": "POP_REG_06",
+      "query": "What is the currently focused top-level window title and which app/process owns it?",
+      "expected": {
+        "popup_ok": true,
+        "state": "ok",
+        "citations_min": 1,
+        "summary_disallow_tokens": [
+          "indeterminate"
+        ]
+      }
+    },
+    {
+      "id": "POP_REG_07",
+      "query": "List the top three most visually prominent applications on screen right now and include one cited clue for each.",
+      "expected": {
+        "popup_ok": true,
+        "state": "ok",
+        "citations_min": 1,
+        "summary_disallow_tokens": [
+          "indeterminate"
+        ]
+      }
+    },
+    {
+      "id": "POP_REG_08",
+      "query": "Extract every visible calendar date/time element shown in the right-side scheduling panel.",
+      "expected": {
+        "popup_ok": true,
+        "state": "ok",
+        "citations_min": 1,
+        "summary_disallow_tokens": [
+          "indeterminate"
+        ]
+      }
+    },
+    {
+      "id": "POP_REG_09",
+      "query": "Summarize the active ticket/task currently open, including ticket identifier and current workflow status if visible.",
+      "expected": {
+        "popup_ok": true,
+        "state": "ok",
+        "citations_min": 1,
+        "summary_disallow_tokens": [
+          "indeterminate"
+        ]
+      }
+    },
+    {
+      "id": "POP_REG_10",
+      "query": "In the communication list pane, count visible unread/new markers and name the first five senders/channels in display order.",
+      "expected": {
+        "popup_ok": true,
+        "state": "ok",
+        "citations_min": 1,
+        "summary_disallow_tokens": [
+          "indeterminate"
+        ]
+      }
     }
   ]
 }

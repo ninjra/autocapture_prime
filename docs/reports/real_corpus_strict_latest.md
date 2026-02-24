@@ -3,14 +3,14 @@
 - ok: `False`
 - matrix_total: `20`
 - matrix_evaluated: `20`
-- matrix_passed: `0`
-- matrix_failed: `20`
+- matrix_passed: `3`
+- matrix_failed: `17`
 - matrix_skipped: `0`
-- failure_reasons: `strict_matrix_failed_nonzero,query_contract_latency_p95_exceeded`
+- failure_reasons: `strict_matrix_failed_nonzero`
 - query_extractor_launch_total: `0`
 - query_schedule_extract_requests_total: `0`
 - query_raw_media_reads_total: `0`
-- query_latency_p95_ms: `20000.0`
+- query_latency_p95_ms: `483.596`
 
 ## Artifacts
 

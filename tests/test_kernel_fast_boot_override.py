@@ -1,9 +1,13 @@
 import json
+import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from autocapture_nx.kernel.config import ConfigPaths
+from autocapture_nx.kernel.instance_lock import acquire_instance_lock
 from autocapture_nx.kernel.loader import Kernel
 
 
@@ -93,7 +97,63 @@ class KernelFastBootOverrideTests(unittest.TestCase):
             self.assertIn("run_recovery", kernel.called)
             self.assertIn("run_integrity_sweep", kernel.called)
 
+    def test_boot_with_readonly_metadata_db_keeps_storage_capability(self) -> None:
+        if os.name == "nt":
+            self.skipTest("readonly chmod semantics differ on Windows")
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _paths(tmp)
+            data_dir = Path(tmp) / "data"
+            data_dir.mkdir(parents=True, exist_ok=True)
+            db_path = data_dir / "metadata.db"
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "CREATE TABLE metadata (id TEXT PRIMARY KEY, payload TEXT NOT NULL, record_type TEXT, ts_utc TEXT, run_id TEXT)"
+            )
+            conn.execute(
+                "CREATE TABLE entity_map (token TEXT PRIMARY KEY, value TEXT, kind TEXT, key_id TEXT, key_version INTEGER, first_seen_ts TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO metadata (id, payload, record_type, ts_utc, run_id) VALUES (?, ?, ?, ?, ?)",
+                ("run1/derived.test/1", "{\"v\":1}", "derived.test", "2026-02-24T00:00:00Z", "run1"),
+            )
+            conn.commit()
+            conn.close()
+            os.chmod(db_path, 0o444)
+
+            kernel = Kernel(paths, safe_mode=False)
+            system = kernel.boot(start_conductor=False, fast_boot=True)
+            try:
+                self.assertTrue(system.has("storage.metadata"))
+                store = system.get("storage.metadata")
+                rows = store.latest("derived.test", limit=1)
+                self.assertIsInstance(rows, list)
+            finally:
+                kernel.shutdown()
+
+    def test_manifest_write_readonly_error_is_fail_open(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _paths(tmp)
+            kernel = Kernel(paths, safe_mode=False)
+            with (
+                patch.dict(os.environ, {"AUTOCAPTURE_QUERY_METADATA_ONLY": "0"}, clear=False),
+                patch.object(Kernel, "_record_storage_manifest", side_effect=PermissionError("readonly manifest write denied")),
+            ):
+                system = kernel.boot(start_conductor=False, fast_boot=False)
+                self.assertIsNotNone(system)
+                self.assertTrue(system.has("event.builder"))
+            kernel.shutdown()
+
+    def test_shutdown_releases_instance_lock_after_partial_boot_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _paths(tmp)
+            kernel = Kernel(paths, safe_mode=False)
+            with patch.object(Kernel, "_record_storage_manifest", side_effect=RuntimeError("boom")):
+                with self.assertRaises(RuntimeError):
+                    kernel.boot(start_conductor=False, fast_boot=False)
+            kernel.shutdown()
+            lock = acquire_instance_lock(Path(tmp) / "data")
+            lock.close()
+
 
 if __name__ == "__main__":
     unittest.main()
-

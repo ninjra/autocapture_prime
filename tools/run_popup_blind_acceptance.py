@@ -35,6 +35,37 @@ def _utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
+def _percentile(samples: list[float], p: float) -> float:
+    if not samples:
+        return 0.0
+    values = sorted(float(x) for x in samples)
+    if len(values) == 1:
+        return float(values[0])
+    pct = min(100.0, max(0.0, float(p)))
+    pos = (pct / 100.0) * float(len(values) - 1)
+    lo = int(pos)
+    hi = min(lo + 1, len(values) - 1)
+    frac = pos - float(lo)
+    return float(values[lo] * (1.0 - frac) + values[hi] * frac)
+
+
+def _counter(rows: list[str]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for key in rows:
+        label = str(key or "").strip()
+        if not label:
+            continue
+        out[label] = int(out.get(label, 0) + 1)
+    return out
+
+
+def _top_counter_key(counts: dict[str, int]) -> str:
+    if not counts:
+        return ""
+    items = sorted(((int(v), str(k)) for k, v in counts.items()), key=lambda item: (-item[0], item[1]))
+    return str(items[0][1]) if items else ""
+
+
 def _read_cases(path: Path) -> list[dict[str, str]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     rows: list[dict[str, str]] = []
@@ -102,6 +133,45 @@ def _fetch_popup_token(base_url: str, timeout_s: float) -> str:
 class AcceptanceDecision:
     accepted: bool
     reasons: list[str]
+
+
+def _is_transport_failure(*, http_ok: bool, http_status: int, http_error: str, payload: dict[str, Any]) -> bool:
+    if not bool(http_ok):
+        return True
+    if int(http_status) <= 0:
+        return True
+    if int(http_status) >= 500:
+        return True
+    if str(http_error or "").strip():
+        return True
+    error_text = str(payload.get("error") or "").strip().casefold()
+    if error_text and ("timeout" in error_text or "upstream" in error_text):
+        return True
+    state = str(payload.get("state") or "").strip().casefold()
+    blocked = str(payload.get("processing_blocked_reason") or "").strip()
+    if state in {"degraded", "error"} and blocked:
+        return True
+    return False
+
+
+def _failure_class(
+    *,
+    accepted: bool,
+    http_ok: bool,
+    http_status: int,
+    http_error: str,
+    payload: dict[str, Any],
+) -> str:
+    if bool(accepted):
+        return "none"
+    if _is_transport_failure(
+        http_ok=bool(http_ok),
+        http_status=int(http_status),
+        http_error=str(http_error or ""),
+        payload=payload,
+    ):
+        return "transport"
+    return "answer_quality"
 
 
 def _evaluate_popup_payload(payload: dict[str, Any]) -> AcceptanceDecision:
@@ -181,16 +251,33 @@ def main(argv: list[str] | None = None) -> int:
         latency_ms = round((time.perf_counter() - started) * 1000.0, 3)
         payload = resp.get("json", {}) if isinstance(resp.get("json", {}), dict) else {}
         decision = _evaluate_popup_payload(payload)
+        http_ok = bool(resp.get("ok", False))
+        http_status = int(resp.get("status", 0) or 0)
+        http_error = str(resp.get("error") or "")
+        failure_class = _failure_class(
+            accepted=bool(decision.accepted),
+            http_ok=http_ok,
+            http_status=http_status,
+            http_error=http_error,
+            payload=payload,
+        )
+        failure_key = "accepted"
+        if failure_class == "transport":
+            failure_key = http_error or str(payload.get("processing_blocked_reason") or "") or str(payload.get("error") or "") or "transport_failure"
+        elif failure_class == "answer_quality":
+            failure_key = str((decision.reasons[0] if decision.reasons else "answer_quality_failure"))
         out_rows.append(
             {
                 "id": str(row.get("id") or ""),
                 "query": query,
                 "source": str(row.get("source") or ""),
                 "accepted": bool(decision.accepted),
+                "failure_class": failure_class,
+                "failure_key": str(failure_key),
                 "failure_reasons": list(decision.reasons),
-                "http_ok": bool(resp.get("ok", False)),
-                "http_status": int(resp.get("status", 0) or 0),
-                "http_error": str(resp.get("error") or ""),
+                "http_ok": http_ok,
+                "http_status": http_status,
+                "http_error": http_error,
                 "state": str(payload.get("state") or ""),
                 "summary": str(payload.get("summary") or ""),
                 "citations_count": len(payload.get("citations", [])) if isinstance(payload.get("citations", []), list) else 0,
@@ -202,6 +289,17 @@ def main(argv: list[str] | None = None) -> int:
 
     accepted_count = sum(1 for row in out_rows if bool(row.get("accepted", False)))
     failed_rows = [row for row in out_rows if not bool(row.get("accepted", False))]
+    latencies = [float(row.get("latency_ms", 0.0) or 0.0) for row in out_rows]
+    failure_class_counts = {
+        "transport": sum(1 for row in failed_rows if str(row.get("failure_class") or "") == "transport"),
+        "answer_quality": sum(1 for row in failed_rows if str(row.get("failure_class") or "") == "answer_quality"),
+    }
+    failure_key_counts = _counter([str(row.get("failure_key") or "") for row in failed_rows])
+    failure_reason_counts = _counter([str(reason) for row in failed_rows for reason in list(row.get("failure_reasons") or [])])
+    p50_ms = round(_percentile(latencies, 50.0), 3)
+    p95_ms = round(_percentile(latencies, 95.0), 3)
+    top_failure_class = _top_counter_key(failure_class_counts)
+    top_failure_key = _top_counter_key(failure_key_counts)
 
     output_path = Path(str(args.out).strip()) if str(args.out).strip() else Path("artifacts/query_acceptance") / f"blind_popup_{_utc_stamp()}.json"
     report = {
@@ -213,6 +311,15 @@ def main(argv: list[str] | None = None) -> int:
         "sample_count": len(out_rows),
         "accepted_count": int(accepted_count),
         "failed_count": int(len(failed_rows)),
+        "transport_failures_count": int(failure_class_counts["transport"]),
+        "answer_quality_failures_count": int(failure_class_counts["answer_quality"]),
+        "failure_class_counts": failure_class_counts,
+        "failure_key_counts": failure_key_counts,
+        "failure_reason_counts": failure_reason_counts,
+        "latency_p50_ms": float(p50_ms),
+        "latency_p95_ms": float(p95_ms),
+        "top_failure_class": str(top_failure_class),
+        "top_failure_key": str(top_failure_key),
         "rows": out_rows,
     }
     _write_json(output_path, report)
@@ -239,6 +346,8 @@ def main(argv: list[str] | None = None) -> int:
                     "state": str(row.get("state") or ""),
                     "citations_count": int(row.get("citations_count", 0) or 0),
                     "summary": str(row.get("summary") or ""),
+                    "failure_class": str(row.get("failure_class") or ""),
+                    "failure_key": str(row.get("failure_key") or ""),
                     "failure_reasons": list(row.get("failure_reasons") or []),
                 },
             }
@@ -254,6 +363,10 @@ def main(argv: list[str] | None = None) -> int:
         "sample_count": len(out_rows),
         "accepted_count": accepted_count,
         "failed_count": len(failed_rows),
+        "latency_p50_ms": float(p50_ms),
+        "latency_p95_ms": float(p95_ms),
+        "top_failure_class": str(top_failure_class),
+        "top_failure_key": str(top_failure_key),
     }
     print(json.dumps(summary, sort_keys=True))
     if bool(args.strict) and failed_rows:
