@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import asdict
@@ -42,6 +43,15 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
         else:
             merged[key] = value
     return merged
+
+
+def _env_true(name: str, default: bool = False) -> bool:
+    raw = str(os.environ.get(name) or "").strip().casefold()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
 
 
 _MISSING = object()
@@ -206,6 +216,55 @@ class KernelManager:
         self._kernel: Kernel | None = None
         self._system: Any | None = None
         self._last_error: str | None = None
+        self._last_error_monotonic: float = 0.0
+
+    def _missing_capability_error(self, error: str | None) -> bool:
+        text = str(error or "").strip()
+        return text.startswith("Missing capability:")
+
+    def _boot_retry_cooldown_s(self) -> float:
+        raw = str(os.environ.get("AUTOCAPTURE_QUERY_BOOT_RETRY_COOLDOWN_S") or "").strip()
+        try:
+            val = float(raw) if raw else 30.0
+        except Exception:
+            val = 30.0
+        return float(max(0.0, min(300.0, val)))
+
+    def _should_skip_boot_retry(self) -> bool:
+        if self._system is not None:
+            return False
+        if not self._missing_capability_error(self._last_error):
+            return False
+        if self._last_error_monotonic <= 0.0:
+            return False
+        elapsed = time.monotonic() - float(self._last_error_monotonic)
+        return elapsed < self._boot_retry_cooldown_s()
+
+    def warm_boot(self) -> dict[str, Any]:
+        if not self._persistent:
+            return {"ok": False, "error": "non_persistent_kernel"}
+        with self._lock:
+            if self._system is not None:
+                return {"ok": True, "cached": True}
+            if self._should_skip_boot_retry():
+                return {"ok": False, "error": str(self._last_error or "kernel_boot_failed"), "cached": True}
+            kernel = Kernel(self._paths, safe_mode=self._safe_mode)
+            self._kernel = kernel
+            try:
+                self._system = kernel.boot(start_conductor=self._start_conductor)
+                self._last_error = None
+                self._last_error_monotonic = 0.0
+                return {"ok": True, "cached": False}
+            except Exception as exc:
+                try:
+                    kernel.shutdown()
+                except Exception:
+                    pass
+                self._kernel = None
+                self._system = None
+                self._last_error = str(exc)
+                self._last_error_monotonic = time.monotonic()
+                return {"ok": False, "error": self._last_error, "cached": False}
 
     @contextmanager
     def session(self) -> Iterator[Any]:
@@ -220,14 +279,24 @@ class KernelManager:
             return
         with self._lock:
             if self._kernel is None or self._system is None:
-                self._kernel = Kernel(self._paths, safe_mode=self._safe_mode)
+                if self._should_skip_boot_retry():
+                    yield None
+                    return
+                kernel = Kernel(self._paths, safe_mode=self._safe_mode)
+                self._kernel = kernel
                 try:
-                    self._system = self._kernel.boot(start_conductor=self._start_conductor)
+                    self._system = kernel.boot(start_conductor=self._start_conductor)
                     self._last_error = None
+                    self._last_error_monotonic = 0.0
                 except Exception as exc:
+                    try:
+                        kernel.shutdown()
+                    except Exception:
+                        pass
                     self._kernel = None
                     self._system = None
                     self._last_error = str(exc)
+                    self._last_error_monotonic = time.monotonic()
                     yield None
                     return
         try:
@@ -254,6 +323,7 @@ class KernelManager:
             self._kernel = None
             self._system = None
             self._last_error = None
+            self._last_error_monotonic = 0.0
 
 
 class UXFacade:
@@ -282,6 +352,19 @@ class UXFacade:
         self._paused_until_utc: str | None = None
         self._history_lock = threading.Lock()
         self._auto_start_capture(auto_start_capture)
+        self._warm_query_runtime()
+
+    def _warm_query_runtime(self) -> None:
+        if not self._persistent:
+            return
+        if not _env_true("AUTOCAPTURE_QUERY_METADATA_ONLY", default=False):
+            return
+        if not _env_true("AUTOCAPTURE_QUERY_WARM_BOOT", default=False):
+            return
+        try:
+            _ = self._kernel_mgr.warm_boot()
+        except Exception:
+            return
 
     def _auto_start_capture(self, explicit: bool | None) -> None:
         if not self._persistent:
@@ -990,8 +1073,131 @@ class UXFacade:
         record_operator_action(config=self._config, action="rollback-locks", payload={"snapshot_path": snapshot_path})
         return result
 
+    def _kernel_boot_failure_query_result(self, text: str, error: str | None) -> dict[str, Any]:
+        detail = str(error or "kernel_boot_failed").strip() or "kernel_boot_failed"
+        return {
+            "ok": False,
+            "error": "kernel_boot_failed",
+            "query": str(text or ""),
+            "answer": {
+                "state": "degraded",
+                "summary": "Query unavailable because runtime boot failed.",
+                "display": {
+                    "summary": "Query unavailable because runtime boot failed.",
+                    "topic": "runtime",
+                    "confidence_pct": 0.0,
+                    "bullets": [
+                        "Kernel boot failed before query execution.",
+                        f"detail: {detail[:240]}",
+                    ],
+                },
+                "claims": [],
+            },
+            "processing": {
+                "extraction": {
+                    "allowed": False,
+                    "ran": False,
+                    "blocked": True,
+                    "blocked_reason": "kernel_boot_failed",
+                    "scheduled_extract_job_id": "",
+                },
+                "query_trace": {
+                    "query_run_id": f"qry_boot_fail_{uuid.uuid4().hex[:12]}",
+                    "stage_ms": {"total": 0.0},
+                    "error": "kernel_boot_failed",
+                    "error_detail": detail,
+                },
+            },
+            "scheduled_extract_job_id": "",
+        }
+
+    def _missing_query_capabilities_result(self, text: str, missing: list[str]) -> dict[str, Any]:
+        missing_caps = [str(item).strip() for item in missing if str(item).strip()]
+        return {
+            "ok": False,
+            "error": "query_capability_missing",
+            "query": str(text or ""),
+            "answer": {
+                "state": "degraded",
+                "summary": "Query unavailable because required capabilities are missing.",
+                "display": {
+                    "summary": "Query unavailable because required capabilities are missing.",
+                    "topic": "runtime",
+                    "confidence_pct": 0.0,
+                    "bullets": [
+                        "Required query capabilities are unavailable.",
+                        f"missing: {', '.join(missing_caps[:8])}",
+                    ],
+                },
+                "claims": [],
+            },
+            "processing": {
+                "extraction": {
+                    "allowed": False,
+                    "ran": False,
+                    "blocked": True,
+                    "blocked_reason": "query_capability_missing",
+                    "scheduled_extract_job_id": "",
+                },
+                "query_trace": {
+                    "query_run_id": f"qry_cap_missing_{uuid.uuid4().hex[:12]}",
+                    "stage_ms": {"total": 0.0},
+                    "error": "query_capability_missing",
+                    "missing_capabilities": missing_caps,
+                },
+            },
+            "scheduled_extract_job_id": "",
+        }
+
+    @staticmethod
+    def _missing_capabilities_from_error(error: str | None) -> list[str]:
+        text = str(error or "").strip()
+        if not text:
+            return []
+        prefix = "Missing capability:"
+        if not text.startswith(prefix):
+            return []
+        raw = str(text[len(prefix) :]).strip()
+        raw = raw.split(" plugin_load_failures=", 1)[0].strip()
+        raw = raw.rstrip(".")
+        if not raw:
+            return []
+        out: list[str] = []
+        seen: set[str] = set()
+        for part in raw.split(","):
+            cap = str(part or "").strip()
+            if not cap or cap in seen:
+                continue
+            seen.add(cap)
+            out.append(cap)
+        return out
+
     def query(self, text: str, *, schedule_extract: bool = False) -> dict[str, Any]:
         with self._kernel_mgr.session() as system:
+            if system is None:
+                boot_error = self._kernel_mgr.last_error()
+                missing = self._missing_capabilities_from_error(boot_error)
+                if missing:
+                    return self._missing_query_capabilities_result(text, missing)
+                return self._kernel_boot_failure_query_result(text, boot_error)
+            required_caps = (
+                "storage.metadata",
+                "retrieval.strategy",
+                "answer.builder",
+                "time.intent_parser",
+            )
+            missing: list[str] = []
+            for capability in required_caps:
+                try:
+                    if hasattr(system, "has"):
+                        if not bool(system.has(capability)):
+                            missing.append(capability)
+                            continue
+                    _ = system.get(capability)
+                except Exception:
+                    missing.append(capability)
+            if missing:
+                return self._missing_query_capabilities_result(text, missing)
             _ = schedule_extract
             return run_query(system, text, schedule_extract=False)
 
