@@ -1176,9 +1176,9 @@ class UXFacade:
         with self._kernel_mgr.session() as system:
             if system is None:
                 boot_error = self._kernel_mgr.last_error()
-                missing = self._missing_capabilities_from_error(boot_error)
-                if missing:
-                    return self._missing_query_capabilities_result(text, missing)
+                missing_caps_boot = self._missing_capabilities_from_error(boot_error)
+                if missing_caps_boot:
+                    return self._missing_query_capabilities_result(text, missing_caps_boot)
                 return self._kernel_boot_failure_query_result(text, boot_error)
             required_caps = (
                 "storage.metadata",
@@ -1186,18 +1186,18 @@ class UXFacade:
                 "answer.builder",
                 "time.intent_parser",
             )
-            missing: list[str] = []
+            missing_caps: list[str] = []
             for capability in required_caps:
                 try:
                     if hasattr(system, "has"):
                         if not bool(system.has(capability)):
-                            missing.append(capability)
+                            missing_caps.append(capability)
                             continue
                     _ = system.get(capability)
                 except Exception:
-                    missing.append(capability)
-            if missing:
-                return self._missing_query_capabilities_result(text, missing)
+                    missing_caps.append(capability)
+            if missing_caps:
+                return self._missing_query_capabilities_result(text, missing_caps)
             _ = schedule_extract
             return run_query(system, text, schedule_extract=False)
 

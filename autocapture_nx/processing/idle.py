@@ -843,10 +843,13 @@ class IdleProcessor:
         if not missing:
             return True
         # Fail-open: if snapshot is unavailable we do not block stage1 completeness.
-        metadata = self._metadata if hasattr(self, "_metadata") and isinstance(self._metadata, dict) else None
-        if metadata is None:
+        metadata_get = getattr(self._metadata, "get", None)
+        if not callable(metadata_get):
             return True
-        snapshot_value = metadata.get(uia_record_id, None)
+        try:
+            snapshot_value = metadata_get(uia_record_id, None)
+        except Exception:
+            return True
         snapshot = _uia_extract_snapshot_dict(snapshot_value)
         if not isinstance(snapshot, dict):
             return True
@@ -861,8 +864,14 @@ class IdleProcessor:
             return False
         if _is_missing_metadata_record(retention_marker):
             return False
-        metadata = self._metadata if hasattr(self, "_metadata") and isinstance(self._metadata, dict) else None
-        record_raw = metadata.get(record_id, {}) if isinstance(metadata, dict) else {}
+        metadata_get = getattr(self._metadata, "get", None)
+        if callable(metadata_get):
+            try:
+                record_raw = metadata_get(record_id, {})
+            except Exception:
+                record_raw = {}
+        else:
+            record_raw = {}
         record = record_raw if isinstance(record_raw, dict) else {}
         if str(record.get("record_type") or "") == "evidence.capture.frame":
             if not bool(retention_marker.get("stage1_contract_validated", False)):
