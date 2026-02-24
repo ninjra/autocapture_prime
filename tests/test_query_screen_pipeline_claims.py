@@ -129,7 +129,7 @@ class _FakeSystem:
 
 
 class QueryScreenPipelineClaimsTests(unittest.TestCase):
-    def test_builds_cited_custom_claims_and_persists_derived_row(self) -> None:
+    def test_raw_off_false_disables_query_time_screen_pipeline(self) -> None:
         system = _FakeSystem()
         metadata = _FakeMetadata()
         claims, debug, err = _run_screen_pipeline_custom_claims(
@@ -141,16 +141,9 @@ class QueryScreenPipelineClaimsTests(unittest.TestCase):
             anchor_ref="anchor123",
         )
         self.assertIsNone(err)
-        self.assertTrue(bool(debug.get("enabled")))
-        self.assertGreaterEqual(int(debug.get("claims_built", 0)), 1)
-        self.assertEqual(len(claims), 1)
-        citation = claims[0]["citations"][0]
-        self.assertEqual(citation.get("source"), "screen_pipeline")
-        derived_id = str(citation.get("derived_id") or "")
-        self.assertTrue(derived_id.startswith("run/derived.sst.text.extra/screen_answer_"))
-        derived = metadata.get(derived_id, {})
-        self.assertEqual(str(derived.get("record_type") or ""), "derived.sst.text.extra")
-        self.assertEqual(str(derived.get("provider_id") or ""), "builtin.screen.answer.v1")
+        self.assertEqual(claims, [])
+        self.assertFalse(bool(debug.get("enabled")))
+        self.assertEqual(str(debug.get("reason") or ""), "raw_off_enforced")
 
     def test_raw_off_default_disables_query_time_screen_pipeline(self) -> None:
         class _RawOffSystem(_FakeSystem):

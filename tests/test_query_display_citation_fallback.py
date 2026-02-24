@@ -163,6 +163,32 @@ class QueryDisplayCitationFallbackTests(unittest.TestCase):
         }
         self.assertTrue(bool(query_mod._display_is_sufficient_for_strict_state("adv_incident", display)))  # noqa: SLF001
 
+    def test_display_strict_state_adv_incident_accepts_complete_fields(self) -> None:
+        display = {
+            "summary": "Incident email: subject=Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476; sender=Permian Resources Service Desk; domain=permian.xyz.com",
+            "bullets": ["action_buttons: COMPLETE, VIEW DETAILS"],
+            "fields": {
+                "subject": "Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476",
+                "sender_display": "Permian Resources Service Desk",
+                "sender_domain": "permian.xyz.com",
+                "action_buttons": "COMPLETE|VIEW DETAILS",
+            },
+        }
+        self.assertTrue(bool(query_mod._display_is_sufficient_for_strict_state("adv_incident", display)))  # noqa: SLF001
+
+    def test_display_strict_state_adv_incident_rejects_missing_primary_button(self) -> None:
+        display = {
+            "summary": "Incident email: subject=Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476; sender=Permian Resources Service Desk; domain=permian.xyz.com",
+            "bullets": ["action_buttons: COMPLETE"],
+            "fields": {
+                "subject": "Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476",
+                "sender_display": "Permian Resources Service Desk",
+                "sender_domain": "permian.xyz.com",
+                "action_buttons": "COMPLETE",
+            },
+        }
+        self.assertFalse(bool(query_mod._display_is_sufficient_for_strict_state("adv_incident", display)))  # noqa: SLF001
+
     def test_display_strict_state_hard_heuristic_rejects_indeterminate(self) -> None:
         display = {
             "summary": "Indeterminate: missing evidence.",

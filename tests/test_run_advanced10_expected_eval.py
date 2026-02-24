@@ -417,6 +417,231 @@ class RunAdvanced10ExpectedEvalTests(unittest.TestCase):
         self.assertTrue(eval_out["evaluated"])
         self.assertTrue(eval_out["passed"])
 
+    def test_true_strict_requires_answer_state_ok(self) -> None:
+        mod = _load_module()
+        case = {"id": "Q2", "question": "What is the focused window?"}
+        result = {
+            "answer": {
+                "state": "degraded",
+                "display": {"summary": "Focused window: Outlook VDI", "bullets": [], "fields": {"focused_window": "Outlook VDI"}},
+            },
+            "processing": {
+                "metadata_only_query": True,
+                "promptops_used": True,
+                "hard_vlm": {"fields": {}},
+                "attribution": {"providers": [{"provider_id": "builtin.observation.graph", "contribution_bp": 10000}]},
+            },
+        }
+        eval_out = mod._evaluate_expected(
+            case,
+            result,
+            result["answer"]["display"]["summary"],
+            [],
+            strict_expected_answer=True,
+            enforce_true_strict=True,
+        )
+        self.assertTrue(eval_out["evaluated"])
+        self.assertFalse(eval_out["passed"])
+        checks = eval_out.get("checks", [])
+        self.assertTrue(any(isinstance(c, dict) and c.get("key") == "answer_state_ok" and not bool(c.get("present")) for c in checks))
+
+    def test_true_strict_first_five_visible_requires_five_rows(self) -> None:
+        mod = _load_module()
+        case = {"id": "Q3", "question": "What are the first 5 visible items in the list?"}
+        result = {
+            "answer": {
+                "state": "ok",
+                "display": {
+                    "summary": "Visible rows: 3",
+                    "bullets": ["1. one", "2. two", "3. three"],
+                    "fields": {"visible_row_count": 3},
+                },
+            },
+            "processing": {
+                "metadata_only_query": True,
+                "promptops_used": True,
+                "hard_vlm": {"fields": {}},
+                "attribution": {"providers": [{"provider_id": "builtin.observation.graph", "contribution_bp": 10000}]},
+            },
+        }
+        eval_out = mod._evaluate_expected(
+            case,
+            result,
+            result["answer"]["display"]["summary"],
+            result["answer"]["display"]["bullets"],
+            strict_expected_answer=True,
+            enforce_true_strict=True,
+        )
+        self.assertTrue(eval_out["evaluated"])
+        self.assertFalse(eval_out["passed"])
+        checks = eval_out.get("checks", [])
+        self.assertTrue(
+            any(
+                isinstance(c, dict)
+                and c.get("key") == "first_five_visible_rows_present"
+                and int(c.get("actual_count") or 0) == 3
+                and not bool(c.get("present"))
+                for c in checks
+            )
+        )
+
+    def test_true_strict_first_five_visible_word_form_requires_five_rows(self) -> None:
+        mod = _load_module()
+        case = {"id": "GQ6", "question": "Return the first five visible rows in display order."}
+        result = {
+            "answer": {
+                "state": "ok",
+                "display": {
+                    "summary": "Visible rows: 4",
+                    "bullets": ["1. one", "2. two", "3. three", "4. four"],
+                    "fields": {"visible_row_count": 4},
+                },
+            },
+            "processing": {
+                "metadata_only_query": True,
+                "promptops_used": True,
+                "hard_vlm": {"fields": {}},
+                "attribution": {"providers": [{"provider_id": "builtin.observation.graph", "contribution_bp": 10000}]},
+            },
+        }
+        eval_out = mod._evaluate_expected(
+            case,
+            result,
+            result["answer"]["display"]["summary"],
+            result["answer"]["display"]["bullets"],
+            strict_expected_answer=True,
+            enforce_true_strict=True,
+        )
+        self.assertTrue(eval_out["evaluated"])
+        self.assertFalse(eval_out["passed"])
+        checks = eval_out.get("checks", [])
+        self.assertTrue(
+            any(
+                isinstance(c, dict)
+                and c.get("key") == "first_five_visible_rows_present"
+                and int(c.get("actual_count") or 0) == 4
+                and not bool(c.get("present"))
+                for c in checks
+            )
+        )
+
+    def test_true_strict_last_two_messages_require_timestamps(self) -> None:
+        mod = _load_module()
+        case = {"id": "Q4", "question": "What are the last two visible messages?"}
+        result = {
+            "answer": {
+                "state": "ok",
+                "display": {
+                    "summary": "Last two visible messages listed",
+                    "bullets": ["1. alice: hello", "2. bob: acknowledged"],
+                    "fields": {"message_count": 2},
+                },
+            },
+            "processing": {
+                "metadata_only_query": True,
+                "promptops_used": True,
+                "hard_vlm": {"fields": {}},
+                "attribution": {"providers": [{"provider_id": "builtin.observation.graph", "contribution_bp": 10000}]},
+            },
+        }
+        eval_out = mod._evaluate_expected(
+            case,
+            result,
+            result["answer"]["display"]["summary"],
+            result["answer"]["display"]["bullets"],
+            strict_expected_answer=True,
+            enforce_true_strict=True,
+        )
+        self.assertTrue(eval_out["evaluated"])
+        self.assertFalse(eval_out["passed"])
+        checks = eval_out.get("checks", [])
+        self.assertTrue(
+            any(
+                isinstance(c, dict)
+                and c.get("key") == "last_two_visible_messages_have_timestamps"
+                and not bool(c.get("present"))
+                for c in checks
+            )
+        )
+
+    def test_true_strict_q9_fails_on_summary_support_count_mismatch(self) -> None:
+        mod = _load_module()
+        case = {"id": "Q9", "question": "How many red/green console lines?"}
+        result = {
+            "answer": {
+                "state": "ok",
+                "display": {
+                    "summary": "Console line colors: count_red=8, count_green=16, count_other=0",
+                    "bullets": ["support: red_count=9 green_count=16 other_count=0"],
+                    "fields": {"red_count": "8", "green_count": "16", "other_count": "0"},
+                },
+            },
+            "processing": {
+                "metadata_only_query": True,
+                "promptops_used": True,
+                "hard_vlm": {"fields": {}},
+                "attribution": {"providers": [{"provider_id": "builtin.observation.graph", "contribution_bp": 10000}]},
+            },
+        }
+        eval_out = mod._evaluate_expected(
+            case,
+            result,
+            result["answer"]["display"]["summary"],
+            result["answer"]["display"]["bullets"],
+            strict_expected_answer=True,
+            enforce_true_strict=True,
+        )
+        self.assertTrue(eval_out["evaluated"])
+        self.assertFalse(eval_out["passed"])
+        checks = eval_out.get("checks", [])
+        self.assertTrue(
+            any(
+                isinstance(c, dict)
+                and c.get("key") == "q9_summary_support_count_consistency"
+                and not bool(c.get("present"))
+                for c in checks
+            )
+        )
+
+    def test_true_strict_q10_fails_on_malformed_active_tab(self) -> None:
+        mod = _load_module()
+        case = {"id": "Q10", "question": "What is the active tab?"}
+        result = {
+            "answer": {
+                "state": "ok",
+                "display": {
+                    "summary": "Browser tabs",
+                    "bullets": ["1. active_tab=http://mail.example.com"],
+                    "fields": {"active_tab": "http://mail.example.com"},
+                },
+            },
+            "processing": {
+                "metadata_only_query": True,
+                "promptops_used": True,
+                "hard_vlm": {"fields": {}},
+                "attribution": {"providers": [{"provider_id": "builtin.observation.graph", "contribution_bp": 10000}]},
+            },
+        }
+        eval_out = mod._evaluate_expected(
+            case,
+            result,
+            result["answer"]["display"]["summary"],
+            result["answer"]["display"]["bullets"],
+            strict_expected_answer=True,
+            enforce_true_strict=True,
+        )
+        self.assertTrue(eval_out["evaluated"])
+        self.assertFalse(eval_out["passed"])
+        checks = eval_out.get("checks", [])
+        self.assertTrue(
+            any(
+                isinstance(c, dict)
+                and c.get("key") == "q10_active_tab_value_well_formed"
+                and not bool(c.get("present"))
+                for c in checks
+            )
+        )
+
     def test_q_series_metadata_only_enforcement_uses_structured_display(self) -> None:
         mod = _load_module()
         case = {"id": "Q1"}

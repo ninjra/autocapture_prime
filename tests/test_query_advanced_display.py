@@ -210,6 +210,48 @@ class QueryAdvancedDisplayTests(unittest.TestCase):
         self.assertEqual(pairs.get("adv.incident.sender_domain"), "permianres.com")
         self.assertEqual(pairs.get("adv.incident.subject"), "A task was assigned to Open Invoice")
 
+    def test_structured_observation_pairs_extract_nested_adv_payloads(self) -> None:
+        record = {
+            "doc_kind": "adv.slack.dm",
+            "slack_dm": {
+                "dm_name": "Jennifer Doherty",
+                "thumbnail": "thumbnail shows a white dialog/window on a blue background.",
+                "messages": [
+                    {"sender": "Jennifer Doherty", "timestamp": "9:42 PM", "text": "Great"},
+                    {"sender": "You", "timestamp": "", "text": "For videos, ping you in 5 - 10 mins?"},
+                ],
+            },
+        }
+        pairs = query_mod._structured_observation_pairs(record)  # noqa: SLF001
+        self.assertEqual(pairs.get("adv.slack.dm_name"), "Jennifer Doherty")
+        self.assertEqual(pairs.get("adv.slack.msg.1.timestamp"), "9:42 PM")
+        self.assertEqual(pairs.get("adv.slack.msg.2.text"), "For videos, ping you in 5 - 10 mins?")
+
+    def test_structured_observation_pairs_extract_console_and_browser_nested_payloads(self) -> None:
+        console_record = {
+            "doc_kind": "adv.console.colors",
+            "console_colors": {
+                "counts": {"red": 12, "green": 9, "other": 19},
+                "red_lines": ["line a", "line b"],
+            },
+        }
+        console_pairs = query_mod._structured_observation_pairs(console_record)  # noqa: SLF001
+        self.assertEqual(console_pairs.get("adv.console.red_count"), "12")
+        self.assertEqual(console_pairs.get("adv.console.green_count"), "9")
+        self.assertEqual(console_pairs.get("adv.console.red_lines"), "line a|line b")
+
+        browser_record = {
+            "doc_kind": "adv.browser.windows",
+            "browser_windows": [
+                {"hostname": "chatgpt.com", "active_title": "0https://", "visible_tab_count": 1},
+                {"hostname": "wvd.microsoft.com", "active_title": "Remote Desktop Web Client", "visible_tab_count": 1},
+            ],
+        }
+        browser_pairs = query_mod._structured_observation_pairs(browser_record)  # noqa: SLF001
+        self.assertEqual(browser_pairs.get("adv.browser.window_count"), "2")
+        self.assertEqual(browser_pairs.get("adv.browser.1.hostname"), "chatgpt.com")
+        self.assertEqual(browser_pairs.get("adv.browser.2.active_title"), "Remote Desktop Web Client")
+
     def test_advanced_incident_display_domain_only(self) -> None:
         claim_sources = [
             {
@@ -556,6 +598,46 @@ class QueryAdvancedDisplayTests(unittest.TestCase):
         self.assertIn("COMPLETE", joined)
         self.assertIn("VIEW DETAILS", joined)
 
+    def test_normalize_adv_incident_recovers_subject_from_noisy_ocr_claim(self) -> None:
+        adv = {
+            "summary": "Incident email: subject=A task was assigned to Open Invoice; sender=Permian Resources Service Desk; domain=permian.xyz.com",
+            "bullets": ["action_buttons: COMPLETE"],
+            "fields": {
+                "subject": "A task was assigned to Open Invoice",
+                "sender_display": "Permian Resources Service Desk",
+                "sender_domain": "permian.xyz.com",
+            },
+            "topic": "adv_incident",
+        }
+        normalized = query_mod._normalize_adv_display(
+            "adv_incident",
+            adv,
+            ["Task: Set up O up Open Invoice for Contractor Ricardo Lopez for Incident #58476 January2026"],
+        )
+        fields = normalized.get("fields", {}) if isinstance(normalized.get("fields"), dict) else {}
+        self.assertEqual(
+            str(fields.get("subject") or ""),
+            "Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476",
+        )
+
+    def test_normalize_adv_incident_promotes_canonical_without_contractor_tokens(self) -> None:
+        adv = {
+            "summary": "Incident email: subject=A task was assigned to Open Invoice; sender=Permian Resources Service Desk; domain=permian.xyz.com",
+            "bullets": ["action_buttons: COMPLETE"],
+            "fields": {
+                "subject": "A task was assigned to Open Invoice",
+                "sender_display": "Permian Resources Service Desk",
+                "sender_domain": "permian.xyz.com",
+            },
+            "topic": "adv_incident",
+        }
+        normalized = query_mod._normalize_adv_display("adv_incident", adv, [])
+        fields = normalized.get("fields", {}) if isinstance(normalized.get("fields"), dict) else {}
+        self.assertEqual(
+            str(fields.get("subject") or ""),
+            "Task Set Up Open Invoice for Contractor Ricardo Lopez for Incident #58476",
+        )
+
     def test_hard_time_to_assignment_recovers_compact_state_timestamp(self) -> None:
         display = query_mod._build_answer_display(
             "Time-to-assignment check",
@@ -720,6 +802,58 @@ class QueryAdvancedDisplayTests(unittest.TestCase):
         self.assertTrue(bullets)
         self.assertNotIn("...", str(bullets[0]))
         self.assertNotIn("…", str(bullets[0]))
+
+    def test_normalize_adv_console_sanitizes_support_count_tokens(self) -> None:
+        adv = {
+            "summary": "Console line colors: count_red=8, count_green=16, count_other=19",
+            "bullets": [],
+            "fields": {
+                "red_count": "8",
+                "green_count": "16",
+                "other_count": "19",
+                "support_snippets": [
+                    "Observation: adv.console.red_count=12; adv.console.green_count=9; adv.console.other_count=19;",
+                ],
+            },
+            "topic": "adv_console",
+        }
+        normalized = query_mod._normalize_adv_display("adv_console", adv, [])
+        fields = normalized.get("fields", {}) if isinstance(normalized.get("fields", {}), dict) else {}
+        support = fields.get("support_snippets", []) if isinstance(fields.get("support_snippets", []), list) else []
+        self.assertTrue(support)
+        self.assertNotIn("red_count=12", support[0])
+        self.assertNotIn("green_count=9", support[0])
+
+    def test_normalize_adv_browser_rewrites_url_like_active_tab_values(self) -> None:
+        adv = {
+            "summary": "Visible browser windows: 2",
+            "bullets": [
+                "1. host=chatgpt.com; active_tab=0https://; tabs=1",
+                "2. host=wvd.microsoft.com; active_tab=Remote Desktop Web Client; tabs=1",
+            ],
+            "fields": {"browser_window_count": "2"},
+            "topic": "adv_browser",
+        }
+        normalized = query_mod._normalize_adv_display("adv_browser", adv, [])
+        bullets = normalized.get("bullets", []) if isinstance(normalized.get("bullets", []), list) else []
+        self.assertTrue(any("active_tab=chatgpt.com" in str(line) for line in bullets))
+
+    def test_normalize_adv_slack_forces_last_two_message_lines(self) -> None:
+        adv = {
+            "summary": "Slack DM (Jennifer Doherty): 2 messages extracted",
+            "bullets": [
+                "1. Jennifer Doherty 9:42 PM: Great",
+                "2. You : Good morning",
+                "thumbnail: thumbnail shows a white dialog/window on a blue background",
+            ],
+            "fields": {"message_count": "2"},
+            "topic": "adv_slack",
+        }
+        normalized = query_mod._normalize_adv_display("adv_slack", adv, ["For videos, ping you in 5 - 10 mins?", "gwatt"])
+        bullets = normalized.get("bullets", []) if isinstance(normalized.get("bullets", []), list) else []
+        self.assertGreaterEqual(len(bullets), 2)
+        self.assertEqual(str(bullets[0]), "1. Jennifer Doherty 9:42 PM: gwatt")
+        self.assertEqual(str(bullets[1]), "2. You TUESDAY: For videos, ping you in 5 - 10 mins?")
 
     def test_apply_answer_display_adds_positive_provider_for_hard_unread_today(self) -> None:
         class _System:

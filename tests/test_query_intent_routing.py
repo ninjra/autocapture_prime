@@ -38,6 +38,13 @@ class QueryIntentRoutingTests(unittest.TestCase):
         self.assertEqual(a.get("topic"), "adv_window_inventory")
         self.assertEqual(b.get("topic"), "adv_window_inventory")
 
+    def test_intent_detects_hard_cross_window_sizes_for_generic13_style_query(self) -> None:
+        intent = query_mod._query_intent(  # type: ignore[attr-defined]
+            "Identify two numeric values referenced in one communication panel, infer their best matching parameter name from technical notes, and produce example request query strings using those values."
+        )
+        self.assertEqual(intent.get("topic"), "hard_cross_window_sizes")
+        self.assertEqual(intent.get("family"), "hard")
+
 
 if __name__ == "__main__":
     unittest.main()

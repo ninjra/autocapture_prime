@@ -576,8 +576,49 @@ def _is_support_line(text: str) -> bool:
 
 
 def _core_answer_surface(summary: str, bullets: list[str]) -> str:
-    core_bullets = [str(x or "").strip() for x in bullets if str(x or "").strip() and not _is_support_line(str(x or ""))]
+    core_bullets = _core_bullets(bullets)
     return "\n".join([str(summary or ""), "\n".join(core_bullets)]).strip()
+
+
+def _core_bullets(bullets: list[str]) -> list[str]:
+    return [str(x or "").strip() for x in bullets if str(x or "").strip() and not _is_support_line(str(x or ""))]
+
+
+def _enumerated_lines(lines: list[str]) -> list[str]:
+    return [line for line in lines if re.match(r"^\d+\.\s+", str(line or "").strip())]
+
+
+def _has_hhmm_timestamp(text: str) -> bool:
+    raw = str(text or "")
+    if re.search(r"\b\d{1,2}:\d{2}\b", raw):
+        return True
+    return bool(
+        re.search(
+            r"\b(?:mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b",
+            raw,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _extract_summary_counts(summary: str) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for key in ("count_red", "count_green", "count_other"):
+        match = re.search(rf"\b{re.escape(key)}\s*=\s*(\d+)", str(summary or ""), flags=re.IGNORECASE)
+        if match:
+            out[key] = int(match.group(1))
+    return out
+
+
+def _extract_support_counts(bullets: list[str]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    support_lines = [str(x or "").strip() for x in bullets if _is_support_line(str(x or ""))]
+    support_text = "\n".join(support_lines)
+    for key in ("red_count", "green_count", "other_count"):
+        match = re.search(rf"\b{re.escape(key)}\s*=\s*(\d+)", support_text, flags=re.IGNORECASE)
+        if match:
+            out[key] = int(match.group(1))
+    return out
 
 
 def _normalize_exact_text(value: Any) -> str:
@@ -655,7 +696,7 @@ def _strict_haystack(result: dict[str, Any], summary: str, bullets: list[str]) -
     processing = result.get("processing", {}) if isinstance(result.get("processing", {}), dict) else {}
     hard_vlm = processing.get("hard_vlm", {}) if isinstance(processing.get("hard_vlm", {}), dict) else {}
     hard_fields = hard_vlm.get("fields", {}) if isinstance(hard_vlm.get("fields", {}), dict) else {}
-    core_bullets = [str(x or "").strip() for x in bullets if str(x or "").strip() and not _is_support_line(str(x or ""))]
+    core_bullets = _core_bullets(bullets)
     strict_fields = {
         "display_fields": {k: v for k, v in display_fields.items() if str(k) != "support_snippets"},
         "hard_fields": hard_fields,
@@ -775,6 +816,107 @@ def _evaluate_expected(
                 }
             )
             if not ok:
+                passed = False
+        answer_state = str(answer.get("state") or "").strip().casefold()
+        state_ok = answer_state == "ok"
+        checks.append(
+            {
+                "type": "strict_quality",
+                "key": "answer_state_ok",
+                "required": True,
+                "present": bool(state_ok),
+                "actual": answer_state,
+            }
+        )
+        if not state_ok:
+            passed = False
+        question_text = str(item.get("question") or "")
+        question_low = question_text.casefold()
+        core_lines = _core_bullets(bullets)
+        if bool(re.search(r"\bfirst\s+(?:5|five)\s+visible\b", question_low)):
+            enumerated = _enumerated_lines(core_lines)
+            min_items_ok = len(enumerated) >= 5
+            checks.append(
+                {
+                    "type": "strict_quality",
+                    "key": "first_five_visible_rows_present",
+                    "required": True,
+                    "present": bool(min_items_ok),
+                    "actual_count": len(enumerated),
+                    "min_required": 5,
+                }
+            )
+            if not min_items_ok:
+                passed = False
+        if "last two visible messages" in question_low:
+            enumerated = _enumerated_lines(core_lines)
+            rows_ok = len(enumerated) >= 2
+            checks.append(
+                {
+                    "type": "strict_quality",
+                    "key": "last_two_visible_message_rows_present",
+                    "required": True,
+                    "present": bool(rows_ok),
+                    "actual_count": len(enumerated),
+                    "min_required": 2,
+                }
+            )
+            if not rows_ok:
+                passed = False
+            else:
+                timestamp_ok = all(_has_hhmm_timestamp(line) for line in enumerated[:2])
+                checks.append(
+                    {
+                        "type": "strict_quality",
+                        "key": "last_two_visible_messages_have_timestamps",
+                        "required": True,
+                        "present": bool(timestamp_ok),
+                    }
+                )
+                if not timestamp_ok:
+                    passed = False
+        if case_id in {"Q9", "GQ9"}:
+            summary_counts = _extract_summary_counts(summary)
+            support_counts = _extract_support_counts(bullets)
+            if summary_counts and support_counts:
+                mapped = {
+                    "count_red": support_counts.get("red_count"),
+                    "count_green": support_counts.get("green_count"),
+                    "count_other": support_counts.get("other_count"),
+                }
+                mismatch = any(
+                    summary_counts.get(key) is not None
+                    and mapped.get(key) is not None
+                    and summary_counts.get(key) != mapped.get(key)
+                    for key in ("count_red", "count_green", "count_other")
+                )
+                counts_ok = not mismatch
+            else:
+                counts_ok = True
+            checks.append(
+                {
+                    "type": "strict_quality",
+                    "key": "q9_summary_support_count_consistency",
+                    "required": True,
+                    "present": bool(counts_ok),
+                    "summary_counts": summary_counts,
+                    "support_counts": support_counts,
+                }
+            )
+            if not counts_ok:
+                passed = False
+        if case_id in {"Q10", "GQ10"}:
+            active_surface_low = "\n".join([str(summary or ""), "\n".join(core_lines)]).casefold()
+            active_tab_ok = "active_tab=http" not in active_surface_low and "active_tab=0http" not in active_surface_low
+            checks.append(
+                {
+                    "type": "strict_quality",
+                    "key": "q10_active_tab_value_well_formed",
+                    "required": True,
+                    "present": bool(active_tab_ok),
+                }
+            )
+            if not active_tab_ok:
                 passed = False
     if bool(strict_expected_answer) and is_q_series:
         if "indeterminate" in str(summary or "").casefold():

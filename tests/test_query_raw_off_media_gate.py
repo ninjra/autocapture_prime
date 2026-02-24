@@ -56,7 +56,7 @@ class QueryRawOffMediaGateTests(unittest.TestCase):
         counters = query_mod._query_contract_counter_snapshot()
         self.assertEqual(int(counters.get("query_raw_media_reads_total", -1)), 0)
 
-    def test_raw_off_false_allows_raw_media_reads(self) -> None:
+    def test_raw_off_false_still_blocks_raw_media_reads(self) -> None:
         query_mod._reset_query_contract_counters_for_tests()
         payload = (
             b"\x89PNG\r\n\x1a\n"
@@ -70,10 +70,10 @@ class QueryRawOffMediaGateTests(unittest.TestCase):
 
         blob = query_mod._load_evidence_image_bytes(system, "run/evidence.capture.frame/1")
 
-        self.assertEqual(blob, payload)
-        self.assertEqual(media.calls, 1)
+        self.assertEqual(blob, b"")
+        self.assertEqual(media.calls, 0)
         counters = query_mod._query_contract_counter_snapshot()
-        self.assertEqual(int(counters.get("query_raw_media_reads_total", 0)), 1)
+        self.assertEqual(int(counters.get("query_raw_media_reads_total", 0)), 0)
 
 
 if __name__ == "__main__":
