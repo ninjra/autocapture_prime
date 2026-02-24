@@ -68,7 +68,8 @@ def _ensure_frame_uia_docs(
         return {"required": False, "ok": True, "inserted": 0, "reason": "invalid_record"}
     if str(record.get("record_type") or "") != "evidence.capture.frame":
         return {"required": False, "ok": True, "inserted": 0, "reason": "not_frame"}
-    uia_ref = record.get("uia_ref") if isinstance(record.get("uia_ref"), dict) else {}
+    uia_ref_raw = record.get("uia_ref")
+    uia_ref: dict[str, Any] = uia_ref_raw if isinstance(uia_ref_raw, dict) else {}
     uia_record_id = str(uia_ref.get("record_id") or "").strip()
     if not uia_record_id:
         return {"required": False, "ok": True, "inserted": 0, "reason": "missing_uia_ref"}
