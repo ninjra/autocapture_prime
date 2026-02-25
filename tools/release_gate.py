@@ -86,12 +86,30 @@ def _default_manifest(py: str) -> list[GateStep]:
         GateStep("gate_acceptance_coverage", [py, "tools/gate_acceptance_coverage.py"], None),
         GateStep("gate_queryability", [py, "tools/gate_queryability.py"], "artifacts/queryability/gate_queryability.json"),
         GateStep(
+            "gate_stage1_contract",
+            [py, "tools/gate_stage1_contract.py"],
+            "artifacts/stage1_contract/gate_stage1_contract.json",
+        ),
+        GateStep(
             "validate_blueprint_spec",
             [py, "tools/validate_blueprint_spec.py", "docs/spec/autocapture_nx_blueprint_2026-01-24.md"],
             None,
         ),
         GateStep("run_mod021_low_resource", ["bash", "tools/run_mod021_low_resource.sh"], None),
     ]
+    stage1_contract_disabled = _truthy(os.environ.get("STAGE1_CONTRACT_DISABLED"))
+    if stage1_contract_disabled:
+        steps = [step for step in steps if step.id != "gate_stage1_contract"]
+    baseline_snapshot_disabled = _truthy(os.environ.get("BASELINE_SNAPSHOT_DISABLED"))
+    baseline_snapshot_out = os.environ.get("BASELINE_SNAPSHOT_OUT", "artifacts/baseline/baseline_snapshot_latest.json").strip()
+    if not baseline_snapshot_disabled:
+        steps.append(
+            GateStep(
+                "generate_baseline_snapshot",
+                [py, "tools/generate_baseline_snapshot.py", "--output", baseline_snapshot_out],
+                baseline_snapshot_out,
+            )
+        )
     popup_go_no_go_disabled = _truthy(os.environ.get("POPUP_GO_NO_GO_DISABLED"))
     popup_go_no_go_out = os.environ.get("POPUP_GO_NO_GO_OUT", "artifacts/query_acceptance/popup_go_no_go_latest.json").strip()
     popup_go_no_go_timeout = os.environ.get("POPUP_GO_NO_GO_TIMEOUT_S", "").strip()

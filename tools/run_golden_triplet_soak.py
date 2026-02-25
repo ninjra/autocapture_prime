@@ -112,6 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stop-on-fail", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--allow-synthetic-fallback", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--require-runtime-contract", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--require-stage1-contract", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--require-popup-strict", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--synthetic-bootstrap-cmd", default="bash tools/run_q40_uia_synthetic.sh")
     parser.add_argument("--repo-root", default="")
@@ -131,6 +132,26 @@ def main(argv: list[str] | None = None) -> int:
     for idx in range(max(1, int(args.cycles))):
         cycle = idx + 1
         row: dict[str, Any] = {"cycle": cycle, "ts_utc": _utc_iso(), "source_tier": "real"}
+
+        stage1_gate = _run(
+            [py_str, "tools/gate_stage1_contract.py"],
+            cwd=root,
+        )
+        row["stage1_contract"] = {
+            "ok": bool(stage1_gate["ok"]),
+            "elapsed_ms": int(stage1_gate["elapsed_ms"]),
+            "stdout_tail": str(stage1_gate["stdout"])[-1200:],
+            "stderr_tail": str(stage1_gate["stderr"])[-1200:],
+        }
+        if not bool(stage1_gate["ok"]) and bool(args.require_stage1_contract):
+            failed = True
+            failure_reason = f"cycle_{cycle}:stage1_contract_failed"
+            rows.append(row)
+            if bool(args.stop_on_fail):
+                break
+            continue
+        elif not bool(stage1_gate["ok"]):
+            row["stage1_contract"]["soft_failed"] = True
 
         verify = _run(
             [py_str, "tools/verify_query_upstream_runtime_contract.py"],

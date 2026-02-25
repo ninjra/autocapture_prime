@@ -28,6 +28,8 @@ def test_soak_optional_popup_with_synthetic_q40_fallback(tmp_path: pathlib.Path,
 
     def fake_run(cmd: list[str], *, cwd: pathlib.Path, env: dict[str, str] | None = None) -> dict[str, Any]:
         calls.append(list(cmd))
+        if cmd[:2] == [str(pathlib.Path(cwd) / ".venv" / "bin" / "python"), "tools/gate_stage1_contract.py"]:
+            return _resp(ok=True, stdout='{"ok": true}')
         if cmd[:2] == [str(pathlib.Path(cwd) / ".venv" / "bin" / "python"), "tools/verify_query_upstream_runtime_contract.py"]:
             return _resp(ok=False, stdout='{"ok": false}')
         if cmd[:2] == ["bash", "tools/run_popup_regression_strict.sh"]:
@@ -79,6 +81,8 @@ def test_soak_popup_required_fails_fast(tmp_path: pathlib.Path, monkeypatch) -> 
 
     def fake_run(cmd: list[str], *, cwd: pathlib.Path, env: dict[str, str] | None = None) -> dict[str, Any]:
         calls.append(list(cmd))
+        if cmd[:2] == [str(pathlib.Path(cwd) / ".venv" / "bin" / "python"), "tools/gate_stage1_contract.py"]:
+            return _resp(ok=True, stdout='{"ok": true}')
         if cmd[:2] == [str(pathlib.Path(cwd) / ".venv" / "bin" / "python"), "tools/verify_query_upstream_runtime_contract.py"]:
             return _resp(ok=True, stdout='{"ok": true}')
         if cmd[:2] == ["bash", "tools/run_popup_regression_strict.sh"]:
@@ -106,3 +110,41 @@ def test_soak_popup_required_fails_fast(tmp_path: pathlib.Path, monkeypatch) -> 
     assert payload["failure_reason"] == "cycle_1:popup_strict_failed"
     assert payload["cycles_completed"] == 1
     assert not any(cmd[:2] == ["bash", "tools/q40.sh"] for cmd in calls)
+
+
+def test_soak_stage1_required_fails_fast_before_runtime_checks(tmp_path: pathlib.Path, monkeypatch) -> None:
+    out = tmp_path / "soak.json"
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], *, cwd: pathlib.Path, env: dict[str, str] | None = None) -> dict[str, Any]:
+        calls.append(list(cmd))
+        if cmd[:2] == [str(pathlib.Path(cwd) / ".venv" / "bin" / "python"), "tools/gate_stage1_contract.py"]:
+            return _resp(ok=False, stdout='{"ok": false}')
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(soak, "_run", fake_run)
+    monkeypatch.setattr(soak.time, "sleep", lambda _: None)
+
+    rc = soak.main(
+        [
+            "--cycles",
+            "1",
+            "--output",
+            str(out),
+            "--repo-root",
+            str(pathlib.Path.cwd()),
+            "--require-stage1-contract",
+            "--stop-on-fail",
+        ]
+    )
+    assert rc == 1
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["ok"] is False
+    assert payload["failure_reason"] == "cycle_1:stage1_contract_failed"
+    assert payload["cycles_completed"] == 1
+    row = payload["rows"][0]
+    assert row["stage1_contract"]["ok"] is False
+    assert not any(
+        cmd[:2] == [str(pathlib.Path.cwd() / ".venv" / "bin" / "python"), "tools/verify_query_upstream_runtime_contract.py"]
+        for cmd in calls
+    )
