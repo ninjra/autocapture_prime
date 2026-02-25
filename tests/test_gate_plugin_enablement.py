@@ -52,6 +52,32 @@ class GatePluginEnablementTests(unittest.TestCase):
         self.assertIn("missing_from_plugins_list", beta.get("reasons", []))
         self.assertIn("not_loaded", beta.get("reasons", []))
 
+    def test_evaluate_enablement_reports_plugin_coverage_by_stage(self) -> None:
+        mod = _load_module()
+        required = ["p.capture", "p.sst", "p.query", "p.core"]
+        plugins_list = {
+            "plugins": [
+                {"plugin_id": "p.capture", "allowlisted": True, "enabled": True, "hash_ok": True, "kinds": ["capture.source"]},
+                {"plugin_id": "p.sst", "allowlisted": True, "enabled": True, "hash_ok": True, "kinds": ["processing.stage.hooks"]},
+                {"plugin_id": "p.query", "allowlisted": True, "enabled": True, "hash_ok": True, "kinds": ["retrieval.strategy"]},
+                {"plugin_id": "p.core", "allowlisted": True, "enabled": True, "hash_ok": True, "kinds": ["storage.metadata_store"]},
+            ]
+        }
+        load_report = {"report": {"loaded": ["p.capture"], "failed": ["p.sst"], "skipped": ["p.query"], "errors": []}}
+        out = mod.evaluate_enablement(plugins_list=plugins_list, load_report=load_report, required_ids=required)
+        coverage = out.get("plugin_coverage", {})
+        totals = coverage.get("totals", {})
+        self.assertEqual(int(totals.get("plugins", 0) or 0), 4)
+        self.assertEqual(int(totals.get("attempted", 0) or 0), 3)
+        self.assertEqual(int(totals.get("succeeded", 0) or 0), 1)
+        self.assertEqual(int(totals.get("failed", 0) or 0), 1)
+        self.assertEqual(int(totals.get("skipped", 0) or 0), 1)
+        by_stage = coverage.get("by_stage", {})
+        self.assertEqual(int(by_stage.get("stage1_capture", {}).get("succeeded", 0) or 0), 1)
+        self.assertEqual(int(by_stage.get("stage2_plus", {}).get("failed", 0) or 0), 1)
+        self.assertEqual(int(by_stage.get("query_runtime", {}).get("skipped", 0) or 0), 1)
+        self.assertEqual(int(by_stage.get("core_runtime", {}).get("enabled_unattempted", 0) or 0), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

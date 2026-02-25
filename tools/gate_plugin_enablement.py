@@ -8,6 +8,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from collections import defaultdict
 from typing import Any
 
 try:
@@ -36,6 +37,115 @@ def _load_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _stage_bucket_for_plugin(row: dict[str, Any]) -> str:
+    plugin_id = str(row.get("plugin_id") or "").strip().casefold()
+    kinds = [str(item).strip().casefold() for item in row.get("kinds", []) if str(item).strip()] if isinstance(row.get("kinds"), list) else []
+    provides = [str(item).strip().casefold() for item in row.get("provides", []) if str(item).strip()] if isinstance(row.get("provides"), list) else []
+    text = " ".join([plugin_id, *kinds, *provides])
+    if (
+        ".capture." in plugin_id
+        or "capture." in text
+        or "tracking." in text
+        or "window.metadata" in text
+    ):
+        return "stage1_capture"
+    if (
+        ".sst." in plugin_id
+        or ".state." in plugin_id
+        or "processing.stage.hooks" in text
+        or "processing.pipeline" in text
+        or "state." in text
+    ):
+        return "stage2_plus"
+    if (
+        ".retrieval." in plugin_id
+        or ".answer." in plugin_id
+        or "retrieval.strategy" in text
+        or "answer.builder" in text
+        or "screen.answer.v1" in text
+        or "time.intent_parser" in text
+        or "citation.validator" in text
+        or "reranker" in text
+    ):
+        return "query_runtime"
+    if (
+        ".storage." in plugin_id
+        or "storage." in text
+        or "journal.writer" in text
+        or "ledger.writer" in text
+        or "observability" in text
+    ):
+        return "core_runtime"
+    return "other"
+
+
+def _plugin_coverage(
+    *,
+    plugin_rows: list[dict[str, Any]],
+    loaded_set: set[str],
+    failed_set: set[str],
+    skipped_set: set[str],
+) -> dict[str, Any]:
+    by_stage: dict[str, dict[str, int]] = defaultdict(
+        lambda: {
+            "plugins": 0,
+            "enabled": 0,
+            "attempted": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "skipped": 0,
+            "enabled_unattempted": 0,
+        }
+    )
+    totals = {
+        "plugins": 0,
+        "enabled": 0,
+        "attempted": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "skipped": 0,
+        "enabled_unattempted": 0,
+    }
+    for row in plugin_rows:
+        if not isinstance(row, dict):
+            continue
+        plugin_id = str(row.get("plugin_id") or "").strip()
+        if not plugin_id:
+            continue
+        enabled = bool(row.get("enabled"))
+        succeeded = plugin_id in loaded_set
+        failed = plugin_id in failed_set
+        skipped = plugin_id in skipped_set
+        attempted = bool(succeeded or failed or skipped)
+        enabled_unattempted = bool(enabled and not attempted)
+        stage = _stage_bucket_for_plugin(row)
+        counters = by_stage[stage]
+        counters["plugins"] += 1
+        totals["plugins"] += 1
+        if enabled:
+            counters["enabled"] += 1
+            totals["enabled"] += 1
+        if attempted:
+            counters["attempted"] += 1
+            totals["attempted"] += 1
+        if succeeded:
+            counters["succeeded"] += 1
+            totals["succeeded"] += 1
+        if failed:
+            counters["failed"] += 1
+            totals["failed"] += 1
+        if skipped:
+            counters["skipped"] += 1
+            totals["skipped"] += 1
+        if enabled_unattempted:
+            counters["enabled_unattempted"] += 1
+            totals["enabled_unattempted"] += 1
+    return {
+        "by_stage": {stage: dict(counters) for stage, counters in sorted(by_stage.items())},
+        "totals": totals,
+    }
+
+
 def evaluate_enablement(
     *,
     plugins_list: dict[str, Any],
@@ -51,6 +161,8 @@ def evaluate_enablement(
     report = load_report.get("report", {}) if isinstance(load_report, dict) else {}
     loaded_set = {str(pid).strip() for pid in report.get("loaded", []) if str(pid).strip()} if isinstance(report, dict) else set()
     failed_set = {str(pid).strip() for pid in report.get("failed", []) if str(pid).strip()} if isinstance(report, dict) else set()
+    skipped_set = {str(pid).strip() for pid in report.get("skipped", []) if str(pid).strip()} if isinstance(report, dict) else set()
+    coverage = _plugin_coverage(plugin_rows=plugin_rows, loaded_set=loaded_set, failed_set=failed_set, skipped_set=skipped_set)
 
     checks: list[dict[str, Any]] = []
     failing: list[dict[str, Any]] = []
@@ -98,9 +210,12 @@ def evaluate_enablement(
         "failed_count": len(failing),
         "required_ids": required_ids,
         "checks": checks,
+        "plugin_coverage": coverage,
         "summary": {
             "loaded_count": len(loaded_set),
             "failed_count_total": len(failed_set),
+            "skipped_count_total": len(skipped_set),
+            "coverage_totals": coverage.get("totals", {}),
         },
     }
 

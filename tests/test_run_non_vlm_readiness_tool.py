@@ -252,6 +252,37 @@ class RunNonVlmReadinessToolTests(unittest.TestCase):
         self.assertEqual(selected, live)
         self.assertEqual(str(details.get("strategy") or ""), "fallback_live_readable")
 
+    def test_failure_class_counts_normalize_known_and_generic_errors(self) -> None:
+        mod = _load_module("tools/run_non_vlm_readiness.py", "run_non_vlm_readiness_tool_11b")
+        steps = [
+            {
+                "id": "query_eval_suite_generic20_metadata_only",
+                "ok": False,
+                "stdout_json": {"error": "kernel_boot_failed:ConfigError:instance_lock_held"},
+                "stderr_tail": "",
+                "stdout_tail": "",
+            },
+            {
+                "id": "gate_plugin_enablement",
+                "ok": False,
+                "stdout_json": {"error": "strict_matrix_gate_failed"},
+                "stderr_tail": "",
+                "stdout_tail": "",
+            },
+            {
+                "id": "synthetic_gauntlet_80_metadata_only",
+                "ok": False,
+                "stdout_json": {"error": "ignored"},
+                "skipped": True,
+                "stderr_tail": "",
+                "stdout_tail": "",
+            },
+        ]
+        out = mod._failure_class_counts(steps)  # noqa: SLF001
+        self.assertEqual(int(out.get("instance_lock_held", 0) or 0), 1)
+        self.assertEqual(int(out.get("strict_matrix_gate_failed", 0) or 0), 1)
+        self.assertNotIn("ignored", out)
+
     def test_main_includes_resolution_on_preflight_failure(self) -> None:
         mod = _load_module("tools/run_non_vlm_readiness.py", "run_non_vlm_readiness_tool_12")
         with tempfile.TemporaryDirectory() as td:

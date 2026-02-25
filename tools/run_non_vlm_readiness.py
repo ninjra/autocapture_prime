@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -148,6 +150,67 @@ def _step_failed(steps: list[dict[str, Any]], step_id: str) -> bool:
             continue
         return not bool(step.get("ok", False))
     return False
+
+
+def _slug_token(value: str) -> str:
+    raw = str(value or "").strip().casefold()
+    normalized = re.sub(r"[^a-z0-9]+", "_", raw).strip("_")
+    return normalized or "unknown_failure"
+
+
+def _failure_class_for_step(step: dict[str, Any]) -> str:
+    step_id = str(step.get("id") or "").strip()
+    stdout_json = step.get("stdout_json")
+    error_text = ""
+    if isinstance(stdout_json, dict):
+        error_text = str(
+            stdout_json.get("error")
+            or stdout_json.get("blocked_reason")
+            or stdout_json.get("reason")
+            or ""
+        ).strip()
+    if not error_text:
+        stderr_text = str(step.get("stderr_tail") or "").strip()
+        if stderr_text:
+            error_text = str(stderr_text.splitlines()[-1]).strip()
+    if not error_text:
+        stdout_text = str(step.get("stdout_tail") or "").strip()
+        if stdout_text:
+            error_text = str(stdout_text.splitlines()[-1]).strip()
+
+    low = error_text.casefold()
+    if "instance_lock_held" in low:
+        return "instance_lock_held"
+    if "missing capability: storage.metadata" in low or "missing_capability:storage.metadata" in low:
+        return "missing_capability_storage_metadata"
+    if "dpapi unprotect requires windows" in low:
+        return "dpapi_windows_required"
+    if any(
+        marker in low
+        for marker in (
+            "operationalerror:disk i/o error",
+            "operationalerror:database is locked",
+            "database disk image is malformed",
+            "sqlite_busy",
+        )
+    ):
+        return "metadata_db_transient_io"
+    if "timeout" in low:
+        return "timeout"
+    if error_text:
+        return _slug_token(error_text)
+    return f"step_{_slug_token(step_id)}"
+
+
+def _failure_class_counts(steps: list[dict[str, Any]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for step in steps:
+        if bool(step.get("ok", False)):
+            continue
+        if bool(step.get("skipped", False)):
+            continue
+        counts[_failure_class_for_step(step)] += 1
+    return {key: int(counts[key]) for key in sorted(counts)}
 
 
 def _run_step_with_retry(
@@ -527,6 +590,9 @@ def main(argv: list[str] | None = None) -> int:
     stage1_audit_json = run_dir / "stage1_completeness_audit.json"
     health_json = run_dir / "processing_health.json"
     bench_json = run_dir / "batch_knob_bench.json"
+    plugin_enablement_json = run_dir / "gate_plugin_enablement.json"
+    stage1_contract_json = run_dir / "gate_stage1_contract.json"
+    audit_integrity_json = run_dir / "gate_audit_log_integrity.json"
     query_eval_json = run_dir / "query_eval_generic20.json"
     synthetic_gauntlet_json = run_dir / "synthetic_gauntlet_80.json"
     real_corpus_strict_json = run_dir / "real_corpus_strict_matrix.json"
@@ -751,6 +817,8 @@ def main(argv: list[str] | None = None) -> int:
                     "tests/test_stage1_marker_revalidation_migration.py",
                     "tests/test_processing_health_snapshot_tool.py",
                     "tests/test_stage1_completeness_audit_tool.py",
+                    "tests/test_gate_stage1_contract.py",
+                    "tests/test_gate_audit_log_integrity.py",
                     "tests/test_query_arbitration.py",
                     "tests/test_query_eval_suite_exact.py",
                     "tests/test_run_synthetic_gauntlet_tool.py",
@@ -766,6 +834,28 @@ def main(argv: list[str] | None = None) -> int:
 
     if bool(args.run_gates):
         for gate_id, gate_cmd in (
+            ("gate_plugin_enablement", [py, "tools/gate_plugin_enablement.py", "--output", str(plugin_enablement_json)]),
+            (
+                "gate_stage1_contract",
+                [
+                    py,
+                    "tools/gate_stage1_contract.py",
+                    "--audit-report",
+                    str(stage1_audit_json),
+                    "--output",
+                    str(stage1_contract_json),
+                ],
+            ),
+            (
+                "gate_audit_log_integrity",
+                [
+                    py,
+                    "tools/gate_audit_log_integrity.py",
+                    "--output",
+                    str(audit_integrity_json),
+                    "--allow-missing",
+                ],
+            ),
             ("gate_ledger", [py, "tools/gate_ledger.py"]),
             ("gate_security", [py, "tools/gate_security.py"]),
             ("gate_promptops_policy", [py, "tools/gate_promptops_policy.py"]),
@@ -917,6 +1007,14 @@ def main(argv: list[str] | None = None) -> int:
             break
     stage1_summary = _load_json_object(stage1_audit_json).get("summary", {}) if stage1_audit_json.exists() else {}
     strict_payload = _load_json_object(real_corpus_strict_json) if real_corpus_strict_json.exists() else {}
+    plugin_enablement_payload = _load_json_object(plugin_enablement_json) if plugin_enablement_json.exists() else {}
+    stage1_contract_payload = _load_json_object(stage1_contract_json) if stage1_contract_json.exists() else {}
+    audit_integrity_payload = _load_json_object(audit_integrity_json) if audit_integrity_json.exists() else {}
+    failure_class_counts = _failure_class_counts(steps)
+    top_failure_classes = [
+        {"failure_class": key, "count": int(val)}
+        for key, val in sorted(failure_class_counts.items(), key=lambda item: (-int(item[1]), item[0]))[:5]
+    ]
 
     payload = {
         "schema_version": 1,
@@ -934,9 +1032,38 @@ def main(argv: list[str] | None = None) -> int:
         "failed_steps": required_failures,
         "optional_failed_steps": optional_failures,
         "optional_skipped_steps": optional_skipped,
+        "failure_class_counts": failure_class_counts,
         "real_corpus_strict": strict_payload,
         "readiness_report": {
             "service_reachability": preflight,
+            "top_failure_classes": top_failure_classes,
+            "plugin_enablement": {
+                "ok": bool(plugin_enablement_payload.get("ok", False)),
+                "required_count": int(plugin_enablement_payload.get("required_count", 0) or 0),
+                "failed_count": int(plugin_enablement_payload.get("failed_count", 0) or 0),
+                "coverage_totals": (
+                    (plugin_enablement_payload.get("plugin_coverage", {}) if isinstance(plugin_enablement_payload.get("plugin_coverage"), dict) else {})
+                    .get("totals", {})
+                ),
+            },
+            "stage1_contract": {
+                "ok": bool(stage1_contract_payload.get("ok", False)),
+                "reasons": (
+                    ((stage1_contract_payload.get("result", {}) if isinstance(stage1_contract_payload.get("result"), dict) else {}).get("reasons", []))
+                    if isinstance(stage1_contract_payload, dict)
+                    else []
+                ),
+                "counts": (
+                    ((stage1_contract_payload.get("result", {}) if isinstance(stage1_contract_payload.get("result"), dict) else {}).get("counts", {}))
+                    if isinstance(stage1_contract_payload, dict)
+                    else {}
+                ),
+            },
+            "audit_integrity": {
+                "ok": bool(audit_integrity_payload.get("ok", False)),
+                "issues": audit_integrity_payload.get("issues", {}) if isinstance(audit_integrity_payload, dict) else {},
+                "counts": audit_integrity_payload.get("counts", {}) if isinstance(audit_integrity_payload, dict) else {},
+            },
             "strict_matrix": {
                 "ok": bool(strict_payload.get("ok", False)),
                 "matrix_total": int(strict_payload.get("matrix_total", 0) or 0),
@@ -958,6 +1085,9 @@ def main(argv: list[str] | None = None) -> int:
             "stage1_completeness_audit": str(stage1_audit_json),
             "processing_health": str(health_json),
             "batch_knob_bench": str(bench_json),
+            "plugin_enablement_gate": str(plugin_enablement_json),
+            "stage1_contract_gate": str(stage1_contract_json),
+            "audit_integrity_gate": str(audit_integrity_json),
             "query_eval": str(query_eval_json),
             "synthetic_gauntlet": str(synthetic_gauntlet_json),
             "real_corpus_strict_matrix": str(real_corpus_strict_json),
