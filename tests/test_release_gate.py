@@ -161,6 +161,56 @@ def test_run_release_gate_honors_max_steps(tmp_path: pathlib.Path) -> None:
     assert payload["steps_executed"] == 2
 
 
+def test_run_release_gate_blocks_required_disable_flags_when_strict(tmp_path: pathlib.Path) -> None:
+    mod = _load_module()
+
+    class _FakeStep:
+        def __init__(self, id: str):
+            self.id = id
+            self.cmd = ["echo", id]
+            self.artifact = None
+
+    fake_steps = [_FakeStep("a")]
+    with (
+        mock.patch.dict(mod.os.environ, {"REAL_CORPUS_STRICT_DISABLED": "1"}, clear=False),
+        mock.patch.object(mod, "_default_manifest", return_value=fake_steps),
+        mock.patch.object(mod, "_run_step") as run_step,
+    ):
+        payload = mod.run_release_gate(root=tmp_path, strict_status=True)
+    assert payload["ok"] is False
+    assert payload["failed_step"] == "required_gate_disable_flag"
+    assert "REAL_CORPUS_STRICT_DISABLED" in payload["required_gate_disable_flags"]
+    assert payload["steps_executed"] == 0
+    run_step.assert_not_called()
+
+
+def test_run_release_gate_allows_disable_flags_with_explicit_override(tmp_path: pathlib.Path) -> None:
+    mod = _load_module()
+
+    class _FakeStep:
+        def __init__(self, id: str):
+            self.id = id
+            self.cmd = ["echo", id]
+            self.artifact = None
+
+    fake_steps = [_FakeStep("a")]
+    with (
+        mock.patch.dict(
+            mod.os.environ,
+            {"REAL_CORPUS_STRICT_DISABLED": "1", "RELEASE_ALLOW_OPTIONAL_GATES": "1"},
+            clear=False,
+        ),
+        mock.patch.object(mod, "_default_manifest", return_value=fake_steps),
+        mock.patch.object(mod, "_run_step", return_value={"id": "a", "ok": True, "returncode": 0, "issues": []}),
+    ):
+        payload = mod.run_release_gate(root=tmp_path, strict_status=True)
+    assert payload["ok"] is True
+    assert payload["failed_step"] is None
+    assert "REAL_CORPUS_STRICT_DISABLED" in payload["required_gate_disable_flags"]
+    assert payload["allow_optional_gates"] is True
+    assert payload["steps_executed"] == 1
+
+
 def test_run_release_gate_honors_start_step(tmp_path: pathlib.Path) -> None:
     mod = _load_module()
 

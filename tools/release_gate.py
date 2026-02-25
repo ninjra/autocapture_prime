@@ -22,6 +22,13 @@ from typing import Any
 
 PASS_STATUSES = {"pass", "passed", "ok", "success"}
 NON_PASS_STATUSES = {"fail", "failed", "error", "warn", "warning", "skip", "skipped"}
+REQUIRED_GATE_DISABLE_FLAGS = (
+    "POPUP_GO_NO_GO_DISABLED",
+    "REAL_CORPUS_STRICT_DISABLED",
+    "GOLDEN_TRIPLET_DISABLED",
+    "STAGE1_CONTRACT_DISABLED",
+    "STAGE1_LINEAGE_GATE_DISABLED",
+)
 
 
 @dataclass(frozen=True)
@@ -38,6 +45,14 @@ def _repo_root() -> Path:
 def _truthy(value: str | None) -> bool:
     raw = str(value or "").strip().lower()
     return raw in {"1", "true", "yes", "on"}
+
+
+def _disabled_required_gate_flags() -> list[str]:
+    out: list[str] = []
+    for key in REQUIRED_GATE_DISABLE_FLAGS:
+        if _truthy(os.environ.get(key)):
+            out.append(str(key))
+    return out
 
 
 def _expected_total_from_contract(path: Path, fallback: int = 20) -> int:
@@ -438,6 +453,23 @@ def run_release_gate(
     if not Path(py).exists():
         py = str(sys.executable)
     steps = _default_manifest(py)
+    disabled_required_flags = _disabled_required_gate_flags()
+    allow_optional_disable = _truthy(os.environ.get("RELEASE_ALLOW_OPTIONAL_GATES"))
+    if bool(strict_status) and disabled_required_flags and not allow_optional_disable:
+        start_idx = max(0, int(start_step) - 1)
+        return {
+            "schema_version": 1,
+            "ok": False,
+            "strict_status": bool(strict_status),
+            "failed_step": "required_gate_disable_flag",
+            "required_gate_disable_flags": disabled_required_flags,
+            "allow_optional_gates": bool(allow_optional_disable),
+            "steps_total": len(steps),
+            "start_step": int(start_idx + 1),
+            "steps_planned_this_run": 0,
+            "steps_executed": 0,
+            "steps": [],
+        }
     results: list[dict[str, Any]] = []
     failed_step: str | None = None
     start_idx = max(0, int(start_step) - 1)
@@ -457,6 +489,8 @@ def run_release_gate(
         "ok": bool(ok),
         "strict_status": bool(strict_status),
         "failed_step": failed_step,
+        "required_gate_disable_flags": disabled_required_flags,
+        "allow_optional_gates": bool(allow_optional_disable),
         "steps_total": len(steps),
         "start_step": int(start_idx + 1),
         "steps_planned_this_run": limit,
