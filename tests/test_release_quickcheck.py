@@ -104,6 +104,25 @@ def test_build_quickcheck_lineage_fallback_reads_root_keys(tmp_path: pathlib.Pat
     assert out["stage_coverage"]["lineage_incomplete"] == 12
 
 
+def test_build_quickcheck_lineage_fallback_derives_from_queryable_counts(tmp_path: pathlib.Path) -> None:
+    mod = _load_module()
+    root = tmp_path
+    _write_json(root / "artifacts/release/release_gate_latest.json", {"ok": True})
+    _write_json(root / "artifacts/query_acceptance/popup_regression_latest.json", {"ok": True, "sample_count": 10, "accepted_count": 10, "failed_count": 0})
+    _write_json(root / "artifacts/advanced10/q40_matrix_latest.json", {"ok": True, "source_tier": "real"})
+    _write_json(root / "artifacts/temporal40/temporal40_gate_latest.json", {"ok": True, "counts": {"evaluated": 40, "skipped": 0, "failed": 0}})
+    _write_json(root / "artifacts/real_corpus_gauntlet/latest/strict_matrix.json", {"ok": True})
+    _write_json(
+        root / "artifacts/lineage/20260225T100000Z/stage1_stage2_lineage_queryability.json",
+        {"summary": {"frames_total": 180, "frames_queryable": 171, "frames_blocked": 9}},
+    )
+    out = mod.build_quickcheck(root=root)
+    assert out["stage_coverage"]["frames_total"] == 180
+    assert out["stage_coverage"]["frames_queryable"] == 171
+    assert out["stage_coverage"]["lineage_complete"] == 171
+    assert out["stage_coverage"]["lineage_incomplete"] == 9
+
+
 def test_build_quickcheck_parses_nested_strict_failure_causes_without_wrapper_keys(tmp_path: pathlib.Path) -> None:
     mod = _load_module()
     root = tmp_path

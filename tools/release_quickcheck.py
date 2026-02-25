@@ -157,11 +157,17 @@ def build_quickcheck(*, root: Path) -> dict[str, Any]:
     stage_summary = {}
     if isinstance(lineage, dict):
         summary = lineage.get("summary", {}) if isinstance(lineage.get("summary", {}), dict) else {}
-        lineage_complete = _to_int(summary.get("lineage_complete", lineage.get("lineage_complete", 0)))
-        lineage_incomplete = _to_int(summary.get("lineage_incomplete", lineage.get("lineage_incomplete", 0)))
+        frames_total = _to_int(summary.get("frames_total", 0))
+        frames_queryable = _to_int(summary.get("frames_queryable", 0))
+        lineage_complete = _to_int(summary.get("lineage_complete", lineage.get("lineage_complete", -1)))
+        lineage_incomplete = _to_int(summary.get("lineage_incomplete", lineage.get("lineage_incomplete", -1)))
+        if lineage_complete < 0:
+            lineage_complete = max(0, frames_queryable)
+        if lineage_incomplete < 0:
+            lineage_incomplete = max(0, frames_total - lineage_complete)
         stage_summary = {
-            "frames_total": _to_int(summary.get("frames_total", 0)),
-            "frames_queryable": _to_int(summary.get("frames_queryable", 0)),
+            "frames_total": frames_total,
+            "frames_queryable": frames_queryable,
             "frames_blocked": _to_int(summary.get("frames_blocked", 0)),
             "lineage_complete": lineage_complete,
             "lineage_incomplete": lineage_incomplete,
