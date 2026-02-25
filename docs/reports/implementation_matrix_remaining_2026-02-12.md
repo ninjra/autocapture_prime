@@ -4,11 +4,11 @@
 This matrix is generated from the full-repo miss inventory and represents every currently detected miss marker across all scanned files.
 
 ## Scan Metadata
-- Generated (matrix): `2026-02-19T23:25:04.791467+00:00`
-- Inventory generated: `2026-02-19T23:24:36.008309+00:00`
-- Scanned files: `1572`
+- Generated (matrix): `2026-02-25T15:57:24.632459+00:00`
+- Inventory generated: `2026-02-25T15:57:16.879662+00:00`
+- Scanned files: `1711`
 - Miss rows: `0`
-- Gate failures: `0`
+- Gate failures: `1`
 
 ## Canonical Full List
 - Full row-by-row list: `docs/reports/full_repo_miss_inventory_2026-02-12.md`
@@ -23,7 +23,9 @@ This matrix is generated from the full-repo miss inventory and represents every 
 | --- | ---: |
 
 ## Gate Failures
-- None
+| Gate | Status | Failed Step | Exit Code |
+| --- | --- | --- | --- |
+| `tools/run_all_tests_report.json` | `failed` | `tools/gate_phase5.py` | `1` |
 
 ## Source Files With Misses (Full List)
 | SourceClass | Source | Total | Categories |
@@ -78,7 +80,7 @@ This matrix is generated from the full-repo miss inventory and represents every 
 ## Regenerated Misses (Actionable Clusters)
 | Cluster ID | Scope | Evidence | Required Closure |
 | --- | --- | --- | --- |
-| MX-000 | None | no actionable clusters detected | No remaining actionable misses from current inventory. |
+| MX-001 | Deterministic gates | tools/run_all_tests_report.json:tools/gate_phase5.py | Restore all failed gate steps to green with deterministic pass artifacts. |
 
 ## Notes
 - This file is generated from inventory data and is intentionally exhaustive; use the actionable clusters above to prioritize implementation sequencing.

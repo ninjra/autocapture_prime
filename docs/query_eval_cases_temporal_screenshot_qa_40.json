@@ -1,0 +1,282 @@
+[
+  {
+    "id": "TQ01",
+    "question": "In the last 24 hours, what unique top-level windows (app + window title) were visible, and for each what were the first_seen and last_seen screenshot times?",
+    "difficulty_class": "unique_windows_rolling",
+    "modality_requirements": ["uia", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ02",
+    "question": "In the last 24 hours, what unique URL hosts/domains were visible on screen, and what was the last_seen time for each?",
+    "difficulty_class": "unique_domains_seen",
+    "modality_requirements": ["ocr_text", "uia", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ03",
+    "question": "In the last 24 hours, list each distinct error, toast, or dialog message that appeared and its first_seen, last_seen, and total_visible_duration, merging gaps less than or equal to 30 seconds.",
+    "difficulty_class": "error_toast_inventory",
+    "modality_requirements": ["ocr_text", "uia", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ04",
+    "question": "In the last 24 hours, what button labels did we click (UIA role button), and what was the most recent click time for each label?",
+    "difficulty_class": "cta_click_inventory",
+    "modality_requirements": ["hid", "uia", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ05",
+    "question": "In the last 24 hours, which UIA element (role plus name) held focus the most total time, and what was that total focused duration in seconds?",
+    "difficulty_class": "focus_duration_max",
+    "modality_requirements": ["uia", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ06",
+    "question": "Between the latest processed 60-minute window start and end, how many frames contained the text snippet \"invoice\", and what was total visible duration when gaps of 30 seconds or less are merged?",
+    "difficulty_class": "snippet_count_duration",
+    "modality_requirements": ["ocr_text", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ07",
+    "question": "In the last 24 hours, what was the longest continuous time the foreground app was Slack, and what were the start and end screenshot times?",
+    "difficulty_class": "longest_app_session",
+    "modality_requirements": ["uia", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ08",
+    "question": "In the last 24 hours, during which single 5-minute interval did the active window change the most, and how many changes occurred?",
+    "difficulty_class": "peak_switch_bucket",
+    "modality_requirements": ["uia", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ09",
+    "question": "In the last 24 hours, what was the median time between mouse clicks in seconds using HID events?",
+    "difficulty_class": "click_cadence_median",
+    "modality_requirements": ["hid", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ10",
+    "question": "Identify a verified instance where we typed token \"incident\" and then the UI reflected it. What was the latency from last keypress to first visible occurrence in milliseconds?",
+    "difficulty_class": "type_to_visible_latency",
+    "modality_requirements": ["hid", "ocr_text", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ11",
+    "question": "After the most recent use of shortcut Ctrl+K in the last 24 hours, what immediate UI change occurred within 3 seconds (window title, app, or URL before versus after)?",
+    "difficulty_class": "shortcut_effect",
+    "modality_requirements": ["hid", "uia", "ocr_text", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ12",
+    "question": "Find a verified click on UIA element named \"View details\" that caused navigation. What were the URLs before and after and what was the delta time?",
+    "difficulty_class": "click_navigation_delta",
+    "modality_requirements": ["hid", "uia", "ocr_text", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ13",
+    "question": "What was the most recent save or export dialog seen, what filename was shown, and when was it dismissed?",
+    "difficulty_class": "save_export_dialog",
+    "modality_requirements": ["uia", "ocr_text", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ14",
+    "question": "Identify the most recent modal dialog lifecycle: when it appeared, when it disappeared, what its title was, and what action closed it (click versus key).",
+    "difficulty_class": "modal_lifecycle",
+    "modality_requirements": ["uia", "hid", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ15",
+    "question": "Find the most recent time a toggle or checkbox changed state. What was the label, old state, new state, and triggering HID event?",
+    "difficulty_class": "toggle_transition",
+    "modality_requirements": ["uia", "hid", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ16",
+    "question": "At the latest processed screenshot time, what were the primary visible windows on the left half versus right half of a 7680x2160 canvas?",
+    "difficulty_class": "left_right_layout",
+    "modality_requirements": ["uia", "geometry"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ17",
+    "question": "In the last 24 hours, how many times did a new top-level window first appear with centroid in the top-right quadrant, and what was the most recent instance?",
+    "difficulty_class": "quadrant_new_window",
+    "modality_requirements": ["uia", "geometry", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ18",
+    "question": "What was the most recent notification or banner observed? Provide text, screenshot time, and screen bounding box.",
+    "difficulty_class": "banner_latest",
+    "modality_requirements": ["ocr_text", "uia", "geometry", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ19",
+    "question": "Find an instance where cursor moved from x < 3840 to x >= 3840 without clicking. Provide start and end positions and times.",
+    "difficulty_class": "cursor_cross_monitor",
+    "modality_requirements": ["hid", "timeline", "geometry"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ20",
+    "question": "At the latest processed screenshot time, was any visible scrollable container not fully shown (scrollbar not at end)? If yes, identify role, name, and scroll position.",
+    "difficulty_class": "scrollable_visibility",
+    "modality_requirements": ["uia", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ21",
+    "question": "In the last 24 hours within app Outlook, what were the minimum and maximum currency-like amounts shown and when did each occur?",
+    "difficulty_class": "numeric_min_max_currency",
+    "modality_requirements": ["ocr_text", "uia", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ22",
+    "question": "Identify the most recent time a percentage value changed on screen. What changed and what was the time delta?",
+    "difficulty_class": "percentage_change_event",
+    "modality_requirements": ["ocr_text", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ23",
+    "question": "What is the most recent non-overlay date shown on screen and what UI context did it belong to (window, app, or element)?",
+    "difficulty_class": "non_overlay_date_context",
+    "modality_requirements": ["ocr_text", "uia", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ24",
+    "question": "In the last 24 hours, how many time-of-day strings like 3:30 PM were visible that referred to times after the screenshot timestamp on that frame?",
+    "difficulty_class": "future_time_string_count",
+    "modality_requirements": ["ocr_text", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ25",
+    "question": "Pick a visible identifier matching regex [A-Z]{3}-[0-9]{3}. When did it first appear and did it reappear later? Provide first_seen and last_seen.",
+    "difficulty_class": "identifier_reappearance",
+    "modality_requirements": ["ocr_text", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ26",
+    "question": "At the latest processed screenshot time, what was the full UIA ancestry path of the focused element as role and name pairs?",
+    "difficulty_class": "focus_ancestry_path",
+    "modality_requirements": ["uia", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ27",
+    "question": "Find a click event that produced no visible effect within 3 seconds: no window title change, no URL change, and no significant text delta. Provide clicked element and time.",
+    "difficulty_class": "click_no_effect",
+    "modality_requirements": ["hid", "uia", "ocr_text", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ28",
+    "question": "Identify a UI value that changed without any HID input within plus or minus 5 seconds. What changed and when?",
+    "difficulty_class": "auto_refresh_without_input",
+    "modality_requirements": ["uia", "hid", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ29",
+    "question": "Find an instance where a text field value jumped by at least 12 characters within 2 seconds, suggesting paste behavior. What field and when?",
+    "difficulty_class": "paste_like_jump",
+    "modality_requirements": ["uia", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ30",
+    "question": "In the last 24 hours, which UIA role received the most clicks and what was the count?",
+    "difficulty_class": "most_clicked_role",
+    "modality_requirements": ["hid", "uia", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ31",
+    "question": "Reconstruct the minimal action sequence that led from seeing marker text \"Open Invoice\" to seeing marker text \"State changed\" within 20 minutes.",
+    "difficulty_class": "state_to_state_reconstruction",
+    "modality_requirements": ["ocr_text", "hid", "uia", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ32",
+    "question": "Find the most recent search where a term was entered and submitted. What was the term and what was the top visible result title?",
+    "difficulty_class": "search_and_result",
+    "modality_requirements": ["hid", "uia", "ocr_text", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ33",
+    "question": "For a verified scrolling session lasting at least 20 seconds, what was total scroll wheel delta and net scroll position change of target container?",
+    "difficulty_class": "scroll_delta_vs_position",
+    "modality_requirements": ["hid", "uia", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ34",
+    "question": "Did we perform a copy then paste sequence (Ctrl+C then Ctrl+V) within 10 minutes? If yes, when and what was the paste target field or app?",
+    "difficulty_class": "copy_paste_sequence",
+    "modality_requirements": ["hid", "uia", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ35",
+    "question": "Identify the most recent time a new tab or new window was opened via keyboard shortcut (Ctrl+T or Ctrl+N). What was resulting window title or URL and when?",
+    "difficulty_class": "new_tab_shortcut",
+    "modality_requirements": ["hid", "uia", "ocr_text", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ36",
+    "question": "Find a tooltip that appeared after hover with no click. What was tooltip text and when did it appear and disappear?",
+    "difficulty_class": "hover_tooltip",
+    "modality_requirements": ["hid", "uia", "ocr_text", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ37",
+    "question": "Find the most recent context menu opened via right-click. What was the menu title if any, and which item was selected?",
+    "difficulty_class": "context_menu_right_click",
+    "modality_requirements": ["hid", "uia", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ38",
+    "question": "Identify an element where UIA name or value disagreed with rendered text in the same bounding region. What were the two strings and when?",
+    "difficulty_class": "uia_vs_rendered_discrepancy",
+    "modality_requirements": ["uia", "ocr_text", "geometry", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ39",
+    "question": "Using the temporal vector store in the last 24 hours, find a highly similar pair of screens at different times. What were the two times and what changed between them?",
+    "difficulty_class": "vector_similarity_across_time",
+    "modality_requirements": ["vector", "timeline", "ocr_text"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  },
+  {
+    "id": "TQ40",
+    "question": "Identify the most recent time we left a screen state and later returned to the same state fingerprint (app, window title, key markers). What were leave time, return time, and time away?",
+    "difficulty_class": "leave_return_state_fingerprint",
+    "modality_requirements": ["uia", "ocr_text", "timeline"],
+    "expected_paths": [{"path": "answer.state"}, {"path": "answer.display.summary"}, {"path": "processing.query_trace.query_run_id"}]
+  }
+]

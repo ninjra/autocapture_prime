@@ -62,6 +62,15 @@ class PromptOpsApiTests(unittest.TestCase):
             self.assertEqual(out.prompt_id, "query.default")
             self.assertIsInstance(out.trace, dict)
 
+    def test_prepare_query_uses_configured_sources_when_context_omits_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = _config(tmp)
+            cfg["promptops"]["sources"] = [{"id": "gemini_ideas", "text": "Be specific and structured."}]
+            api = PromptOpsAPI(cfg)
+            out = api.prepare("query", "pls help w/ it", {"prompt_id": "query.default"})
+            self.assertEqual(out.prompt, "please help with it?")
+            self.assertEqual(int(out.trace.get("source_count", 0) or 0), 1)
+
     def test_recommend_template_prefers_stored(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cfg = _config(tmp)

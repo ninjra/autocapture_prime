@@ -71,6 +71,42 @@ class QueryAdvancedDisplayTests(unittest.TestCase):
         )
         self.assertEqual(snippets, [])
 
+    def test_support_snippets_adv_calendar_keeps_long_calendar_items(self) -> None:
+        long_calendar_line = (
+            "Calendar and schedule pane extraction "
+            + ("pad " * 90)
+            + "adv.calendar.item.1.start=8:00AM; adv.calendar.item.1.title=First Meeting; "
+            + "adv.calendar.item.2.start=9:00AM; adv.calendar.item.2.title=Second Meeting"
+        )
+
+        class _Metadata:
+            def latest(self, *, record_type: str, limit: int = 256):  # noqa: ARG002
+                if record_type != "derived.sst.text.extra":
+                    return []
+                return [
+                    {
+                        "record_id": "cal-long",
+                        "record": {
+                            "record_type": "derived.sst.text.extra",
+                            "doc_kind": "adv.calendar.schedule",
+                            "text": long_calendar_line,
+                        },
+                    }
+                ][: max(0, int(limit))]
+
+            def get(self, _record_id: str):  # noqa: ANN001
+                return None
+
+        snippets = query_mod._support_snippets_for_topic(
+            "adv_calendar",
+            "calendar schedule pane items",
+            _Metadata(),
+            limit=4,
+        )
+        joined = "\n".join(str(x) for x in snippets)
+        self.assertIn("adv.calendar.item.2.title=Second Meeting", joined)
+        self.assertNotIn("…", joined)
+
     def test_apply_answer_display_skips_hard_vlm_in_metadata_only_mode(self) -> None:
         class _System:
             config: dict = {}
@@ -487,6 +523,78 @@ class QueryAdvancedDisplayTests(unittest.TestCase):
         display = display or {}
         self.assertEqual(display.get("topic"), "adv_calendar")
         self.assertIn("January 2026", str(display.get("summary") or ""))
+
+    def test_build_answer_display_adv_calendar_recovers_five_rows(self) -> None:
+        claim_sources = [
+            {
+                "provider_id": "builtin.observation.graph",
+                "doc_kind": "adv.calendar.schedule",
+                "record_id": "rec_cal_rows",
+                "signal_pairs": {
+                    "adv.calendar.month_year": "January 2026",
+                    "adv.calendar.selected_date": "20",
+                    "adv.calendar.item_count": "4",
+                    "adv.calendar.item.1.start": "8:00 AM",
+                    "adv.calendar.item.1.title": "Daily Work",
+                    "adv.calendar.item.2.start": "9:00 AM",
+                    "adv.calendar.item.2.title": "Planning",
+                    "adv.calendar.item.3.start": "10:00 AM",
+                    "adv.calendar.item.3.title": "Review",
+                    "adv.calendar.item.4.start": "11:00 AM",
+                    "adv.calendar.item.4.title": "Sync",
+                },
+                "meta": {
+                    "meta": {
+                        "source_modality": "vlm",
+                        "source_state_id": "vlm",
+                        "source_backend": "openai_compat_two_pass",
+                        "vlm_grounded": True,
+                    }
+                },
+            }
+        ]
+        with mock.patch.object(query_mod, "_support_snippets_for_topic", return_value=[]):
+            display = query_mod._build_answer_display(
+                "What are the first five visible rows in the calendar list?",
+                ["9:09AM Microsoft Teams Meeting"],
+                claim_sources,
+                query_intent={"topic": "adv_calendar"},
+            )
+        bullets = [str(x) for x in display.get("bullets", []) if str(x)]
+        schedule_rows = [line for line in bullets if str(line).split(".", 1)[0].isdigit()]
+        self.assertGreaterEqual(len(schedule_rows), 5)
+        self.assertTrue(any("Microsoft Teams Meeting" in row for row in schedule_rows))
+        self.assertFalse(any("| CST" in row for row in schedule_rows))
+
+    def test_build_answer_display_support_snippets_strip_ellipsis(self) -> None:
+        claim_sources = [
+            {
+                "provider_id": "builtin.observation.graph",
+                "doc_kind": "adv.calendar.schedule",
+                "record_id": "rec_cal_clean",
+                "signal_pairs": {
+                    "adv.calendar.month_year": "January 2026",
+                    "adv.calendar.selected_date": "20",
+                    "adv.calendar.item_count": "1",
+                    "adv.calendar.item.1.start": "8:30 AM",
+                    "adv.calendar.item.1.title": "Microsoft Teams Meeting",
+                },
+            }
+        ]
+        with mock.patch.object(
+            query_mod,
+            "_support_snippets_for_topic",
+            return_value=["Calendar row… truncated ... keep rest"],
+        ):
+            display = query_mod._build_answer_display(
+                "calendar pane rows",
+                [],
+                claim_sources,
+                query_intent={"topic": "adv_calendar"},
+            )
+        joined = "\n".join(str(x) for x in display.get("bullets", []))
+        self.assertNotIn("…", joined)
+        self.assertNotIn("...", joined)
 
     def test_normalize_hard_fields_parses_answer_text_for_focus(self) -> None:
         hard = {

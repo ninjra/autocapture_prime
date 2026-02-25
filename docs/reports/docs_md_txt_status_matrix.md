@@ -1,6 +1,6 @@
 # Docs MD/TXT Status Matrix
 
-Generated: 2026-02-19T23:25:05Z
+Generated: 2026-02-25T15:57:24Z
 
 Scope: every `docs/**/*.md` and `docs/**/*.txt` file.
 
@@ -8,16 +8,18 @@ Scope: every `docs/**/*.md` and `docs/**/*.txt` file.
 
 - `active-authoritative`: 8
 - `active-handoff`: 2
-- `active-plan`: 5
-- `active-reference`: 48
-- `active-report`: 25
+- `active-plan`: 13
+- `active-reference`: 54
+- `active-report`: 28
 - `active-runbook`: 4
 - `active-spec`: 35
 - `deprecated`: 75
 
 | Path | Status | Outstanding | Action | Rationale |
 | --- | --- | --- | --- | --- |
+| `docs/AUTOCAPTURE_PRIME_MERGE_WORK_ORDER.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/AutocapturePrime_4Pillars_Upgrade_Plan.md` | `active-authoritative` | `N` | `keep_active` | Authoritative contract or specification source. |
+| `docs/STAGE2_USER_QUERY_HEAVY_UNBLOCK.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/_codex_repo_manifest.txt` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/_codex_repo_review.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/adr/ADR-0001-event_sourcing.md` | `active-spec` | `N` | `keep_active` | Architecture or specification reference. |
@@ -57,6 +59,8 @@ Scope: every `docs/**/*.md` and `docs/**/*.txt` file.
 | `docs/codex_autocapture_prime_blueprint.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/codex_work_order_autocapture_prime_memory.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/contracts/advanced20_strict_rubric.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
+| `docs/contracts/plugin-stack-non8000-contract.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
+| `docs/contracts/real_corpus_query_readiness_contract.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/deprecated/README.md` | `deprecated` | `N` | `archived` | Previously completed or superseded artifact. |
 | `docs/deprecated/plans/adaptive-screenshot-capture-plan.md` | `deprecated` | `N` | `archived` | Previously completed or superseded artifact. |
 | `docs/deprecated/plans/advanced20-verified-correct-plan.md` | `deprecated` | `N` | `archived` | Previously completed or superseded artifact. |
@@ -132,6 +136,7 @@ Scope: every `docs/**/*.md` and `docs/**/*.txt` file.
 | `docs/deprecated/reports/screenshot-query-reliability-plan.md` | `deprecated` | `N` | `archived` | Previously completed or superseded artifact. |
 | `docs/deprecated/workflows/fixture_pipeline_workflow.md` | `deprecated` | `N` | `archived` | Previously completed or superseded artifact. |
 | `docs/deprecated/workflows/query-metrics-workflow.md` | `deprecated` | `N` | `archived` | Previously completed or superseded artifact. |
+| `docs/handoff-stage1-contract.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/handoffs/research_hypervisor_codex_prompt.txt` | `active-handoff` | `N` | `keep_active` | Cross-repo handoff contract artifact. |
 | `docs/handoffs/research_hypervisor_migration.md` | `active-handoff` | `N` | `keep_active` | Cross-repo handoff contract artifact. |
 | `docs/implemented-ignore/1-30-26 blueprint.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
@@ -170,9 +175,17 @@ Scope: every `docs/**/*.md` and `docs/**/*.txt` file.
 | `docs/migrations.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/plans/README.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/plans/advanced20-true-strict-correctness-plan.md` | `active-plan` | `Y` | `keep_active` | Active outstanding planning document. |
+| `docs/plans/autocapture-prime-merge-work-order-lockstep-plan.md` | `active-plan` | `Y` | `keep_active` | Active outstanding planning document. |
+| `docs/plans/capture-deprecation-non8000-plugin-stack-golden-plan.md` | `active-plan` | `Y` | `keep_active` | Active outstanding planning document. |
 | `docs/plans/golden-pipeline-6day-sla-hardening-plan.md` | `active-plan` | `Y` | `keep_active` | Active outstanding planning document. |
 | `docs/plans/golden-pipeline-core-remediation-plan.md` | `active-plan` | `Y` | `keep_active` | Active outstanding planning document. |
+| `docs/plans/plugin-stack-whitelist-full-enablement-deterministic-proof-plan.md` | `active-plan` | `Y` | `keep_active` | Active outstanding planning document. |
 | `docs/plans/promptops-four-pillars-improvement-plan.md` | `active-plan` | `Y` | `keep_active` | Active outstanding planning document. |
+| `docs/plans/real-corpus-memory-query-readiness-plan.md` | `active-plan` | `Y` | `keep_active` | Active outstanding planning document. |
+| `docs/plans/stage1-ingest-retention-hypervisor-alignment-plan.md` | `active-plan` | `Y` | `keep_active` | Active outstanding planning document. |
+| `docs/plans/stage2-query-ready-raw-off-normalized-layer-plan.md` | `active-plan` | `Y` | `keep_active` | Active outstanding planning document. |
+| `docs/plans/stage2-user-query-heavy-unblock-plan.md` | `active-plan` | `Y` | `keep_active` | Active outstanding planning document. |
+| `docs/plans/temporal-screenshot-qa-40-plan.md` | `active-plan` | `Y` | `keep_active` | Active outstanding planning document. |
 | `docs/plans/uia-ingestion-40-question-gauntlet-plan.md` | `active-plan` | `Y` | `keep_active` | Active outstanding planning document. |
 | `docs/processing-only-plugin-stack.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/promptops_contract.md` | `active-authoritative` | `N` | `keep_active` | Authoritative contract or specification source. |
@@ -196,9 +209,12 @@ Scope: every `docs/**/*.md` and `docs/**/*.txt` file.
 | `docs/reports/implementation_matrix.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
 | `docs/reports/implementation_matrix_remaining_2026-02-12.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
 | `docs/reports/module_map.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
+| `docs/reports/non8000_plugin_stack_checkpoint_2026-02-21.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
 | `docs/reports/q40_questions_expected_vs_pipeline_2026-02-19.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
 | `docs/reports/q40_uia_mismatch_latest.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
+| `docs/reports/q40_uia_mismatch_novlm_20260220T2225.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
 | `docs/reports/question-validation-plugin-trace-2026-02-13.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
+| `docs/reports/real_corpus_strict_latest.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
 | `docs/reports/repo_tooling_summary.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
 | `docs/reports/risk_register.md` | `active-report` | `N` | `keep_active` | Generated report or operational summary artifact. |
 | `docs/roadmap.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
@@ -216,6 +232,7 @@ Scope: every `docs/**/*.md` and `docs/**/*.txt` file.
 | `docs/specs/plugin_framework.md` | `active-spec` | `N` | `keep_active` | Architecture or specification reference. |
 | `docs/specs/plugins.md` | `active-spec` | `N` | `keep_active` | Architecture or specification reference. |
 | `docs/specs/storage_and_query.md` | `active-spec` | `N` | `keep_active` | Architecture or specification reference. |
+| `docs/temporal_screenshot_qa_40.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/test sample/README.md` | `active-reference` | `N` | `keep_active` | Reference documentation. |
 | `docs/windows-hypervisor-popup-query-contract.md` | `active-authoritative` | `N` | `keep_active` | Authoritative contract or specification source. |
 | `docs/windows-sidecar-capture-interface.md` | `active-authoritative` | `N` | `keep_active` | Authoritative contract or specification source. |

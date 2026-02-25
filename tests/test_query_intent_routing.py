@@ -45,6 +45,13 @@ class QueryIntentRoutingTests(unittest.TestCase):
         self.assertEqual(intent.get("topic"), "hard_cross_window_sizes")
         self.assertEqual(intent.get("family"), "hard")
 
+    def test_intent_detects_temporal_analytics_for_rolling_window_question(self) -> None:
+        intent = query_mod._query_intent(  # type: ignore[attr-defined]
+            "In the last 24 hours, what unique top-level windows were visible, and for each what were first_seen and last_seen times?"
+        )
+        self.assertEqual(intent.get("topic"), "temporal_analytics")
+        self.assertEqual(intent.get("family"), "temporal")
+
 
 if __name__ == "__main__":
     unittest.main()

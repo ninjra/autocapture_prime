@@ -22,6 +22,7 @@ if [[ -f "$pid_file" ]]; then
     echo "{\"ok\":false,\"error\":\"already_running\",\"pid\":$old_pid,\"log\":\"$log_file\"}"
     exit 1
   fi
+  rm -f "$pid_file"
 fi
 
 if [[ "$skip_admission" != "1" ]]; then
@@ -40,7 +41,9 @@ PY
 fi
 
 AUTOCAPTURE_SOAK_PARALLEL_WORKERS="$parallel_workers" \
-nohup "$ROOT/tools/soak/run_golden_qh_soak.sh" "$duration_s" "$interval_s" "$image_path" "$cases_path" >>"$log_file" 2>&1 &
+setsid bash -lc 'exec -a autocapture_soak_runner "$@"' _ \
+  "$ROOT/tools/soak/run_golden_qh_soak.sh" "$duration_s" "$interval_s" "$image_path" "$cases_path" \
+  >>"$log_file" 2>&1 < /dev/null &
 pid="$!"
 echo "$pid" >"$pid_file"
 sleep 1

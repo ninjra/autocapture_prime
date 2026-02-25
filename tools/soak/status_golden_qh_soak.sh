@@ -13,15 +13,17 @@ if [[ -f "$pid_file" ]]; then
   if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
     running=true
   else
+    rm -f "$pid_file"
     pid=""
   fi
 fi
 
 if [[ "$running" == "false" ]]; then
-  fallback_pid="$(pgrep -f "tools/soak/run_golden_qh_soak.sh" | head -n 1 || true)"
+  fallback_pid="$(pgrep -f "autocapture_soak_runner|tools/soak/run_golden_qh_soak.sh" | head -n 1 || true)"
   if [[ -n "$fallback_pid" ]]; then
     pid="$fallback_pid"
     running=true
+    echo "$pid" >"$pid_file"
   fi
 fi
 
