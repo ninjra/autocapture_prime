@@ -15,6 +15,7 @@ DEFAULT_SOURCES = [
     "docs/query_eval_cases_advanced20.json",
     "docs/query_eval_cases_stage2_time40.json",
     "docs/query_eval_cases_temporal_screenshot_qa_40.json",
+    "docs/query_eval_cases_temporal_screenshot_qa_40_additional_grounded.json",
     "docs/query_eval_cases_popup_regression.json",
 ]
 

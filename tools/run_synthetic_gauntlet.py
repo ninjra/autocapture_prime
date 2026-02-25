@@ -21,6 +21,7 @@ DEFAULT_CASE_PATHS = [
     "docs/query_eval_cases_advanced20.json",
     "docs/query_eval_cases_stage2_time40.json",
     "docs/query_eval_cases_temporal_screenshot_qa_40.json",
+    "docs/query_eval_cases_temporal_screenshot_qa_40_additional_grounded.json",
 ]
 
 
@@ -208,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
         "--cases",
         action="append",
         default=[],
-        help="Case file path. May repeat. Defaults: generic20 + advanced20 + stage2_time40.",
+        help="Case file path. May repeat. Defaults: generic20 + advanced20 + stage2_time40 + temporal40 + grounded temporal40.",
     )
     parser.add_argument("--output", default="artifacts/query_gauntlet/synthetic_gauntlet_latest.json")
     parser.add_argument("--strict", action=argparse.BooleanOptionalAction, default=False)

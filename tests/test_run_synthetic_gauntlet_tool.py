@@ -22,6 +22,7 @@ class SyntheticGauntletToolTests(unittest.TestCase):
         mod = _load_module()
         paths = list(getattr(mod, "DEFAULT_CASE_PATHS", []))
         self.assertIn("docs/query_eval_cases_temporal_screenshot_qa_40.json", paths)
+        self.assertIn("docs/query_eval_cases_temporal_screenshot_qa_40_additional_grounded.json", paths)
 
     def test_evaluate_case_strict_exact_passes(self) -> None:
         mod = _load_module()

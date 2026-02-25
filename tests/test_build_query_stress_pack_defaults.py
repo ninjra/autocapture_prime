@@ -21,8 +21,8 @@ class BuildQueryStressPackDefaultTests(unittest.TestCase):
         mod = _load_module()
         sources = list(getattr(mod, "DEFAULT_SOURCES", []))
         self.assertIn("docs/query_eval_cases_temporal_screenshot_qa_40.json", sources)
+        self.assertIn("docs/query_eval_cases_temporal_screenshot_qa_40_additional_grounded.json", sources)
 
 
 if __name__ == "__main__":
     unittest.main()
-
