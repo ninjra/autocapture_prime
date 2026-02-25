@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sqlite3
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -317,6 +318,82 @@ class RunNonVlmReadinessToolTests(unittest.TestCase):
             self.assertEqual(str(payload.get("error") or ""), "preflight_failed")
             resolution = payload.get("metadata_db_resolution", {})
             self.assertEqual(str(resolution.get("strategy") or ""), "primary_readable")
+
+    def test_main_records_release_quickcheck_artifact_when_gates_enabled(self) -> None:
+        mod = _load_module("tools/run_non_vlm_readiness.py", "run_non_vlm_readiness_tool_13")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            dataroot = root / "data"
+            dataroot.mkdir(parents=True, exist_ok=True)
+            db = dataroot / "metadata.db"
+            con = sqlite3.connect(db)
+            con.execute("create table metadata(record_type text)")
+            con.commit()
+            con.close()
+            out_path = root / "out.json"
+
+            def _fake_step(**kwargs):  # type: ignore[no-untyped-def]
+                sid = str(kwargs.get("step_id") or "")
+                cmd = kwargs.get("cmd", [])
+                row = {
+                    "id": sid,
+                    "cmd": list(cmd),
+                    "returncode": 0,
+                    "ok": True,
+                    "elapsed_ms": 1,
+                    "stdout_json": {"ok": True},
+                    "stdout_tail": "",
+                    "stderr_tail": "",
+                }
+                if sid == "release_quickcheck" and isinstance(cmd, list) and "--output" in cmd:
+                    out = Path(str(cmd[cmd.index("--output") + 1]))
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    out.write_text(
+                        json.dumps(
+                            {
+                                "ok": False,
+                                "top_failure_reasons": ["strict_matrix_failed_nonzero"],
+                                "statuses": {"real_corpus_strict_ok": False},
+                                "stage_coverage": {"frames_total": 10, "frames_queryable": 8},
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    row["stdout_json"] = {"ok": False}
+                return row
+
+            with (
+                mock.patch.object(mod, "_repo_root", return_value=root),
+                mock.patch.object(mod, "_pick_python", return_value=str(Path(sys.executable))),
+                mock.patch.object(mod, "_run_preflight", return_value={"ok": True}),
+                mock.patch.object(mod, "_run_step", side_effect=_fake_step),
+                mock.patch.object(mod, "_run_step_with_retry", side_effect=_fake_step),
+            ):
+                rc = mod.main(
+                    [
+                        "--dataroot",
+                        str(dataroot),
+                        "--output",
+                        str(out_path),
+                        "--no-run-pytest",
+                        "--run-gates",
+                        "--no-run-query-eval",
+                        "--no-run-synthetic-gauntlet",
+                        "--no-run-real-corpus-strict",
+                        "--no-revalidate-markers",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            artifacts = payload.get("artifacts", {}) if isinstance(payload.get("artifacts", {}), dict) else {}
+            self.assertIn("release_quickcheck", artifacts)
+            readiness = payload.get("readiness_report", {}) if isinstance(payload.get("readiness_report", {}), dict) else {}
+            quick = readiness.get("release_quickcheck", {}) if isinstance(readiness.get("release_quickcheck", {}), dict) else {}
+            self.assertFalse(bool(quick.get("ok", True)))
+            self.assertIn("strict_matrix_failed_nonzero", list(quick.get("top_failure_reasons", [])))
+            steps = payload.get("steps", []) if isinstance(payload.get("steps", []), list) else []
+            ids = {str(step.get("id") or "") for step in steps if isinstance(step, dict)}
+            self.assertIn("release_quickcheck", ids)
 
 
 if __name__ == "__main__":

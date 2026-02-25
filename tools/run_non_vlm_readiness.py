@@ -593,6 +593,7 @@ def main(argv: list[str] | None = None) -> int:
     plugin_enablement_json = run_dir / "gate_plugin_enablement.json"
     stage1_contract_json = run_dir / "gate_stage1_contract.json"
     audit_integrity_json = run_dir / "gate_audit_log_integrity.json"
+    release_quickcheck_json = run_dir / "release_quickcheck.json"
     query_eval_json = run_dir / "query_eval_generic20.json"
     synthetic_gauntlet_json = run_dir / "synthetic_gauntlet_80.json"
     real_corpus_strict_json = run_dir / "real_corpus_strict_matrix.json"
@@ -859,6 +860,7 @@ def main(argv: list[str] | None = None) -> int:
             ("gate_ledger", [py, "tools/gate_ledger.py"]),
             ("gate_security", [py, "tools/gate_security.py"]),
             ("gate_promptops_policy", [py, "tools/gate_promptops_policy.py"]),
+            ("release_quickcheck", [py, "tools/release_quickcheck.py", "--output", str(release_quickcheck_json)]),
         ):
             steps.append(
                 _run_step(
@@ -1010,6 +1012,7 @@ def main(argv: list[str] | None = None) -> int:
     plugin_enablement_payload = _load_json_object(plugin_enablement_json) if plugin_enablement_json.exists() else {}
     stage1_contract_payload = _load_json_object(stage1_contract_json) if stage1_contract_json.exists() else {}
     audit_integrity_payload = _load_json_object(audit_integrity_json) if audit_integrity_json.exists() else {}
+    release_quickcheck_payload = _load_json_object(release_quickcheck_json) if release_quickcheck_json.exists() else {}
     failure_class_counts = _failure_class_counts(steps)
     top_failure_classes = [
         {"failure_class": key, "count": int(val)}
@@ -1072,6 +1075,12 @@ def main(argv: list[str] | None = None) -> int:
                 "matrix_skipped": int(strict_payload.get("matrix_skipped", 0) or 0),
                 "failure_cause_counts": strict_payload.get("strict_failure_cause_counts", {}),
             },
+            "release_quickcheck": {
+                "ok": bool(release_quickcheck_payload.get("ok", False)),
+                "top_failure_reasons": release_quickcheck_payload.get("top_failure_reasons", []),
+                "statuses": release_quickcheck_payload.get("statuses", {}),
+                "stage_coverage": release_quickcheck_payload.get("stage_coverage", {}),
+            },
             "stage1_backlog_risk": {
                 "frames_total": int((stage1_summary or {}).get("frames_total", 0) or 0),
                 "frames_queryable": int((stage1_summary or {}).get("frames_queryable", 0) or 0),
@@ -1088,6 +1097,7 @@ def main(argv: list[str] | None = None) -> int:
             "plugin_enablement_gate": str(plugin_enablement_json),
             "stage1_contract_gate": str(stage1_contract_json),
             "audit_integrity_gate": str(audit_integrity_json),
+            "release_quickcheck": str(release_quickcheck_json),
             "query_eval": str(query_eval_json),
             "synthetic_gauntlet": str(synthetic_gauntlet_json),
             "real_corpus_strict_matrix": str(real_corpus_strict_json),
