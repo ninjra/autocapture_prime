@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -64,22 +65,30 @@ class PromptOpsResult:
 
 
 class PromptStore:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, cache_max_entries: int = 128) -> None:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
-        self._cache: dict[str, str] = {}
+        self._cache: "OrderedDict[str, str]" = OrderedDict()
+        self._cache_max_entries = max(1, min(512, int(cache_max_entries)))
 
     def _path(self, prompt_id: str) -> Path:
         return self.root / f"{_safe_name(prompt_id)}.txt"
 
+    def _evict_overflow(self) -> None:
+        while len(self._cache) > int(self._cache_max_entries):
+            self._cache.popitem(last=False)
+
     def get(self, prompt_id: str) -> str | None:
         if prompt_id in self._cache:
+            self._cache.move_to_end(prompt_id)
             return self._cache[prompt_id]
         path = self._path(prompt_id)
         if not path.exists():
             return None
         text = path.read_text(encoding="utf-8")
         self._cache[prompt_id] = text
+        self._cache.move_to_end(prompt_id)
+        self._evict_overflow()
         return text
 
     def set(self, prompt_id: str, text: str) -> Path:
@@ -87,6 +96,8 @@ class PromptStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
         self._cache[prompt_id] = text
+        self._cache.move_to_end(prompt_id)
+        self._evict_overflow()
         return path
 
 
@@ -116,11 +127,27 @@ class PromptOpsLayer:
         self._config = config
         self._bundle_instance: PromptBundle | None = None
         self._bundle_loaded = False
-        self._store = PromptStore(self._prompt_dir())
+        self._store = PromptStore(self._prompt_dir(), cache_max_entries=self._prompt_store_cache_max_entries())
         self._history = PromptHistory(self._history_dir())
 
     def _prompt_cfg(self) -> dict[str, Any]:
         return self._config.get("promptops", {}) if isinstance(self._config, dict) else {}
+
+    def _prompt_store_cache_max_entries(self) -> int:
+        cfg = self._prompt_cfg()
+        env_raw = str(os.getenv("AUTOCAPTURE_PROMPTOPS_PROMPT_STORE_CACHE_MAX_ENTRIES", "")).strip()
+        cfg_raw: Any = None
+        service_cache = cfg.get("store_cache", {}) if isinstance(cfg.get("store_cache", {}), dict) else {}
+        if "max_entries" in service_cache:
+            cfg_raw = service_cache.get("max_entries")
+        elif "prompt_store_cache_max_entries" in cfg:
+            cfg_raw = cfg.get("prompt_store_cache_max_entries")
+        raw = env_raw if env_raw else cfg_raw
+        try:
+            cap = int(raw) if raw is not None and str(raw).strip() else 128
+        except Exception:
+            cap = 128
+        return max(1, min(512, cap))
 
     def _prompt_dir(self) -> Path:
         cfg = self._prompt_cfg()

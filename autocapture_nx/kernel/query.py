@@ -180,10 +180,11 @@ def _query_fast_cache_settings(system: Any) -> tuple[bool, float, int]:
     except Exception:
         ttl_s = 2.0
     try:
-        max_entries = int(cache_cfg.get("max_entries", 128) or 128)
+        raw_max_entries = cache_cfg.get("max_entries", 128)
+        max_entries = int(raw_max_entries if raw_max_entries is not None else 128)
     except Exception:
         max_entries = 128
-    return enabled, max(0.0, ttl_s), max(1, max_entries)
+    return enabled, max(0.0, ttl_s), max(1, min(4096, max_entries))
 
 
 def _query_fast_cache_key(system: Any, *, query_text: str, time_window: dict[str, Any] | None) -> str:
@@ -920,7 +921,6 @@ def run_state_query(system, query: str) -> dict[str, Any]:
                     query,
                     {
                         "prompt_id": "state_query",
-                        "sources": [],
                     },
                 )
                 query_text = promptops_result.prompt
@@ -1329,7 +1329,6 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
                     query,
                     {
                         "prompt_id": "query",
-                        "sources": [],
                     },
                 )
                 query_text = promptops_result.prompt
@@ -2669,7 +2668,12 @@ def _append_query_metric(system, *, query: str, method: str, result: dict[str, A
 def _query_tokens(query: str) -> set[str]:
     raw = str(query or "").casefold()
     raw = raw.replace("_", " ").replace(".", " ").replace("/", " ").replace(":", " ").replace("-", " ")
-    tokens = [tok for tok in normalize_text(raw).split() if len(tok) >= 2]
+    raw_tokens = normalize_text(raw).split()
+    tokens: list[str] = []
+    for tok_raw in raw_tokens:
+        tok = re.sub(r"^[^a-z0-9]+|[^a-z0-9]+$", "", str(tok_raw or ""))
+        if len(tok) >= 2:
+            tokens.append(tok)
     out: set[str] = set()
     for tok in tokens:
         out.add(tok)
@@ -6388,6 +6392,28 @@ _QUERY_CAPABILITY_CATALOG: list[dict[str, Any]] = [
     {"topic": "adv_dev", "family": "advanced", "doc_kinds": ["adv.dev.summary"], "signals": ["what_changed", "files", "tests_command"], "min_overlap": 2},
     {"topic": "adv_console", "family": "advanced", "doc_kinds": ["adv.console.colors"], "signals": ["line_colors", "red_lines", "green_lines"], "min_overlap": 2},
     {"topic": "adv_browser", "family": "advanced", "doc_kinds": ["adv.browser.windows"], "signals": ["active_tab", "hostname", "tab_count"], "min_overlap": 2},
+    {
+        "topic": "temporal_analytics",
+        "family": "temporal",
+        "doc_kinds": ["derived.sst.text.extra", "obs.uia.focus", "obs.uia.context", "obs.uia.operable"],
+        "signals": [
+            "last_24_hours",
+            "first_seen",
+            "last_seen",
+            "most_recent",
+            "between",
+            "within",
+            "duration",
+            "latency",
+            "median",
+            "delta",
+            "count",
+            "timeline",
+            "window_changes",
+            "foreground_app",
+        ],
+        "min_overlap": 3,
+    },
     {"topic": "inbox", "family": "signal", "doc_kinds": ["obs.metric.open_inboxes", "obs.breakdown.open_inboxes"], "signals": ["open_inboxes_count", "mail_clients"], "min_overlap": 1},
     {"topic": "song", "family": "signal", "doc_kinds": ["obs.media.now_playing"], "signals": ["current_song", "now_playing"], "min_overlap": 1},
     {"topic": "quorum", "family": "signal", "doc_kinds": ["obs.role.message_author", "obs.relation.collaboration"], "signals": ["quorum_message_collaborator"], "min_overlap": 1},
@@ -6411,6 +6437,168 @@ def _capability_tokens(capability: dict[str, Any]) -> set[str]:
     return {tok for tok in tokens if tok not in stop}
 
 
+def _temporal_intent_override(query: str, tokens: set[str]) -> dict[str, Any] | None:
+    query_low = str(query or "").casefold()
+    if not query_low:
+        return None
+    temporal_phrases = (
+        "last 24 hours",
+        "most recent",
+        "latest processed",
+        "first_seen",
+        "last_seen",
+        "time delta",
+        "time away",
+        "within 10 minutes",
+        "within 20 minutes",
+        "within 3 seconds",
+        "between",
+        "rolling",
+    )
+    temporal_terms = {
+        "hour",
+        "hours",
+        "day",
+        "days",
+        "time",
+        "times",
+        "when",
+        "before",
+        "after",
+        "start",
+        "end",
+        "latest",
+        "recent",
+        "first",
+        "last",
+        "seen",
+        "within",
+        "between",
+        "timeline",
+        "duration",
+        "latency",
+        "median",
+        "delta",
+        "count",
+        "minutes",
+        "minute",
+        "seconds",
+        "second",
+    }
+    analytic_terms = {
+        "window",
+        "windows",
+        "focus",
+        "domain",
+        "url",
+        "error",
+        "toast",
+        "dialog",
+        "button",
+        "label",
+        "foreground",
+        "click",
+        "cursor",
+        "scroll",
+        "hid",
+        "role",
+        "typed",
+        "keypress",
+        "modal",
+        "toggle",
+        "checkbox",
+        "banner",
+        "notification",
+        "currency",
+        "percentage",
+        "identifier",
+        "value",
+        "uia",
+        "rendered",
+        "mismatch",
+        "disagreed",
+        "string",
+        "strings",
+        "search",
+        "tooltip",
+        "context",
+        "menu",
+        "state",
+        "vector",
+        "similar",
+        "return",
+    }
+    hard_query_blockers = (
+        "bounding boxes for complete and view details",
+        "k preset",
+        "cross-window reasoning",
+        "tile classification",
+        "siriusxm carousel",
+        "time-to-assignment",
+        "opened at",
+        "state changed update timestamp",
+        "cell phone number",
+        "worklog",
+        "unread indicator",
+        "action grounding",
+    )
+    if any(item in query_low for item in hard_query_blockers):
+        return None
+    phrase_hits = [phrase for phrase in temporal_phrases if phrase in query_low]
+    temporal_hits = sorted(tok for tok in tokens if tok in temporal_terms)
+    analytic_hits = sorted(tok for tok in tokens if tok in analytic_terms)
+    has_temporal_anchor = (
+        len(phrase_hits) > 0
+        or ("last" in tokens and ("hour" in tokens or "hours" in tokens or "day" in tokens or "days" in tokens))
+        or ("most" in tokens and "recent" in tokens)
+        or ("when" in tokens)
+        or len(
+            [
+                tok
+                for tok in tokens
+                if tok
+                in {
+                    "time",
+                    "times",
+                    "when",
+                    "delta",
+                    "latency",
+                    "duration",
+                    "before",
+                    "after",
+                    "within",
+                    "between",
+                    "start",
+                    "end",
+                    "minute",
+                    "minutes",
+                    "second",
+                    "seconds",
+                }
+            ]
+        )
+        >= 2
+    )
+    if (not has_temporal_anchor) and len(temporal_hits) < 3:
+        return None
+    if len(analytic_hits) < 1 and len(tokens) < 6:
+        return None
+    marker_terms = sorted(set(temporal_hits + analytic_hits + [p.replace(" ", "_") for p in phrase_hits]))
+    raw_score = (len(phrase_hits) * 0.24) + (len(temporal_hits) * 0.05) + (len(analytic_hits) * 0.03)
+    if has_temporal_anchor and len(analytic_hits) >= 1:
+        raw_score = max(raw_score, 0.35)
+    score = max(0.0, min(0.99, round(raw_score, 6)))
+    if score < 0.18:
+        return None
+    return {
+        "topic": "temporal_analytics",
+        "family": "temporal",
+        "score": score,
+        "matched_markers": marker_terms[:8],
+        "matched_tokens": marker_terms[:16],
+    }
+
+
 def _query_intent(query: str) -> dict[str, Any]:
     tokens = _query_tokens(str(query or ""))
     best: dict[str, Any] = {
@@ -6422,6 +6610,7 @@ def _query_intent(query: str) -> dict[str, Any]:
     }
     if not tokens:
         return best
+    temporal_override = _temporal_intent_override(query, tokens)
     for capability in _QUERY_CAPABILITY_CATALOG:
         cap_tokens = _capability_tokens(capability)
         if not cap_tokens:
@@ -6442,6 +6631,13 @@ def _query_intent(query: str) -> dict[str, Any]:
             "matched_markers": overlap[:8],
             "matched_tokens": overlap[:16],
         }
+    if isinstance(temporal_override, dict):
+        temporal_score = float(temporal_override.get("score") or 0.0)
+        best_family = str(best.get("family") or "generic").strip().casefold()
+        if temporal_score >= 0.20:
+            return temporal_override
+        if best_family == "generic":
+            return temporal_override
     if float(best.get("score", 0.0)) < 0.12:
         return {
             "topic": "generic",
@@ -6686,6 +6882,7 @@ def _topic_doc_kind(topic: str) -> str:
         "adv_dev": "adv.dev.summary",
         "adv_console": "adv.console.colors",
         "adv_browser": "adv.browser.windows",
+        "temporal_analytics": "derived.sst.text.extra",
     }
     return str(topic_map.get(str(topic or ""), "") or "").strip()
 
@@ -6694,6 +6891,7 @@ def _topic_obs_doc_kinds(topic: str) -> list[str]:
     mapping = {
         "hard_time_to_assignment": ["adv.details.kv"],
         "hard_cross_window_sizes": ["adv.dev.summary"],
+        "temporal_analytics": ["obs.uia.focus", "obs.uia.context", "obs.uia.operable"],
         "inbox": ["obs.metric.open_inboxes", "obs.breakdown.open_inboxes"],
         "song": ["obs.media.now_playing"],
         "quorum": ["obs.role.message_author", "obs.relation.collaboration", "obs.role.contractor"],
@@ -7803,6 +8001,94 @@ def _normalize_hard_fields_for_topic(topic: str, hard_fields: dict[str, Any]) ->
     return out
 
 
+def _temporal_query_markers(query: str) -> list[str]:
+    text = str(query or "").casefold()
+    marker_pairs = [
+        ("last_24_hours", ("last 24 hours",)),
+        ("most_recent", ("most recent", "latest")),
+        ("first_seen", ("first_seen", "first seen")),
+        ("last_seen", ("last_seen", "last seen")),
+        ("duration", ("duration", "time away")),
+        ("latency", ("latency", "delta")),
+        ("window_changes", ("window change", "active window")),
+        ("hid", ("hid", "keypress", "click", "mouse")),
+    ]
+    out: list[str] = []
+    for key, variants in marker_pairs:
+        if any(str(v) in text for v in variants):
+            out.append(str(key))
+    return out
+
+
+def _build_temporal_display(query: str, metadata: Any | None, claim_texts: list[str]) -> dict[str, Any]:
+    support_rows = _support_snippets_for_topic("temporal_analytics", query, metadata, limit=12)
+    clue_rows = _metadata_window_clues(metadata, limit=6)
+    markers = _temporal_query_markers(query)
+    evidence: list[str] = []
+    seen: set[str] = set()
+    for line in support_rows + clue_rows:
+        text = _compact_line(str(line or "").strip(), limit=240, with_ellipsis=False)
+        if not text:
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        evidence.append(text)
+    if not evidence:
+        for raw in claim_texts[:4]:
+            text = _compact_line(str(raw or "").strip(), limit=220, with_ellipsis=False)
+            if not text:
+                continue
+            key = text.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            evidence.append(text)
+    required = ["obs.uia.focus", "obs.uia.context", "obs.uia.operable", "derived.sst.text.extra"]
+    query_excerpt = _compact_line(str(query or "").strip(), limit=200, with_ellipsis=False)
+    marker_summary = ", ".join(markers) if markers else "none_detected"
+    if evidence:
+        summary = (
+            "Temporal query matched; normalized evidence is present but aggregate rollups are incomplete for strict metric guarantees. "
+            f"query=\"{query_excerpt}\" markers={marker_summary}"
+        ).strip()
+        bullets = [
+            "required_source: temporal aggregate rows with explicit first_seen/last_seen/duration semantics",
+            f"query_markers: {marker_summary}",
+        ] + [f"evidence: {line}" for line in evidence[:10]]
+        fields = {
+            "evidence_status": "partial_normalized",
+            "evidence_count": int(len(evidence)),
+            "query_markers": markers,
+            "required_record_types": required,
+            "support_snippets": evidence[:10],
+        }
+    else:
+        summary = (
+            "Indeterminate: no temporal aggregate evidence is available yet for this query in the normalized corpus. "
+            f"query=\"{query_excerpt}\" markers={marker_summary}"
+        ).strip()
+        bullets = [
+            "required_source: temporal aggregate rows with explicit first_seen/last_seen/duration semantics",
+            f"query_markers: {marker_summary}",
+            "fallback_status: no temporal evidence rows matched current query markers",
+        ]
+        fields = {
+            "evidence_status": "no_temporal_evidence",
+            "evidence_count": 0,
+            "query_markers": markers,
+            "required_record_types": required,
+        }
+    return {
+        "schema_version": 1,
+        "summary": summary,
+        "bullets": bullets[:24],
+        "fields": fields,
+        "topic": "temporal_analytics",
+    }
+
+
 def _build_answer_display(
     query: str,
     claim_texts: list[str],
@@ -7830,6 +8116,8 @@ def _build_answer_display(
     adv_hard = _build_adv_display_from_hard(query_topic, hard_vlm_map)
     adv_struct = _build_adv_display(query_topic, display_sources)
     adv: dict[str, Any] | None = None
+    if query_topic == "temporal_analytics":
+        return _build_temporal_display(query, metadata, claim_texts)
     if adv_hard is not None and adv_struct is not None:
         hard_norm = _normalize_adv_display(query_topic, adv_hard, claim_texts)
         struct_norm = _normalize_adv_display(query_topic, adv_struct, claim_texts)
@@ -9099,6 +9387,16 @@ def _apply_answer_display(
     answer_obj = dict(answer)
     answer_obj["display"] = display
     answer_obj["summary"] = str(display.get("summary") or "")
+    if query_topic == "temporal_analytics":
+        temporal_summary = str(display.get("summary") or "").strip().casefold() if isinstance(display, dict) else ""
+        temporal_fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
+        status = str(temporal_fields.get("evidence_status") or "").strip().casefold()
+        if "indeterminate" in temporal_summary or status in {"", "no_temporal_evidence"}:
+            answer_obj["state"] = "no_evidence"
+            if not str(answer_obj.get("notice") or "").strip():
+                answer_obj["notice"] = "No temporal aggregate evidence is available for this query yet."
+        elif str(answer_obj.get("state") or "").strip().casefold() == "ok" and status != "complete":
+            answer_obj["state"] = "partial"
     current_state = str(answer_obj.get("state") or "").strip().casefold()
     has_positive_provider = any(
         isinstance(p, dict) and int(p.get("contribution_bp", 0) or 0) > 0
