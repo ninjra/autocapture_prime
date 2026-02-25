@@ -100,6 +100,25 @@ def _default_manifest(py: str) -> list[GateStep]:
     stage1_contract_disabled = _truthy(os.environ.get("STAGE1_CONTRACT_DISABLED"))
     if stage1_contract_disabled:
         steps = [step for step in steps if step.id != "gate_stage1_contract"]
+    stage1_lineage_disabled = _truthy(os.environ.get("STAGE1_LINEAGE_GATE_DISABLED"))
+    stage1_lineage_out = os.environ.get("STAGE1_LINEAGE_GATE_OUT", "artifacts/lineage/gate_stage1_lineage.json").strip()
+    stage1_lineage_samples = os.environ.get("STAGE1_LINEAGE_GATE_SAMPLES", "3").strip() or "3"
+    if not stage1_lineage_disabled:
+        steps.append(
+            GateStep(
+                "validate_stage1_lineage",
+                [
+                    py,
+                    "tools/validate_stage1_lineage.py",
+                    "--strict",
+                    "--samples",
+                    str(stage1_lineage_samples),
+                    "--output",
+                    stage1_lineage_out,
+                ],
+                stage1_lineage_out,
+            )
+        )
     baseline_snapshot_disabled = _truthy(os.environ.get("BASELINE_SNAPSHOT_DISABLED"))
     baseline_snapshot_out = os.environ.get("BASELINE_SNAPSHOT_OUT", "artifacts/baseline/baseline_snapshot_latest.json").strip()
     if not baseline_snapshot_disabled:

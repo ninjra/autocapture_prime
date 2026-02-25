@@ -64,6 +64,7 @@ def test_default_manifest_includes_required_release_steps() -> None:
     assert "gate_acceptance_coverage" in ids
     assert "gate_queryability" in ids
     assert "gate_stage1_contract" in ids
+    assert "validate_stage1_lineage" in ids
     assert "generate_baseline_snapshot" in ids
     assert "validate_blueprint_spec" in ids
     assert "run_mod021_low_resource" in ids
@@ -79,6 +80,8 @@ def test_default_manifest_orders_stage1_gate_before_strict_corpus_gates() -> Non
     ordered_ids = [step.id for step in steps]
     assert ordered_ids.index("gate_stage1_contract") < ordered_ids.index("run_real_corpus_readiness")
     assert ordered_ids.index("gate_stage1_contract") < ordered_ids.index("gate_real_corpus_strict")
+    assert ordered_ids.index("validate_stage1_lineage") < ordered_ids.index("run_real_corpus_readiness")
+    assert ordered_ids.index("validate_stage1_lineage") < ordered_ids.index("gate_real_corpus_strict")
 
 
 def test_default_manifest_can_disable_stage1_contract() -> None:
@@ -87,6 +90,14 @@ def test_default_manifest_can_disable_stage1_contract() -> None:
         steps = mod._default_manifest(sys.executable)
     ids = {step.id for step in steps}
     assert "gate_stage1_contract" not in ids
+
+
+def test_default_manifest_can_disable_stage1_lineage_gate() -> None:
+    mod = _load_module()
+    with mock.patch.dict(mod.os.environ, {"STAGE1_LINEAGE_GATE_DISABLED": "1"}, clear=False):
+        steps = mod._default_manifest(sys.executable)
+    ids = {step.id for step in steps}
+    assert "validate_stage1_lineage" not in ids
 
 
 def test_default_manifest_can_disable_baseline_snapshot() -> None:
