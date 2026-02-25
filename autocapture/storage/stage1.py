@@ -23,6 +23,12 @@ def stage2_complete_record_id(record_id: str) -> str:
     return f"{run_id}/derived.ingest.stage2.complete/{component}"
 
 
+def stage1_plugin_completion_record_id(record_id: str) -> str:
+    run_id = str(record_id).split("/", 1)[0] if "/" in str(record_id) else "run"
+    component = encode_record_id_component(str(record_id))
+    return f"{run_id}/derived.ingest.plugin.completion/{component}"
+
+
 def is_stage1_complete_record(record_id: str, record: dict[str, Any]) -> bool:
     if not isinstance(record, dict):
         return False
@@ -303,8 +309,14 @@ def mark_stage2_complete(
     payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
 
     existing = metadata.get(rid, None) if hasattr(metadata, "get") else None
-    if isinstance(existing, dict) and str(existing.get("payload_hash") or "") == str(payload.get("payload_hash") or ""):
-        return rid, False
+    if isinstance(existing, dict):
+        same_hash = str(existing.get("payload_hash") or "") == str(payload.get("payload_hash") or "")
+        if same_hash:
+            return rid, False
+        compare_keys = [key for key in payload.keys() if key not in {"ts_utc", "payload_hash"}]
+        same_core = all(existing.get(key) == payload.get(key) for key in compare_keys)
+        if same_core:
+            return rid, False
 
     try:
         if hasattr(metadata, "put_replace"):
@@ -348,6 +360,105 @@ def mark_stage2_complete(
                     "projection_ok": bool(projection_ok),
                     "generated_docs": int(payload.get("generated_docs", 0)),
                     "generated_states": int(payload.get("generated_states", 0)),
+                },
+            )
+        except Exception:
+            pass
+    return rid, True
+
+
+def mark_stage1_plugin_completion(
+    metadata: Any,
+    record_id: str,
+    record: dict[str, Any],
+    *,
+    stage1_complete: bool,
+    retention_eligible: bool,
+    retention_missing: bool = False,
+    uia_required: bool = False,
+    uia_ok: bool = True,
+    uia_reason: str = "",
+    obs_uia_inserted: int = 0,
+    stage2_projection_ok: bool = False,
+    stage2_projection_errors: int = 0,
+    stage2_complete: bool = False,
+    reason: str = "handoff_ingest",
+    ts_utc: str | None = None,
+    logger: Any | None = None,
+) -> tuple[str | None, bool]:
+    if metadata is None:
+        return None, False
+    if not isinstance(record, dict):
+        return None, False
+
+    rid = stage1_plugin_completion_record_id(record_id)
+    run_id = str(record.get("run_id") or (record_id.split("/", 1)[0] if "/" in record_id else "run"))
+    ts_val = str(ts_utc or datetime.now(timezone.utc).isoformat())
+    record_type = str(record.get("record_type") or "")
+    complete = bool(stage1_complete and retention_eligible and ((not uia_required) or uia_ok))
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "record_type": "derived.ingest.plugin.completion",
+        "run_id": run_id,
+        "ts_utc": ts_val,
+        "source_record_id": str(record_id),
+        "source_record_type": record_type,
+        "reason": str(reason or "handoff_ingest"),
+        "stage1_complete": bool(stage1_complete),
+        "retention_eligible": bool(retention_eligible),
+        "retention_missing": bool(retention_missing),
+        "uia_required": bool(uia_required),
+        "uia_ok": bool(uia_ok),
+        "uia_reason": str(uia_reason or ""),
+        "obs_uia_inserted": int(_safe_int(obs_uia_inserted)),
+        "stage2_projection_ok": bool(stage2_projection_ok),
+        "stage2_projection_errors": int(_safe_int(stage2_projection_errors)),
+        "stage2_complete": bool(stage2_complete),
+        "complete": bool(complete),
+    }
+    payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
+
+    existing = metadata.get(rid, None) if hasattr(metadata, "get") else None
+    if isinstance(existing, dict):
+        same_hash = str(existing.get("payload_hash") or "") == str(payload.get("payload_hash") or "")
+        if same_hash:
+            return rid, False
+        compare_keys = [key for key in payload.keys() if key not in {"ts_utc", "payload_hash"}]
+        same_core = all(existing.get(key) == payload.get(key) for key in compare_keys)
+        if same_core:
+            return rid, False
+
+    try:
+        if hasattr(metadata, "put_replace"):
+            metadata.put_replace(rid, payload)
+        elif hasattr(metadata, "put"):
+            metadata.put(rid, payload)
+        else:
+            metadata.put_new(rid, payload)
+    except Exception as exc:
+        if logger is not None:
+            try:
+                logger.log(
+                    "ingest.stage1.plugin_completion.write_error",
+                    {
+                        "source_record_id": str(record_id),
+                        "plugin_completion_record_id": str(rid),
+                        "error": f"{type(exc).__name__}: {exc}",
+                    },
+                )
+            except Exception:
+                pass
+        return None, False
+
+    if logger is not None:
+        try:
+            logger.log(
+                "ingest.stage1.plugin_completion",
+                {
+                    "source_record_id": str(record_id),
+                    "complete": bool(complete),
+                    "uia_required": bool(uia_required),
+                    "uia_ok": bool(uia_ok),
                 },
             )
         except Exception:

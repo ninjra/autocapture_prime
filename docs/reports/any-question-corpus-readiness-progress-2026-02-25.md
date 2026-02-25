@@ -62,3 +62,21 @@ Progress update for `docs/plans/any-question-corpus-readiness-plan.md`, focused 
 ## Next Step (Sprint 3)
 - Enforce full Stage2+ plugin stack completion proof and persist deterministic per-frame plugin completion records suitable for query diagnostics.
 
+## Sprint 3 Start (Implemented)
+- Added deterministic per-frame plugin completion records:
+  - record type: `derived.ingest.plugin.completion`
+  - record id: deterministic from source frame id
+  - writes occur in handoff ingest success and failure paths
+- Files:
+  - `autocapture/storage/stage1.py`
+  - `autocapture_nx/ingest/handoff_ingest.py`
+  - `tests/test_stage1_retention_markers.py`
+  - `tests/test_handoff_ingest.py`
+- New counter surfaced in handoff stats:
+  - `stage1_plugin_completion_records`
+
+Validation:
+- `tests/test_stage1_retention_markers.py`
+- `tests/test_handoff_ingest.py`
+- combined regression subset:
+  - `41 passed`, `0 failed`

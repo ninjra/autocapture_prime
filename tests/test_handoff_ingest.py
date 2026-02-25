@@ -168,6 +168,7 @@ class HandoffIngestTests(unittest.TestCase):
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.focus"), 1)
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.context"), 1)
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.operable"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "derived.ingest.plugin.completion"), 1)
             first_projection_ids = _fetch_dest_record_ids(dest / "metadata.db", "derived.sst.text.extra")
             self.assertGreaterEqual(len(first_projection_ids), 1)
             self.assertEqual(_count_dest_records(dest / "metadata.db", "system.ingest.handoff.completed"), 1)
@@ -183,6 +184,7 @@ class HandoffIngestTests(unittest.TestCase):
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.focus"), 1)
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.context"), 1)
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "obs.uia.operable"), 1)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "derived.ingest.plugin.completion"), 1)
             second_projection_ids = _fetch_dest_record_ids(dest / "metadata.db", "derived.sst.text.extra")
             self.assertEqual(second_projection_ids, first_projection_ids)
             self.assertEqual(_count_dest_records(dest / "metadata.db", "system.ingest.handoff.completed"), 1)
@@ -372,8 +374,10 @@ class HandoffIngestTests(unittest.TestCase):
             self.assertEqual(result.stage1_retention_marked_records, 0)
             self.assertEqual(result.stage1_missing_retention_marker_count, 1)
             self.assertEqual(result.stage1_uia_frames_missing_count, 1)
+            self.assertEqual(result.stage1_plugin_completion_records, 1)
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "derived.ingest.stage1.complete"), 0)
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "retention.eligible"), 0)
+            self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "derived.ingest.plugin.completion"), 1)
 
     def test_auto_drain_retries_marked_handoff_when_stage1_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

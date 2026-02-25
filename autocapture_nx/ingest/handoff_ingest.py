@@ -20,7 +20,7 @@ from autocapture_nx.ingest.uia_obs_docs import _ensure_frame_uia_docs
 from autocapture_nx.storage.stage1_derived_store import Stage1DerivedSqliteStore
 from autocapture_nx.storage.stage1_derived_store import Stage1OverlayStore
 from autocapture_nx.storage.stage1_derived_store import default_stage1_derived_db_path
-from autocapture.storage.stage1 import mark_stage1_and_retention, mark_stage2_complete
+from autocapture.storage.stage1 import mark_stage1_and_retention, mark_stage1_plugin_completion, mark_stage2_complete
 
 _REAP_MARKER = "reap_eligible.json"
 _REAP_SCHEMA = "autocapture.handoff.reap_eligible.v1"
@@ -202,6 +202,7 @@ class IngestResult:
     stage2_projection_inserted_docs: int
     stage2_projection_errors: int
     stage2_complete_records: int
+    stage1_plugin_completion_records: int
     ack_path: str
     journal_record_id: str
     errors: list[str]
@@ -349,6 +350,7 @@ class HandoffIngestor:
         stage2_projection_inserted_docs = 0
         stage2_projection_errors = 0
         stage2_complete_records = 0
+        stage1_plugin_completion_records = 0
         journal_record_id = ""
         errors: list[str] = []
 
@@ -466,7 +468,29 @@ class HandoffIngestor:
                     if bool(uia_status.get("required", False)) and not bool(uia_status.get("ok", False)):
                         stage1_uia_frames_missing_count += 1
                         stage1_missing_retention_marker_count += 1
+                        try:
+                            completion_id, completion_inserted = mark_stage1_plugin_completion(
+                                stage1_store,
+                                source_record_id,
+                                source_payload,
+                                stage1_complete=False,
+                                retention_eligible=False,
+                                retention_missing=True,
+                                uia_required=bool(uia_status.get("required", False)),
+                                uia_ok=bool(uia_status.get("ok", False)),
+                                uia_reason=str(uia_status.get("reason") or "uia_docs_missing"),
+                                obs_uia_inserted=_safe_int(uia_status.get("inserted", 0)),
+                                stage2_projection_ok=False,
+                                stage2_projection_errors=0,
+                                stage2_complete=False,
+                                reason="handoff_uia_docs_missing",
+                            )
+                            if completion_id and completion_inserted:
+                                stage1_plugin_completion_records += 1
+                        except Exception:
+                            pass
                         continue
+                    stage2_complete_ok = False
                     try:
                         projection = project_stage2_docs_for_frame(
                             stage1_read_store,
@@ -489,10 +513,10 @@ class HandoffIngestor:
                             projection=projection if isinstance(projection, dict) else None,
                             reason="handoff_ingest",
                         )
-                        if stage2_id and stage2_inserted:
-                            stage2_marker = stage1_store.get(stage2_id, None) if hasattr(stage1_store, "get") else None
-                            if isinstance(stage2_marker, dict) and bool(stage2_marker.get("complete", False)):
-                                stage2_complete_records += 1
+                        stage2_marker = stage1_store.get(stage2_id, None) if (stage2_id and hasattr(stage1_store, "get")) else None
+                        stage2_complete_ok = isinstance(stage2_marker, dict) and bool(stage2_marker.get("complete", False))
+                        if stage2_complete_ok:
+                            stage2_complete_records += 1
                     except Exception:
                         stage2_projection_errors += 1
                     try:
@@ -503,6 +527,28 @@ class HandoffIngestor:
                             reason="handoff_ingest",
                         )
                     except Exception:
+                        try:
+                            completion_id, completion_inserted = mark_stage1_plugin_completion(
+                                stage1_store,
+                                source_record_id,
+                                source_payload,
+                                stage1_complete=False,
+                                retention_eligible=False,
+                                retention_missing=True,
+                                uia_required=bool(uia_status.get("required", False)),
+                                uia_ok=bool(uia_status.get("ok", False)),
+                                uia_reason=str(uia_status.get("reason") or ""),
+                                obs_uia_inserted=_safe_int(uia_status.get("inserted", 0)),
+                                stage2_projection_ok=bool(projection.get("ok", False))
+                                and _safe_int(projection.get("errors", 0)) <= 0,
+                                stage2_projection_errors=_safe_int(projection.get("errors", 0)),
+                                stage2_complete=bool(stage2_complete_ok),
+                                reason="handoff_stage1_retention_exception",
+                            )
+                            if completion_id and completion_inserted:
+                                stage1_plugin_completion_records += 1
+                        except Exception:
+                            pass
                         continue
                     stage1_complete_ok = bool(result.get("stage1_complete", False))
                     retention_missing = bool(result.get("retention_missing", False))
@@ -527,6 +573,28 @@ class HandoffIngestor:
                         stage1_retention_marked_records += 1
                     if retention_missing:
                         stage1_missing_retention_marker_count += 1
+                    try:
+                        completion_id, completion_inserted = mark_stage1_plugin_completion(
+                            stage1_store,
+                            source_record_id,
+                            source_payload,
+                            stage1_complete=bool(stage1_complete_ok),
+                            retention_eligible=bool(result.get("retention_record_id")),
+                            retention_missing=bool(retention_missing),
+                            uia_required=bool(uia_status.get("required", False)),
+                            uia_ok=bool(uia_status.get("ok", False)),
+                            uia_reason=str(uia_status.get("reason") or ""),
+                            obs_uia_inserted=_safe_int(uia_status.get("inserted", 0)),
+                            stage2_projection_ok=bool(projection.get("ok", False))
+                            and _safe_int(projection.get("errors", 0)) <= 0,
+                            stage2_projection_errors=_safe_int(projection.get("errors", 0)),
+                            stage2_complete=bool(stage2_complete_ok),
+                            reason="handoff_ingest",
+                        )
+                        if completion_id and completion_inserted:
+                            stage1_plugin_completion_records += 1
+                    except Exception:
+                        pass
 
                 handoff_hash = sha256_file(metadata_path)
                 handoff_key = encode_record_id_component(f"{handoff.name}:{handoff_hash}")
@@ -554,6 +622,7 @@ class HandoffIngestor:
                         "stage2_projection_inserted_docs": int(stage2_projection_inserted_docs),
                         "stage2_projection_errors": int(stage2_projection_errors),
                         "stage2_complete_records": int(stage2_complete_records),
+                        "stage1_plugin_completion_records": int(stage1_plugin_completion_records),
                     },
                     "errors": [],
                 }
@@ -605,6 +674,7 @@ class HandoffIngestor:
                 "stage2_projection_inserted_docs": int(stage2_projection_inserted_docs),
                 "stage2_projection_errors": int(stage2_projection_errors),
                 "stage2_complete_records": int(stage2_complete_records),
+                "stage1_plugin_completion_records": int(stage1_plugin_completion_records),
             },
             "integrity": {
                 "dest_metadata_db_sha256": sha256_file(self._dest_data_root / "metadata.db"),
@@ -631,6 +701,7 @@ class HandoffIngestor:
             stage2_projection_inserted_docs=int(stage2_projection_inserted_docs),
             stage2_projection_errors=int(stage2_projection_errors),
             stage2_complete_records=int(stage2_complete_records),
+            stage1_plugin_completion_records=int(stage1_plugin_completion_records),
             ack_path=str(ack_path),
             journal_record_id=journal_record_id,
             errors=list(errors),
@@ -740,6 +811,7 @@ def auto_drain_handoff_spool(
     stage2_projection_inserted_docs = 0
     stage2_projection_errors = 0
     stage2_complete_records = 0
+    stage1_plugin_completion_records = 0
     for row in results:
         if not isinstance(row, dict):
             continue
@@ -752,6 +824,7 @@ def auto_drain_handoff_spool(
         stage2_projection_inserted_docs += _safe_int(row.get("stage2_projection_inserted_docs", 0))
         stage2_projection_errors += _safe_int(row.get("stage2_projection_errors", 0))
         stage2_complete_records += _safe_int(row.get("stage2_complete_records", 0))
+        stage1_plugin_completion_records += _safe_int(row.get("stage1_plugin_completion_records", 0))
     return {
         "ok": len(drained.errors) == 0,
         "enabled": True,
@@ -769,4 +842,5 @@ def auto_drain_handoff_spool(
         "stage2_projection_inserted_docs": int(stage2_projection_inserted_docs),
         "stage2_projection_errors": int(stage2_projection_errors),
         "stage2_complete_records": int(stage2_complete_records),
+        "stage1_plugin_completion_records": int(stage1_plugin_completion_records),
     }

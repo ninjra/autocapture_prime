@@ -9,7 +9,9 @@ from autocapture.storage.retention import retention_eligibility_record_id
 from autocapture.storage.stage1 import mark_stage1_complete
 from autocapture.storage.stage1 import (
     mark_stage1_and_retention,
+    mark_stage1_plugin_completion,
     mark_stage2_complete,
+    stage1_plugin_completion_record_id,
     stage1_complete_record_id,
     stage2_complete_record_id,
 )
@@ -230,6 +232,79 @@ class Stage1RetentionMarkerTests(unittest.TestCase):
         self.assertEqual(rid, stage2_complete_record_id(record_id))
         row = metadata.get(rid, {})
         self.assertFalse(bool(row.get("complete", True)))
+
+    def test_stage1_plugin_completion_marker_writes_and_is_idempotent(self) -> None:
+        metadata = _MetadataStore()
+        record_id = "run_test/evidence.capture.frame/8"
+        payload = {
+            "record_type": "evidence.capture.frame",
+            "run_id": "run_test",
+            "ts_utc": "2026-02-20T00:00:00Z",
+        }
+        rid, inserted = mark_stage1_plugin_completion(
+            metadata,
+            record_id,
+            payload,
+            stage1_complete=True,
+            retention_eligible=True,
+            retention_missing=False,
+            uia_required=True,
+            uia_ok=True,
+            obs_uia_inserted=3,
+            stage2_projection_ok=True,
+            stage2_projection_errors=0,
+            stage2_complete=True,
+        )
+        self.assertTrue(inserted)
+        self.assertEqual(rid, stage1_plugin_completion_record_id(record_id))
+        row = metadata.get(rid, {})
+        self.assertTrue(bool(row.get("complete", False)))
+        self.assertEqual(int(row.get("obs_uia_inserted", 0) or 0), 3)
+
+        rid2, inserted2 = mark_stage1_plugin_completion(
+            metadata,
+            record_id,
+            payload,
+            stage1_complete=True,
+            retention_eligible=True,
+            retention_missing=False,
+            uia_required=True,
+            uia_ok=True,
+            obs_uia_inserted=3,
+            stage2_projection_ok=True,
+            stage2_projection_errors=0,
+            stage2_complete=True,
+        )
+        self.assertEqual(rid2, rid)
+        self.assertFalse(inserted2)
+
+    def test_stage1_plugin_completion_incomplete_when_uia_required_missing(self) -> None:
+        metadata = _MetadataStore()
+        record_id = "run_test/evidence.capture.frame/9"
+        payload = {
+            "record_type": "evidence.capture.frame",
+            "run_id": "run_test",
+            "ts_utc": "2026-02-20T00:00:00Z",
+        }
+        rid, inserted = mark_stage1_plugin_completion(
+            metadata,
+            record_id,
+            payload,
+            stage1_complete=False,
+            retention_eligible=False,
+            retention_missing=True,
+            uia_required=True,
+            uia_ok=False,
+            uia_reason="snapshot_missing",
+            obs_uia_inserted=0,
+            stage2_projection_ok=False,
+            stage2_projection_errors=1,
+            stage2_complete=False,
+        )
+        self.assertTrue(inserted)
+        row = metadata.get(rid, {})
+        self.assertFalse(bool(row.get("complete", True)))
+        self.assertEqual(str(row.get("uia_reason") or ""), "snapshot_missing")
 
 
 if __name__ == "__main__":
