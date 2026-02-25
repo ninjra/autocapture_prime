@@ -129,9 +129,39 @@ def _generic_contract_check(row: dict[str, Any]) -> tuple[bool, list[str]]:
     return len(errors) == 0, errors
 
 
+def _advanced_contract_errors(row: dict[str, Any]) -> list[str]:
+    ev = row.get("expected_eval", {}) if isinstance(row.get("expected_eval", {}), dict) else {}
+    if bool(ev.get("passed", False)):
+        return []
+    errors: list[str] = []
+    if not bool(ev.get("evaluated", False)):
+        errors.append("expected_eval_not_evaluated")
+    reasons = ev.get("reasons", []) if isinstance(ev.get("reasons", []), list) else []
+    for reason in reasons:
+        txt = str(reason or "").strip()
+        if txt:
+            errors.append(f"expected_eval_reason:{txt}")
+    checks = ev.get("checks", []) if isinstance(ev.get("checks", []), list) else []
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        if bool(check.get("present", True)):
+            continue
+        key = str(check.get("key") or check.get("path") or check.get("type") or "").strip()
+        expected = str(check.get("expected") or check.get("equals") or "").strip()
+        if key and expected:
+            errors.append(f"missing:{key}={expected}")
+        elif key:
+            errors.append(f"missing:{key}")
+    if not errors:
+        errors.append("expected_eval_failed")
+    return list(dict.fromkeys([str(x) for x in errors if str(x)]))
+
+
 def _summarize_advanced(adv: dict[str, Any]) -> dict[str, Any]:
     rows = adv.get("rows", []) if isinstance(adv.get("rows", []), list) else []
     failed_ids: list[str] = []
+    failures: list[dict[str, Any]] = []
     skipped = int(adv.get("rows_skipped", 0) or 0)
     if skipped <= 0:
         for row in rows:
@@ -148,7 +178,9 @@ def _summarize_advanced(adv: dict[str, Any]) -> dict[str, Any]:
             continue
         ev = row.get("expected_eval", {}) if isinstance(row.get("expected_eval", {}), dict) else {}
         if not bool(ev.get("passed", False)):
-            failed_ids.append(str(row.get("id") or ""))
+            cid = str(row.get("id") or "")
+            failed_ids.append(cid)
+            failures.append({"id": cid, "errors": _advanced_contract_errors(row)})
     evaluated_total = int(adv.get("evaluated_total", max(0, len(rows) - skipped)) or 0)
     passed = int(adv.get("evaluated_passed", max(0, evaluated_total - len(failed_ids))) or 0)
     failed = int(max(0, evaluated_total - passed))
@@ -160,6 +192,7 @@ def _summarize_advanced(adv: dict[str, Any]) -> dict[str, Any]:
         "failed": int(failed),
         "skipped": int(skipped),
         "failed_ids": [x for x in failed_ids if x],
+        "failures": failures,
         "ok": int(failed) == 0 and int(evaluated_total + skipped) == int(len(rows)),
     }
 

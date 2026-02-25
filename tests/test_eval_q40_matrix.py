@@ -122,6 +122,60 @@ class EvalQ40MatrixTests(unittest.TestCase):
             payload = json.loads(out_path.read_text(encoding="utf-8"))
             self.assertEqual(str(payload.get("source_tier") or ""), "synthetic")
 
+    def test_advanced_failures_emit_actionable_error_keys(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            adv_path = root / "advanced20.json"
+            gen_path = root / "generic20.json"
+            out_path = root / "out.json"
+            adv_path.write_text(
+                json.dumps(
+                    {
+                        "rows": [
+                            {
+                                "id": "Q1",
+                                "expected_eval": {
+                                    "evaluated": True,
+                                    "passed": False,
+                                    "checks": [
+                                        {"type": "contains_all", "key": "contains_all[0]", "expected": "Slack", "present": False},
+                                        {"type": "path", "key": "expected_paths[1]", "equals": "ok", "present": True},
+                                    ],
+                                },
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            gen_path.write_text(
+                json.dumps(
+                    {
+                        "rows": [
+                            {
+                                "id": "G1",
+                                "ok": True,
+                                "query_run_id": "qr-1",
+                                "summary": "ok",
+                                "answer_state": "ok",
+                                "expected_eval": {"passed": True},
+                                "providers": [{"provider_id": "builtin.observation.graph", "contribution_bp": 10000}],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            rc = mod.main(["--advanced-json", str(adv_path), "--generic-json", str(gen_path), "--out", str(out_path)])
+            self.assertEqual(rc, 1)
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            advanced = payload.get("advanced20", {}) if isinstance(payload.get("advanced20", {}), dict) else {}
+            failures = advanced.get("failures", []) if isinstance(advanced.get("failures", []), list) else []
+            self.assertEqual(len(failures), 1)
+            errors = failures[0].get("errors", []) if isinstance(failures[0].get("errors", []), list) else []
+            self.assertIn("missing:contains_all[0]=Slack", errors)
+
     def test_strict_mode_fails_when_any_case_skipped(self) -> None:
         mod = _load_module()
         with tempfile.TemporaryDirectory() as tmp:
