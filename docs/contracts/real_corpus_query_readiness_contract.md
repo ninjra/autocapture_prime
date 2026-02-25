@@ -18,6 +18,7 @@ Synthetic pass never overrides real-corpus strict failure.
   - `matrix_evaluated == expected_total_from_contract`
   - `matrix_skipped == 0`
   - `matrix_failed == 0`
+  - `source_tier == "real"`
 
 ## Generic Policy
 - `generic20` is non-blocking informational telemetry.

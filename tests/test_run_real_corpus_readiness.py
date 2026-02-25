@@ -98,6 +98,7 @@ class RealCorpusReadinessTests(unittest.TestCase):
             self.assertEqual(int(payload.get("matrix_evaluated", 0)), 2)
             self.assertEqual(int(payload.get("matrix_skipped", 0)), 0)
             self.assertEqual(int(payload.get("matrix_failed", 0)), 0)
+            self.assertEqual(str(payload.get("source_tier") or ""), "real")
             query_contract = payload.get("query_contract", {}) if isinstance(payload.get("query_contract", {}), dict) else {}
             self.assertEqual(int(query_contract.get("query_extractor_launch_total", -1)), 0)
             self.assertEqual(int(query_contract.get("query_schedule_extract_requests_total", -1)), 0)
@@ -369,6 +370,54 @@ class RealCorpusReadinessTests(unittest.TestCase):
             payload = json.loads(out.read_text(encoding="utf-8"))
             reasons = set(payload.get("failure_reasons", []))
             self.assertIn("strict_source_missing", reasons)
+
+    def test_source_policy_blocks_non_real_source_tier(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            contract = root / "contract.json"
+            adv = root / "advanced.json"
+            gen = root / "generic.json"
+            out = root / "strict_matrix.json"
+            contract.write_text(
+                json.dumps(
+                    {
+                        "schema": "autocapture.real_corpus_expected_answers.v1",
+                        "strict": {
+                            "expected_total": 1,
+                            "source_policy": {"require_real_corpus": True},
+                            "cases": [
+                                {"id": "Q1", "suite": "advanced20", "allow_indeterminate": False, "require_citations": True, "allowed_answer_states": ["ok"]}
+                            ],
+                        },
+                        "generic_policy": {"suite": "generic20", "blocking": False},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            adv.write_text(json.dumps({"source_report": str(root / "adv.json"), "rows": [_mk_row(case_id="Q1")]}), encoding="utf-8")
+            gen.write_text(json.dumps({"source_report": str(root / "gen.json"), "rows": []}), encoding="utf-8")
+            rc = mod.main(
+                [
+                    "--contract",
+                    str(contract),
+                    "--advanced-json",
+                    str(adv),
+                    "--generic-json",
+                    str(gen),
+                    "--source-tier",
+                    "synthetic",
+                    "--out",
+                    str(out),
+                    "--latest-report-md",
+                    str(root / "latest.md"),
+                ]
+            )
+            self.assertEqual(rc, 1)
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(str(payload.get("source_tier") or ""), "synthetic")
+            reasons = set(payload.get("failure_reasons", []))
+            self.assertIn("strict_source_tier_disallowed", reasons)
 
     def test_main_fails_when_query_contract_metrics_violate_read_only(self) -> None:
         mod = _load_module()

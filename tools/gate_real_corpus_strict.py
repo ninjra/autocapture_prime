@@ -25,7 +25,13 @@ def extract_counts(payload: dict[str, Any]) -> dict[str, int | None]:
     }
 
 
-def evaluate_strict(*, counts: dict[str, int | None], expected_total: int) -> tuple[bool, list[str]]:
+def evaluate_strict(
+    *,
+    counts: dict[str, int | None],
+    expected_total: int,
+    source_tier: str,
+    require_real_source_tier: bool,
+) -> tuple[bool, list[str]]:
     reasons: list[str] = []
     total = counts.get("total")
     evaluated = counts.get("evaluated")
@@ -47,6 +53,12 @@ def evaluate_strict(*, counts: dict[str, int | None], expected_total: int) -> tu
         reasons.append("failed_missing")
     elif int(failed) != 0:
         reasons.append("failed_nonzero")
+    normalized_source_tier = str(source_tier or "").strip().lower()
+    if require_real_source_tier:
+        if not normalized_source_tier:
+            reasons.append("source_tier_missing")
+        elif normalized_source_tier != "real":
+            reasons.append("source_tier_not_real")
     return len(reasons) == 0, reasons
 
 
@@ -55,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report", required=True, help="Path to real-corpus readiness report JSON.")
     parser.add_argument("--output", default="artifacts/real_corpus/gate_real_corpus_strict.json")
     parser.add_argument("--expected-total", type=int, default=20)
+    parser.add_argument("--require-real-source-tier", action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args(argv)
 
     report_path = Path(str(args.report))
@@ -62,7 +75,13 @@ def main(argv: list[str] | None = None) -> int:
     if not isinstance(payload, dict):
         raise SystemExit("report must be a JSON object")
     counts = extract_counts(payload)
-    ok, reasons = evaluate_strict(counts=counts, expected_total=int(args.expected_total))
+    source_tier = str(payload.get("source_tier") or "").strip().lower()
+    ok, reasons = evaluate_strict(
+        counts=counts,
+        expected_total=int(args.expected_total),
+        source_tier=source_tier,
+        require_real_source_tier=bool(args.require_real_source_tier),
+    )
     report_ok = bool(payload.get("ok", True))
     report_reasons = payload.get("failure_reasons", []) if isinstance(payload.get("failure_reasons", []), list) else []
     if not report_ok:
@@ -76,6 +95,8 @@ def main(argv: list[str] | None = None) -> int:
         "report": str(report_path.resolve()),
         "counts": counts,
         "expected_total": int(args.expected_total),
+        "source_tier": source_tier,
+        "require_real_source_tier": bool(args.require_real_source_tier),
         "failure_reasons": reasons,
     }
     output_path = Path(str(args.output))

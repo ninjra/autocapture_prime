@@ -185,12 +185,16 @@ def build_quickcheck(*, root: Path) -> dict[str, Any]:
 
     q40_source_tier = str((q40 or {}).get("source_tier") or "").strip().lower()
     q40_ok_with_real_source = bool(isinstance(q40, dict) and q40.get("ok") is True and q40_source_tier == "real")
+    real_source_tier = str((real_corpus or {}).get("source_tier") or "").strip().lower()
+    real_corpus_ok_with_real_source = bool(
+        isinstance(real_corpus, dict) and real_corpus.get("ok") is True and real_source_tier == "real"
+    )
     statuses = {
         "release_gate_ok": bool(isinstance(release, dict) and release.get("ok") is True),
         "popup_strict_ok": bool(isinstance(popup, dict) and popup.get("ok") is True),
         "q40_strict_ok": bool(q40_ok_with_real_source),
         "temporal40_strict_ok": bool(isinstance(temporal, dict) and temporal.get("ok") is True),
-        "real_corpus_strict_ok": bool(isinstance(real_corpus, dict) and real_corpus.get("ok") is True),
+        "real_corpus_strict_ok": bool(real_corpus_ok_with_real_source),
     }
     all_ok = all(bool(v) for v in statuses.values()) and len(missing_artifacts) == 0
 
@@ -212,6 +216,8 @@ def build_quickcheck(*, root: Path) -> dict[str, Any]:
     if isinstance(real_corpus, dict) and not bool(real_corpus.get("ok", False)):
         for reason in _extract_reason_candidates(real_corpus):
             reason_counter[str(reason)] += 1
+    elif isinstance(real_corpus, dict) and real_source_tier != "real":
+        reason_counter["real_corpus.source_tier_not_real"] += 1
     for path in missing_artifacts:
         reason_counter[f"missing_artifact:{path}"] += 1
     top_failure_reasons = [key for key, _count in reason_counter.most_common(8)]
@@ -239,6 +245,7 @@ def build_quickcheck(*, root: Path) -> dict[str, Any]:
         "matrix_evaluated": _to_int((real_corpus or {}).get("matrix_evaluated", 0)),
         "matrix_skipped": _to_int((real_corpus or {}).get("matrix_skipped", 0)),
         "matrix_failed": _to_int((real_corpus or {}).get("matrix_failed", 0)),
+        "source_tier": real_source_tier,
     }
 
     return {

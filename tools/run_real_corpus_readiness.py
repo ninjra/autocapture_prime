@@ -483,6 +483,13 @@ def _source_paths_valid(payload: dict[str, Any], policy: dict[str, Any]) -> bool
     return True
 
 
+def _normalize_source_tier(value: str) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in {"real", "synthetic", "mixed"}:
+        return raw
+    return "real"
+
+
 def _resolve_report_path_with_policy(
     *,
     explicit: str,
@@ -607,6 +614,7 @@ def _write_summary_markdown(
     lines.append(f"- matrix_passed: `{int(payload.get('matrix_passed', 0) or 0)}`")
     lines.append(f"- matrix_failed: `{int(payload.get('matrix_failed', 0) or 0)}`")
     lines.append(f"- matrix_skipped: `{int(payload.get('matrix_skipped', 0) or 0)}`")
+    lines.append(f"- source_tier: `{str(payload.get('source_tier') or '')}`")
     lines.append(f"- failure_reasons: `{','.join([str(x) for x in payload.get('failure_reasons', [])])}`")
     qc = payload.get("query_contract", {}) if isinstance(payload.get("query_contract", {}), dict) else {}
     lines.append(f"- query_extractor_launch_total: `{int(qc.get('query_extractor_launch_total', 0) or 0)}`")
@@ -643,6 +651,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--latest-report-md", default="docs/reports/real_corpus_strict_latest.md")
     parser.add_argument("--lineage-json", default="")
     parser.add_argument("--min-queryable-ratio", type=float, default=0.0)
+    parser.add_argument("--source-tier", choices=["real", "synthetic", "mixed"], default="real")
     args = parser.parse_args(argv)
 
     contract_path = Path(str(args.contract))
@@ -706,9 +715,12 @@ def main(argv: list[str] | None = None) -> int:
                     }
                 )
                 strict_failures.append("queryability_slo_parse_failed")
+    source_tier = _normalize_source_tier(str(args.source_tier))
+
     if bool(source_policy.get("require_real_corpus", False)):
         disallowed = False
         missing_source = False
+        non_real_source_tier = source_tier != "real"
         for payload in (advanced, generic):
             top_src = str(payload.get("source_report") or payload.get("report") or "").strip()
             if not top_src:
@@ -730,10 +742,26 @@ def main(argv: list[str] | None = None) -> int:
                     break
             if disallowed or missing_source:
                 break
+            payload_source_tier = str(payload.get("source_tier") or "").strip().lower()
+            if payload_source_tier and payload_source_tier != "real":
+                non_real_source_tier = True
+                break
+            rows = payload.get("rows", []) if isinstance(payload.get("rows", []), list) else []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                row_source_tier = str(row.get("source_tier") or "").strip().lower()
+                if row_source_tier and row_source_tier != "real":
+                    non_real_source_tier = True
+                    break
+            if non_real_source_tier:
+                break
         if missing_source:
             strict_failures.append("strict_source_missing")
         if disallowed:
             strict_failures.append("strict_source_disallowed")
+        if non_real_source_tier:
+            strict_failures.append("strict_source_tier_disallowed")
 
     strict_query_contract_rows = [row for row in strict_rows if isinstance(row, dict)]
     qc_missing = int(
@@ -840,6 +868,7 @@ def main(argv: list[str] | None = None) -> int:
         "schema_version": 1,
         "ok": len(strict_failures) == 0,
         "strict_mode": True,
+        "source_tier": source_tier,
         "strict_contract": str(contract_path.resolve()),
         "strict_contract_sha256": _sha256_file(contract_path),
         "source_reports": {
@@ -874,6 +903,7 @@ def main(argv: list[str] | None = None) -> int:
             "matrix_passed": payload["matrix_passed"],
             "matrix_failed": payload["matrix_failed"],
             "matrix_skipped": payload["matrix_skipped"],
+            "source_tier": payload["source_tier"],
             "failure_reasons": payload["failure_reasons"],
         },
         "query_contract": {

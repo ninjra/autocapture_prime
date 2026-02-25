@@ -33,11 +33,15 @@ class GateRealCorpusStrictTests(unittest.TestCase):
             root = pathlib.Path(tmp)
             report = root / "report.json"
             out = root / "gate.json"
-            report.write_text(json.dumps({"matrix_total": 20, "matrix_evaluated": 20, "matrix_skipped": 0, "matrix_failed": 0}), encoding="utf-8")
+            report.write_text(
+                json.dumps({"matrix_total": 20, "matrix_evaluated": 20, "matrix_skipped": 0, "matrix_failed": 0, "source_tier": "real"}),
+                encoding="utf-8",
+            )
             rc = mod.main(["--report", str(report), "--output", str(out), "--expected-total", "20"])
             self.assertEqual(rc, 0)
             payload = json.loads(out.read_text(encoding="utf-8"))
             self.assertTrue(bool(payload.get("ok", False)))
+            self.assertEqual(str(payload.get("source_tier") or ""), "real")
 
     def test_main_fails_on_skipped_or_failed(self) -> None:
         mod = _load_module()
@@ -45,7 +49,10 @@ class GateRealCorpusStrictTests(unittest.TestCase):
             root = pathlib.Path(tmp)
             report = root / "report.json"
             out = root / "gate.json"
-            report.write_text(json.dumps({"matrix_total": 20, "matrix_evaluated": 19, "matrix_skipped": 1, "matrix_failed": 0}), encoding="utf-8")
+            report.write_text(
+                json.dumps({"matrix_total": 20, "matrix_evaluated": 19, "matrix_skipped": 1, "matrix_failed": 0, "source_tier": "real"}),
+                encoding="utf-8",
+            )
             rc = mod.main(["--report", str(report), "--output", str(out), "--expected-total", "20"])
             self.assertEqual(rc, 1)
             payload = json.loads(out.read_text(encoding="utf-8"))
@@ -68,6 +75,7 @@ class GateRealCorpusStrictTests(unittest.TestCase):
                         "matrix_evaluated": 20,
                         "matrix_skipped": 0,
                         "matrix_failed": 0,
+                        "source_tier": "real",
                         "failure_reasons": ["strict_source_disallowed"],
                     }
                 ),
@@ -79,6 +87,35 @@ class GateRealCorpusStrictTests(unittest.TestCase):
             reasons = set(payload.get("failure_reasons", []))
             self.assertIn("report_ok_false", reasons)
             self.assertIn("report_failure_reasons_nonempty", reasons)
+
+    def test_main_fails_when_source_tier_missing(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            report = root / "report.json"
+            out = root / "gate.json"
+            report.write_text(json.dumps({"matrix_total": 20, "matrix_evaluated": 20, "matrix_skipped": 0, "matrix_failed": 0}), encoding="utf-8")
+            rc = mod.main(["--report", str(report), "--output", str(out), "--expected-total", "20"])
+            self.assertEqual(rc, 1)
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            reasons = set(payload.get("failure_reasons", []))
+            self.assertIn("source_tier_missing", reasons)
+
+    def test_main_fails_when_source_tier_not_real(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            report = root / "report.json"
+            out = root / "gate.json"
+            report.write_text(
+                json.dumps({"matrix_total": 20, "matrix_evaluated": 20, "matrix_skipped": 0, "matrix_failed": 0, "source_tier": "synthetic"}),
+                encoding="utf-8",
+            )
+            rc = mod.main(["--report", str(report), "--output", str(out), "--expected-total", "20"])
+            self.assertEqual(rc, 1)
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            reasons = set(payload.get("failure_reasons", []))
+            self.assertIn("source_tier_not_real", reasons)
 
 
 if __name__ == "__main__":
