@@ -9,6 +9,26 @@ LOCKFILE="${AUTOCAPTURE_GOLDEN_LOCKFILE:-/tmp/autocapture_prime_golden_qh.lock}"
 PIDFILE="${LOCKFILE}.pid"
 STATUSFILE="${AUTOCAPTURE_GOLDEN_STATUSFILE:-/tmp/autocapture_prime_golden_qh.status.json}"
 
+latest_single_image_dir() {
+  local root="$1"
+  "$root/.venv/bin/python" - "$root" <<'PY'
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+base = root / "artifacts" / "single_image_runs"
+if not base.exists():
+    print("")
+    raise SystemExit(0)
+candidates = [p for p in base.iterdir() if p.is_dir()]
+if not candidates:
+    print("")
+    raise SystemExit(0)
+candidates.sort(key=lambda p: p.stat().st_mtime_ns, reverse=True)
+print(candidates[0].name)
+PY
+}
+
 mkdir -p "$(dirname "$LOCKFILE")" "$(dirname "$STATUSFILE")"
 exec 9>"$LOCKFILE"
 if ! flock -n 9; then
@@ -172,7 +192,7 @@ if [[ "${vlm_degraded}" == "1" ]]; then
   export AUTOCAPTURE_SKIP_VLM_UNSTABLE=1
 fi
 
-before_latest="$(ls -1t "$ROOT/artifacts/single_image_runs" 2>/dev/null | head -n 1 || true)"
+before_latest="$(latest_single_image_dir "$ROOT" 2>/dev/null || true)"
 ingest_timeout_s="${AUTOCAPTURE_GOLDEN_INGEST_TIMEOUT_S:-900}"
 ingest_vlm_flag="--skip-vllm-unstable"
 if [[ "${skip_vlm_unstable}" != "1" ]]; then
@@ -210,7 +230,7 @@ set -e
 process_out="$(tail -n 400 "$ingest_log_path" 2>/dev/null || true)"
 
 if [[ $process_rc -ne 0 ]]; then
-  after_latest="$(ls -1t "$ROOT/artifacts/single_image_runs" 2>/dev/null | head -n 1 || true)"
+  after_latest="$(latest_single_image_dir "$ROOT" 2>/dev/null || true)"
   run_dir=""
   if [[ -n "${after_latest}" ]]; then
     run_dir="$ROOT/artifacts/single_image_runs/${after_latest}"
@@ -277,7 +297,7 @@ PY
   exit 1
 fi
 
-latest_run="$(ls -1t "$ROOT/artifacts/single_image_runs" | head -n 1)"
+latest_run="$(latest_single_image_dir "$ROOT")"
 report_path="$ROOT/artifacts/single_image_runs/${latest_run}/report.json"
 
 query_timeout_s="${AUTOCAPTURE_ADV_QUERY_TIMEOUT_S:-180}"

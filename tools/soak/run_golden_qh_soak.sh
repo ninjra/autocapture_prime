@@ -93,22 +93,27 @@ while true; do
     cycle_rc=$?
     set -e
     cycle_out="$(cat "${out_files[$slot]}" 2>/dev/null || true)"
-    parsed_row="$("$ROOT/.venv/bin/python" - <<'PY' "$cycle_out" "$cycle_rc" "$slot" "${slot_images[$slot]}"
+    parsed_row="$("$ROOT/.venv/bin/python" - "$cycle_out" "$cycle_rc" "$slot" "${slot_images[$slot]}" <<'PY'
 import json
-import re
 import sys
 
 raw = str(sys.argv[1] or "")
 rc = int(sys.argv[2] or 1)
 slot = int(sys.argv[3] or 0)
 image = str(sys.argv[4] or "")
-m = re.search(r"\{.*\}\s*$", raw, re.S)
 payload = {}
-if m:
+# Parse the last valid JSON object line instead of greedy multi-line regex.
+for line in reversed(raw.splitlines()):
+    line = line.strip()
+    if not line or not line.startswith("{") or not line.endswith("}"):
+        continue
     try:
-        payload = json.loads(m.group(0))
+        obj = json.loads(line)
     except Exception:
-        payload = {}
+        continue
+    if isinstance(obj, dict):
+        payload = obj
+        break
 summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
 failed = int(summary.get("evaluated_failed", 0) or 0)
 passed = bool(rc == 0 and failed == 0 and bool(payload.get("ok", False)))
@@ -126,7 +131,7 @@ PY
     echo "$parsed_row" >> "$attempt_rows"
   done
 
-  parsed="$("$ROOT/.venv/bin/python" - <<'PY' "$attempt_rows"
+  parsed="$("$ROOT/.venv/bin/python" - "$attempt_rows" <<'PY'
 import json
 import pathlib
 import sys
@@ -147,7 +152,11 @@ max_rc = 0
 blocked = 0
 tails = []
 for row in rows:
-    max_rc = max(max_rc, int(row.get("cycle_rc", 1) or 1))
+    try:
+        rc_value = int(row.get("cycle_rc", 1))
+    except Exception:
+        rc_value = 1
+    max_rc = max(max_rc, rc_value)
     blocked += int(row.get("blocked_vllm", 0) or 0)
     tail = str(row.get("raw_tail") or "")
     if tail:
@@ -162,14 +171,14 @@ print(json.dumps({
 PY
 )"
 
-  did_pass="$("$ROOT/.venv/bin/python" - <<'PY' "$parsed"
+  did_pass="$("$ROOT/.venv/bin/python" - "$parsed" <<'PY'
 import json
 import sys
 obj = json.loads(sys.argv[1])
 print("1" if bool(obj.get("passed", False)) else "0")
 PY
 )"
-  blocked_vllm="$("$ROOT/.venv/bin/python" - <<'PY' "$parsed"
+  blocked_vllm="$("$ROOT/.venv/bin/python" - "$parsed" <<'PY'
 import json
 import sys
 obj = json.loads(sys.argv[1])
@@ -192,7 +201,7 @@ PY
     blocked_vllm_count="$((blocked_vllm_count + 1))"
   fi
 
-  "$ROOT/.venv/bin/python" - <<'PY' "$jsonl" "$attempt" "$ts" "$elapsed" "$parsed"
+  "$ROOT/.venv/bin/python" - "$jsonl" "$attempt" "$ts" "$elapsed" "$parsed" <<'PY'
 import json
 import pathlib
 import sys
@@ -216,7 +225,7 @@ with path.open("a", encoding="utf-8") as f:
     f.write(json.dumps(row, sort_keys=True) + "\n")
 PY
 
-  "$ROOT/.venv/bin/python" - <<'PY' "$live_json" "$stamp" "$attempt" "$elapsed" "$pass_count" "$fail_count" "$blocked_vllm_count" "$jsonl"
+  "$ROOT/.venv/bin/python" - "$live_json" "$stamp" "$attempt" "$elapsed" "$pass_count" "$fail_count" "$blocked_vllm_count" "$jsonl" <<'PY'
 import json
 import pathlib
 import sys
@@ -242,7 +251,7 @@ end_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 end_epoch="$(date +%s)"
 total_elapsed="$((end_epoch - start_epoch))"
 
-"$ROOT/.venv/bin/python" - <<'PY' "$summary_json" "$stamp" "$start_epoch" "$end_ts" "$total_elapsed" "$attempt" "$pass_count" "$fail_count" "$jsonl" "$blocked_vllm_count"
+"$ROOT/.venv/bin/python" - "$summary_json" "$stamp" "$start_epoch" "$end_ts" "$total_elapsed" "$attempt" "$pass_count" "$fail_count" "$jsonl" "$blocked_vllm_count" <<'PY'
 import json
 import pathlib
 import sys
