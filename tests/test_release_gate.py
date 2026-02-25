@@ -66,6 +66,7 @@ def test_default_manifest_includes_required_release_steps() -> None:
     assert "gate_stage1_contract" in ids
     assert "validate_stage1_lineage" in ids
     assert "generate_baseline_snapshot" in ids
+    assert "release_quickcheck" in ids
     assert "validate_blueprint_spec" in ids
     assert "run_mod021_low_resource" in ids
     assert "popup_go_no_go" in ids
@@ -106,6 +107,14 @@ def test_default_manifest_can_disable_baseline_snapshot() -> None:
         steps = mod._default_manifest(sys.executable)
     ids = {step.id for step in steps}
     assert "generate_baseline_snapshot" not in ids
+
+
+def test_default_manifest_can_disable_release_quickcheck() -> None:
+    mod = _load_module()
+    with mock.patch.dict(mod.os.environ, {"RELEASE_QUICKCHECK_DISABLED": "1"}, clear=False):
+        steps = mod._default_manifest(sys.executable)
+    ids = {step.id for step in steps}
+    assert "release_quickcheck" not in ids
 
 
 def test_default_manifest_can_disable_real_corpus_steps() -> None:

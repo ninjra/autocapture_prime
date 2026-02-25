@@ -144,6 +144,16 @@ def _default_manifest(py: str) -> list[GateStep]:
                 baseline_snapshot_out,
             )
         )
+    quickcheck_disabled = _truthy(os.environ.get("RELEASE_QUICKCHECK_DISABLED"))
+    quickcheck_out = os.environ.get("RELEASE_QUICKCHECK_OUT", "artifacts/release/release_quickcheck_latest.json").strip()
+    if not quickcheck_disabled:
+        steps.append(
+            GateStep(
+                "release_quickcheck",
+                [py, "tools/release_quickcheck.py", "--strict-exit", "--output", quickcheck_out],
+                quickcheck_out,
+            )
+        )
     popup_go_no_go_disabled = _truthy(os.environ.get("POPUP_GO_NO_GO_DISABLED"))
     popup_go_no_go_out = os.environ.get("POPUP_GO_NO_GO_OUT", "artifacts/query_acceptance/popup_go_no_go_latest.json").strip()
     popup_go_no_go_timeout = os.environ.get("POPUP_GO_NO_GO_TIMEOUT_S", "").strip()
