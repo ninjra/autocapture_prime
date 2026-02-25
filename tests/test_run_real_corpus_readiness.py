@@ -628,12 +628,18 @@ class RealCorpusReadinessTests(unittest.TestCase):
             self.assertTrue(bool(by_case))
             case_q1 = next((row for row in by_case if str(row.get("id") or "") == "Q1"), {})
             self.assertEqual(str(case_q1.get("cause") or ""), "citation_invalid")
+            missing_expectations = case_q1.get("missing_expectations", [])
+            self.assertTrue(isinstance(missing_expectations, list))
             self.assertIn("citation_linkage", case_q1)
             linkage = case_q1.get("citation_linkage", {}) if isinstance(case_q1.get("citation_linkage", {}), dict) else {}
             issues = set(str(x) for x in (linkage.get("issues") or []))
             self.assertIn("providers_claims_without_citations", issues)
             providers = case_q1.get("provider_diagnostics", [])
             self.assertTrue(isinstance(providers, list) and bool(providers))
+            missing_counts = payload.get("strict_missing_expectation_counts", {})
+            self.assertTrue(isinstance(missing_counts, dict))
+            top_missing = payload.get("strict_top_missing_expectations", [])
+            self.assertTrue(isinstance(top_missing, list))
 
     def test_main_fails_when_queryability_ratio_below_threshold(self) -> None:
         mod = _load_module()

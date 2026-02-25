@@ -184,6 +184,7 @@ def _strict_case_eval(case: dict[str, Any], row: dict[str, Any] | None) -> dict[
     source_report = ""
     provider_diagnostics: list[dict[str, Any]] = []
     citation_linkage: dict[str, Any] = {"count": 0, "issues": [], "entries": []}
+    missing_expectations: list[str] = []
     if row is None:
         reasons.append("missing_row")
     else:
@@ -203,6 +204,18 @@ def _strict_case_eval(case: dict[str, Any], row: dict[str, Any] | None) -> dict[
                 reasons.append("expected_eval_not_evaluated")
             if not bool(ev.get("passed", False)):
                 reasons.append("expected_eval_failed")
+            checks = ev.get("checks", []) if isinstance(ev.get("checks", []), list) else []
+            for check in checks:
+                if not isinstance(check, dict):
+                    continue
+                if bool(check.get("present", True)):
+                    continue
+                key = str(check.get("key") or check.get("path") or check.get("type") or "").strip()
+                expected = str(check.get("expected") or check.get("equals") or "").strip()
+                if key and expected:
+                    missing_expectations.append(f"{key}={expected}")
+                elif key:
+                    missing_expectations.append(key)
             answer_state = str(row.get("answer_state") or "").strip()
             allowed_states = case.get("allowed_answer_states", ["ok"])
             allowed = [str(x).strip() for x in allowed_states if str(x).strip()]
@@ -233,6 +246,7 @@ def _strict_case_eval(case: dict[str, Any], row: dict[str, Any] | None) -> dict[
         "source_report": source_report,
         "provider_diagnostics": provider_diagnostics,
         "citation_linkage": citation_linkage,
+        "missing_expectations": list(dict.fromkeys([str(x) for x in missing_expectations if str(x)])),
     }
 
 
@@ -403,6 +417,7 @@ def _strict_failure_cause_summary(strict_rows: list[dict[str, Any]]) -> dict[str
         "upstream_unreachable": 0,
     }
     by_case: list[dict[str, Any]] = []
+    missing_expectation_counts: dict[str, int] = {}
     for row in strict_rows:
         if not isinstance(row, dict):
             continue
@@ -422,9 +437,27 @@ def _strict_failure_cause_summary(strict_rows: list[dict[str, Any]]) -> dict[str
                 "source_report": str(row.get("source_report") or ""),
                 "provider_diagnostics": row.get("provider_diagnostics", []),
                 "citation_linkage": row.get("citation_linkage", {}),
+                "missing_expectations": row.get("missing_expectations", []),
             }
         )
-    return {"counts": counts, "by_case": by_case}
+        for item in (row.get("missing_expectations") or []):
+            text = str(item or "").strip()
+            if not text:
+                continue
+            missing_expectation_counts[text] = int(missing_expectation_counts.get(text, 0)) + 1
+    top_missing_expectations = [
+        {"expectation": key, "count": int(count)}
+        for key, count in sorted(
+            missing_expectation_counts.items(),
+            key=lambda item: (-int(item[1]), str(item[0])),
+        )[:50]
+    ]
+    return {
+        "counts": counts,
+        "by_case": by_case,
+        "missing_expectation_counts": missing_expectation_counts,
+        "top_missing_expectations": top_missing_expectations,
+    }
 
 
 def _required_signals(case: dict[str, Any]) -> list[str]:
@@ -893,6 +926,8 @@ def main(argv: list[str] | None = None) -> int:
         "queryability_slo": queryability_slo,
         "strict_failure_causes": strict_failure_causes,
         "strict_failure_cause_counts": strict_failure_causes.get("counts", {}),
+        "strict_missing_expectation_counts": strict_failure_causes.get("missing_expectation_counts", {}),
+        "strict_top_missing_expectations": strict_failure_causes.get("top_missing_expectations", []),
     }
     payload["out_path"] = str(out_path.resolve())
     out_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -919,6 +954,8 @@ def main(argv: list[str] | None = None) -> int:
         "generic20": generic_summary,
         "stage1_audit": stage1_audit_summary or {},
         "strict_failure_causes": strict_failure_causes,
+        "strict_missing_expectation_counts": strict_failure_causes.get("missing_expectation_counts", {}),
+        "strict_top_missing_expectations": strict_failure_causes.get("top_missing_expectations", []),
         "queryability_slo": queryability_slo,
     }
     metrics_path.write_text(json.dumps(metrics_payload, indent=2, sort_keys=True), encoding="utf-8")
