@@ -520,6 +520,18 @@ def run_processing_batch(
         if guard_blocked:
             break
         signals = conductor._signals()  # pylint: disable=protected-access
+        if not require_idle:
+            # Manual drain mode (`--no-require-idle`) must be able to run under
+            # active-user signals; use the governor's fixture override lane to
+            # keep budget enforcement while bypassing idle-mode hard gating.
+            if isinstance(signals, dict):
+                signals = dict(signals)
+            else:
+                try:
+                    signals = dict(signals)  # type: ignore[arg-type]
+                except Exception:
+                    signals = {}
+            signals["fixture_override"] = True
         sla_pressure = _apply_retention_sla_pressure(config, previous_sla=previous_sla)
         adaptive_idle = _apply_adaptive_idle_parallelism(config, signals=signals, recent_steps=loop_stats)
         decision = governor.decide(signals)
@@ -539,6 +551,15 @@ def run_processing_batch(
 
         def _should_abort() -> bool:
             sig = conductor._signals()  # pylint: disable=protected-access
+            if not require_idle:
+                if isinstance(sig, dict):
+                    sig = dict(sig)
+                else:
+                    try:
+                        sig = dict(sig)  # type: ignore[arg-type]
+                    except Exception:
+                        sig = {}
+                sig["fixture_override"] = True
             _ = governor.decide(sig)
             return governor.should_preempt(sig)
 

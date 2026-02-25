@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from autocapture_nx.runtime.batch import (
@@ -271,6 +272,81 @@ class RuntimeBatchAdaptiveParallelismTests(unittest.TestCase):
         guard = out.get("metadata_db_guard", {}) if isinstance(out.get("metadata_db_guard", {}), dict) else {}
         self.assertFalse(bool(guard.get("ok", True)))
         self.assertIn("metadata_db_unstable", [str(x) for x in (out.get("slo_alerts") or [])])
+
+    def test_run_processing_batch_no_require_idle_overrides_active_user(self) -> None:
+        class _Lease:
+            def __init__(self) -> None:
+                self.allowed = True
+                self.granted_ms = 2500
+
+            def record(self, _consumed_ms):  # noqa: ANN001
+                return None
+
+        class _Governor:
+            def __init__(self) -> None:
+                self.last_signals: dict[str, object] = {}
+
+            def update_config(self, _cfg):  # noqa: ANN001
+                return None
+
+            def decide(self, signals):  # noqa: ANN001
+                self.last_signals = dict(signals) if isinstance(signals, dict) else {}
+                fixture = bool(self.last_signals.get("fixture_override", False))
+                mode = "IDLE_DRAIN" if fixture else "ACTIVE_CAPTURE_ONLY"
+                reason = "fixture_override" if fixture else "active_user"
+                return SimpleNamespace(
+                    mode=mode,
+                    heavy_allowed=fixture,
+                    reason=reason,
+                    budget=SimpleNamespace(remaining_ms=2500),
+                )
+
+            def lease(self, _job_name, _estimated_ms, heavy=True):  # noqa: ANN001
+                if not heavy:
+                    return _Lease()
+                return _Lease()
+
+            def should_preempt(self, _signals=None):  # noqa: ANN001
+                return False
+
+        class _Conductor:
+            def __init__(self) -> None:
+                self._governor = _Governor()
+
+            def _signals(self):  # noqa: ANN001
+                return {"user_active": True, "activity_recent": True, "idle_seconds": 0.0}
+
+        class _System:
+            def __init__(self, base: dict[str, object]) -> None:
+                self.config = base
+
+            def get(self, _name):  # noqa: ANN001
+                return None
+
+        system = _System(self._base_config())
+        with (
+            mock.patch("autocapture_nx.runtime.batch.create_conductor", return_value=_Conductor()),
+            mock.patch("autocapture_nx.runtime.batch.IdleProcessor") as processor_cls,
+            mock.patch(
+                "autocapture_nx.runtime.batch._metadata_db_guard",
+                return_value={"enabled": True, "ok": True, "fail_closed": True, "reason": "ok", "snapshot": {"stable": True}},
+            ),
+            mock.patch(
+                "autocapture_nx.runtime.batch.auto_drain_handoff_spool",
+                return_value={"ok": True, "processed": 0, "errors": 0},
+            ),
+        ):
+            processor = processor_cls.return_value
+            processor.process_step.return_value = (True, {"records_completed": 1, "pending_records": 0})
+            out = run_processing_batch(system, max_loops=3, sleep_ms=1, require_idle=False)
+        self.assertTrue(bool(out.get("ok", False)))
+        self.assertEqual(int(out.get("loops") or 0), 1)
+        self.assertEqual(str(out.get("blocked_reason") or ""), "")
+        steps = out.get("steps", []) if isinstance(out.get("steps", []), list) else []
+        self.assertEqual(len(steps), 1)
+        step = steps[0] if isinstance(steps[0], dict) else {}
+        self.assertEqual(str(step.get("mode") or ""), "IDLE_DRAIN")
+        self.assertEqual(str(step.get("reason") or ""), "fixture_override")
 
 
 if __name__ == "__main__":
