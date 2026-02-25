@@ -16,7 +16,7 @@
     },
     {
       "id": "POP_REG_04_A",
-      "query": "Extract all visible key-value fields from the details form in on-screen order, including present-but-empty fields as empty strings."
+      "query": "what am i working on right now"
     },
     {
       "id": "POP_REG_05_A",
@@ -36,7 +36,7 @@
     },
     {
       "id": "POP_REG_04_B",
-      "query": "Extract all visible key-value fields from the details form in on-screen order, including present-but-empty fields as empty strings."
+      "query": "what is on my screen right now"
     },
     {
       "id": "POP_REG_05_B",
