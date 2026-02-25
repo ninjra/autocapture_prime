@@ -155,6 +155,63 @@ class RealCorpusReadinessTests(unittest.TestCase):
             self.assertFalse(bool(payload.get("ok", True)))
             self.assertIn("strict_matrix_failed_nonzero", set(payload.get("failure_reasons", [])))
 
+    def test_main_accepts_claim_level_citations_when_provider_count_is_zero(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            contract = root / "contract.json"
+            adv = root / "advanced.json"
+            gen = root / "generic.json"
+            out = root / "strict_matrix.json"
+            contract.write_text(
+                json.dumps(
+                    {
+                        "schema": "autocapture.real_corpus_expected_answers.v1",
+                        "strict": {
+                            "expected_total": 1,
+                            "cases": [
+                                {"id": "Q1", "suite": "advanced20", "allow_indeterminate": False, "require_citations": True, "allowed_answer_states": ["ok"]}
+                            ],
+                        },
+                        "generic_policy": {"suite": "generic20", "blocking": False},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            row = _mk_row(case_id="Q1", citation_count=0)
+            row["answer"] = {
+                "claims": [
+                    {
+                        "citations": [
+                            {
+                                "evidence_id": "rec_123",
+                                "locator": {"kind": "metadata.record"},
+                            }
+                        ]
+                    }
+                ]
+            }
+            adv.write_text(json.dumps({"rows": [row]}), encoding="utf-8")
+            gen.write_text(json.dumps({"rows": []}), encoding="utf-8")
+            rc = mod.main(
+                [
+                    "--contract",
+                    str(contract),
+                    "--advanced-json",
+                    str(adv),
+                    "--generic-json",
+                    str(gen),
+                    "--out",
+                    str(out),
+                    "--latest-report-md",
+                    str(root / "latest.md"),
+                ]
+            )
+            self.assertEqual(rc, 0)
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertTrue(bool(payload.get("ok", False)))
+            self.assertEqual(int(payload.get("matrix_failed", 0)), 0)
+
     def test_generic_failures_are_informational_only(self) -> None:
         mod = _load_module()
         with tempfile.TemporaryDirectory() as tmp:

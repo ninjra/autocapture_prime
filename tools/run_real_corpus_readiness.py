@@ -208,7 +208,9 @@ def _strict_case_eval(case: dict[str, Any], row: dict[str, Any] | None) -> dict[
             allowed = [str(x).strip() for x in allowed_states if str(x).strip()]
             if allowed and answer_state not in allowed:
                 reasons.append("answer_state_disallowed")
-            citations = _provider_citation_count(row)
+            provider_citations = _provider_citation_count(row)
+            citation_entries = int(citation_linkage.get("count", 0) or 0)
+            citations = max(int(provider_citations), int(citation_entries))
             if bool(case.get("require_citations", True)) and citations <= 0:
                 reasons.append("citations_missing")
             if not bool(case.get("allow_indeterminate", False)):
