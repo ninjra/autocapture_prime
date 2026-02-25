@@ -212,6 +212,7 @@ set +e
   --generic-json "$gen_path" \
   --strict \
   --expected-total 40 \
+  --source-tier synthetic \
   --out "$matrix_path" >"$matrix_log" 2>&1
 matrix_rc=$?
 set -e

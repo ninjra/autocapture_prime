@@ -96,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-temporal-evaluated", type=int, default=40)
     parser.add_argument("--expected-temporal-skipped", type=int, default=0)
     parser.add_argument("--expected-temporal-failed", type=int, default=0)
+    parser.add_argument("--require-real-q40-source-tier", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--max-age-minutes", type=float, default=180.0)
     parser.add_argument("--output", default="artifacts/release/gate_golden_pipeline_triplet.json")
     args = parser.parse_args(argv)
@@ -144,8 +145,10 @@ def main(argv: list[str] | None = None) -> int:
     if q40_payload is None:
         reasons.append(f"q40_report_{q40_err}")
         q40_counts = {"evaluated": None, "skipped": None, "failed": None}
+        q40_source_tier = ""
     else:
         q40_counts = _extract_counts(q40_payload)
+        q40_source_tier = str(q40_payload.get("source_tier") or "").strip().lower()
         reasons.extend(
             _evaluate_counts(
                 name="q40",
@@ -155,6 +158,11 @@ def main(argv: list[str] | None = None) -> int:
                 expected_failed=int(args.expected_q40_failed),
             )
         )
+        if bool(args.require_real_q40_source_tier):
+            if not q40_source_tier:
+                reasons.append("q40.source_tier_missing")
+            elif q40_source_tier != "real":
+                reasons.append("q40.source_tier_not_real")
 
     temporal_payload, temporal_err = _load_json(temporal_path)
     if temporal_payload is None:
@@ -184,6 +192,7 @@ def main(argv: list[str] | None = None) -> int:
             "q40": q40_counts,
             "temporal": temporal_counts,
         },
+        "source_tier": {"q40": q40_source_tier if q40_payload is not None else ""},
         "artifact_age_minutes": ages,
         "max_age_minutes": max_age,
         "failure_reasons": reasons,

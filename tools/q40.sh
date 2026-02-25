@@ -84,11 +84,13 @@ if [[ "${golden_strict}" == "1" ]]; then
     --generic-json "$gen_path" \
     --strict \
     --expected-total 40 \
+    --source-tier real \
     --out "$matrix_path" >"$matrix_log"
 else
   "$PY" "$ROOT/tools/eval_q40_matrix.py" \
     --advanced-json "$adv_path" \
     --generic-json "$gen_path" \
+    --source-tier real \
     --out "$matrix_path" >"$matrix_log"
 fi
 matrix_rc=$?

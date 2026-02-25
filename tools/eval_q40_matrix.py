@@ -216,6 +216,12 @@ def main(argv: list[str] | None = None) -> int:
         default=0,
         help="Optional expected matrix size; strict mode fails when total/evaluated mismatch this value.",
     )
+    parser.add_argument(
+        "--source-tier",
+        default="real",
+        choices=("real", "synthetic"),
+        help="Provenance tier for this matrix output.",
+    )
     args = parser.parse_args(argv)
 
     adv_path = Path(str(args.advanced_json).strip()) if str(args.advanced_json).strip() else (_latest_matching("advanced20_*.json") or Path(""))
@@ -265,6 +271,7 @@ def main(argv: list[str] | None = None) -> int:
 
     out_payload = {
         "ok": bool(adv_summary["ok"] and gen_summary["ok"] and len(failure_reasons) == 0),
+        "source_tier": str(args.source_tier),
         "strict_mode": strict,
         "expected_total": int(expected_total),
         "failure_reasons": [str(reason) for reason in failure_reasons],

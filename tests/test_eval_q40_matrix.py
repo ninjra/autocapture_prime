@@ -64,11 +64,63 @@ class EvalQ40MatrixTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             payload = json.loads(out_path.read_text(encoding="utf-8"))
             self.assertTrue(payload.get("ok"))
+            self.assertEqual(str(payload.get("source_tier") or ""), "real")
             self.assertEqual(payload.get("matrix_total"), 4)
             self.assertEqual(payload.get("matrix_evaluated"), 2)
             self.assertEqual(payload.get("matrix_passed"), 2)
             self.assertEqual(payload.get("matrix_failed"), 0)
             self.assertEqual(payload.get("matrix_skipped"), 2)
+
+    def test_can_write_synthetic_source_tier(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            adv_path = root / "advanced20.json"
+            gen_path = root / "generic20.json"
+            out_path = root / "out.json"
+            adv_path.write_text(
+                json.dumps(
+                    {
+                        "rows": [
+                            {"id": "Q1", "expected_eval": {"evaluated": True, "passed": True}},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            gen_path.write_text(
+                json.dumps(
+                    {
+                        "rows": [
+                            {
+                                "id": "G1",
+                                "ok": True,
+                                "query_run_id": "qr-1",
+                                "summary": "ok",
+                                "answer_state": "ok",
+                                "expected_eval": {"passed": True},
+                                "providers": [{"provider_id": "builtin.observation.graph", "contribution_bp": 10000}],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            rc = mod.main(
+                [
+                    "--advanced-json",
+                    str(adv_path),
+                    "--generic-json",
+                    str(gen_path),
+                    "--out",
+                    str(out_path),
+                    "--source-tier",
+                    "synthetic",
+                ]
+            )
+            self.assertEqual(rc, 0)
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertEqual(str(payload.get("source_tier") or ""), "synthetic")
 
     def test_strict_mode_fails_when_any_case_skipped(self) -> None:
         mod = _load_module()
