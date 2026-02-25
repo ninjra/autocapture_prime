@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -19,6 +20,27 @@ def _load_module():
 
 
 class EvalQ40MatrixTests(unittest.TestCase):
+    def test_resolve_default_input_prefers_canonical_latest_name(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            artifacts = root / "artifacts" / "advanced10"
+            artifacts.mkdir(parents=True, exist_ok=True)
+            (artifacts / "advanced20_20260101T000000Z.json").write_text("{}", encoding="utf-8")
+            (artifacts / "advanced20_stage2proj_latest.json").write_text("{}", encoding="utf-8")
+            (artifacts / "advanced20_latest.json").write_text("{}", encoding="utf-8")
+            cwd = pathlib.Path.cwd()
+            try:
+                os.chdir(root)
+                out = mod._resolve_default_input_path(
+                    explicit="",
+                    latest_name="advanced20_latest.json",
+                    pattern="advanced20_*.json",
+                )
+                self.assertEqual(out, pathlib.Path("artifacts/advanced10/advanced20_latest.json"))
+            finally:
+                os.chdir(cwd)
+
     def test_matrix_counts_skipped_without_failing(self) -> None:
         mod = _load_module()
         with tempfile.TemporaryDirectory() as tmp:

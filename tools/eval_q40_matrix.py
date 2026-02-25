@@ -28,6 +28,16 @@ def _latest_matching(pattern: str) -> Path | None:
     return found[0] if found else None
 
 
+def _resolve_default_input_path(*, explicit: str, latest_name: str, pattern: str) -> Path:
+    if str(explicit).strip():
+        return Path(str(explicit).strip())
+    root = Path("artifacts/advanced10")
+    latest = root / latest_name
+    if latest.exists():
+        return latest
+    return _latest_matching(pattern) or Path("")
+
+
 def _is_nonempty(value: Any) -> bool:
     return bool(str(value or "").strip())
 
@@ -257,8 +267,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    adv_path = Path(str(args.advanced_json).strip()) if str(args.advanced_json).strip() else (_latest_matching("advanced20_*.json") or Path(""))
-    gen_path = Path(str(args.generic_json).strip()) if str(args.generic_json).strip() else (_latest_matching("generic20_*.json") or Path(""))
+    adv_path = _resolve_default_input_path(
+        explicit=str(args.advanced_json),
+        latest_name="advanced20_latest.json",
+        pattern="advanced20_*.json",
+    )
+    gen_path = _resolve_default_input_path(
+        explicit=str(args.generic_json),
+        latest_name="generic20_latest.json",
+        pattern="generic20_*.json",
+    )
     if not adv_path.exists():
         print(json.dumps({"ok": False, "error": "advanced20_not_found", "path": str(adv_path)}))
         return 2
