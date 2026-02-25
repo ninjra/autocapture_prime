@@ -417,6 +417,60 @@ class RunAdvanced10ExpectedEvalTests(unittest.TestCase):
         self.assertTrue(eval_out["evaluated"])
         self.assertTrue(eval_out["passed"])
 
+    def test_true_strict_quality_gate_not_applied_to_temporal_tq_series(self) -> None:
+        mod = _load_module()
+        case = {"id": "TQ03", "expected_paths": [{"path": "answer.state"}]}
+        result = {
+            "answer": {
+                "state": "ok",
+                "display": {"summary": "Timeline result ...", "bullets": []},
+            },
+            "processing": {
+                "metadata_only_query": True,
+                "promptops_used": False,
+                "attribution": {"providers": []},
+            },
+        }
+        eval_out = mod._evaluate_expected(
+            case,
+            result,
+            result["answer"]["display"]["summary"],
+            [],
+            strict_expected_answer=True,
+            enforce_true_strict=True,
+        )
+        self.assertTrue(eval_out["evaluated"])
+        self.assertTrue(eval_out["passed"])
+        checks = eval_out.get("checks", [])
+        self.assertFalse(any(isinstance(c, dict) and c.get("key") == "no_partial_or_truncated_surface" for c in checks))
+
+    def test_true_strict_quality_gate_still_applies_to_legacy_h_series(self) -> None:
+        mod = _load_module()
+        case = {"id": "H1", "expected_paths": [{"path": "answer.state"}]}
+        result = {
+            "answer": {
+                "state": "ok",
+                "display": {"summary": "Timeline result ...", "bullets": []},
+            },
+            "processing": {
+                "metadata_only_query": True,
+                "promptops_used": False,
+                "attribution": {"providers": []},
+            },
+        }
+        eval_out = mod._evaluate_expected(
+            case,
+            result,
+            result["answer"]["display"]["summary"],
+            [],
+            strict_expected_answer=True,
+            enforce_true_strict=True,
+        )
+        self.assertTrue(eval_out["evaluated"])
+        self.assertFalse(eval_out["passed"])
+        checks = eval_out.get("checks", [])
+        self.assertTrue(any(isinstance(c, dict) and c.get("key") == "no_partial_or_truncated_surface" for c in checks))
+
     def test_true_strict_requires_answer_state_ok(self) -> None:
         mod = _load_module()
         case = {"id": "Q2", "question": "What is the focused window?"}

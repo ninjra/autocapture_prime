@@ -40,9 +40,12 @@ class PromptOpsAPI:
     def prepare(self, task_class: str, raw_prompt: str, context: dict[str, Any] | None = None) -> PromptPrepared:
         ctx = context if isinstance(context, dict) else {}
         prompt_id = self._resolve_prompt_id(task_class, ctx)
-        sources = ctx.get("sources", [])
-        if not isinstance(sources, list):
-            sources = []
+        if "sources" in ctx:
+            raw_sources = ctx.get("sources")
+            sources = raw_sources if isinstance(raw_sources, list) else []
+        else:
+            # Omitted sources means "use promptops.sources from config".
+            sources = None
         strategy = str(ctx.get("strategy") or "").strip().lower()
         if task_class in {"query", "query.default", "state_query", "state.query"}:
             result = self._layer.prepare_query(str(raw_prompt or ""), prompt_id=prompt_id, sources=sources)

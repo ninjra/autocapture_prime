@@ -16,6 +16,13 @@ from autocapture_nx.kernel.hashing import sha256_text
 from autocapture_nx.kernel.loader import Kernel, default_config_paths
 from autocapture_nx.kernel.query import run_query
 
+DEFAULT_CASE_PATHS = [
+    "docs/query_eval_cases_generic20.json",
+    "docs/query_eval_cases_advanced20.json",
+    "docs/query_eval_cases_stage2_time40.json",
+    "docs/query_eval_cases_temporal_screenshot_qa_40.json",
+]
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -211,11 +218,7 @@ def main(argv: list[str] | None = None) -> int:
 
     case_paths = [str(x) for x in args.cases if str(x).strip()]
     if not case_paths:
-        case_paths = [
-            "docs/query_eval_cases_generic20.json",
-            "docs/query_eval_cases_advanced20.json",
-            "docs/query_eval_cases_stage2_time40.json",
-        ]
+        case_paths = list(DEFAULT_CASE_PATHS)
 
     prev_metadata_only = os.environ.get("AUTOCAPTURE_QUERY_METADATA_ONLY")
     if bool(args.metadata_only):

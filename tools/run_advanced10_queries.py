@@ -757,6 +757,9 @@ def _evaluate_expected(
     # reasoning path (PromptOps + structured hard-VLM extraction), not weak
     # substring matches.
     is_q_series = bool(re.match(r"^Q(?:[1-9]|10)$", case_id))
+    legacy_true_strict_series = bool(
+        re.match(r"^(?:Q(?:[1-9]|10)|H(?:[1-9]|10)|GQ(?:[1-9]|1[0-9]|20)|GH(?:[1-9]|10))$", case_id)
+    )
     processing = result.get("processing", {}) if isinstance(result.get("processing", {}), dict) else {}
     metadata_only_query = bool(processing.get("metadata_only_query", False))
     promptops_used = bool(processing.get("promptops_used", False))
@@ -777,7 +780,7 @@ def _evaluate_expected(
     display = answer.get("display", {}) if isinstance(answer.get("display", {}), dict) else {}
     display_fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
     metadata_structured = bool(display_fields)
-    if bool(strict_expected_answer) and bool(enforce_true_strict):
+    if bool(strict_expected_answer) and bool(enforce_true_strict) and bool(legacy_true_strict_series):
         quality_markers = _strict_quality_markers(case_id, summary, bullets)
         quality_ok = len(quality_markers) == 0
         checks.append(

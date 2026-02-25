@@ -156,6 +156,41 @@ def _default_manifest(py: str) -> list[GateStep]:
                 "artifacts/q40/gate_q40_strict.json",
             )
         )
+    if _truthy(os.environ.get("MEMORY_SOAK_GATE_ENABLED")):
+        memory_soak_summary = os.environ.get("MEMORY_SOAK_SUMMARY", "artifacts/memory_soak/memory_soak_300_latest.json").strip()
+        memory_soak_out = os.environ.get("MEMORY_SOAK_OUT", "artifacts/memory_soak/gate_memory_soak.json").strip()
+        memory_soak_min_loops = os.environ.get("MEMORY_SOAK_MIN_LOOPS", "200").strip()
+        memory_soak_max_delta = os.environ.get("MEMORY_SOAK_MAX_RSS_DELTA_MB", "8.0").strip()
+        memory_soak_max_tail = os.environ.get("MEMORY_SOAK_MAX_RSS_TAIL_SPAN_MB", "2.0").strip()
+        memory_soak_max_promptops_cache = os.environ.get("MEMORY_SOAK_MAX_PROMPTOPS_CACHE", "16").strip()
+        memory_soak_max_query_fast_cache = os.environ.get("MEMORY_SOAK_MAX_QUERY_FAST_CACHE", "4096").strip()
+        memory_soak_max_p95_ms = os.environ.get("MEMORY_SOAK_MAX_P95_MS", "2500.0").strip()
+        steps.append(
+            GateStep(
+                "gate_memory_soak",
+                [
+                    py,
+                    "tools/gate_memory_soak.py",
+                    "--summary",
+                    memory_soak_summary,
+                    "--out",
+                    memory_soak_out,
+                    "--min-loops",
+                    memory_soak_min_loops,
+                    "--max-rss-delta-mb",
+                    memory_soak_max_delta,
+                    "--max-rss-tail-span-mb",
+                    memory_soak_max_tail,
+                    "--max-promptops-service-cache-entries",
+                    memory_soak_max_promptops_cache,
+                    "--max-query-fast-cache-entries",
+                    memory_soak_max_query_fast_cache,
+                    "--max-p95-ms",
+                    memory_soak_max_p95_ms,
+                ],
+                memory_soak_out,
+            )
+        )
     if _truthy(os.environ.get("REAL_CORPUS_DETERMINISM_ENABLED")):
         det_runs = int(os.environ.get("REAL_CORPUS_DETERMINISM_RUNS", "5").strip() or 5)
         det_out = os.environ.get("REAL_CORPUS_DETERMINISM_OUT", "artifacts/real_corpus/gate_real_corpus_determinism.json").strip()

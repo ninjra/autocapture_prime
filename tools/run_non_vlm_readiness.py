@@ -309,14 +309,14 @@ def _popup_query_preflight(
     }
 
 
-def _metadata_db_preflight(path: Path) -> dict[str, Any]:
+def _metadata_db_preflight(path: Path, *, attempts: int = 4) -> dict[str, Any]:
     target = Path(path)
     if not target.exists():
         return {"ok": False, "path": str(target), "error": "missing"}
-    attempts = 4
+    safe_attempts = max(1, int(attempts))
     delay_s = 0.2
     last_exc: BaseException | None = None
-    for attempt in range(1, attempts + 1):
+    for attempt in range(1, safe_attempts + 1):
         conn: sqlite3.Connection | None = None
         try:
             conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True, timeout=1.0)
@@ -331,7 +331,7 @@ def _metadata_db_preflight(path: Path) -> dict[str, Any]:
             }
         except Exception as exc:
             last_exc = exc
-            if attempt >= attempts or not _is_transient_db_error(
+            if attempt >= safe_attempts or not _is_transient_db_error(
                 {
                     "stdout_tail": "",
                     "stderr_tail": f"{type(exc).__name__}:{exc}",
@@ -347,7 +347,48 @@ def _metadata_db_preflight(path: Path) -> dict[str, Any]:
                 except Exception:
                     pass
     assert last_exc is not None
-    return {"ok": False, "path": str(target), "error": f"{type(last_exc).__name__}:{last_exc}", "attempts": int(attempts)}
+    return {"ok": False, "path": str(target), "error": f"{type(last_exc).__name__}:{last_exc}", "attempts": int(safe_attempts)}
+
+
+def _resolve_metadata_db_path(*, dataroot: Path, explicit_db: str) -> tuple[Path, dict[str, Any]]:
+    explicit = str(explicit_db or "").strip()
+    if explicit:
+        path = Path(explicit).expanduser()
+        return path, {"selected": str(path), "strategy": "explicit"}
+
+    primary = dataroot / "metadata.db"
+    live = dataroot / "metadata.live.db"
+
+    if not primary.exists() and live.exists():
+        return live, {"selected": str(live), "strategy": "live_only"}
+    if not live.exists():
+        return primary, {"selected": str(primary), "strategy": "primary_only"}
+
+    primary_probe = _metadata_db_preflight(primary, attempts=1)
+    if bool(primary_probe.get("ok", False)):
+        return primary, {"selected": str(primary), "strategy": "primary_readable", "primary_probe": primary_probe}
+
+    live_probe = _metadata_db_preflight(live, attempts=1)
+    if bool(live_probe.get("ok", False)):
+        return (
+            live,
+            {
+                "selected": str(live),
+                "strategy": "fallback_live_readable",
+                "primary_probe": primary_probe,
+                "live_probe": live_probe,
+            },
+        )
+
+    return (
+        primary,
+        {
+            "selected": str(primary),
+            "strategy": "primary_unreadable_live_unreadable",
+            "primary_probe": primary_probe,
+            "live_probe": live_probe,
+        },
+    )
 
 
 def _run_preflight(
@@ -474,7 +515,10 @@ def main(argv: list[str] | None = None) -> int:
     py = _pick_python(root, str(args.python or ""))
 
     dataroot = Path(str(args.dataroot)).expanduser()
-    db_path = Path(str(args.db or "")).expanduser() if str(args.db or "").strip() else (dataroot / "metadata.db")
+    db_path, metadata_db_resolution = _resolve_metadata_db_path(
+        dataroot=dataroot,
+        explicit_db=str(args.db or ""),
+    )
     derived_db_path = dataroot / "derived" / "stage1_derived.db"
     run_dir = root / "artifacts" / "non_vlm_readiness" / f"run_{_utc_stamp()}"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -510,6 +554,7 @@ def main(argv: list[str] | None = None) -> int:
             "error": "metadata_db_missing",
             "db": str(db_path),
             "dataroot": str(dataroot),
+            "metadata_db_resolution": metadata_db_resolution,
         }
         out_path = root / str(args.output)
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -534,6 +579,7 @@ def main(argv: list[str] | None = None) -> int:
             "error": "preflight_failed",
             "db": str(db_path),
             "dataroot": str(dataroot),
+            "metadata_db_resolution": metadata_db_resolution,
             "preflight": preflight,
         }
         out_path = root / str(args.output)
@@ -878,6 +924,7 @@ def main(argv: list[str] | None = None) -> int:
         "ok": len(required_failures) == 0,
         "dataroot": str(dataroot),
         "db": str(db_path),
+        "metadata_db_resolution": metadata_db_resolution,
         "derived_db": str(derived_db_path),
         "python": str(py),
         "strict_all_frames": bool(args.strict_all_frames),

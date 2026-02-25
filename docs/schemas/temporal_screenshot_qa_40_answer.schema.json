@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Temporal Screenshot QA 40 Answer Contract",
+  "type": "object",
+  "required": ["status", "question_id", "time_window", "answer", "evidence"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["OK", "NOT_FOUND", "NEEDS_CLARIFICATION"]
+    },
+    "question_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "time_window": {
+      "type": "object",
+      "required": ["start", "end", "timezone", "source"],
+      "properties": {
+        "start": {"type": "string", "minLength": 1},
+        "end": {"type": "string", "minLength": 1},
+        "timezone": {"type": "string", "minLength": 1},
+        "source": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": true
+    },
+    "answer": {
+      "type": "object",
+      "required": ["type", "value"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["string", "number", "boolean", "timestamp", "duration", "list", "object"]
+        },
+        "value": {}
+      },
+      "additionalProperties": true
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["frames"],
+      "properties": {
+        "frames": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["frame_id", "screenshot_time"],
+            "properties": {
+              "frame_id": {"type": "string", "minLength": 1},
+              "screenshot_time": {"type": "string", "minLength": 1},
+              "app": {"type": "string"},
+              "window_title": {"type": "string"},
+              "screen_bbox": {"type": "object"},
+              "text_spans": {"type": "array"},
+              "uia_refs": {"type": "array"},
+              "hid_refs": {"type": "array"},
+              "vector_refs": {"type": "array"}
+            },
+            "additionalProperties": true
+          }
+        },
+        "joins": {
+          "type": "array",
+          "items": {"type": "object"}
+        }
+      },
+      "additionalProperties": true
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {"const": "OK"}
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "evidence": {
+            "properties": {
+              "frames": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": true
+}

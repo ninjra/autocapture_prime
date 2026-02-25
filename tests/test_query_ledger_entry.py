@@ -97,6 +97,27 @@ class QueryLedgerEntryTests(unittest.TestCase):
         self.assertIsInstance(payload.get("promptops_trace"), dict)
         self.assertIn("stages_ms", payload["promptops_trace"])
 
+    def test_query_promptops_uses_config_sources_when_context_omits_sources(self) -> None:
+        system = _System()
+        system.config["promptops"] = {
+            "enabled": True,
+            "mode": "auto_apply",
+            "query_strategy": "normalize_query",
+            "model_strategy": "model_contract",
+            "require_citations": True,
+            "history": {"enabled": False},
+            "github": {"enabled": False},
+            "sources": [{"id": "gemini_ideas", "text": "Use clear structure and explicit outputs."}],
+            "examples": {},
+            "metrics": {"enabled": False},
+            "review": {"enabled": False},
+        }
+        _ = run_query(system, "pls help w/ query")
+        entry = system.get("event.builder").entries[-1]
+        payload = entry["payload"]
+        trace = payload.get("promptops_trace", {}) if isinstance(payload.get("promptops_trace"), dict) else {}
+        self.assertEqual(int(trace.get("source_count", 0) or 0), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

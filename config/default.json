@@ -1568,6 +1568,9 @@
     "require_query_path": true,
     "query_strategy": "normalize_query",
     "require_citations": true,
+    "sources": [
+      "gemini_cli_prompt_ideas.md"
+    ],
     "review": {
       "approved_prompt_ids": [],
       "auto_approve": true,
