@@ -6,9 +6,11 @@ Run fail-closed release checks and enforce soak admission criteria for the golde
 ## Single Command
 - `bash /mnt/d/projects/autocapture_prime/tools/release_gate.sh`
 - Optional baseline refresh (before release gate): `bash /mnt/d/projects/autocapture_prime/tools/baseline.sh /mnt/d/autocapture http://127.0.0.1:8000`
+- Fast status snapshot (strict readiness + stage coverage + top failures): `.venv/bin/python tools/release_quickcheck.py --strict-exit`
 
 ## Artifacts
 - Release gate report: `artifacts/release/release_gate_latest.json`
+- Quickcheck report: `artifacts/release/release_quickcheck_latest.json`
 - Popup go/no-go report: `artifacts/query_acceptance/popup_go_no_go_latest.json`
 - Soak precheck report: `artifacts/soak/golden_qh/admission_precheck_latest.json`
 - Soak postcheck report: `artifacts/soak/golden_qh/latest/admission_postcheck.json`
