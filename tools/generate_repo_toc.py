@@ -51,6 +51,7 @@ def _render() -> str:
             "Stage1 completeness audit",
             "python3 tools/soak/stage1_completeness_audit.py --db /mnt/d/autocapture/metadata.live.db",
         ),
+        ("Strict readiness quickcheck", ".venv/bin/python tools/release_quickcheck.py --strict-exit"),
         ("PromptOps metrics", "python3 tools/promptops_metrics_report.py"),
     ]
 
