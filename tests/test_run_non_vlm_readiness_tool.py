@@ -232,6 +232,61 @@ class RunNonVlmReadinessToolTests(unittest.TestCase):
             self.assertEqual(int(out.get("attempts", 0) or 0), 2)
             self.assertTrue(bool(out.get("retried", False)))
 
+    def test_resolve_metadata_db_path_prefers_live_when_primary_unreadable(self) -> None:
+        mod = _load_module("tools/run_non_vlm_readiness.py", "run_non_vlm_readiness_tool_11")
+        with tempfile.TemporaryDirectory() as td:
+            dataroot = Path(td)
+            primary = dataroot / "metadata.db"
+            live = dataroot / "metadata.live.db"
+            primary.write_text("", encoding="utf-8")
+            live.write_text("", encoding="utf-8")
+            with mock.patch.object(mod, "_metadata_db_preflight", autospec=True) as probe:
+                probe.side_effect = [
+                    {"ok": False, "error": "OperationalError:disk I/O error"},
+                    {"ok": True, "record_count": 10},
+                ]
+                selected, details = mod._resolve_metadata_db_path(  # noqa: SLF001
+                    dataroot=dataroot,
+                    explicit_db="",
+                )
+        self.assertEqual(selected, live)
+        self.assertEqual(str(details.get("strategy") or ""), "fallback_live_readable")
+
+    def test_main_includes_resolution_on_preflight_failure(self) -> None:
+        mod = _load_module("tools/run_non_vlm_readiness.py", "run_non_vlm_readiness_tool_12")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            dataroot = root / "data"
+            dataroot.mkdir(parents=True, exist_ok=True)
+            db = dataroot / "metadata.db"
+            con = sqlite3.connect(db)
+            con.execute("create table metadata(record_type text)")
+            con.commit()
+            con.close()
+            out_path = root / "out.json"
+            with mock.patch.object(mod, "_repo_root", return_value=root), mock.patch.object(
+                mod, "_resolve_metadata_db_path", return_value=(db, {"selected": str(db), "strategy": "primary_readable"})
+            ), mock.patch.object(mod, "_run_preflight", return_value={"ok": False}):
+                rc = mod.main(
+                    [
+                        "--dataroot",
+                        str(dataroot),
+                        "--output",
+                        str(out_path),
+                        "--no-run-pytest",
+                        "--no-run-gates",
+                        "--no-run-query-eval",
+                        "--no-run-synthetic-gauntlet",
+                        "--no-revalidate-markers",
+                        "--require-preflight",
+                    ]
+                )
+            self.assertEqual(rc, 3)
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertEqual(str(payload.get("error") or ""), "preflight_failed")
+            resolution = payload.get("metadata_db_resolution", {})
+            self.assertEqual(str(resolution.get("strategy") or ""), "primary_readable")
+
 
 if __name__ == "__main__":
     unittest.main()
