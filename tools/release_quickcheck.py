@@ -52,7 +52,50 @@ def _extract_reason_candidates(payload: dict[str, Any]) -> list[str]:
         if isinstance(raw, list):
             reasons.extend(str(item) for item in raw if str(item).strip())
         elif isinstance(raw, dict):
-            reasons.extend(str(item) for item in raw.keys() if str(item).strip())
+            if str(key) == "strict_failure_causes":
+                counts = raw.get("counts")
+                if isinstance(counts, dict):
+                    for item, value in counts.items():
+                        item_s = str(item).strip()
+                        if item_s and _to_int(value, 0) > 0:
+                            reasons.append(item_s)
+                by_case = raw.get("by_case")
+                if isinstance(by_case, list):
+                    for row in by_case:
+                        if not isinstance(row, dict):
+                            continue
+                        cause = str(row.get("cause") or "").strip()
+                        if cause:
+                            reasons.append(cause)
+                continue
+            for item, value in raw.items():
+                item_s = str(item).strip()
+                if not item_s:
+                    continue
+                if isinstance(value, bool):
+                    if value:
+                        reasons.append(item_s)
+                    continue
+                if isinstance(value, (int, float)):
+                    if float(value) > 0:
+                        reasons.append(item_s)
+                    continue
+                if isinstance(value, (list, tuple, set)):
+                    if len(value) > 0:
+                        reasons.append(item_s)
+                    continue
+                if isinstance(value, dict):
+                    if len(value) > 0:
+                        reasons.append(item_s)
+                    continue
+                if str(value).strip():
+                    reasons.append(item_s)
+    strict_counts = payload.get("strict_failure_cause_counts")
+    if isinstance(strict_counts, dict):
+        for key, value in strict_counts.items():
+            key_s = str(key).strip()
+            if key_s and _to_int(value, 0) > 0:
+                reasons.append(key_s)
     if isinstance(payload.get("top_failure_key"), str) and str(payload.get("top_failure_key")).strip():
         reasons.append(str(payload.get("top_failure_key")).strip())
     return reasons
@@ -114,12 +157,14 @@ def build_quickcheck(*, root: Path) -> dict[str, Any]:
     stage_summary = {}
     if isinstance(lineage, dict):
         summary = lineage.get("summary", {}) if isinstance(lineage.get("summary", {}), dict) else {}
+        lineage_complete = _to_int(summary.get("lineage_complete", lineage.get("lineage_complete", 0)))
+        lineage_incomplete = _to_int(summary.get("lineage_incomplete", lineage.get("lineage_incomplete", 0)))
         stage_summary = {
             "frames_total": _to_int(summary.get("frames_total", 0)),
             "frames_queryable": _to_int(summary.get("frames_queryable", 0)),
             "frames_blocked": _to_int(summary.get("frames_blocked", 0)),
-            "lineage_complete": _to_int(summary.get("lineage_complete", 0)),
-            "lineage_incomplete": _to_int(summary.get("lineage_incomplete", 0)),
+            "lineage_complete": lineage_complete,
+            "lineage_incomplete": lineage_incomplete,
             "lineage_path": str(lineage_path) if isinstance(lineage_path, Path) else "",
         }
     else:
@@ -132,10 +177,12 @@ def build_quickcheck(*, root: Path) -> dict[str, Any]:
             "lineage_path": str(lineage_path) if isinstance(lineage_path, Path) else "",
         }
 
+    q40_source_tier = str((q40 or {}).get("source_tier") or "").strip().lower()
+    q40_ok_with_real_source = bool(isinstance(q40, dict) and q40.get("ok") is True and q40_source_tier == "real")
     statuses = {
         "release_gate_ok": bool(isinstance(release, dict) and release.get("ok") is True),
         "popup_strict_ok": bool(isinstance(popup, dict) and popup.get("ok") is True),
-        "q40_strict_ok": bool(isinstance(q40, dict) and q40.get("ok") is True),
+        "q40_strict_ok": bool(q40_ok_with_real_source),
         "temporal40_strict_ok": bool(isinstance(temporal, dict) and temporal.get("ok") is True),
         "real_corpus_strict_ok": bool(isinstance(real_corpus, dict) and real_corpus.get("ok") is True),
     }
@@ -151,6 +198,8 @@ def build_quickcheck(*, root: Path) -> dict[str, Any]:
     if isinstance(q40, dict) and not bool(q40.get("ok", False)):
         for reason in _extract_reason_candidates(q40):
             reason_counter[str(reason)] += 1
+    elif isinstance(q40, dict) and q40_source_tier != "real":
+        reason_counter["q40.source_tier_not_real"] += 1
     if isinstance(temporal, dict) and not bool(temporal.get("ok", False)):
         for reason in _extract_reason_candidates(temporal):
             reason_counter[str(reason)] += 1
@@ -166,7 +215,7 @@ def build_quickcheck(*, root: Path) -> dict[str, Any]:
         "matrix_evaluated": _to_int((q40 or {}).get("matrix_evaluated", 0)),
         "matrix_skipped": _to_int((q40 or {}).get("matrix_skipped", 0)),
         "matrix_failed": _to_int((q40 or {}).get("matrix_failed", 0)),
-        "source_tier": str((q40 or {}).get("source_tier") or ""),
+        "source_tier": q40_source_tier,
     }
     temporal_counts_src = (temporal or {}).get("counts", {}) if isinstance((temporal or {}).get("counts", {}), dict) else {}
     temporal_counts = {

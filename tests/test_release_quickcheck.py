@@ -43,7 +43,15 @@ def test_build_quickcheck_collects_status_counts_and_top_reasons(tmp_path: pathl
     )
     _write_json(
         root / "artifacts/real_corpus_gauntlet/latest/strict_matrix.json",
-        {"ok": False, "matrix_total": 20, "matrix_evaluated": 20, "matrix_skipped": 0, "matrix_failed": 4, "strict_failure_causes": ["citation_invalid"]},
+        {
+            "ok": False,
+            "matrix_total": 20,
+            "matrix_evaluated": 20,
+            "matrix_skipped": 0,
+            "matrix_failed": 4,
+            "strict_failure_causes": {"citation_invalid": 7, "retrieval_miss": 0},
+            "strict_failure_cause_counts": {"citation_invalid": 7, "retrieval_miss": 0},
+        },
     )
     _write_json(
         root / "artifacts/lineage/20260225T100000Z/stage1_stage2_lineage_queryability.json",
@@ -61,6 +69,62 @@ def test_build_quickcheck_collects_status_counts_and_top_reasons(tmp_path: pathl
     assert "state_not_ok" in out["top_failure_reasons"]
     assert "matrix_failed_nonzero" in out["top_failure_reasons"]
     assert "citation_invalid" in out["top_failure_reasons"]
+    assert "retrieval_miss" not in out["top_failure_reasons"]
+
+
+def test_build_quickcheck_requires_real_q40_source_tier_for_q40_ok(tmp_path: pathlib.Path) -> None:
+    mod = _load_module()
+    root = tmp_path
+    _write_json(root / "artifacts/release/release_gate_latest.json", {"ok": True})
+    _write_json(root / "artifacts/query_acceptance/popup_regression_latest.json", {"ok": True, "sample_count": 10, "accepted_count": 10, "failed_count": 0})
+    _write_json(root / "artifacts/advanced10/q40_matrix_latest.json", {"ok": True, "matrix_total": 40, "matrix_evaluated": 40, "matrix_skipped": 0, "matrix_failed": 0, "source_tier": "synthetic"})
+    _write_json(root / "artifacts/temporal40/temporal40_gate_latest.json", {"ok": True, "counts": {"evaluated": 40, "skipped": 0, "failed": 0}})
+    _write_json(root / "artifacts/real_corpus_gauntlet/latest/strict_matrix.json", {"ok": True, "matrix_total": 20, "matrix_evaluated": 20, "matrix_skipped": 0, "matrix_failed": 0})
+    out = mod.build_quickcheck(root=root)
+    assert out["statuses"]["q40_strict_ok"] is False
+    assert out["counts"]["q40"]["source_tier"] == "synthetic"
+    assert "q40.source_tier_not_real" in out["top_failure_reasons"]
+
+
+def test_build_quickcheck_lineage_fallback_reads_root_keys(tmp_path: pathlib.Path) -> None:
+    mod = _load_module()
+    root = tmp_path
+    _write_json(root / "artifacts/release/release_gate_latest.json", {"ok": True})
+    _write_json(root / "artifacts/query_acceptance/popup_regression_latest.json", {"ok": True, "sample_count": 10, "accepted_count": 10, "failed_count": 0})
+    _write_json(root / "artifacts/advanced10/q40_matrix_latest.json", {"ok": True, "source_tier": "real"})
+    _write_json(root / "artifacts/temporal40/temporal40_gate_latest.json", {"ok": True, "counts": {"evaluated": 40, "skipped": 0, "failed": 0}})
+    _write_json(root / "artifacts/real_corpus_gauntlet/latest/strict_matrix.json", {"ok": True})
+    _write_json(
+        root / "artifacts/lineage/20260225T100000Z/stage1_stage2_lineage_queryability.json",
+        {"summary": {"frames_total": 100, "frames_queryable": 90, "frames_blocked": 10}, "lineage_complete": 88, "lineage_incomplete": 12},
+    )
+    out = mod.build_quickcheck(root=root)
+    assert out["stage_coverage"]["frames_total"] == 100
+    assert out["stage_coverage"]["lineage_complete"] == 88
+    assert out["stage_coverage"]["lineage_incomplete"] == 12
+
+
+def test_build_quickcheck_parses_nested_strict_failure_causes_without_wrapper_keys(tmp_path: pathlib.Path) -> None:
+    mod = _load_module()
+    root = tmp_path
+    _write_json(root / "artifacts/release/release_gate_latest.json", {"ok": False})
+    _write_json(root / "artifacts/query_acceptance/popup_regression_latest.json", {"ok": True, "sample_count": 10, "accepted_count": 10, "failed_count": 0})
+    _write_json(root / "artifacts/advanced10/q40_matrix_latest.json", {"ok": True, "source_tier": "real"})
+    _write_json(root / "artifacts/temporal40/temporal40_gate_latest.json", {"ok": True, "counts": {"evaluated": 40, "skipped": 0, "failed": 0}})
+    _write_json(
+        root / "artifacts/real_corpus_gauntlet/latest/strict_matrix.json",
+        {
+            "ok": False,
+            "strict_failure_causes": {
+                "by_case": [{"id": "Q1", "cause": "retrieval_miss"}],
+                "counts": {"retrieval_miss": 1, "citation_invalid": 0},
+            },
+        },
+    )
+    out = mod.build_quickcheck(root=root)
+    assert "retrieval_miss" in out["top_failure_reasons"]
+    assert "by_case" not in out["top_failure_reasons"]
+    assert "counts" not in out["top_failure_reasons"]
 
 
 def test_build_quickcheck_handles_missing_artifacts(tmp_path: pathlib.Path) -> None:
