@@ -46,6 +46,8 @@ def validate_promptops_policy(
     config: dict[str, Any],
     lock_payload: dict[str, Any],
     safe_mode_config: dict[str, Any],
+    *,
+    repo_root: Path | None = None,
 ) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     plugins = config.get("plugins", {}) if isinstance(config, dict) else {}
@@ -165,6 +167,44 @@ def validate_promptops_policy(
 
     safe_plugins = safe_mode_config.get("plugins", {}) if isinstance(safe_mode_config, dict) else {}
     checks.append({"name": "safe_mode_forces_plugins_safe_mode", "ok": bool(safe_plugins.get("safe_mode", False))})
+
+    settings = plugins.get("settings", {}) if isinstance(plugins, dict) else {}
+    synth_settings = settings.get("builtin.answer.synth_vllm_localhost", {}) if isinstance(settings.get("builtin.answer.synth_vllm_localhost", {}), dict) else {}
+    system_prompt_path = str(synth_settings.get("system_prompt_path") or "").strip()
+    query_pre_path = str(synth_settings.get("query_context_pre_path") or "").strip()
+    query_post_path = str(synth_settings.get("query_context_post_path") or "").strip()
+    checks.append({"name": "answer_synth_system_prompt_path_set", "ok": bool(system_prompt_path), "value": system_prompt_path})
+    checks.append({"name": "answer_synth_query_context_pre_path_set", "ok": bool(query_pre_path), "value": query_pre_path})
+    checks.append({"name": "answer_synth_query_context_post_path_set", "ok": bool(query_post_path), "value": query_post_path})
+    distinct_paths = {p for p in (system_prompt_path, query_pre_path, query_post_path) if p}
+    checks.append(
+        {
+            "name": "answer_synth_prompt_paths_distinct",
+            "ok": len(distinct_paths) == 3,
+            "value": sorted(distinct_paths),
+        }
+    )
+    if isinstance(repo_root, Path):
+        for name, rel in (
+            ("answer_synth_system_prompt_file_exists", system_prompt_path),
+            ("answer_synth_query_context_pre_file_exists", query_pre_path),
+            ("answer_synth_query_context_post_file_exists", query_post_path),
+        ):
+            full = (repo_root / rel).resolve() if rel else None
+            exists = bool(full and full.exists() and full.is_file())
+            non_empty = False
+            if exists and full is not None:
+                try:
+                    non_empty = bool(full.read_text(encoding="utf-8").strip())
+                except Exception:
+                    non_empty = False
+            checks.append(
+                {
+                    "name": name,
+                    "ok": bool(exists and non_empty),
+                    "value": rel,
+                }
+            )
     return checks
 
 
@@ -173,7 +213,7 @@ def main() -> int:
     default_cfg = _load_json(root / "config" / "default.json")
     lock_payload = _load_json(root / "config" / "plugin_locks.json")
     safe_cfg = load_config(default_config_paths(), safe_mode=True)
-    checks = validate_promptops_policy(default_cfg, lock_payload, safe_cfg)
+    checks = validate_promptops_policy(default_cfg, lock_payload, safe_cfg, repo_root=root)
     ok = all(bool(item.get("ok", False)) for item in checks)
 
     out = root / "artifacts" / "promptops" / "gate_promptops_policy.json"

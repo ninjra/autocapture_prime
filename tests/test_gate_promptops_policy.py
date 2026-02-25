@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 from tools import gate_promptops_policy as mod
 
@@ -10,6 +12,13 @@ def _sample_config() -> dict:
         "plugins": {
             "allowlist": list(mod.REQUIRED_PLUGIN_IDS),
             "enabled": {pid: True for pid in mod.REQUIRED_PLUGIN_IDS},
+            "settings": {
+                "builtin.answer.synth_vllm_localhost": {
+                    "system_prompt_path": "promptops/prompts/answer_synth_system.txt",
+                    "query_context_pre_path": "promptops/prompts/answer_synth_query_pre.txt",
+                    "query_context_post_path": "promptops/prompts/answer_synth_query_post.txt",
+                }
+            },
         },
         "promptops": {
             "enabled": True,
@@ -59,6 +68,29 @@ class GatePromptOpsPolicyTests(unittest.TestCase):
         safe_cfg = {"plugins": {"safe_mode": True}}
         checks = mod.validate_promptops_policy(config, lock_payload, safe_cfg)
         self.assertTrue(all(bool(item.get("ok", False)) for item in checks))
+
+    def test_validate_promptops_policy_rejects_missing_prompt_path_settings(self) -> None:
+        config = _sample_config()
+        config["plugins"]["settings"]["builtin.answer.synth_vllm_localhost"]["query_context_post_path"] = ""
+        lock_payload = {"plugins": {pid: {"artifact_sha256": "x"} for pid in mod.REQUIRED_PLUGIN_IDS}}
+        safe_cfg = {"plugins": {"safe_mode": True}}
+        checks = mod.validate_promptops_policy(config, lock_payload, safe_cfg)
+        failed = {item["name"] for item in checks if not bool(item.get("ok", False))}
+        self.assertIn("answer_synth_query_context_post_path_set", failed)
+
+    def test_validate_promptops_policy_checks_prompt_files_when_repo_root_provided(self) -> None:
+        config = _sample_config()
+        lock_payload = {"plugins": {pid: {"artifact_sha256": "x"} for pid in mod.REQUIRED_PLUGIN_IDS}}
+        safe_cfg = {"plugins": {"safe_mode": True}}
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "promptops" / "prompts").mkdir(parents=True, exist_ok=True)
+            (root / "promptops" / "prompts" / "answer_synth_system.txt").write_text("sys", encoding="utf-8")
+            (root / "promptops" / "prompts" / "answer_synth_query_pre.txt").write_text("pre", encoding="utf-8")
+            (root / "promptops" / "prompts" / "answer_synth_query_post.txt").write_text("", encoding="utf-8")
+            checks = mod.validate_promptops_policy(config, lock_payload, safe_cfg, repo_root=root)
+            failed = {item["name"] for item in checks if not bool(item.get("ok", False))}
+            self.assertIn("answer_synth_query_context_post_file_exists", failed)
 
 
 if __name__ == "__main__":
