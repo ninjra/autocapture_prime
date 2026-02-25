@@ -156,6 +156,48 @@ def _default_manifest(py: str) -> list[GateStep]:
                 "artifacts/q40/gate_q40_strict.json",
             )
         )
+    golden_triplet_disabled = _truthy(os.environ.get("GOLDEN_TRIPLET_DISABLED"))
+    golden_triplet_popup = os.environ.get(
+        "GOLDEN_TRIPLET_POPUP_REPORT",
+        "artifacts/query_acceptance/popup_regression_latest.json",
+    ).strip()
+    golden_triplet_q40 = os.environ.get(
+        "GOLDEN_TRIPLET_Q40_REPORT",
+        "artifacts/advanced10/q40_matrix_latest.json",
+    ).strip()
+    golden_triplet_temporal = os.environ.get(
+        "GOLDEN_TRIPLET_TEMPORAL_REPORT",
+        "artifacts/temporal40/temporal40_gate_latest.json",
+    ).strip()
+    golden_triplet_sample = os.environ.get("GOLDEN_TRIPLET_POPUP_SAMPLE", "10").strip() or "10"
+    golden_triplet_max_age = os.environ.get("GOLDEN_TRIPLET_MAX_AGE_MINUTES", "180").strip() or "180"
+    golden_triplet_out = os.environ.get(
+        "GOLDEN_TRIPLET_OUT",
+        "artifacts/release/gate_golden_pipeline_triplet.json",
+    ).strip()
+    if not golden_triplet_disabled:
+        steps.append(
+            GateStep(
+                "gate_golden_pipeline_triplet",
+                [
+                    py,
+                    "tools/gate_golden_pipeline_triplet.py",
+                    "--popup-report",
+                    golden_triplet_popup,
+                    "--q40-report",
+                    golden_triplet_q40,
+                    "--temporal-report",
+                    golden_triplet_temporal,
+                    "--expected-popup-sample",
+                    str(golden_triplet_sample),
+                    "--max-age-minutes",
+                    str(golden_triplet_max_age),
+                    "--output",
+                    golden_triplet_out,
+                ],
+                golden_triplet_out,
+            )
+        )
     if _truthy(os.environ.get("MEMORY_SOAK_GATE_ENABLED")):
         memory_soak_summary = os.environ.get("MEMORY_SOAK_SUMMARY", "artifacts/memory_soak/memory_soak_300_latest.json").strip()
         memory_soak_out = os.environ.get("MEMORY_SOAK_OUT", "artifacts/memory_soak/gate_memory_soak.json").strip()

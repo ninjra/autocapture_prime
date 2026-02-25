@@ -68,6 +68,7 @@ def test_default_manifest_includes_required_release_steps() -> None:
     assert "popup_go_no_go" in ids
     assert "run_real_corpus_readiness" in ids
     assert "gate_real_corpus_strict" in ids
+    assert "gate_golden_pipeline_triplet" in ids
 
 
 def test_default_manifest_can_disable_real_corpus_steps() -> None:
@@ -85,6 +86,14 @@ def test_default_manifest_can_disable_popup_go_no_go() -> None:
         steps = mod._default_manifest(sys.executable)
     ids = {step.id for step in steps}
     assert "popup_go_no_go" not in ids
+
+
+def test_default_manifest_can_disable_golden_triplet_gate() -> None:
+    mod = _load_module()
+    with mock.patch.dict(mod.os.environ, {"GOLDEN_TRIPLET_DISABLED": "1"}, clear=False):
+        steps = mod._default_manifest(sys.executable)
+    ids = {step.id for step in steps}
+    assert "gate_golden_pipeline_triplet" not in ids
 
 
 def test_run_release_gate_honors_max_steps(tmp_path: pathlib.Path) -> None:
