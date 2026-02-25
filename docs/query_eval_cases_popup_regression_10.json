@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "record_type": "derived.eval.popup_regression_cases",
+  "cases": [
+    {
+      "id": "POP_REG_01_A",
+      "query": "Identify two numeric values referenced in one communication panel, infer their best matching parameter name from technical notes, and produce example request query strings using those values."
+    },
+    {
+      "id": "POP_REG_02_A",
+      "query": "In the VDI right-side calendar/schedule pane: extract the displayed month+year, the currently selected date, and then list the first 5 visible scheduled items (top-to-bottom) with start time + title."
+    },
+    {
+      "id": "POP_REG_03_A",
+      "query": "Count completed checklist items in the engineering notes/log area and identify the currently running action line directly below the checklist."
+    },
+    {
+      "id": "POP_REG_04_A",
+      "query": "Extract all visible key-value fields from the details form in on-screen order, including present-but-empty fields as empty strings."
+    },
+    {
+      "id": "POP_REG_05_A",
+      "query": "Vision classification: In the SiriusXM carousel row at the bottom center, classify the 6 fully visible tiles into {talk/podcast, NCAA team, NFL event}. Return counts per class and list the titles/entities you used."
+    },
+    {
+      "id": "POP_REG_01_B",
+      "query": "Identify two numeric values referenced in one communication panel, infer their best matching parameter name from technical notes, and produce example request query strings using those values."
+    },
+    {
+      "id": "POP_REG_02_B",
+      "query": "In the VDI right-side calendar/schedule pane: extract the displayed month+year, the currently selected date, and then list the first 5 visible scheduled items (top-to-bottom) with start time + title."
+    },
+    {
+      "id": "POP_REG_03_B",
+      "query": "Count completed checklist items in the engineering notes/log area and identify the currently running action line directly below the checklist."
+    },
+    {
+      "id": "POP_REG_04_B",
+      "query": "Extract all visible key-value fields from the details form in on-screen order, including present-but-empty fields as empty strings."
+    },
+    {
+      "id": "POP_REG_05_B",
+      "query": "Vision classification: In the SiriusXM carousel row at the bottom center, classify the 6 fully visible tiles into {talk/podcast, NCAA team, NFL event}. Return counts per class and list the titles/entities you used."
+    }
+  ]
+}
