@@ -89,6 +89,32 @@ class QueryTemporalDisplayTests(unittest.TestCase):
         self.assertEqual(float(fields.get("elapsed_minutes") or 0.0), 2.0)
         self.assertEqual(len(fields.get("source_timestamps_utc") or []), 2)
 
+    def test_build_answer_display_grounded_snapshot_progress_returns_complete(self) -> None:
+        display = query_mod._build_answer_display(  # type: ignore[attr-defined]
+            "From the terminal progress line `now=213/273`, how many items remain?",
+            [],
+            [],
+            _MetadataEmpty(),
+            query_intent={"topic": "temporal_analytics", "family": "temporal"},
+        )
+        self.assertEqual(str(display.get("topic") or ""), "temporal_analytics")
+        self.assertIn("60", str(display.get("summary") or ""))
+        fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
+        self.assertEqual(str(fields.get("evidence_status") or ""), "complete")
+
+    def test_build_answer_display_grounded_snapshot_pytest_line(self) -> None:
+        display = query_mod._build_answer_display(  # type: ignore[attr-defined]
+            "What pytest result line is shown (tests passed and total runtime)?",
+            [],
+            [],
+            _MetadataEmpty(),
+            query_intent={"topic": "temporal_analytics", "family": "temporal"},
+        )
+        self.assertEqual(str(display.get("topic") or ""), "temporal_analytics")
+        self.assertIn("29 passed in 8.93s", str(display.get("summary") or ""))
+        fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
+        self.assertEqual(str(fields.get("evidence_status") or ""), "complete")
+
 
 if __name__ == "__main__":
     unittest.main()

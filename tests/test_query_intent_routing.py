@@ -52,6 +52,27 @@ class QueryIntentRoutingTests(unittest.TestCase):
         self.assertEqual(intent.get("topic"), "temporal_analytics")
         self.assertEqual(intent.get("family"), "temporal")
 
+    def test_intent_detects_temporal_analytics_for_grounded_ts_utc_question(self) -> None:
+        intent = query_mod._query_intent(  # type: ignore[attr-defined]
+            "Convert the on-screen ts_utc value to America/Denver local time (include offset)."
+        )
+        self.assertEqual(intent.get("topic"), "temporal_analytics")
+        self.assertEqual(intent.get("family"), "temporal")
+
+    def test_intent_detects_temporal_analytics_for_grounded_pytest_question(self) -> None:
+        intent = query_mod._query_intent(  # type: ignore[attr-defined]
+            "What pytest result line is shown (tests passed and total runtime)?"
+        )
+        self.assertEqual(intent.get("topic"), "temporal_analytics")
+        self.assertEqual(intent.get("family"), "temporal")
+
+    def test_intent_detects_temporal_analytics_for_grounded_investigating_duration(self) -> None:
+        intent = query_mod._query_intent(  # type: ignore[attr-defined]
+            "What duration is shown for `Investigating error source`?"
+        )
+        self.assertEqual(intent.get("topic"), "temporal_analytics")
+        self.assertEqual(intent.get("family"), "temporal")
+
 
 if __name__ == "__main__":
     unittest.main()
