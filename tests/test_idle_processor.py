@@ -51,6 +51,16 @@ class _MediaStore:
         return self._blobs.get(record_id)
 
 
+class _TrackingMediaStore(_MediaStore):
+    def __init__(self, blobs: dict[str, bytes]) -> None:
+        super().__init__(blobs)
+        self.calls = 0
+
+    def get(self, record_id: str):
+        self.calls += 1
+        return super().get(record_id)
+
+
 class _Extractor:
     def __init__(self, text: str) -> None:
         self._text = text
@@ -367,6 +377,72 @@ class IdleProcessorTests(unittest.TestCase):
         self.assertIsInstance(done, bool)
         self.assertIsNotNone(stats)
         self.assertNotIn("run1/derived.idle.checkpoint", metadata.data)
+
+    def test_already_processed_path_skips_media_decode_and_marks_stage1(self) -> None:
+        config = {
+            "runtime": {"run_id": "run1"},
+            "processing": {
+                "idle": {
+                    "enabled": True,
+                    "auto_start": False,
+                    "max_items_per_run": 5,
+                    "max_seconds_per_run": 5,
+                    "sleep_ms": 1,
+                    "max_concurrency_cpu": 1,
+                    "max_concurrency_gpu": 0,
+                    "extractors": {"ocr": False, "vlm": False},
+                },
+                "sst": {"enabled": False},
+            },
+        }
+        metadata = _MetadataStore()
+        record_id = "run1/evidence.capture.frame/42"
+        metadata.put(
+            record_id,
+            {
+                "record_type": "evidence.capture.frame",
+                "ts_utc": "2024-01-01T00:00:00+00:00",
+                "content_type": "image/png",
+            },
+        )
+        metadata.put(
+            stage1_complete_record_id(record_id),
+            {
+                "record_type": "derived.ingest.stage1.complete",
+                "source_record_id": record_id,
+                "ts_utc": "2024-01-01T00:00:01+00:00",
+            },
+        )
+        metadata.put(
+            retention_eligibility_record_id(record_id),
+            {
+                "record_type": "retention.eligible",
+                "source_record_id": record_id,
+                "stage1_contract_validated": True,
+                "quarantine_pending": False,
+                "ts_utc": "2024-01-01T00:00:01+00:00",
+            },
+        )
+        metadata.put(
+            stage2_complete_record_id(record_id),
+            {
+                "record_type": "derived.ingest.stage2.complete",
+                "source_record_id": record_id,
+                "complete": True,
+                "ts_utc": "2024-01-01T00:00:01+00:00",
+            },
+        )
+        media = _TrackingMediaStore({})
+        events = _EventBuilder()
+        system = _System(config, metadata, media, None, None, events)
+
+        processor = IdleProcessor(system)
+        done, stats = processor.process_step(budget_ms=0)
+
+        self.assertIsInstance(done, bool)
+        self.assertEqual(media.calls, 0)
+        self.assertEqual(stats.errors, 0)
+        self.assertGreaterEqual(int(stats.records_completed), 1)
 
     def test_intelligent_batch_defers_repeat_hash_vlm_and_materializes_copy(self) -> None:
         with tempfile.TemporaryDirectory():
@@ -695,7 +771,7 @@ class IdleProcessorTests(unittest.TestCase):
     def test_stage1_backfill_inserts_uia_obs_docs_when_snapshot_present(self) -> None:
         config = {
             "runtime": {"run_id": "run1"},
-            "storage": {"data_dir": "/tmp/autocapture"},
+            "storage": {"data_dir": "/tmp/autocapture", "stage1_derived": {"enabled": False}},
             "processing": {
                 "idle": {
                     "enabled": True,
@@ -811,6 +887,195 @@ class IdleProcessorTests(unittest.TestCase):
         self.assertGreaterEqual(int(stats.stage1_uia_docs_inserted), 3)
         self.assertIn(stage2_complete_record_id(frame_id), metadata.data)
         self.assertGreaterEqual(int(stats.stage2_projection_generated_states), 1)
+
+    def test_stage1_backfill_projects_stage2_for_stage1_complete_frame_even_when_extractors_missing(self) -> None:
+        config = {
+            "runtime": {"run_id": "run1"},
+            "storage": {"data_dir": "/tmp/autocapture", "stage1_derived": {"enabled": False}},
+            "processing": {
+                "idle": {
+                    "enabled": True,
+                    "auto_start": False,
+                    "max_items_per_run": 10,
+                    "max_seconds_per_run": 5,
+                    "max_concurrency_cpu": 1,
+                    "max_concurrency_gpu": 0,
+                    "extractors": {"ocr": True, "vlm": False},
+                    "stage1_marker_backfill": {"enabled": True, "max_records_per_run": 10},
+                },
+                "sst": {"enabled": False},
+            },
+        }
+        metadata = _MetadataStore()
+        frame_id = "run1/evidence.capture.frame/0"
+        uia_id = "run1/evidence.uia.snapshot/0"
+        metadata.put(
+            frame_id,
+            {
+                "record_type": "evidence.capture.frame",
+                "run_id": "run1",
+                "ts_utc": "2024-01-01T00:00:00+00:00",
+                "blob_path": "media/frame0.png",
+                "content_hash": "hash_frame_0",
+                "uia_ref": {"record_id": uia_id, "content_hash": "uia_hash_0"},
+                "input_ref": {"record_id": "run1/evidence.input.batch/0"},
+                "content_type": "image/png",
+                "desktop_rect": [0, 0, 1920, 1080],
+            },
+        )
+        metadata.put(
+            uia_id,
+            {
+                "record_type": "evidence.uia.snapshot",
+                "record_id": uia_id,
+                "run_id": "run1",
+                "ts_utc": "2024-01-01T00:00:00+00:00",
+                "unix_ms_utc": 1704067200000,
+                "hwnd": "101",
+                "window": {"title": "Outlook", "process_path": "outlook.exe", "pid": 1234},
+                "focus_path": [{"eid": "n1", "role": "button", "name": "Complete", "rect": [10, 10, 80, 30], "enabled": True, "offscreen": False}],
+                "context_peers": [],
+                "operables": [{"eid": "n2", "role": "button", "name": "View", "rect": [90, 10, 150, 30], "enabled": True, "offscreen": False}],
+                "stats": {"walk_ms": 2, "nodes_emitted": 2, "failures": 0},
+                "content_hash": "uia_hash_0",
+            },
+        )
+        metadata.put(
+            stage1_complete_record_id(frame_id),
+            {
+                "record_type": "derived.ingest.stage1.complete",
+                "run_id": "run1",
+                "source_record_id": frame_id,
+                "complete": True,
+            },
+        )
+        metadata.put(
+            retention_eligibility_record_id(frame_id),
+            {
+                "record_type": "retention.eligible",
+                "run_id": "run1",
+                "source_record_id": frame_id,
+                "source_record_type": "evidence.capture.frame",
+                "eligible": True,
+                "stage1_contract_validated": True,
+                "quarantine_pending": False,
+            },
+        )
+        metadata.put(
+            "system/derived.idle.checkpoint",
+            {
+                "record_type": "derived.idle.checkpoint",
+                "run_id": "run1",
+                "ts_utc": "2024-01-01T00:00:01+00:00",
+                "last_record_id": frame_id,
+                "processed_total": 1,
+            },
+        )
+        ocr = _Extractor("should not run")
+        media = _MediaStore({frame_id: b"\x89PNG\r\n\x1a\nframe"})
+        system = _System(config, metadata, media, ocr, None, _EventBuilder())
+
+        processor = IdleProcessor(system)
+        done, stats = processor.process_step(budget_ms=0)
+
+        self.assertTrue(done)
+        self.assertEqual(ocr.calls, 0)
+        stage2_id = stage2_complete_record_id(frame_id)
+        self.assertIn(stage2_id, metadata.data)
+        self.assertTrue(bool(metadata.data[stage2_id].get("complete", False)))
+        self.assertGreaterEqual(int(stats.stage2_complete_records), 1)
+        self.assertGreaterEqual(int(stats.stage2_projection_generated_states), 1)
+
+    def test_stage1_backfill_cold_start_scans_newest_tail_for_stage2_recovery(self) -> None:
+        config = {
+            "runtime": {"run_id": "run1"},
+            "storage": {"data_dir": "/tmp/autocapture", "stage1_derived": {"enabled": False}},
+            "processing": {
+                "idle": {
+                    "enabled": True,
+                    "auto_start": False,
+                    "max_items_per_run": 10,
+                    "max_seconds_per_run": 5,
+                    "max_concurrency_cpu": 1,
+                    "max_concurrency_gpu": 0,
+                    "extractors": {"ocr": True, "vlm": False},
+                    "stage1_marker_backfill": {
+                        "enabled": True,
+                        "max_records_per_run": 10,
+                        "initial_scan_records": 16,
+                    },
+                },
+                "sst": {"enabled": False},
+            },
+        }
+        metadata = _MetadataStore()
+        frame_id = "run1/evidence.capture.frame/0"
+        uia_id = "run1/evidence.uia.snapshot/0"
+        metadata.put(
+            frame_id,
+            {
+                "record_type": "evidence.capture.frame",
+                "run_id": "run1",
+                "ts_utc": "2024-01-01T00:00:00+00:00",
+                "blob_path": "media/frame0.png",
+                "content_hash": "hash_frame_0",
+                "uia_ref": {"record_id": uia_id, "content_hash": "uia_hash_0"},
+                "input_ref": {"record_id": "run1/evidence.input.batch/0"},
+                "content_type": "image/png",
+                "desktop_rect": [0, 0, 1920, 1080],
+            },
+        )
+        metadata.put(
+            uia_id,
+            {
+                "record_type": "evidence.uia.snapshot",
+                "record_id": uia_id,
+                "run_id": "run1",
+                "ts_utc": "2024-01-01T00:00:00+00:00",
+                "unix_ms_utc": 1704067200000,
+                "hwnd": "101",
+                "window": {"title": "Outlook", "process_path": "outlook.exe", "pid": 1234},
+                "focus_path": [{"eid": "n1", "role": "button", "name": "Complete", "rect": [10, 10, 80, 30], "enabled": True, "offscreen": False}],
+                "context_peers": [],
+                "operables": [{"eid": "n2", "role": "button", "name": "View", "rect": [90, 10, 150, 30], "enabled": True, "offscreen": False}],
+                "stats": {"walk_ms": 2, "nodes_emitted": 2, "failures": 0},
+                "content_hash": "uia_hash_0",
+            },
+        )
+        metadata.put(
+            stage1_complete_record_id(frame_id),
+            {
+                "record_type": "derived.ingest.stage1.complete",
+                "run_id": "run1",
+                "source_record_id": frame_id,
+                "complete": True,
+            },
+        )
+        metadata.put(
+            retention_eligibility_record_id(frame_id),
+            {
+                "record_type": "retention.eligible",
+                "run_id": "run1",
+                "source_record_id": frame_id,
+                "source_record_type": "evidence.capture.frame",
+                "eligible": True,
+                "stage1_contract_validated": True,
+                "quarantine_pending": False,
+            },
+        )
+        ocr = _Extractor("should not run")
+        media = _MediaStore({})
+        system = _System(config, metadata, media, ocr, None, _EventBuilder())
+
+        processor = IdleProcessor(system)
+        done, stats = processor.process_step(budget_ms=0)
+
+        self.assertTrue(done)
+        self.assertEqual(ocr.calls, 0)
+        stage2_id = stage2_complete_record_id(frame_id)
+        self.assertIn(stage2_id, metadata.data)
+        self.assertTrue(bool(metadata.data[stage2_id].get("complete", False)))
+        self.assertGreaterEqual(int(stats.stage1_backfill_scanned_records), 1)
 
     def test_stage2_projection_refreshes_indexes_for_immediate_retrieval(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

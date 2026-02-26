@@ -37,6 +37,21 @@ class Stage1DerivedStoreTests(unittest.TestCase):
         out = resolve_stage1_derived_db_path(cfg)
         self.assertEqual(str(out), "/tmp/custom.db")
 
+    def test_resolve_auto_detects_existing_db_when_flag_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            derived = Path(td) / "derived" / "stage1_derived.db"
+            derived.parent.mkdir(parents=True, exist_ok=True)
+            derived.touch()
+            cfg = {"storage": {"data_dir": td}}
+            out = resolve_stage1_derived_db_path(cfg)
+            self.assertEqual(str(out), str(derived))
+
+    def test_resolve_auto_detect_returns_none_when_db_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            cfg = {"storage": {"data_dir": td}}
+            out = resolve_stage1_derived_db_path(cfg)
+            self.assertIsNone(out)
+
     def test_overlay_reads_derived_first_and_falls_back(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             db_path = Path(td) / "derived.db"

@@ -21,9 +21,6 @@ def resolve_stage1_derived_db_path(config: dict[str, Any] | None, *, dataroot_hi
     storage_cfg: dict[str, Any] = storage_cfg_raw if isinstance(storage_cfg_raw, dict) else {}
     stage1_cfg_raw = storage_cfg.get("stage1_derived")
     stage1_cfg: dict[str, Any] = stage1_cfg_raw if isinstance(stage1_cfg_raw, dict) else {}
-    enabled = bool(stage1_cfg.get("enabled", False))
-    if not enabled:
-        return None
     explicit = str(
         stage1_cfg.get("db_path")
         or storage_cfg.get("stage1_derived_db_path")
@@ -31,13 +28,35 @@ def resolve_stage1_derived_db_path(config: dict[str, Any] | None, *, dataroot_hi
     ).strip()
     if explicit:
         return Path(explicit).expanduser()
-    dataroot = str(
+
+    enabled_raw = stage1_cfg.get("enabled", None)
+    if enabled_raw is not None:
+        enabled = bool(enabled_raw)
+        if not enabled:
+            return None
+        dataroot = str(
+            storage_cfg.get("data_dir")
+            or dataroot_hint
+            or os.environ.get("AUTOCAPTURE_DATA_DIR")
+            or "data"
+        ).strip()
+        return default_stage1_derived_db_path(dataroot)
+
+    # Auto-detect mode for backwards compatibility: if no explicit enable flag
+    # is configured, attach the overlay only when a stage1 derived DB already
+    # exists under an explicit data root.
+    dataroot_explicit = str(
         storage_cfg.get("data_dir")
         or dataroot_hint
         or os.environ.get("AUTOCAPTURE_DATA_DIR")
-        or "data"
+        or ""
     ).strip()
-    return default_stage1_derived_db_path(dataroot)
+    if not dataroot_explicit:
+        return None
+    candidate = default_stage1_derived_db_path(dataroot_explicit)
+    if candidate.exists():
+        return candidate
+    return None
 
 
 class Stage1DerivedSqliteStore:

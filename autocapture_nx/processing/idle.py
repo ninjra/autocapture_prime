@@ -896,7 +896,7 @@ class IdleProcessor:
             return True
         return False
 
-    def _has_stage1_and_retention_markers(self, record_id: str) -> bool:
+    def _has_stage1_and_retention_markers(self, record_id: str, *, require_stage2: bool = True) -> bool:
         if self._stage1_store is None:
             return False
         stage1_marker = self._stage1_store.get(stage1_complete_record_id(record_id), None)
@@ -921,7 +921,7 @@ class IdleProcessor:
                 return False
         if not self._has_stage1_uia_docs(record):
             return False
-        if str(record.get("record_type") or "") == "evidence.capture.frame":
+        if require_stage2 and str(record.get("record_type") or "") == "evidence.capture.frame":
             stage2_marker = self._stage1_store.get(stage2_complete_record_id(record_id), None)
             if _is_missing_metadata_record(stage2_marker):
                 return False
@@ -934,6 +934,7 @@ class IdleProcessor:
         *,
         evidence_ids: list[str],
         start_index: int,
+        initial_scan_records: int,
         allow_ocr: bool,
         allow_vlm: bool,
         pipeline_enabled: bool,
@@ -944,15 +945,25 @@ class IdleProcessor:
     ) -> int:
         if self._metadata is None:
             return 0
-        if max_records <= 0 or start_index <= 0:
+        if max_records <= 0:
             return 0
-        capped_start = min(start_index, len(evidence_ids))
-        if capped_start <= 0:
+        safe_start = max(0, int(start_index))
+        capped_start = min(safe_start, len(evidence_ids))
+        if capped_start > 0:
+            backfill_ids = list(reversed(evidence_ids[:capped_start]))
+        else:
+            cold_scan = int(initial_scan_records) if int(initial_scan_records) > 0 else int(max_records * 8)
+            capped_scan = min(len(evidence_ids), max(1, cold_scan))
+            if capped_scan <= 0:
+                return 0
+            backfill_ids = list(reversed(evidence_ids[-capped_scan:]))
+        if not backfill_ids:
             return 0
         marked = 0
         scanned = 0
-        # Work newest-first in the checkpointed prefix so recent unmarked frames converge first.
-        for record_id in reversed(evidence_ids[:capped_start]):
+        # Work newest-first in the checkpointed prefix so recent unmarked frames
+        # converge first; in cold-start mode scan a bounded newest tail.
+        for record_id in backfill_ids:
             if should_abort and should_abort():
                 break
             if expired():
@@ -965,7 +976,31 @@ class IdleProcessor:
             if not record_type.startswith("evidence.capture."):
                 continue
             scanned += 1
-            if self._has_stage1_and_retention_markers(record_id):
+            if self._has_stage1_and_retention_markers(record_id, require_stage2=True):
+                continue
+            stage1_marker = self._stage1_store.get(stage1_complete_record_id(record_id), None)
+            retention_marker = self._stage1_store.get(retention_eligibility_record_id(record_id), None)
+            has_stage1_core = not _is_missing_metadata_record(stage1_marker)
+            has_retention_core = not _is_missing_metadata_record(retention_marker)
+            if record_type == "evidence.capture.frame" and isinstance(retention_marker, dict):
+                has_retention_core = has_retention_core and bool(retention_marker.get("stage1_contract_validated", False)) and not bool(
+                    retention_marker.get("quarantine_pending", False)
+                )
+            if has_stage1_core and has_retention_core and record_type == "evidence.capture.frame":
+                # Stage1 markers can pre-exist without obs.uia.* docs. Materialize docs
+                # first, then recover Stage2 completion from normalized artifacts.
+                self._ensure_stage1_uia_docs(record_id, record, stats=stats)
+                has_stage1_retention = self._has_stage1_and_retention_markers(record_id, require_stage2=False)
+            else:
+                has_stage1_retention = False
+            if has_stage1_retention:
+                stage2_before = self._stage1_store.get(stage2_complete_record_id(record_id), None)
+                had_stage2 = isinstance(stage2_before, dict) and bool(stage2_before.get("complete", False))
+                self._ensure_stage2_projection(record_id, record, reason="stage1_backfill", stats=stats)
+                stage2_after = self._stage1_store.get(stage2_complete_record_id(record_id), None)
+                has_stage2 = isinstance(stage2_after, dict) and bool(stage2_after.get("complete", False))
+                if has_stage2 and not had_stage2:
+                    marked += 1
                 continue
             if self._needs_processing(record_id, record, allow_ocr, allow_vlm, pipeline_enabled):
                 continue
@@ -1179,6 +1214,53 @@ class IdleProcessor:
         metadata = self._metadata
         if metadata is None:
             return [], None, False, 0
+
+        def _record_is_complete(candidate_record_id: str) -> bool:
+            try:
+                return bool(
+                    self._has_stage1_and_retention_markers(
+                        candidate_record_id,
+                    )
+                )
+            except Exception:
+                return False
+
+        def _missing_counts_and_pipeline(candidate_record_id: str) -> tuple[int, int, bool]:
+            ocr_missing_count = 0
+            vlm_missing_count = 0
+            if allow_ocr:
+                for provider_id, _extractor in ocr_providers:
+                    missing, _derived_id = _missing_derived_text(
+                        metadata,
+                        kind="ocr",
+                        run_id=_derive_run_id(self._config, candidate_record_id),
+                        provider_id=str(provider_id),
+                        source_id=candidate_record_id,
+                        config=self._config,
+                    )
+                    if missing:
+                        ocr_missing_count += 1
+            if allow_vlm:
+                for provider_id, _extractor in vlm_providers:
+                    missing, _derived_id = _missing_derived_text(
+                        metadata,
+                        kind="vlm",
+                        run_id=_derive_run_id(self._config, candidate_record_id),
+                        provider_id=str(provider_id),
+                        source_id=candidate_record_id,
+                        config=self._config,
+                    )
+                    if missing:
+                        vlm_missing_count += 1
+            needs_pipeline = False
+            if pipeline_enabled:
+                run_id = _derive_run_id(self._config, candidate_record_id)
+                frame_component = encode_record_id_component(candidate_record_id)
+                frame_id = f"{run_id}/derived.sst.frame/{frame_component}"
+                if _is_missing_metadata_record(metadata.get(frame_id)):
+                    needs_pipeline = True
+            return ocr_missing_count, vlm_missing_count, needs_pipeline
+
         items: list[_IdleWorkItem] = []
         recent_hashes: deque[str] = deque(maxlen=max(1, int(hash_repeat_window)))
         recent_hash_set: set[str] = set()
@@ -1210,6 +1292,21 @@ class IdleProcessor:
                     last_record_id = source_record_id
                     continue
             stats.scanned += 1
+            # Stage1+retention(+stage2 when required) is authoritative for
+            # background completion. If these markers already exist, avoid
+            # expensive re-extraction and just advance checkpoint progress.
+            if _record_is_complete(record_id):
+                stats.records_completed += 1
+                last_record_id = source_record_id
+                continue
+            ocr_missing_count, vlm_missing_count, needs_pipeline = _missing_counts_and_pipeline(record_id)
+            missing_count = int(ocr_missing_count + vlm_missing_count)
+            if missing_count == 0 and (not needs_pipeline or not pipeline_required_for_completion):
+                self._mark_stage1_retention(record_id, record, reason="already_processed", stats=stats)
+                if _record_is_complete(record_id):
+                    stats.records_completed += 1
+                last_record_id = source_record_id
+                continue
             if max_items > 0 and planned >= max_items:
                 break
             blob = _get_media_blob(self._media, record_id, record=record, config=self._config)
@@ -1232,32 +1329,15 @@ class IdleProcessor:
                 event_builder=self._events,
                 logger=self._logger,
             )
-            ocr_missing_count = 0
-            vlm_missing_count = 0
-            if allow_ocr:
-                for provider_id, _extractor in ocr_providers:
-                    missing, _derived_id = _missing_derived_text(
-                        metadata,
-                        kind="ocr",
-                        run_id=_derive_run_id(self._config, record_id),
-                        provider_id=str(provider_id),
-                        source_id=record_id,
-                        config=self._config,
-                    )
-                    if missing:
-                        ocr_missing_count += 1
-            if allow_vlm:
-                for provider_id, _extractor in vlm_providers:
-                    missing, _derived_id = _missing_derived_text(
-                        metadata,
-                        kind="vlm",
-                        run_id=_derive_run_id(self._config, record_id),
-                        provider_id=str(provider_id),
-                        source_id=record_id,
-                        config=self._config,
-                    )
-                    if missing:
-                        vlm_missing_count += 1
+            if record_id != source_record_id:
+                ocr_missing_count, vlm_missing_count, needs_pipeline = _missing_counts_and_pipeline(record_id)
+                missing_count = int(ocr_missing_count + vlm_missing_count)
+                if missing_count == 0 and (not needs_pipeline or not pipeline_required_for_completion):
+                    self._mark_stage1_retention(record_id, record, reason="already_processed", stats=stats)
+                    if _record_is_complete(record_id):
+                        stats.records_completed += 1
+                    last_record_id = source_record_id
+                    continue
             content_hash = str(record.get("content_hash") or "").strip().lower()
             if (
                 intelligent_enabled
@@ -1284,16 +1364,10 @@ class IdleProcessor:
                     recent_hash_set.discard(evicted)
             needs_ocr = ocr_missing_count > 0
             needs_vlm = vlm_missing_count > 0
-            missing_count = int(ocr_missing_count + vlm_missing_count)
-            needs_pipeline = False
-            if pipeline_enabled:
-                run_id = _derive_run_id(self._config, record_id)
-                frame_component = encode_record_id_component(record_id)
-                frame_id = f"{run_id}/derived.sst.frame/{frame_component}"
-                if _is_missing_metadata_record(metadata.get(frame_id)):
-                    needs_pipeline = True
             if missing_count == 0 and (not needs_pipeline or not pipeline_required_for_completion):
                 self._mark_stage1_retention(record_id, record, reason="already_processed", stats=stats)
+                if _record_is_complete(record_id):
+                    stats.records_completed += 1
                 last_record_id = source_record_id
                 continue
             run_id = _derive_run_id(self._config, record_id)
@@ -1643,6 +1717,11 @@ class IdleProcessor:
         stage1_backfill_enabled = bool(stage1_backfill_cfg.get("enabled", True))
         default_stage1_backfill_max = max(256, int(max_items * 4) if max_items > 0 else 512)
         stage1_backfill_max_records = max(0, int(stage1_backfill_cfg.get("max_records_per_run", default_stage1_backfill_max) or 0))
+        default_stage1_backfill_initial_scan = max(stage1_backfill_max_records * 4, 1024)
+        stage1_backfill_initial_scan_records = max(
+            1,
+            int(stage1_backfill_cfg.get("initial_scan_records", default_stage1_backfill_initial_scan) or default_stage1_backfill_initial_scan),
+        )
         if max_gpu <= 0:
             allow_vlm = False
         sst_cfg = self._config.get("processing", {}).get("sst", {})
@@ -1673,9 +1752,10 @@ class IdleProcessor:
             collect_budget_fraction = 0.1
         if collect_budget_fraction > 0.95:
             collect_budget_fraction = 0.95
-        collect_budget_mono = None
-        if budget_mono is not None:
-            collect_budget_mono = start_mono + ((budget_mono - start_mono) * collect_budget_fraction)
+        collect_budget_min_ms = float(idle_cfg.get("collect_min_ms", 200.0) or 200.0)
+        if collect_budget_min_ms < 0.0:
+            collect_budget_min_ms = 0.0
+        collect_budget_mono: float | None = None
 
         def _expired() -> bool:
             now = time.monotonic()
@@ -1717,6 +1797,14 @@ class IdleProcessor:
             if backlog:
                 pending_ids = list(dict.fromkeys(backlog + pending_ids))
         stats.pending_records = int(len(pending_ids))
+        if budget_mono is not None:
+            now = time.monotonic()
+            remaining_budget_s = max(0.0, budget_mono - now)
+            if remaining_budget_s <= 0.0:
+                collect_budget_mono = now
+            else:
+                collect_window_s = max(collect_budget_min_ms / 1000.0, remaining_budget_s * collect_budget_fraction)
+                collect_budget_mono = min(budget_mono, now + collect_window_s)
 
         processed_total = checkpoint.processed_total if checkpoint else 0
         last_record_id: str | None = None
@@ -1850,11 +1938,13 @@ class IdleProcessor:
                 ):
                     continue
                 self._mark_stage1_retention(item.record_id, item.record, reason="idle_processed", stats=stats)
-                stats.records_completed += 1
-            last_record_id = last_record_id or (items[-1].source_id if items else None)
+                if self._has_stage1_and_retention_markers(
+                    item.record_id,
+                ):
+                    stats.records_completed += 1
+                last_record_id = last_record_id or (items[-1].source_id if items else None)
         if (
             stage1_backfill_enabled
-            and start_index > 0
             and stage1_backfill_max_records > 0
             and not aborted
             and not _expired()
@@ -1862,6 +1952,7 @@ class IdleProcessor:
             self._backfill_stage1_markers(
                 evidence_ids=evidence_ids,
                 start_index=start_index,
+                initial_scan_records=stage1_backfill_initial_scan_records,
                 allow_ocr=allow_ocr,
                 allow_vlm=allow_vlm,
                 pipeline_enabled=pipeline_enabled if pipeline_required_for_completion else False,

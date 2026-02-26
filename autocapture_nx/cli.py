@@ -23,6 +23,33 @@ from autocapture_nx.ux.facade import create_facade
 from autocapture_nx.kernel.backup_bundle import create_backup_bundle, restore_backup_bundle
 from autocapture_nx.kernel.paths import repo_root
 
+
+def _env_flag(name: str, *, default: bool) -> bool:
+    raw = str(os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _resolve_batch_metadata_path_override() -> str:
+    explicit = str(os.environ.get("AUTOCAPTURE_STORAGE_METADATA_PATH") or "").strip()
+    if explicit:
+        return ""
+    if not _env_flag("AUTOCAPTURE_BATCH_METADATA_USE_LIVE_DB", default=True):
+        return ""
+    data_dir = str(os.environ.get("AUTOCAPTURE_DATA_DIR") or "").strip()
+    if not data_dir:
+        return ""
+    live_path = Path(data_dir) / "metadata.live.db"
+    if live_path.exists():
+        return str(live_path)
+    return ""
+
+
 def _print_json(data: object) -> None:
     print(json.dumps(data, indent=2, sort_keys=True))
 
@@ -703,6 +730,9 @@ def cmd_enrich(args: argparse.Namespace) -> int:
 
 
 def cmd_batch_run(args: argparse.Namespace) -> int:
+    metadata_override = _resolve_batch_metadata_path_override()
+    if metadata_override:
+        os.environ.setdefault("AUTOCAPTURE_STORAGE_METADATA_PATH", metadata_override)
     facade = create_facade(safe_mode=args.safe_mode)
     result = facade.batch_run(
         max_loops=int(args.max_loops),
