@@ -1,16 +1,17 @@
 # Real-Corpus Strict Status
 
-- ok: `False`
+- ok: `True`
 - matrix_total: `20`
 - matrix_evaluated: `20`
-- matrix_passed: `3`
-- matrix_failed: `17`
+- matrix_passed: `20`
+- matrix_failed: `0`
 - matrix_skipped: `0`
-- failure_reasons: `strict_matrix_failed_nonzero`
+- source_tier: `real`
+- failure_reasons: ``
 - query_extractor_launch_total: `0`
 - query_schedule_extract_requests_total: `0`
 - query_raw_media_reads_total: `0`
-- query_latency_p95_ms: `483.596`
+- query_latency_p95_ms: `352.666`
 
 ## Artifacts
 

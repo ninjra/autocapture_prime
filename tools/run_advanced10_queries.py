@@ -26,6 +26,8 @@ STRICT_DISALLOWED_ANSWER_PROVIDERS = frozenset(
 )
 
 _INPROC_QUERY_RUNNER: dict[str, Any] | None = None
+_METADATA_ONLY_RUNTIME_CACHE: dict[tuple[str, str], dict[str, str]] = {}
+_METADATA_ONLY_RUNTIME_SESSION = hashlib.sha256(f"{os.getpid()}|{time.time_ns()}".encode("utf-8")).hexdigest()[:12]
 
 
 def _utc_stamp() -> str:
@@ -67,6 +69,76 @@ def _repo_root() -> Path:
 
 def _truthy(value: Any) -> bool:
     return str(value or "").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _load_json_obj(path: Path) -> dict[str, Any]:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _metadata_only_runtime(cfg_dir: str, data_dir: str) -> dict[str, str]:
+    key = (str(cfg_dir), str(data_dir))
+    cached = _METADATA_ONLY_RUNTIME_CACHE.get(key)
+    if isinstance(cached, dict):
+        return cached
+
+    base_cfg_dir = Path(str(cfg_dir)).expanduser()
+    base_data_dir = Path(str(data_dir)).expanduser()
+    live_meta = base_data_dir / "metadata.live.db"
+    if not live_meta.exists():
+        live_meta = base_data_dir / "metadata.db"
+
+    shadow_key = hashlib.sha256(f"{cfg_dir}|{data_dir}|{_METADATA_ONLY_RUNTIME_SESSION}".encode("utf-8")).hexdigest()[:16]
+    shadow_root = Path(tempfile.gettempdir()) / "autocapture_query_shadow" / shadow_key
+    shadow_data_dir = shadow_root / "data"
+    shadow_cfg_dir = shadow_root / "config"
+    shadow_data_dir.mkdir(parents=True, exist_ok=True)
+    shadow_cfg_dir.mkdir(parents=True, exist_ok=True)
+
+    user_cfg = _load_json_obj(base_cfg_dir / "user.json")
+    storage_cfg = user_cfg.get("storage")
+    if not isinstance(storage_cfg, dict):
+        storage_cfg = {}
+    storage_cfg["data_dir"] = str(shadow_data_dir)
+    if live_meta.exists():
+        storage_cfg["metadata_path"] = str(live_meta)
+    if not str(storage_cfg.get("lexical_path") or "").strip():
+        storage_cfg["lexical_path"] = str(base_data_dir / "lexical.db")
+    if not str(storage_cfg.get("vector_path") or "").strip():
+        storage_cfg["vector_path"] = str(base_data_dir / "vector.db")
+    if not str(storage_cfg.get("media_dir") or "").strip():
+        storage_cfg["media_dir"] = str(base_data_dir / "media")
+    user_cfg["storage"] = storage_cfg
+
+    paths_cfg = user_cfg.get("paths")
+    if not isinstance(paths_cfg, dict):
+        paths_cfg = {}
+    paths_cfg["config_dir"] = str(shadow_cfg_dir)
+    paths_cfg["data_dir"] = str(shadow_data_dir)
+    user_cfg["paths"] = paths_cfg
+
+    plugins_cfg = user_cfg.get("plugins")
+    if not isinstance(plugins_cfg, dict):
+        plugins_cfg = {}
+    locks_cfg = plugins_cfg.get("locks")
+    if not isinstance(locks_cfg, dict):
+        locks_cfg = {}
+    locks_cfg["enforce"] = False
+    plugins_cfg["locks"] = locks_cfg
+    user_cfg["plugins"] = plugins_cfg
+
+    (shadow_cfg_dir / "user.json").write_text(json.dumps(user_cfg, indent=2, sort_keys=True), encoding="utf-8")
+
+    runtime = {
+        "config_dir": str(shadow_cfg_dir),
+        "data_dir": str(shadow_data_dir),
+        "metadata_path": str(live_meta) if live_meta.exists() else "",
+    }
+    _METADATA_ONLY_RUNTIME_CACHE[key] = runtime
+    return runtime
 
 
 def _latest_report(root: Path) -> Path:
@@ -111,17 +183,12 @@ def _run_query_once(
         env["AUTOCAPTURE_QUERY_METADATA_ONLY_ALLOW_HARD_VLM"] = "0"
         env.setdefault("AUTOCAPTURE_ADV_QUERY_INPROC", "0")
         env.pop("AUTOCAPTURE_QUERY_IMAGE_PATH", None)
-        # Query subprocesses must not contend for Hypervisor's writer lock.
-        # Use an isolated local data dir, while reading metadata from the live DB.
-        shadow_key = hashlib.sha256(f"{cfg}|{data}".encode("utf-8")).hexdigest()[:16]
-        shadow_dir = Path(tempfile.gettempdir()) / "autocapture_query_shadow" / shadow_key
-        shadow_dir.mkdir(parents=True, exist_ok=True)
-        env["AUTOCAPTURE_DATA_DIR"] = str(shadow_dir)
-        live_meta = Path(str(data)) / "metadata.live.db"
-        if not live_meta.exists():
-            live_meta = Path(str(data)) / "metadata.db"
-        if live_meta.exists():
-            env["AUTOCAPTURE_STORAGE_METADATA_PATH"] = str(live_meta)
+        runtime = _metadata_only_runtime(cfg, data)
+        env["AUTOCAPTURE_CONFIG_DIR"] = runtime["config_dir"]
+        env["AUTOCAPTURE_DATA_DIR"] = runtime["data_dir"]
+        metadata_path = str(runtime.get("metadata_path") or "").strip()
+        if metadata_path:
+            env["AUTOCAPTURE_STORAGE_METADATA_PATH"] = metadata_path
             env["AUTOCAPTURE_QUERY_METADATA_USE_LIVE_DB"] = "0"
         # Keep metadata-only strict runs bounded; defaults remain overrideable.
         env.setdefault("AUTOCAPTURE_HARD_VLM_MAX_CANDIDATES", "1")

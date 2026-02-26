@@ -82,6 +82,62 @@ class RunAdvanced10ExpectedEvalTests(unittest.TestCase):
         self.assertEqual(captured.get("AUTOCAPTURE_QUERY_METADATA_ONLY_ALLOW_HARD_VLM"), "0")
         self.assertEqual(captured.get("AUTOCAPTURE_QUERY_IMAGE_PATH"), "")
 
+    def test_run_query_once_metadata_only_shadows_config_data_dir(self) -> None:
+        mod = _load_module()
+        captured: dict[str, str] = {}
+
+        class _Proc:
+            returncode = 0
+            stdout = "{}"
+            stderr = ""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            cfg = root / "cfg"
+            data = root / "data"
+            cfg.mkdir(parents=True, exist_ok=True)
+            data.mkdir(parents=True, exist_ok=True)
+            (data / "metadata.db").write_text("ok", encoding="utf-8")
+            (cfg / "user.json").write_text(
+                json.dumps(
+                    {
+                        "paths": {"config_dir": "/pinned/cfg", "data_dir": "/pinned/data"},
+                        "storage": {"data_dir": "/pinned/data"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            def _fake_run(cmd, cwd, env, capture_output, text, check, timeout):  # noqa: ARG001
+                captured["AUTOCAPTURE_CONFIG_DIR"] = str(env.get("AUTOCAPTURE_CONFIG_DIR") or "")
+                captured["AUTOCAPTURE_DATA_DIR"] = str(env.get("AUTOCAPTURE_DATA_DIR") or "")
+                captured["AUTOCAPTURE_STORAGE_METADATA_PATH"] = str(env.get("AUTOCAPTURE_STORAGE_METADATA_PATH") or "")
+                return _Proc()
+
+            with (
+                mock.patch.dict(os.environ, {"AUTOCAPTURE_ADV_QUERY_INPROC": "0"}, clear=False),
+                mock.patch.object(mod.subprocess, "run", side_effect=_fake_run),
+            ):
+                out = mod._run_query_once(
+                    pathlib.Path("."),
+                    cfg=str(cfg),
+                    data=str(data),
+                    query="q",
+                    metadata_only=True,
+                    timeout_s=1.0,
+                )
+
+            self.assertTrue(bool(out.get("ok", False)))
+            shadow_cfg = pathlib.Path(str(captured.get("AUTOCAPTURE_CONFIG_DIR") or ""))
+            shadow_data = pathlib.Path(str(captured.get("AUTOCAPTURE_DATA_DIR") or ""))
+            self.assertNotEqual(str(shadow_cfg), str(cfg))
+            self.assertNotEqual(str(shadow_data), str(data))
+            self.assertTrue((shadow_cfg / "user.json").exists())
+            shadow_user = json.loads((shadow_cfg / "user.json").read_text(encoding="utf-8"))
+            self.assertEqual(str(shadow_user.get("paths", {}).get("data_dir") or ""), str(shadow_data))
+            self.assertEqual(str(shadow_user.get("storage", {}).get("data_dir") or ""), str(shadow_data))
+            self.assertEqual(str(captured.get("AUTOCAPTURE_STORAGE_METADATA_PATH") or ""), str(data / "metadata.db"))
+
     def test_run_query_once_uses_inproc_runner_when_enabled(self) -> None:
         mod = _load_module()
         with (

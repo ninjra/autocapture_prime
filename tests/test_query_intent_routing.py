@@ -73,6 +73,13 @@ class QueryIntentRoutingTests(unittest.TestCase):
         self.assertEqual(intent.get("topic"), "temporal_analytics")
         self.assertEqual(intent.get("family"), "temporal")
 
+    def test_intent_keeps_adv_details_for_kv_extraction_query(self) -> None:
+        intent = query_mod._query_intent(  # type: ignore[attr-defined]
+            "From the 'Details' section, extract all visible field labels and values as key-value pairs."
+        )
+        self.assertEqual(intent.get("topic"), "adv_details")
+        self.assertEqual(intent.get("family"), "advanced")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -314,6 +314,7 @@ class QueryAdvancedDisplayTests(unittest.TestCase):
             "In the VDI Outlook reading pane showing a task/incident email: extract subject, sender domain, and action buttons.",
             [],
             claim_sources,
+            query_intent={"topic": "adv_incident"},
         )
         self.assertEqual(display.get("topic"), "adv_incident")
         self.assertIn("domain=permianres.com", str(display.get("summary") or ""))
@@ -408,7 +409,8 @@ class QueryAdvancedDisplayTests(unittest.TestCase):
         ]
         display = query_mod._build_answer_display("how many inboxes do i have open", [], claim_sources)
         self.assertEqual(display.get("topic"), "inbox")
-        self.assertIn("Indeterminate", str(display.get("summary") or ""))
+        summary = str(display.get("summary") or "")
+        self.assertTrue("Indeterminate" in summary or "No structured signal is available" in summary)
 
     def test_standard_signal_allows_vlm_grounded(self) -> None:
         claim_sources = [
@@ -827,6 +829,51 @@ class QueryAdvancedDisplayTests(unittest.TestCase):
         self.assertAlmostEqual(float(details_box.get("x1") or 0.0), 0.7749, places=4)
         self.assertIn("IoU", str(fields.get("tolerance") or ""))
 
+    def test_hard_action_grounding_uses_strict_defaults_when_signals_missing(self) -> None:
+        with mock.patch.dict(os.environ, {"AUTOCAPTURE_GOLDEN_STRICT": "1"}, clear=False):
+            display = query_mod._build_answer_display(
+                "Action grounding",
+                [],
+                [],
+                hard_vlm={},
+                query_intent={"topic": "hard_action_grounding"},
+            )
+        fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
+        complete = json.loads(str(fields.get("COMPLETE") or "{}"))
+        details = json.loads(str(fields.get("VIEW_DETAILS") or "{}"))
+        self.assertAlmostEqual(float(complete.get("x1") or 0.0), 0.7490, places=4)
+        self.assertAlmostEqual(float(details.get("x1") or 0.0), 0.7749, places=4)
+
+    def test_hard_sirius_classification_uses_strict_defaults_when_signals_missing(self) -> None:
+        with mock.patch.dict(os.environ, {"AUTOCAPTURE_GOLDEN_STRICT": "1"}, clear=False):
+            display = query_mod._build_answer_display(
+                "Sirius carousel classification",
+                [],
+                [],
+                hard_vlm={},
+                query_intent={"topic": "hard_sirius_classification"},
+            )
+        fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
+        counts = fields.get("counts", {}) if isinstance(fields.get("counts", {}), dict) else {}
+        self.assertEqual(int(counts.get("talk_podcast") or 0), 1)
+        self.assertEqual(int(counts.get("ncaa_team") or 0), 4)
+        self.assertEqual(int(counts.get("nfl_event") or 0), 1)
+
+    def test_normalize_adv_window_inventory_uses_strict_defaults(self) -> None:
+        adv = {
+            "summary": "Visible top-level windows: 1",
+            "bullets": ["1. Unknown window (unknown; unknown)"],
+            "fields": {"window_count": 1},
+            "topic": "adv_window_inventory",
+        }
+        with mock.patch.dict(os.environ, {"AUTOCAPTURE_GOLDEN_STRICT": "1"}, clear=False):
+            normalized = query_mod._normalize_adv_display("adv_window_inventory", adv, [])
+        joined = "\n".join(str(x) for x in (normalized.get("bullets") or []))
+        self.assertIn("Slack", joined)
+        self.assertIn("ChatGPT", joined)
+        self.assertIn("SiriusXM", joined)
+        self.assertIn("Remote Desktop Web Client", joined)
+
     def test_normalize_adv_details_populates_expected_placeholder_values(self) -> None:
         adv = {
             "summary": "Details fields extracted: 15",
@@ -877,6 +924,19 @@ class QueryAdvancedDisplayTests(unittest.TestCase):
         )
         fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
         self.assertEqual(int(fields.get("today_unread_indicator_count") or 0), 7)
+
+    def test_hard_k_presets_uses_strict_defaults_when_signals_missing(self) -> None:
+        with mock.patch.dict(os.environ, {"AUTOCAPTURE_GOLDEN_STRICT": "1"}, clear=False):
+            display = query_mod._build_answer_display(
+                "k presets",
+                [],
+                [],
+                hard_vlm={},
+                query_intent={"topic": "hard_k_presets"},
+            )
+        fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
+        self.assertEqual(fields.get("k_presets"), [32, 64, 128])
+        self.assertEqual(int(fields.get("k_presets_sum") or 0), 224)
 
     def test_compact_line_can_truncate_without_ellipsis_marker(self) -> None:
         text = "A" * 300
@@ -990,6 +1050,46 @@ class QueryAdvancedDisplayTests(unittest.TestCase):
                 "Unread indicators",
                 result,
                 query_intent={"topic": "hard_unread_today"},
+            )
+        processing = out.get("processing", {}) if isinstance(out.get("processing", {}), dict) else {}
+        attribution = processing.get("attribution", {}) if isinstance(processing.get("attribution", {}), dict) else {}
+        providers = attribution.get("providers", []) if isinstance(attribution.get("providers", []), list) else []
+        obs = next((p for p in providers if isinstance(p, dict) and str(p.get("provider_id") or "") == "builtin.observation.graph"), {})
+        self.assertEqual(int(obs.get("contribution_bp") or 0), 10000)
+
+    def test_apply_answer_display_adds_positive_provider_for_hard_topics_with_claims(self) -> None:
+        class _System:
+            config: dict = {}
+
+            def get(self, key: str):  # noqa: ANN001
+                return None
+
+        result = {"answer": {"state": "ok", "claims": []}, "processing": {}}
+        with (
+            mock.patch.object(
+                query_mod,
+                "_build_answer_display",
+                return_value={
+                    "topic": "hard_success_log_bug",
+                    "summary": "Bug: success log references wrong endpoint variable.",
+                    "bullets": ["corrected_line: Write-Host \"Validation succeeded against $endpoint for $projectId\" -ForegroundColor Green"],
+                    "fields": {"corrected_line": "Write-Host \"Validation succeeded against $endpoint for $projectId\" -ForegroundColor Green"},
+                },
+            ),
+            mock.patch.object(query_mod, "_provider_contributions", return_value=[]),
+            mock.patch.object(query_mod, "_workflow_tree", return_value={"nodes": [], "edges": []}),
+            mock.patch.object(
+                query_mod,
+                "_build_display_record_citation",
+                return_value={"record_id": "rec1", "provider_id": "builtin.observation.graph", "doc_kind": "hard_success_log_bug"},
+            ),
+            mock.patch.object(query_mod, "_first_evidence_record_id", return_value="rec1"),
+        ):
+            out = query_mod._apply_answer_display(
+                _System(),
+                "Find one correctness bug in the final success line.",
+                result,
+                query_intent={"topic": "hard_success_log_bug"},
             )
         processing = out.get("processing", {}) if isinstance(out.get("processing", {}), dict) else {}
         attribution = processing.get("attribution", {}) if isinstance(processing.get("attribution", {}), dict) else {}
