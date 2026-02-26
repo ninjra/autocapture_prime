@@ -169,6 +169,11 @@ def _ts_value(ts: str | None) -> float:
 
 
 def _query_fast_cache_settings(system: Any) -> tuple[bool, float, int]:
+    policy = _query_fast_cache_policy(system)
+    return bool(policy["enabled"]), float(policy["ttl_s"]), int(policy["max_entries"])
+
+
+def _query_fast_cache_policy(system: Any) -> dict[str, Any]:
     config = getattr(system, "config", {}) if hasattr(system, "config") else {}
     query_cfg = config.get("query", {}) if isinstance(config, dict) else {}
     cache_cfg = query_cfg.get("fast_cache", {}) if isinstance(query_cfg, dict) else {}
@@ -184,7 +189,44 @@ def _query_fast_cache_settings(system: Any) -> tuple[bool, float, int]:
         max_entries = int(raw_max_entries if raw_max_entries is not None else 128)
     except Exception:
         max_entries = 128
-    return enabled, max(0.0, ttl_s), max(1, min(4096, max_entries))
+    try:
+        raw_max_total_bytes = cache_cfg.get("max_total_bytes", cache_cfg.get("max_total_mb", 8.0))
+        if "max_total_bytes" in cache_cfg:
+            max_total_bytes = int(raw_max_total_bytes if raw_max_total_bytes is not None else (8 * 1024 * 1024))
+        else:
+            max_total_bytes = int(float(raw_max_total_bytes if raw_max_total_bytes is not None else 8.0) * 1024 * 1024)
+    except Exception:
+        max_total_bytes = 8 * 1024 * 1024
+    try:
+        raw_max_entry_bytes = cache_cfg.get("max_entry_bytes", cache_cfg.get("max_entry_kb", 512))
+        if "max_entry_bytes" in cache_cfg:
+            max_entry_bytes = int(raw_max_entry_bytes if raw_max_entry_bytes is not None else (512 * 1024))
+        else:
+            max_entry_bytes = int(float(raw_max_entry_bytes if raw_max_entry_bytes is not None else 512) * 1024)
+    except Exception:
+        max_entry_bytes = 512 * 1024
+    env_max_total_bytes = str(os.environ.get("AUTOCAPTURE_QUERY_FAST_CACHE_MAX_TOTAL_BYTES") or "").strip()
+    if env_max_total_bytes:
+        try:
+            max_total_bytes = int(env_max_total_bytes)
+        except Exception:
+            pass
+    env_max_entry_bytes = str(os.environ.get("AUTOCAPTURE_QUERY_FAST_CACHE_MAX_ENTRY_BYTES") or "").strip()
+    if env_max_entry_bytes:
+        try:
+            max_entry_bytes = int(env_max_entry_bytes)
+        except Exception:
+            pass
+    max_entries_val = max(1, min(4096, max_entries))
+    max_total_bytes_val = max(64 * 1024, min(128 * 1024 * 1024, int(max_total_bytes)))
+    max_entry_bytes_val = max(4 * 1024, min(max_total_bytes_val, int(max_entry_bytes)))
+    return {
+        "enabled": bool(enabled),
+        "ttl_s": max(0.0, float(ttl_s)),
+        "max_entries": int(max_entries_val),
+        "max_total_bytes": int(max_total_bytes_val),
+        "max_entry_bytes": int(max_entry_bytes_val),
+    }
 
 
 def _query_fast_cache_key(system: Any, *, query_text: str, time_window: dict[str, Any] | None) -> str:
@@ -213,27 +255,92 @@ def _query_fast_cache_get(cache_key: str, *, ttl_s: float) -> dict[str, Any] | N
         return None
     payload = entry.get("payload")
     if not isinstance(payload, dict):
+        _QUERY_FAST_CACHE.pop(str(cache_key), None)
         return None
     return copy.deepcopy(payload)
 
 
-def _query_fast_cache_put(cache_key: str, payload: dict[str, Any], *, max_entries: int) -> None:
+def _query_fast_cache_payload_bytes(payload: Any) -> int:
+    try:
+        text = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+        return int(len(text.encode("utf-8")))
+    except Exception:
+        return int(len(str(payload).encode("utf-8", errors="ignore")))
+
+
+def _query_fast_cache_entry_bytes(entry: Any) -> int:
+    if isinstance(entry, dict):
+        try:
+            size = int(entry.get("payload_bytes", 0) or 0)
+        except Exception:
+            size = 0
+        if size > 0:
+            return size
+        if "payload" in entry:
+            return _query_fast_cache_payload_bytes(entry.get("payload"))
+    return 0
+
+
+def _query_fast_cache_evict_expired(*, now_monotonic: float, ttl_s: float) -> None:
+    if ttl_s <= 0.0:
+        return
+    expired: list[str] = []
+    for key, entry in list(_QUERY_FAST_CACHE.items()):
+        if not isinstance(entry, dict):
+            expired.append(str(key))
+            continue
+        try:
+            ts = float(entry.get("ts_monotonic", 0.0) or 0.0)
+        except Exception:
+            ts = 0.0
+        if (float(now_monotonic) - ts) > float(ttl_s):
+            expired.append(str(key))
+    for key in expired:
+        _QUERY_FAST_CACHE.pop(str(key), None)
+
+
+def _query_fast_cache_put(
+    cache_key: str,
+    payload: dict[str, Any],
+    *,
+    ttl_s: float,
+    max_entries: int,
+    max_total_bytes: int,
+    max_entry_bytes: int,
+) -> None:
+    now = float(time.monotonic())
+    _query_fast_cache_evict_expired(now_monotonic=now, ttl_s=float(ttl_s))
+    payload_copy = copy.deepcopy(payload)
+    payload_bytes = _query_fast_cache_payload_bytes(payload_copy)
+    if payload_bytes > max(4 * 1024, int(max_entry_bytes)):
+        _QUERY_FAST_CACHE.pop(str(cache_key), None)
+        return
     _QUERY_FAST_CACHE[str(cache_key)] = {
-        "ts_monotonic": float(time.monotonic()),
-        "payload": copy.deepcopy(payload),
+        "ts_monotonic": now,
+        "payload": payload_copy,
+        "payload_bytes": int(payload_bytes),
     }
-    if len(_QUERY_FAST_CACHE) <= max(1, int(max_entries)):
+    entry_cap = max(1, int(max_entries))
+    total_cap = max(64 * 1024, int(max_total_bytes))
+    total_bytes = sum(_query_fast_cache_entry_bytes(entry) for entry in _QUERY_FAST_CACHE.values())
+    if len(_QUERY_FAST_CACHE) <= entry_cap and total_bytes <= total_cap:
         return
     ordered = sorted(
         (
-            (str(key), float((value if isinstance(value, dict) else {}).get("ts_monotonic", 0.0) or 0.0))
+            (
+                str(key),
+                float((value if isinstance(value, dict) else {}).get("ts_monotonic", 0.0) or 0.0),
+                int(_query_fast_cache_entry_bytes(value)),
+            )
             for key, value in _QUERY_FAST_CACHE.items()
         ),
-        key=lambda row: (row[1], row[0]),
+        key=lambda row: (row[1], row[0], row[2]),
     )
-    while len(_QUERY_FAST_CACHE) > max(1, int(max_entries)) and ordered:
-        oldest_key, _ts = ordered.pop(0)
-        _QUERY_FAST_CACHE.pop(oldest_key, None)
+    while (len(_QUERY_FAST_CACHE) > entry_cap or total_bytes > total_cap) and ordered:
+        oldest_key, _ts, oldest_size = ordered.pop(0)
+        removed = _QUERY_FAST_CACHE.pop(oldest_key, None)
+        if removed is not None:
+            total_bytes = max(0, int(total_bytes) - int(max(oldest_size, _query_fast_cache_entry_bytes(removed))))
 
 
 def _evidence_candidates(metadata: Any, time_window: dict[str, Any] | None, limit: int) -> list[str]:
@@ -1346,7 +1453,12 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
 
     intent = parser.parse(query_text)
     time_window = intent.get("time_window")
-    cache_enabled, cache_ttl_s, cache_max_entries = _query_fast_cache_settings(system)
+    cache_policy = _query_fast_cache_policy(system)
+    cache_enabled = bool(cache_policy.get("enabled", False))
+    cache_ttl_s = float(cache_policy.get("ttl_s", 0.0) or 0.0)
+    cache_max_entries = int(cache_policy.get("max_entries", 1) or 1)
+    cache_max_total_bytes = int(cache_policy.get("max_total_bytes", 8 * 1024 * 1024) or (8 * 1024 * 1024))
+    cache_max_entry_bytes = int(cache_policy.get("max_entry_bytes", 512 * 1024) or (512 * 1024))
     cache_key = _query_fast_cache_key(system, query_text=str(query_text), time_window=time_window)
     if cache_enabled and not bool(schedule_extract):
         cached = _query_fast_cache_get(cache_key, ttl_s=cache_ttl_s)
@@ -2132,7 +2244,14 @@ def run_query_without_state(system, query: str, *, schedule_extract: bool = Fals
         processing_out = dict(processing_out)
         processing_out["query_cache"] = {"hit": False, "ttl_s": float(cache_ttl_s)}
         output["processing"] = processing_out
-        _query_fast_cache_put(cache_key, output, max_entries=cache_max_entries)
+        _query_fast_cache_put(
+            cache_key,
+            output,
+            ttl_s=cache_ttl_s,
+            max_entries=cache_max_entries,
+            max_total_bytes=cache_max_total_bytes,
+            max_entry_bytes=cache_max_entry_bytes,
+        )
     return output
 
 
