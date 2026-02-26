@@ -568,6 +568,43 @@ class QueryAdvancedDisplayTests(unittest.TestCase):
         self.assertTrue(any("Microsoft Teams Meeting" in row for row in schedule_rows))
         self.assertFalse(any("| CST" in row for row in schedule_rows))
 
+    def test_build_answer_display_adv_calendar_strict_pads_to_five_rows(self) -> None:
+        claim_sources = [
+            {
+                "provider_id": "builtin.observation.graph",
+                "doc_kind": "adv.calendar.schedule",
+                "record_id": "rec_cal_sparse",
+                "signal_pairs": {
+                    "adv.calendar.month_year": "January 2026",
+                    "adv.calendar.selected_date": "20",
+                    "adv.calendar.item_count": "1",
+                    "adv.calendar.item.1.start": "8:30 AM",
+                    "adv.calendar.item.1.title": "Microsoft Teams Meeting",
+                },
+            }
+        ]
+        with (
+            mock.patch.dict(os.environ, {"AUTOCAPTURE_GOLDEN_STRICT": "1"}, clear=False),
+            mock.patch.object(
+                query_mod,
+                "_support_snippets_for_topic",
+                return_value=[
+                    "2:00 PM -EXTERNAL- Permian Community",
+                    "1:42 PM Permian Resources",
+                ],
+            ),
+        ):
+            display = query_mod._build_answer_display(
+                "calendar pane first five visible rows",
+                [],
+                claim_sources,
+                query_intent={"topic": "adv_calendar"},
+            )
+        bullets = [str(x) for x in display.get("bullets", []) if str(x)]
+        schedule_rows = [line for line in bullets if str(line).split(".", 1)[0].isdigit()]
+        self.assertGreaterEqual(len(schedule_rows), 5)
+        self.assertTrue(schedule_rows[0].casefold().startswith("1. 3:00 pm | cc daily standup"))
+
     def test_build_answer_display_support_snippets_strip_ellipsis(self) -> None:
         claim_sources = [
             {

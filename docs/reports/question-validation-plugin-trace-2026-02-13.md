@@ -1,10 +1,10 @@
 # Question Validation + Plugin Path Trace (Q/H)
 
-- Generated: `2026-02-25T21:05:55.587933Z`
-- Artifact: `artifacts/advanced10/advanced20_20260225T210549Z.json`
-- Run report: `artifacts/single_image_runs/single_20260225T210052Z/report.json`
-- Evaluated summary: total=20 passed=19 failed=1
-- Overall confidence mean: `0.8955`
+- Generated: `2026-02-26T16:57:57.913820Z`
+- Artifact: `artifacts/advanced10/advanced20_20260226T165750Z.json`
+- Run report: `artifacts/single_image_runs/single_20260226T165223Z/report.json`
+- Evaluated summary: total=20 passed=20 failed=0
+- Overall confidence mean: `0.9300`
 
 ## Question Results (All Q and H)
 | ID | Strict Evaluated | Strict Passed | Answer State | Confidence | Label | Winner | Providers In Path |
@@ -14,7 +14,7 @@
 | Q3 | True | True | ok | 0.93 | high | state | 2 |
 | Q4 | True | True | ok | 0.93 | high | state | 2 |
 | Q5 | True | True | ok | 0.93 | high | state | 2 |
-| Q6 | True | False | ok | 0.24 | low | state | 2 |
+| Q6 | True | True | ok | 0.93 | high | state | 2 |
 | Q7 | True | True | ok | 0.93 | high | state | 2 |
 | Q8 | True | True | ok | 0.93 | high | state | 2 |
 | Q9 | True | True | ok | 0.93 | high | state | 2 |
@@ -34,7 +34,7 @@
 | Class | Total | Strict Evaluated | Strict Passed | Strict Failed | Confidence Mean |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | H | 10 | 10 | 10 | 0 | 0.9300 |
-| Q | 10 | 10 | 9 | 1 | 0.8610 |
+| Q | 10 | 10 | 10 | 0 | 0.9300 |
 
 ## Answer State Confusion By Class
 ### Class H
@@ -51,67 +51,67 @@
 ## Plugin Inventory + Effectiveness
 | Plugin ID | Status | In Path | Out Path | Strict Pass | Strict Fail | Neutral | Avg Conf | Conf Δ | Mean Est Latency ms | Decision |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| builtin.answer.synth_vllm_localhost | loaded | 20 | 0 | 19 | 1 | 0 | 0.8955 | +0.0000 | 0.000 | neutral |
-| builtin.observation.graph | loaded | 20 | 0 | 19 | 1 | 0 | 0.8955 | +0.0000 | 0.000 | neutral |
-| builtin.anchor.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.answer.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.backpressure.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.citation.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.devtools.ast_ir | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.devtools.diffusion | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.egress.gateway | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.embedder.vllm_localhost | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.index.colbert_hash | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.journal.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.ledger.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.observability.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.ocr.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.ocr.nemotron_torch | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.ocr.rapid | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.privacy.egress_sanitizer | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.processing.sst.pipeline | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.processing.sst.ui_vlm | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.processing.sst.uia_context | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.prompt.bundle.default | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.reranker.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.reranker.colbert_hash | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.retrieval.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.runtime.governor | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.runtime.scheduler | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.screen.answer.v1 | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.screen.index.v1 | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.screen.parse.v1 | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.sst.build.delta | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.sst.build.state | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.sst.compliance.redact | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.sst.extract.chart | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.sst.extract.code | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.sst.extract.spreadsheet | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.sst.extract.table | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.sst.index | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.sst.infer.action | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.sst.layout.assemble | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.sst.match.ids | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.sst.ocr.onnx | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.sst.persist | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.sst.preprocess.normalize | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.sst.preprocess.tile | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.sst.temporal.segment | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.sst.track.cursor | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.sst.ui.parse | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.state.anomaly | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.state.evidence.compiler | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.state.jepa.training | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.state.jepa_like | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.state.policy | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.state.retrieval | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.state.vector.hnsw | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.state.vector.linear | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.state.vector.sqlite_ts | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.state.workflow.miner | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.storage.sqlcipher | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.time.advanced | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
-| builtin.vlm.vllm_localhost | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.8955 | 0.000 | remove_or_rewire |
+| builtin.answer.synth_vllm_localhost | loaded | 20 | 0 | 20 | 0 | 0 | 0.9300 | +0.0000 | 0.000 | neutral |
+| builtin.observation.graph | loaded | 20 | 0 | 20 | 0 | 0 | 0.9300 | +0.0000 | 0.000 | neutral |
+| builtin.anchor.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.answer.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.backpressure.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.citation.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.devtools.ast_ir | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.devtools.diffusion | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.egress.gateway | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.embedder.vllm_localhost | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.index.colbert_hash | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.journal.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.ledger.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.observability.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.ocr.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.ocr.nemotron_torch | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.ocr.rapid | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.privacy.egress_sanitizer | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.processing.sst.pipeline | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.processing.sst.ui_vlm | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.processing.sst.uia_context | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.prompt.bundle.default | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.reranker.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.reranker.colbert_hash | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.retrieval.basic | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.runtime.governor | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.runtime.scheduler | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.screen.answer.v1 | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.screen.index.v1 | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.screen.parse.v1 | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.sst.build.delta | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.sst.build.state | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.sst.compliance.redact | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.sst.extract.chart | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.sst.extract.code | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.sst.extract.spreadsheet | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.sst.extract.table | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.sst.index | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.sst.infer.action | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.sst.layout.assemble | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.sst.match.ids | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.sst.ocr.onnx | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.sst.persist | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.sst.preprocess.normalize | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.sst.preprocess.tile | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.sst.temporal.segment | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.sst.track.cursor | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.sst.ui.parse | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.state.anomaly | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.state.evidence.compiler | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.state.jepa.training | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.state.jepa_like | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.state.policy | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.state.retrieval | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.state.vector.hnsw | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.state.vector.linear | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.state.vector.sqlite_ts | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.state.workflow.miner | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.storage.sqlcipher | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.time.advanced | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
+| builtin.vlm.vllm_localhost | loaded | 0 | 20 | 0 | 0 | 0 | 0.0000 | -0.9300 | 0.000 | remove_or_rewire |
 
 ## Per-Question Plugin Path + Confidence
 ### Q1
@@ -162,8 +162,8 @@
 ### Q6
 - Question: In the VDI right-side calendar/schedule pane: extract the displayed month+year, the currently selected date, and then list the first 5 visible scheduled items (top-to-bottom) with start time + title.
 - Answer state: `ok`
-- Strict evaluated: `True` | strict passed: `False`
-- Confidence: `0.24` (low)
+- Strict evaluated: `True` | strict passed: `True`
+- Confidence: `0.93` (high)
 - Plugins in answer path:
   - `builtin.observation.graph` | contribution_bp=10000 | claim_count=1 | citation_count=1 | est_latency_ms=0
   - `builtin.answer.synth_vllm_localhost` | contribution_bp=0 | claim_count=0 | citation_count=0 | est_latency_ms=0

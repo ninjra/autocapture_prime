@@ -89,6 +89,19 @@ class QueryTemporalDisplayTests(unittest.TestCase):
         self.assertEqual(float(fields.get("elapsed_minutes") or 0.0), 2.0)
         self.assertEqual(len(fields.get("source_timestamps_utc") or []), 2)
 
+    def test_build_answer_display_temporal_elapsed_url_before_after_stays_partial(self) -> None:
+        display = query_mod._build_answer_display(  # type: ignore[attr-defined]
+            "Find navigation delta with URLs before and after and elapsed time.",
+            [],
+            [],
+            _MetadataTemporalElapsed(),
+            query_intent={"topic": "temporal_analytics", "family": "temporal"},
+        )
+        self.assertEqual(str(display.get("topic") or ""), "temporal_analytics")
+        fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
+        self.assertEqual(str(fields.get("evidence_status") or ""), "partial_normalized")
+        self.assertEqual(float(fields.get("elapsed_minutes") or 0.0), 2.0)
+
     def test_build_answer_display_grounded_snapshot_progress_returns_complete(self) -> None:
         display = query_mod._build_answer_display(  # type: ignore[attr-defined]
             "From the terminal progress line `now=213/273`, how many items remain?",
