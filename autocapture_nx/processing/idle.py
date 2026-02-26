@@ -88,6 +88,13 @@ class IdleProcessStats:
     stage2_projection_inserted_states: int = 0
     stage2_projection_errors: int = 0
     stage2_complete_records: int = 0
+    stage2_index_docs_target: int = 0
+    stage2_index_docs_indexed: int = 0
+    stage2_index_docs_missing: int = 0
+    stage2_index_errors: int = 0
+    stage2_index_stale_docs: int = 0
+    stage2_index_freshness_lag_ms_last: float = 0.0
+    stage2_index_freshness_lag_ms_max: float = 0.0
 
 
 @dataclass
@@ -767,6 +774,7 @@ class IdleProcessor:
         stats.stage2_projection_generated_states += int(projection.get("generated_states", 0) or 0)
         stats.stage2_projection_inserted_states += int(projection.get("inserted_states", 0) or 0)
         stats.stage2_projection_errors += int(projection.get("errors", 0) or 0)
+        self._refresh_stage2_projection_indexes(record=record, projection=projection, stats=stats)
         stage2_id, stage2_inserted = mark_stage2_complete(
             self._stage1_store,
             str(record_id),
@@ -780,6 +788,39 @@ class IdleProcessor:
             marker = self._stage1_store.get(stage2_id, {})
             if isinstance(marker, dict) and bool(marker.get("complete", False)):
                 stats.stage2_complete_records += 1
+
+    def _refresh_stage2_projection_indexes(self, *, record: dict[str, Any], projection: dict[str, Any], stats: IdleProcessStats) -> None:
+        if self._stage1_store is None:
+            return
+        doc_ids_any = projection.get("doc_ids")
+        raw_doc_ids = doc_ids_any if isinstance(doc_ids_any, list) else []
+        doc_ids = [str(item).strip() for item in raw_doc_ids if str(item).strip()]
+        if not doc_ids:
+            return
+        stats.stage2_index_docs_target += int(len(doc_ids))
+        ts_value = _ts_key(str(record.get("ts_utc") or record.get("ts_start_utc") or ""))
+        if ts_value > 0:
+            lag_ms = max(0.0, (time.time() - ts_value) * 1000.0)
+            stats.stage2_index_freshness_lag_ms_last = float(round(lag_ms, 3))
+            stats.stage2_index_freshness_lag_ms_max = float(round(max(float(stats.stage2_index_freshness_lag_ms_max), lag_ms), 3))
+            idle_cfg = self._config.get("processing", {}).get("idle", {}) if isinstance(self._config, dict) else {}
+            stale_threshold_ms = float(idle_cfg.get("stage2_index_stale_threshold_ms", 15000.0) or 15000.0)
+            if lag_ms > stale_threshold_ms:
+                stats.stage2_index_stale_docs += int(len(doc_ids))
+        for doc_id in doc_ids:
+            row = self._stage1_store.get(doc_id, None)
+            if not isinstance(row, dict):
+                stats.stage2_index_docs_missing += 1
+                continue
+            text = str(row.get("text") or "").strip()
+            if not text:
+                stats.stage2_index_docs_missing += 1
+                continue
+            backends, index_errors = self._index_text(doc_id, text)
+            if backends > 0 and index_errors == 0:
+                stats.stage2_index_docs_indexed += 1
+            elif index_errors > 0:
+                stats.stage2_index_errors += int(index_errors)
 
     def _ensure_stage1_uia_docs(self, record_id: str, record: dict[str, Any], *, stats: IdleProcessStats) -> None:
         if self._stage1_store is None:
@@ -949,27 +990,34 @@ class IdleProcessor:
         stats.stage1_backfill_marked_records += marked
         return marked
 
-    def _index_text(self, doc_id: str, text: str) -> None:
+    def _index_text(self, doc_id: str, text: str) -> tuple[int, int]:
         if not text:
-            return
+            return 0, 0
+        backends = 0
+        errors = 0
         if self._lexical is not None:
+            backends += 1
             try:
                 if hasattr(self._lexical, "index_if_changed"):
                     self._lexical.index_if_changed(doc_id, text)  # type: ignore[attr-defined]
                 else:
                     self._lexical.index(doc_id, text)
             except Exception as exc:
+                errors += 1
                 if self._logger is not None:
                     self._logger.log("index.lexical_error", {"doc_id": doc_id, "error": str(exc)})
         if self._vector is not None:
+            backends += 1
             try:
                 if hasattr(self._vector, "index_if_changed"):
                     self._vector.index_if_changed(doc_id, text)  # type: ignore[attr-defined]
                 else:
                     self._vector.index(doc_id, text)
             except Exception as exc:
+                errors += 1
                 if self._logger is not None:
                     self._logger.log("index.vector_error", {"doc_id": doc_id, "error": str(exc)})
+        return backends, errors
 
     def _run_provider_batch(
         self,

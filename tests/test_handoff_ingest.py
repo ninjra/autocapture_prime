@@ -78,6 +78,24 @@ def _fetch_dest_record_ids(db_path: Path, record_type: str) -> list[str]:
         conn.close()
 
 
+def _count_projection_records(db_path: Path, record_type: str) -> int:
+    if not db_path.exists():
+        return 0
+    conn = sqlite3.connect(str(db_path))
+    try:
+        cur = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='metadata_projection'"
+        )
+        has_table = cur.fetchone()
+        if not has_table or int(has_table[0] or 0) <= 0:
+            return 0
+        cur = conn.execute("SELECT COUNT(*) FROM metadata_projection WHERE record_type = ?", (record_type,))
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+    finally:
+        conn.close()
+
+
 def _insert_dest_metadata_payload(db_path: Path, record_id: str, payload: dict) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
@@ -171,6 +189,9 @@ class HandoffIngestTests(unittest.TestCase):
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "derived.ingest.plugin.completion"), 1)
             first_projection_ids = _fetch_dest_record_ids(dest / "metadata.db", "derived.sst.text.extra")
             self.assertGreaterEqual(len(first_projection_ids), 1)
+            self.assertEqual(_count_projection_records(dest / "metadata.db", "evidence.capture.frame"), 1)
+            self.assertEqual(_count_projection_records(dest / "metadata.db", "derived.sst.state"), 1)
+            self.assertGreaterEqual(_count_projection_records(dest / "metadata.db", "derived.sst.text.extra"), 1)
             self.assertEqual(_count_dest_records(dest / "metadata.db", "system.ingest.handoff.completed"), 1)
 
             second = ingestor.ingest_handoff_dir(handoff)
@@ -187,6 +208,9 @@ class HandoffIngestTests(unittest.TestCase):
             self.assertEqual(_count_dest_records(dest / "derived" / "stage1_derived.db", "derived.ingest.plugin.completion"), 1)
             second_projection_ids = _fetch_dest_record_ids(dest / "metadata.db", "derived.sst.text.extra")
             self.assertEqual(second_projection_ids, first_projection_ids)
+            self.assertEqual(_count_projection_records(dest / "metadata.db", "evidence.capture.frame"), 1)
+            self.assertEqual(_count_projection_records(dest / "metadata.db", "derived.sst.state"), 1)
+            self.assertGreaterEqual(_count_projection_records(dest / "metadata.db", "derived.sst.text.extra"), 1)
             self.assertEqual(_count_dest_records(dest / "metadata.db", "system.ingest.handoff.completed"), 1)
 
     def test_handoff_ingest_missing_media_fails_no_marker(self) -> None:

@@ -101,6 +101,27 @@ def _default_manifest(py: str) -> list[GateStep]:
         GateStep("gate_acceptance_coverage", [py, "tools/gate_acceptance_coverage.py"], None),
         GateStep("gate_queryability", [py, "tools/gate_queryability.py"], "artifacts/queryability/gate_queryability.json"),
         GateStep(
+            "gate_metadata_projection_alignment",
+            [
+                py,
+                "tools/verify_metadata_projection_alignment.py",
+                "--db",
+                os.environ.get("METADATA_PROJECTION_ALIGNMENT_DB", "/mnt/d/autocapture/metadata.db").strip()
+                or "/mnt/d/autocapture/metadata.db",
+                "--output",
+                os.environ.get(
+                    "METADATA_PROJECTION_ALIGNMENT_OUT",
+                    "artifacts/queryability/metadata_projection_alignment_latest.json",
+                ).strip()
+                or "artifacts/queryability/metadata_projection_alignment_latest.json",
+            ],
+            os.environ.get(
+                "METADATA_PROJECTION_ALIGNMENT_OUT",
+                "artifacts/queryability/metadata_projection_alignment_latest.json",
+            ).strip()
+            or "artifacts/queryability/metadata_projection_alignment_latest.json",
+        ),
+        GateStep(
             "gate_stage1_contract",
             [py, "tools/gate_stage1_contract.py"],
             "artifacts/stage1_contract/gate_stage1_contract.json",

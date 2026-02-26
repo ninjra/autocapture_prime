@@ -50,6 +50,27 @@ def _choose_source_table(conn: sqlite3.Connection) -> str:
 
 def _ensure_dest_metadata_table(conn: sqlite3.Connection) -> str:
     if _table_exists(conn, "metadata"):
+        if not _table_exists(conn, "metadata_projection"):
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS metadata_projection (
+                    id TEXT PRIMARY KEY,
+                    record_type TEXT,
+                    ts_utc TEXT,
+                    ts_epoch REAL
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_metadata_projection_record_type_epoch_id ON metadata_projection(record_type, ts_epoch DESC, id DESC)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_metadata_projection_epoch_id ON metadata_projection(ts_epoch DESC, id DESC)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_metadata_projection_window ON metadata_projection(ts_epoch, id)"
+            )
+            conn.commit()
         return "metadata"
     if _table_exists(conn, "records"):
         return "records"
@@ -70,6 +91,25 @@ def _ensure_dest_metadata_table(conn: sqlite3.Connection) -> str:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_metadata_record_type ON metadata(record_type)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_metadata_ts_utc ON metadata(ts_utc)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_metadata_run_id ON metadata(run_id)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS metadata_projection (
+            id TEXT PRIMARY KEY,
+            record_type TEXT,
+            ts_utc TEXT,
+            ts_epoch REAL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_metadata_projection_record_type_epoch_id ON metadata_projection(record_type, ts_epoch DESC, id DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_metadata_projection_epoch_id ON metadata_projection(ts_epoch DESC, id DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_metadata_projection_window ON metadata_projection(ts_epoch, id)"
+    )
     conn.commit()
     return "metadata"
 
@@ -170,6 +210,19 @@ def _safe_int(value: Any) -> int:
         return 0
 
 
+def _projection_epoch(ts_utc: str | None) -> float | None:
+    text = str(ts_utc or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return float(parsed.timestamp())
+
+
 def _marker_requires_retry(payload: dict[str, Any]) -> bool:
     if not isinstance(payload, dict):
         return False
@@ -236,6 +289,37 @@ class _SqliteMetadataAdapter:
         self._record_type_col = "record_type" if "record_type" in self._columns else ""
         self._ts_col = "ts_utc" if "ts_utc" in self._columns else ""
         self._run_id_col = "run_id" if "run_id" in self._columns else ""
+        self._projection_enabled = False
+        self._projection_has_ts_epoch = False
+        if _table_exists(self._conn, "metadata_projection"):
+            projection_cols = set(_table_columns(self._conn, "metadata_projection"))
+            self._projection_enabled = {"id", "record_type", "ts_utc"}.issubset(projection_cols)
+            self._projection_has_ts_epoch = "ts_epoch" in projection_cols
+
+    def _projection_epoch(self, ts_utc: str | None) -> float | None:
+        text = str(ts_utc or "").strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except Exception:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return float(parsed.timestamp())
+
+    def _projection_upsert(self, record_id: str, value: dict[str, Any]) -> None:
+        if not self._projection_enabled:
+            return
+        ts_utc = str(value.get("ts_utc") or value.get("ts_start_utc") or value.get("ts_end_utc") or "")
+        params: list[Any] = [str(record_id), str(value.get("record_type") or ""), ts_utc]
+        cols = ["id", "record_type", "ts_utc"]
+        if self._projection_has_ts_epoch:
+            cols.append("ts_epoch")
+            params.append(self._projection_epoch(ts_utc))
+        placeholders = ",".join("?" for _ in cols)
+        sql = f"INSERT OR REPLACE INTO metadata_projection ({','.join(cols)}) VALUES ({placeholders})"
+        self._conn.execute(sql, tuple(params))
 
     def _select_sql(self) -> str:
         cols = [self._id_col]
@@ -293,6 +377,7 @@ class _SqliteMetadataAdapter:
         sql = f"INSERT INTO {self._table} ({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})"
         try:
             self._conn.execute(sql, tuple(vals))
+            self._projection_upsert(str(record_id), value)
         except sqlite3.IntegrityError as exc:
             raise FileExistsError(str(record_id)) from exc
 
@@ -313,6 +398,7 @@ class _SqliteMetadataAdapter:
             vals.append(str(value.get("run_id") or ""))
         sql = f"INSERT OR REPLACE INTO {self._table} ({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})"
         self._conn.execute(sql, tuple(vals))
+        self._projection_upsert(str(record_id), value)
 
 
 class HandoffIngestor:
@@ -417,6 +503,29 @@ class HandoffIngestor:
                     cur = dst_conn.execute(sql, values)
                     metadata_rows_copied += _safe_int(cur.rowcount)
                 dst_conn.commit()
+                if dest_table == "metadata" and _table_exists(dst_conn, "metadata_projection"):
+                    dst_conn.execute("BEGIN")
+                    for row_payload in rows:
+                        record_id = str(row_payload.get("id") or "")
+                        if not record_id:
+                            continue
+                        record_type = str(row_payload.get("record_type") or "")
+                        ts_utc = str(row_payload.get("ts_utc") or "")
+                        if (not record_type or not ts_utc) and isinstance(row_payload.get("payload"), str):
+                            parsed = _decode_payload_text(str(row_payload.get("payload") or ""))
+                            if isinstance(parsed, dict):
+                                if not record_type:
+                                    record_type = str(parsed.get("record_type") or "")
+                                if not ts_utc:
+                                    ts_utc = str(parsed.get("ts_utc") or parsed.get("ts_start_utc") or parsed.get("ts_end_utc") or "")
+                        dst_conn.execute(
+                            (
+                                "INSERT OR REPLACE INTO metadata_projection "
+                                "(id, record_type, ts_utc, ts_epoch) VALUES (?, ?, ?, ?)"
+                            ),
+                            (record_id, record_type, ts_utc, _projection_epoch(ts_utc)),
+                        )
+                    dst_conn.commit()
 
                 if source_media_root.exists():
                     for src_file in sorted(source_media_root.rglob("*")):

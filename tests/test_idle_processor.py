@@ -8,9 +8,11 @@ from pathlib import Path
 
 from autocapture.core.hashing import hash_text, normalize_text
 from autocapture_nx.kernel.derived_records import derived_text_record_id
+from autocapture_nx.plugin_system.api import PluginContext
 from autocapture_nx.processing.idle import IdleProcessor, _get_media_blob
 from autocapture.storage.retention import retention_eligibility_record_id
 from autocapture.storage.stage1 import stage1_complete_record_id, stage2_complete_record_id
+from plugins.builtin.retrieval_basic.plugin import RetrievalStrategy
 
 
 class _MetadataStore:
@@ -809,6 +811,96 @@ class IdleProcessorTests(unittest.TestCase):
         self.assertGreaterEqual(int(stats.stage1_uia_docs_inserted), 3)
         self.assertIn(stage2_complete_record_id(frame_id), metadata.data)
         self.assertGreaterEqual(int(stats.stage2_projection_generated_states), 1)
+
+    def test_stage2_projection_refreshes_indexes_for_immediate_retrieval(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "runtime": {"run_id": "run1"},
+                "storage": {
+                    "data_dir": tmpdir,
+                    "lexical_path": "data/lexical.db",
+                    "vector_path": "data/vector.db",
+                },
+                "indexing": {"vector_backend": "sqlite"},
+                "processing": {
+                    "idle": {
+                        "enabled": True,
+                        "auto_start": False,
+                        "max_items_per_run": 5,
+                        "max_seconds_per_run": 5,
+                        "max_concurrency_cpu": 1,
+                        "max_concurrency_gpu": 0,
+                        "extractors": {"ocr": False, "vlm": False},
+                        "stage1_marker_backfill": {"enabled": False},
+                    },
+                    "sst": {"enabled": False},
+                },
+            }
+            metadata = _MetadataStore()
+            frame_id = "run1/evidence.capture.frame/idx0"
+            uia_id = "run1/evidence.uia.snapshot/idx0"
+            metadata.put(
+                frame_id,
+                {
+                    "record_type": "evidence.capture.frame",
+                    "run_id": "run1",
+                    "ts_utc": "2026-02-20T00:00:00+00:00",
+                    "blob_path": "media/frame0.png",
+                    "content_hash": "hash_frame_0",
+                    "uia_ref": {"record_id": uia_id, "content_hash": "uia_hash_0"},
+                    "input_ref": {"record_id": "run1/evidence.input/idx0"},
+                    "content_type": "image/png",
+                    "desktop_rect": [0, 0, 1920, 1080],
+                },
+            )
+            metadata.put(
+                uia_id,
+                {
+                    "record_type": "evidence.uia.snapshot",
+                    "record_id": uia_id,
+                    "run_id": "run1",
+                    "ts_utc": "2026-02-20T00:00:00+00:00",
+                    "unix_ms_utc": 1700000000000,
+                    "hwnd": "101",
+                    "window": {"title": "NCAAW Game Center", "process_path": "chrome.exe", "pid": 42},
+                    "focus_path": [{"eid": "n1", "role": "text", "name": "Tipoff at 8:00 PM", "rect": [10, 10, 220, 30], "enabled": True, "offscreen": False}],
+                    "context_peers": [],
+                    "operables": [{"eid": "n2", "role": "button", "name": "View Details", "rect": [10, 40, 120, 70], "enabled": True, "offscreen": False}],
+                    "stats": {"walk_ms": 2, "nodes_emitted": 2, "failures": 0},
+                    "content_hash": "uia_hash_0",
+                },
+            )
+            blob_path = Path(tmpdir) / "media" / "frame0.png"
+            blob_path.parent.mkdir(parents=True, exist_ok=True)
+            blob_path.write_bytes(b"\x89PNG\r\n\x1a\nframe")
+            media = _MediaStore({})
+            system = _System(config, metadata, media, None, None, _EventBuilder())
+            processor = IdleProcessor(system)
+
+            done, stats = processor.process_step(budget_ms=0)
+
+            self.assertTrue(done)
+            self.assertGreaterEqual(int(stats.stage2_projection_inserted_docs), 1)
+            self.assertGreaterEqual(int(stats.stage2_index_docs_target), 1)
+            self.assertGreaterEqual(int(stats.stage2_index_docs_indexed), 1)
+            self.assertEqual(int(stats.stage2_index_docs_missing), 0)
+
+            retrieval = RetrievalStrategy(
+                "builtin.retrieval.basic",
+                PluginContext(
+                    config=config,
+                    get_capability=lambda name: metadata if name == "storage.metadata" else None,
+                    logger=lambda _m: None,
+                ),
+            )
+            hits = retrieval.search("tipoff 8:00 pm", time_window=None)
+            self.assertTrue(hits)
+            self.assertEqual(str(hits[0].get("record_id") or ""), frame_id)
+            trace = retrieval.trace()
+            lexical_tiers = [row for row in trace if str(row.get("tier") or "") == "LEXICAL"]
+            self.assertTrue(lexical_tiers)
+            self.assertGreaterEqual(int(lexical_tiers[0].get("result_count", 0) or 0), 1)
+            self.assertFalse(any(str(row.get("tier") or "") == "LATEST_SCAN" for row in trace))
 
     def test_stage1_backfill_uses_plugin_uia_dataroot_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

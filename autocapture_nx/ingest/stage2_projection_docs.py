@@ -382,9 +382,31 @@ def project_stage2_docs_for_frame(
 ) -> dict[str, Any]:
     """Emit deterministic derived.sst.text.extra projection docs for one frame."""
     if not isinstance(frame_record, dict):
-        return {"required": False, "ok": True, "generated_docs": 0, "inserted_docs": 0, "errors": 0, "reason": "invalid_record"}
+        return {
+            "required": False,
+            "ok": True,
+            "generated_docs": 0,
+            "inserted_docs": 0,
+            "generated_states": 0,
+            "inserted_states": 0,
+            "doc_ids": [],
+            "inserted_doc_ids": [],
+            "errors": 0,
+            "reason": "invalid_record",
+        }
     if str(frame_record.get("record_type") or "") != "evidence.capture.frame":
-        return {"required": False, "ok": True, "generated_docs": 0, "inserted_docs": 0, "errors": 0, "reason": "not_frame"}
+        return {
+            "required": False,
+            "ok": True,
+            "generated_docs": 0,
+            "inserted_docs": 0,
+            "generated_states": 0,
+            "inserted_states": 0,
+            "doc_ids": [],
+            "inserted_doc_ids": [],
+            "errors": 0,
+            "reason": "not_frame",
+        }
 
     reader = read_store if read_store is not None else write_store
     snapshot = _snapshot_for_frame(reader, frame_record)
@@ -412,6 +434,8 @@ def project_stage2_docs_for_frame(
             "inserted_docs": 0,
             "generated_states": int(generated_states),
             "inserted_states": int(inserted_states),
+            "doc_ids": [],
+            "inserted_doc_ids": [],
             "errors": int(state_errors),
             "reason": "empty_payload",
         }
@@ -434,6 +458,8 @@ def project_stage2_docs_for_frame(
             "inserted_docs": 0,
             "generated_states": int(generated_states),
             "inserted_states": int(inserted_states),
+            "doc_ids": [],
+            "inserted_doc_ids": [],
             "errors": int(1 + state_errors),
             "reason": f"plugin_error:{type(exc).__name__}",
         }
@@ -446,6 +472,8 @@ def project_stage2_docs_for_frame(
             "inserted_docs": 0,
             "generated_states": int(generated_states),
             "inserted_states": int(inserted_states),
+            "doc_ids": [],
+            "inserted_doc_ids": [],
             "errors": int(state_errors),
             "reason": "no_docs",
         }
@@ -470,6 +498,8 @@ def project_stage2_docs_for_frame(
             "inserted_docs": 0,
             "generated_states": int(generated_states),
             "inserted_states": int(inserted_states),
+            "doc_ids": [],
+            "inserted_doc_ids": [],
             "errors": int(state_errors),
             "reason": "filtered_docs_empty",
         }
@@ -480,10 +510,13 @@ def project_stage2_docs_for_frame(
     generated = 0
     inserted = 0
     errors = 0
+    doc_ids: list[str] = []
+    inserted_doc_ids: list[str] = []
     for index, (doc_kind, text, doc) in enumerate(normalized_docs):
         generated += 1
         component_seed = f"{source_record_id}|{doc_kind}|{index}|{sha256_text(text)[:16]}"
         doc_id = f"{run_id}/derived.sst.text/extra/{encode_record_id_component(component_seed)}"
+        doc_ids.append(str(doc_id))
         existing = write_store.get(doc_id, None) if hasattr(write_store, "get") else None
         if isinstance(existing, dict):
             continue
@@ -507,6 +540,7 @@ def project_stage2_docs_for_frame(
         payload_doc["payload_hash"] = sha256_canonical({k: v for k, v in payload_doc.items() if k != "payload_hash"})
         if dry_run:
             inserted += 1
+            inserted_doc_ids.append(str(doc_id))
             continue
         try:
             if hasattr(write_store, "put_new"):
@@ -514,6 +548,7 @@ def project_stage2_docs_for_frame(
             else:
                 write_store.put(doc_id, payload_doc)
             inserted += 1
+            inserted_doc_ids.append(str(doc_id))
         except FileExistsError:
             continue
         except Exception:
@@ -527,6 +562,8 @@ def project_stage2_docs_for_frame(
         "inserted_docs": int(inserted),
         "generated_states": int(generated_states),
         "inserted_states": int(inserted_states),
+        "doc_ids": list(doc_ids),
+        "inserted_doc_ids": list(inserted_doc_ids),
         "errors": int(errors + state_errors),
         "reason": "ok" if errors == 0 and state_errors == 0 else "insert_failed",
     }

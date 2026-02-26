@@ -74,6 +74,8 @@ def test_stage2_projection_docs_deterministic_and_idempotent() -> None:
     assert int(first.get("inserted_docs", 0) or 0) >= 1
     assert int(first.get("generated_states", 0) or 0) == 1
     assert int(first.get("inserted_states", 0) or 0) == 1
+    assert len(list(first.get("doc_ids") or [])) >= 1
+    assert sorted(list(first.get("inserted_doc_ids") or [])) == sorted(list(first.get("doc_ids") or []))
     first_ids = sorted([rid for rid, row in store.data.items() if str(row.get("record_type") or "") == "derived.sst.text.extra"])
     first_state_ids = sorted([rid for rid, row in store.data.items() if str(row.get("record_type") or "") == "derived.sst.state"])
     assert len(first_ids) >= 1
@@ -83,6 +85,8 @@ def test_stage2_projection_docs_deterministic_and_idempotent() -> None:
     assert bool(second.get("ok", False))
     assert int(second.get("generated_states", 0) or 0) == 1
     assert int(second.get("inserted_states", 0) or 0) == 0
+    assert sorted(list(second.get("doc_ids") or [])) == sorted(list(first.get("doc_ids") or []))
+    assert list(second.get("inserted_doc_ids") or []) == []
     second_ids = sorted([rid for rid, row in store.data.items() if str(row.get("record_type") or "") == "derived.sst.text.extra"])
     second_state_ids = sorted([rid for rid, row in store.data.items() if str(row.get("record_type") or "") == "derived.sst.state"])
     assert second_ids == first_ids
