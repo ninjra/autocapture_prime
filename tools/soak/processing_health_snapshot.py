@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -33,9 +34,24 @@ def build_health_snapshot(rows: list[dict[str, Any]], *, tail: int = 30) -> dict
     retention_risk_events = 0
     metadata_db_unstable_events = 0
     throughput_zero_backlog_events = 0
+    latest_manifest_ts: datetime | None = None
     for row in scoped:
         if not isinstance(row, dict):
             continue
+        ts_text = str(row.get("ts_utc") or "").strip()
+        if ts_text:
+            parsed: datetime | None = None
+            try:
+                parsed = datetime.fromisoformat(ts_text.replace("Z", "+00:00"))
+            except Exception:
+                parsed = None
+            if parsed is not None:
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                else:
+                    parsed = parsed.astimezone(timezone.utc)
+                if latest_manifest_ts is None or parsed > latest_manifest_ts:
+                    latest_manifest_ts = parsed
         sla = row.get("sla") if isinstance(row.get("sla"), dict) else {}
         pending_series.append(int(sla.get("pending_records", 0) or 0))
         completed_series.append(int(sla.get("completed_records", 0) or 0))
@@ -60,6 +76,9 @@ def build_health_snapshot(rows: list[dict[str, Any]], *, tail: int = 30) -> dict
     latest_completed = completed_series[-1] if completed_series else 0
     latest_throughput = throughput_series[-1] if throughput_series else 0.0
     latest_lag = lag_series[-1] if lag_series else 0.0
+    freshness_lag_hours = None
+    if latest_manifest_ts is not None:
+        freshness_lag_hours = max(0.0, round((datetime.now(timezone.utc) - latest_manifest_ts).total_seconds() / 3600.0, 6))
 
     alerts: list[str] = []
     if retention_risk_events > 0:
@@ -73,13 +92,15 @@ def build_health_snapshot(rows: list[dict[str, Any]], *, tail: int = 30) -> dict
 
     return {
         "ok": True,
-        "schema_version": 1,
+        "schema_version": 2,
         "samples": int(len(scoped)),
         "latest": {
             "pending_records": int(latest_pending),
             "completed_records": int(latest_completed),
             "throughput_records_per_s": float(latest_throughput),
             "projected_lag_hours": float(latest_lag),
+            "manifest_ts_utc": latest_manifest_ts.isoformat().replace("+00:00", "Z") if latest_manifest_ts is not None else "",
+            "manifest_freshness_lag_hours": freshness_lag_hours,
         },
         "events": {
             "retention_risk": int(retention_risk_events),
@@ -88,6 +109,57 @@ def build_health_snapshot(rows: list[dict[str, Any]], *, tail: int = 30) -> dict
         },
         "alerts": alerts,
     }
+
+
+def probe_db_freshness(db_path: Path) -> dict[str, Any]:
+    """Probe metadata DB directly for capture and stage1 timestamps."""
+    import sqlite3
+    result: dict[str, Any] = {
+        "db_path": str(db_path),
+        "db_exists": bool(db_path.exists()),
+        "latest_capture_ts_utc": None,
+        "latest_stage1_complete_ts_utc": None,
+        "freshness_lag_hours": None,
+    }
+    if not db_path.exists():
+        return result
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=1.0)
+        conn.execute("PRAGMA query_only = ON")
+        for record_type, key in (
+            ("evidence.capture.frame", "latest_capture_ts_utc"),
+            ("derived.ingest.stage1.complete", "latest_stage1_complete_ts_utc"),
+        ):
+            row = conn.execute(
+                "SELECT MAX(ts_utc) FROM metadata WHERE record_type = ?",
+                (record_type,),
+            ).fetchone()
+            raw_ts = str(row[0] or "").strip() if row else ""
+            if raw_ts:
+                result[key] = raw_ts
+        # Compute freshness lag from latest stage1 timestamp
+        stage1_ts = str(result.get("latest_stage1_complete_ts_utc") or "").strip()
+        if stage1_ts:
+            try:
+                parsed = datetime.fromisoformat(stage1_ts.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                else:
+                    parsed = parsed.astimezone(timezone.utc)
+                lag = max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds() / 3600.0)
+                result["freshness_lag_hours"] = round(lag, 6)
+            except Exception:
+                pass
+    except Exception as exc:
+        result["db_error"] = f"{type(exc).__name__}:{exc}"
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    return result
 
 
 def resolve_manifests_path(raw_path: str) -> Path:
@@ -108,6 +180,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--tail", type=int, default=30, help="How many latest rows to include.")
     parser.add_argument("--output", default="", help="Optional JSON output path.")
+    parser.add_argument(
+        "--db",
+        default="",
+        help="Optional metadata DB path to probe for freshness (e.g. /mnt/d/autocapture/metadata.live.db).",
+    )
+    parser.add_argument("--max-freshness-lag-hours", type=float, default=24.0, help="Freshness SLO threshold in hours.")
     return parser
 
 
@@ -119,6 +197,39 @@ def main() -> int:
     payload = build_health_snapshot(rows, tail=int(args.tail))
     payload["manifests_path"] = str(path)
     payload["exists"] = bool(path.exists())
+
+    # DB-sourced freshness probe
+    db_path_str = str(args.db or "").strip()
+    if db_path_str:
+        db_freshness = probe_db_freshness(Path(db_path_str))
+        payload["db_freshness"] = db_freshness
+    else:
+        # Auto-detect: try derived DB, then live DB, then primary
+        for candidate in (
+            Path("/mnt/d/autocapture/derived/stage1_derived.db"),
+            Path("/mnt/d/autocapture/metadata.live.db"),
+            Path("/mnt/d/autocapture/metadata.db"),
+        ):
+            if candidate.exists():
+                db_freshness = probe_db_freshness(candidate)
+                payload["db_freshness"] = db_freshness
+                break
+
+    # Freshness SLO check
+    max_lag = float(args.max_freshness_lag_hours)
+    db_freshness_data = payload.get("db_freshness", {}) if isinstance(payload.get("db_freshness"), dict) else {}
+    db_lag = db_freshness_data.get("freshness_lag_hours")
+    if isinstance(db_lag, (int, float)):
+        freshness_ok = float(db_lag) <= max_lag
+        payload["freshness_ok"] = bool(freshness_ok)
+        payload["freshness_lag_hours"] = float(db_lag)
+        payload["max_freshness_lag_hours"] = float(max_lag)
+        if not freshness_ok:
+            alerts = payload.get("alerts", []) if isinstance(payload.get("alerts"), list) else []
+            if "freshness_lag_exceeded" not in alerts:
+                alerts.append("freshness_lag_exceeded")
+                payload["alerts"] = alerts
+
     out = str(args.output or "").strip()
     if out:
         out_path = Path(out).expanduser()

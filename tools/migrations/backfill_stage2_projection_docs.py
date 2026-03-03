@@ -14,6 +14,7 @@ from autocapture_nx.ingest.handoff_ingest import _choose_source_table
 from autocapture_nx.ingest.handoff_ingest import _table_columns
 from autocapture_nx.ingest.stage2_projection_docs import project_stage2_docs_for_frame
 from autocapture_nx.kernel.sqlite_reads import open_sqlite_reader
+from autocapture_nx.storage.stage1_derived_store import Stage1DerivedSqliteStore
 from autocapture.storage.stage1 import mark_stage2_complete
 
 
@@ -122,6 +123,7 @@ def wait_for_db_stability(
 def backfill_stage2_projection_docs(
     db_path: Path,
     *,
+    derived_db_path: Path | None = None,
     dry_run: bool = False,
     limit: int | None = None,
     snapshot_read: bool = True,
@@ -133,10 +135,11 @@ def backfill_stage2_projection_docs(
         force_snapshot=False,
     )
     write_conn: sqlite3.Connection | None = None
-    write_mode = "dry_run" if dry_run else "live"
+    write_mode = "dry_run" if dry_run else ("derived" if derived_db_path else "live")
     summary = {
         "source_read": source_read,
         "write_mode": write_mode,
+        "derived_db": str(derived_db_path) if derived_db_path else "",
         "source_table": "",
         "scanned_frames": 0,
         "invalid_payload_frames": 0,
@@ -162,14 +165,19 @@ def backfill_stage2_projection_docs(
             raise RuntimeError("metadata_id_column_missing")
         read_adapter = _SqliteMetadataAdapter(source_conn, source_table, source_cols)
         write_store: Any = read_adapter
+        derived_store: Stage1DerivedSqliteStore | None = None
         if not dry_run:
-            write_conn = sqlite3.connect(str(db_path), timeout=5.0)
-            write_conn.row_factory = sqlite3.Row
-            write_table = _choose_source_table(write_conn)
-            write_cols = set(_table_columns(write_conn, write_table))
-            write_adapter = _SqliteMetadataAdapter(write_conn, write_table, write_cols)
-            write_store = _ReadWriteAdapter(read_adapter=read_adapter, write_adapter=write_adapter)
-            write_conn.execute("BEGIN")
+            if derived_db_path is not None:
+                derived_store = Stage1DerivedSqliteStore(derived_db_path)
+                write_store = _ReadWriteAdapter(read_adapter=_ReadWriteAdapter(read_adapter=read_adapter, write_adapter=derived_store), write_adapter=derived_store)
+            else:
+                write_conn = sqlite3.connect(str(db_path), timeout=5.0)
+                write_conn.row_factory = sqlite3.Row
+                write_table = _choose_source_table(write_conn)
+                write_cols = set(_table_columns(write_conn, write_table))
+                write_adapter = _SqliteMetadataAdapter(write_conn, write_table, write_cols)
+                write_store = _ReadWriteAdapter(read_adapter=read_adapter, write_adapter=write_adapter)
+                write_conn.execute("BEGIN")
 
         sql = f"SELECT {id_col}, {payload_col} FROM {source_table} WHERE record_type = ? ORDER BY {id_col}"
         params: list[Any] = ["evidence.capture.frame"]
@@ -177,8 +185,14 @@ def backfill_stage2_projection_docs(
             sql += " LIMIT ?"
             params.append(int(limit))
 
+        _BATCH_COMMIT_INTERVAL = 500
+        if derived_store is not None:
+            derived_store.begin_batch()
         for row in source_conn.execute(sql, tuple(params)):
             summary["scanned_frames"] = int(summary.get("scanned_frames", 0) or 0) + 1
+            if derived_store is not None and int(summary["scanned_frames"]) % _BATCH_COMMIT_INTERVAL == 0:
+                derived_store.end_batch()
+                derived_store.begin_batch()
             source_record_id = str(row[id_col] or "")
             payload = _decode_payload(row[payload_col])
             if not source_record_id or not isinstance(payload, dict):
@@ -215,6 +229,8 @@ def backfill_stage2_projection_docs(
                     marker = write_store.get(stage2_id, {})
                     if isinstance(marker, dict) and bool(marker.get("complete", False)):
                         summary["stage2_marker_complete"] = int(summary.get("stage2_marker_complete", 0) or 0) + 1
+        if derived_store is not None:
+            derived_store.end_batch()
         if write_conn is not None:
             write_conn.commit()
     finally:
@@ -227,6 +243,7 @@ def backfill_stage2_projection_docs(
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Backfill derived.sst.text.extra docs from normalized frame/UIA metadata only.")
     parser.add_argument("--db", default="/mnt/d/autocapture/metadata.db", help="Path to metadata DB")
+    parser.add_argument("--derived-db", default="", help="Path to stage1 derived DB for overlay read/write (empty = write to source DB)")
     parser.add_argument("--dry-run", action="store_true", help="Analyze without writing")
     parser.add_argument("--limit", type=int, default=0, help="Optional max frame rows to scan (0 = all)")
     parser.add_argument("--snapshot-read", dest="snapshot_read", action="store_true", help="Allow read snapshot fallback.")
@@ -269,9 +286,12 @@ def main() -> int:
                 )
             )
             return 3
+    derived_db_str = str(getattr(args, "derived_db", "") or "").strip()
+    derived_db_path = Path(derived_db_str).expanduser() if derived_db_str else None
     try:
         summary = backfill_stage2_projection_docs(
             db_path=db_path,
+            derived_db_path=derived_db_path,
             dry_run=bool(args.dry_run),
             limit=int(args.limit) if int(args.limit) > 0 else None,
             snapshot_read=bool(args.snapshot_read),

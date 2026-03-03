@@ -67,6 +67,7 @@ class Stage1DerivedSqliteStore:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
         self._lock = threading.Lock()
+        self._in_batch: bool = False
 
     def _ensure(self) -> sqlite3.Connection:
         if self._conn is None:
@@ -87,6 +88,8 @@ class Stage1DerivedSqliteStore:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_metadata_ts_utc ON metadata(ts_utc)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_metadata_run_id ON metadata(run_id)")
             conn.commit()
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA synchronous = NORMAL")
             self._conn = conn
         return self._conn
 
@@ -111,6 +114,20 @@ class Stage1DerivedSqliteStore:
             row = conn.execute("SELECT payload FROM metadata WHERE id = ?", (str(record_id),)).fetchone()
             return self._decode(row, default=default)
 
+    def begin_batch(self) -> None:
+        """Start a batch write transaction. Call end_batch() to commit."""
+        with self._lock:
+            conn = self._ensure()
+            conn.execute("BEGIN")
+            self._in_batch = True
+
+    def end_batch(self) -> None:
+        """Commit the current batch transaction."""
+        with self._lock:
+            if self._conn is not None and self._in_batch:
+                self._conn.commit()
+            self._in_batch = False
+
     def put_new(self, record_id: str, value: dict[str, Any]) -> None:
         payload = json.dumps(value, sort_keys=True)
         ts_utc = str(value.get("ts_utc") or value.get("ts_start_utc") or value.get("ts_end_utc") or "")
@@ -123,7 +140,8 @@ class Stage1DerivedSqliteStore:
                     "INSERT INTO metadata (id, record_type, ts_utc, payload, run_id) VALUES (?, ?, ?, ?, ?)",
                     (str(record_id), record_type, ts_utc, payload, run_id),
                 )
-                conn.commit()
+                if not self._in_batch:
+                    conn.commit()
             except sqlite3.IntegrityError as exc:
                 raise FileExistsError(str(record_id)) from exc
 
@@ -138,7 +156,8 @@ class Stage1DerivedSqliteStore:
                 "INSERT OR REPLACE INTO metadata (id, record_type, ts_utc, payload, run_id) VALUES (?, ?, ?, ?, ?)",
                 (str(record_id), record_type, ts_utc, payload, run_id),
             )
-            conn.commit()
+            if not self._in_batch:
+                conn.commit()
 
     def put_replace(self, record_id: str, value: dict[str, Any]) -> None:
         self.put(record_id, value)
@@ -176,7 +195,12 @@ class Stage1OverlayStore:
             return row
         if self._metadata_read is None or not hasattr(self._metadata_read, "get"):
             return default
-        return self._metadata_read.get(record_id, default)
+        try:
+            return self._metadata_read.get(record_id, default)
+        except Exception:
+            # Fail-open on transient read-path faults in the ingest metadata store.
+            # This keeps idle processing/backfill progressing via the derived overlay.
+            return default
 
     def put_new(self, record_id: str, value: dict[str, Any]) -> None:
         self._derived_write.put_new(record_id, value)

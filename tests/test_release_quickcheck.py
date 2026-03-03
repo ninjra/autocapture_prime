@@ -72,6 +72,31 @@ def test_build_quickcheck_collects_status_counts_and_top_reasons(tmp_path: pathl
     assert "retrieval_miss" not in out["top_failure_reasons"]
 
 
+def test_build_quickcheck_popup_status_requires_count_contract(tmp_path: pathlib.Path) -> None:
+    mod = _load_module()
+    root = tmp_path
+    _write_json(root / "artifacts/release/release_gate_latest.json", {"ok": True})
+    _write_json(
+        root / "artifacts/query_acceptance/popup_regression_latest.json",
+        {"ok": True, "sample_count": 10, "accepted_count": 0, "failed_count": 10},
+    )
+    _write_json(
+        root / "artifacts/query_acceptance/popup_regression_misses_latest.json",
+        {"failure_reason_counts": {"state_not_ok": 10}},
+    )
+    _write_json(root / "artifacts/advanced10/q40_matrix_latest.json", {"ok": True, "source_tier": "real"})
+    _write_json(root / "artifacts/temporal40/temporal40_gate_latest.json", {"ok": True, "counts": {"evaluated": 40, "skipped": 0, "failed": 0}})
+    _write_json(root / "artifacts/real_corpus_gauntlet/latest/strict_matrix.json", {"ok": True, "source_tier": "real"})
+    _write_json(
+        root / "artifacts/lineage/20260225T100000Z/stage1_stage2_lineage_queryability.json",
+        {"summary": {"frames_total": 100, "frames_queryable": 100, "frames_blocked": 0}, "queryable_windows": [{"end_utc": "2026-02-25T00:00:00Z"}]},
+    )
+
+    out = mod.build_quickcheck(root=root)
+    assert out["statuses"]["popup_strict_ok"] is False
+    assert "popup.failed_nonzero" in out["top_failure_reasons"]
+
+
 def test_build_quickcheck_requires_real_q40_source_tier_for_q40_ok(tmp_path: pathlib.Path) -> None:
     mod = _load_module()
     root = tmp_path
@@ -124,6 +149,51 @@ def test_build_quickcheck_lineage_fallback_derives_from_queryable_counts(tmp_pat
     assert out["stage_coverage"]["frames_queryable"] == 171
     assert out["stage_coverage"]["lineage_complete"] == 171
     assert out["stage_coverage"]["lineage_incomplete"] == 9
+
+
+def test_build_quickcheck_emits_queryable_freshness_fields_from_windows(tmp_path: pathlib.Path) -> None:
+    mod = _load_module()
+    root = tmp_path
+    _write_json(root / "artifacts/release/release_gate_latest.json", {"ok": True})
+    _write_json(root / "artifacts/query_acceptance/popup_regression_latest.json", {"ok": True, "sample_count": 10, "accepted_count": 10, "failed_count": 0})
+    _write_json(root / "artifacts/advanced10/q40_matrix_latest.json", {"ok": True, "source_tier": "real"})
+    _write_json(root / "artifacts/temporal40/temporal40_gate_latest.json", {"ok": True, "counts": {"evaluated": 40, "skipped": 0, "failed": 0}})
+    _write_json(root / "artifacts/real_corpus_gauntlet/latest/strict_matrix.json", {"ok": True, "source_tier": "real"})
+    _write_json(
+        root / "artifacts/lineage/20260225T100000Z/stage1_stage2_lineage_queryability.json",
+        {
+            "summary": {"frames_total": 20, "frames_queryable": 20, "frames_blocked": 0},
+            "queryable_windows": [
+                {"end_utc": "2026-02-20T01:00:00Z"},
+                {"end_utc": "2026-02-21T02:52:06.043Z"},
+            ],
+        },
+    )
+    out = mod.build_quickcheck(root=root)
+    stage = out["stage_coverage"]
+    assert stage["latest_queryable_ts_utc"] == "2026-02-21T02:52:06.043000Z"
+    assert isinstance(stage["freshness_lag_hours"], float)
+    assert stage["freshness_lag_hours"] >= 0.0
+
+
+def test_build_quickcheck_flags_freshness_exceeded(tmp_path: pathlib.Path) -> None:
+    mod = _load_module()
+    root = tmp_path
+    _write_json(root / "artifacts/release/release_gate_latest.json", {"ok": True})
+    _write_json(root / "artifacts/query_acceptance/popup_regression_latest.json", {"ok": True, "sample_count": 10, "accepted_count": 10, "failed_count": 0})
+    _write_json(root / "artifacts/advanced10/q40_matrix_latest.json", {"ok": True, "source_tier": "real"})
+    _write_json(root / "artifacts/temporal40/temporal40_gate_latest.json", {"ok": True, "counts": {"evaluated": 40, "skipped": 0, "failed": 0}})
+    _write_json(root / "artifacts/real_corpus_gauntlet/latest/strict_matrix.json", {"ok": True, "source_tier": "real"})
+    _write_json(
+        root / "artifacts/lineage/20260225T100000Z/stage1_stage2_lineage_queryability.json",
+        {
+            "summary": {"frames_total": 20, "frames_queryable": 20, "frames_blocked": 0},
+            "queryable_windows": [{"end_utc": "2026-02-01T00:00:00Z"}],
+        },
+    )
+    out = mod.build_quickcheck(root=root, max_freshness_lag_hours=1.0)
+    assert out["statuses"]["freshness_ok"] is False
+    assert "freshness_lag_exceeded" in out["top_failure_reasons"]
 
 
 def test_build_quickcheck_parses_nested_strict_failure_causes_without_wrapper_keys(tmp_path: pathlib.Path) -> None:

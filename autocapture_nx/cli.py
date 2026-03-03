@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from getpass import getpass
 from dataclasses import asdict
 from pathlib import Path
@@ -35,19 +37,210 @@ def _env_flag(name: str, *, default: bool) -> bool:
     return bool(default)
 
 
+def _probe_sqlite_readable(path: Path, *, heavy: bool = False) -> tuple[bool, str]:
+    conn: sqlite3.Connection | None = None
+    try:
+        if not path.exists():
+            return False, "missing"
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=0.5)
+        conn.execute("PRAGMA query_only = ON")
+        conn.execute("PRAGMA schema_version")
+        if heavy:
+            # Stress-test: read a real row to exercise WAL replay.
+            # On 9P mounts this can fail when a writer is active.
+            conn.execute("SELECT id FROM metadata LIMIT 1")
+            conn.execute("PRAGMA integrity_check(1)")
+        return True, "ok"
+    except Exception as exc:
+        return False, f"{type(exc).__name__}:{exc}"
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _parse_ts_utc(value: str | None) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    if "." in text and "+" in text:
+        prefix, suffix = text.rsplit("+", 1)
+        head, frac = prefix.split(".", 1)
+        frac_digits = "".join(ch for ch in frac if ch.isdigit())
+        frac_digits = (frac_digits + "000000")[:6]
+        text = f"{head}.{frac_digits}+{suffix}"
+    try:
+        dt = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _probe_latest_record_ts_ns(path: Path, record_type: str) -> tuple[int | None, str]:
+    conn: sqlite3.Connection | None = None
+    try:
+        if not path.exists():
+            return None, "missing"
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=0.5)
+        conn.execute("PRAGMA query_only = ON")
+        row = conn.execute("SELECT MAX(ts_utc) FROM metadata WHERE record_type = ?", (str(record_type),)).fetchone()
+        raw = row[0] if row else None
+        text = str(raw).strip() if raw is not None else ""
+        if not text:
+            return None, "none"
+        dt = _parse_ts_utc(text)
+        if dt is None:
+            return None, "invalid_ts"
+        return int(dt.timestamp() * 1_000_000_000.0), "ok"
+    except Exception as exc:
+        return None, f"{type(exc).__name__}:{exc}"
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 def _resolve_batch_metadata_path_override() -> str:
     explicit = str(os.environ.get("AUTOCAPTURE_STORAGE_METADATA_PATH") or "").strip()
     if explicit:
+        os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "explicit_metadata_path"
         return ""
     if not _env_flag("AUTOCAPTURE_BATCH_METADATA_USE_LIVE_DB", default=True):
+        os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "live_db_preference_disabled"
         return ""
     data_dir = str(os.environ.get("AUTOCAPTURE_DATA_DIR") or "").strip()
     if not data_dir:
+        os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "data_dir_missing"
         return ""
-    live_path = Path(data_dir) / "metadata.live.db"
-    if live_path.exists():
+    root = Path(data_dir)
+    primary_path = root / "metadata.db"
+    live_path = root / "metadata.live.db"
+    probe_readable = _env_flag("AUTOCAPTURE_BATCH_METADATA_PROBE_READABLE", default=True)
+
+    policy = str(os.environ.get("AUTOCAPTURE_BATCH_METADATA_SOURCE_POLICY") or "freshest").strip().lower()
+    if policy not in {"freshest", "live", "primary"}:
+        policy = "freshest"
+
+    if policy == "live":
+        if live_path.exists():
+            if probe_readable:
+                ok, reason = _probe_sqlite_readable(live_path)
+                if not ok:
+                    os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "policy_live_unreadable"
+                    os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_PROBE"] = reason
+                    return ""
+            os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "policy_live"
+            return str(live_path)
+        os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "policy_live_missing"
+        return ""
+
+    if policy == "primary":
+        if primary_path.exists():
+            if probe_readable:
+                ok, reason = _probe_sqlite_readable(primary_path)
+                if not ok:
+                    os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "policy_primary_unreadable"
+                    os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_PROBE"] = reason
+                    return ""
+            os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "policy_primary"
+            return str(primary_path)
+        os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "policy_primary_missing"
+        return ""
+
+    # Freshest policy (default): prefer metadata.db unless live replica is
+    # materially fresher. This prevents stale-but-green idle runs when live
+    # replication drifts behind active capture.
+    if not primary_path.exists() and live_path.exists():
+        if probe_readable:
+            ok, reason = _probe_sqlite_readable(live_path)
+            if not ok:
+                os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "freshest_live_only_unreadable"
+                os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_PROBE"] = reason
+                return ""
+        os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "freshest_live_only"
         return str(live_path)
-    return ""
+    if primary_path.exists() and not live_path.exists():
+        if probe_readable:
+            ok, reason = _probe_sqlite_readable(primary_path)
+            if not ok:
+                os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "freshest_primary_only_unreadable"
+                os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_PROBE"] = reason
+                return ""
+        os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "freshest_primary_only"
+        return str(primary_path)
+    if not primary_path.exists() and not live_path.exists():
+        os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "freshest_no_candidate"
+        return ""
+
+    if probe_readable:
+        # Use heavy probe on 9P/NTFS mounts — light PRAGMA probes pass but
+        # sustained reads fail with "database disk image is malformed" when a
+        # Windows writer is active.
+        _9p_mount = str(primary_path).startswith("/mnt/")
+        primary_ok, primary_probe = _probe_sqlite_readable(primary_path, heavy=_9p_mount)
+        live_ok, live_probe = _probe_sqlite_readable(live_path, heavy=_9p_mount)
+        os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_PROBE"] = f"primary={primary_probe};live={live_probe}"
+        if primary_ok and not live_ok:
+            os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "freshest_live_unreadable_primary_readable"
+            return str(primary_path)
+        if live_ok and not primary_ok:
+            os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "freshest_primary_unreadable_live_readable"
+            return str(live_path)
+        if not primary_ok and not live_ok:
+            os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "freshest_no_readable_candidate"
+            return ""
+
+    skew_raw = str(os.environ.get("AUTOCAPTURE_BATCH_METADATA_FRESHNESS_SKEW_S") or "").strip()
+    try:
+        skew_s = float(skew_raw) if skew_raw else 30.0
+    except Exception:
+        skew_s = 30.0
+    if skew_s < 0.0:
+        skew_s = 0.0
+    skew_ns = int(skew_s * 1_000_000_000.0)
+
+    primary_frame_ns, primary_frame_probe = _probe_latest_record_ts_ns(primary_path, "evidence.capture.frame")
+    live_frame_ns, live_frame_probe = _probe_latest_record_ts_ns(live_path, "evidence.capture.frame")
+    probe_reason = str(os.environ.get("AUTOCAPTURE_BATCH_METADATA_SELECTION_PROBE") or "").strip()
+    frame_probe = f"primary_frame={primary_frame_probe};live_frame={live_frame_probe}"
+    os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_PROBE"] = (
+        f"{probe_reason};{frame_probe}" if probe_reason else frame_probe
+    )
+    if primary_frame_ns is not None and live_frame_ns is not None:
+        if live_frame_ns > primary_frame_ns and (live_frame_ns - primary_frame_ns) > skew_ns:
+            os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "freshest_live_frame_newer"
+            return str(live_path)
+        os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "freshest_primary_frame_preferred"
+        return str(primary_path)
+    if primary_frame_ns is not None and live_frame_ns is None:
+        os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "freshest_primary_frame_only"
+        return str(primary_path)
+    if live_frame_ns is not None and primary_frame_ns is None:
+        os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "freshest_live_frame_only"
+        return str(live_path)
+
+    try:
+        primary_mtime_ns = int(primary_path.stat().st_mtime_ns)
+    except Exception:
+        primary_mtime_ns = 0
+    try:
+        live_mtime_ns = int(live_path.stat().st_mtime_ns)
+    except Exception:
+        live_mtime_ns = 0
+
+    if live_mtime_ns > primary_mtime_ns and (live_mtime_ns - primary_mtime_ns) > skew_ns:
+        os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "freshest_live_newer"
+        return str(live_path)
+    os.environ["AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON"] = "freshest_primary_preferred"
+    return str(primary_path)
 
 
 def _print_json(data: object) -> None:
@@ -590,6 +783,8 @@ def cmd_devtools_ast_ir(args: argparse.Namespace) -> int:
 
 def cmd_query(args: argparse.Namespace) -> int:
     os.environ.setdefault("AUTOCAPTURE_QUERY_METADATA_ONLY", "1")
+    os.environ.setdefault("AUTOCAPTURE_QUERY_HARD_FAIL_STALE", "1")
+    os.environ.setdefault("AUTOCAPTURE_QUERY_ALLOW_LIVE_FALLBACK_ON_PRIMARY_UNREADABLE", "1")
     os.environ.setdefault("AUTOCAPTURE_ADV_HARD_VLM_MODE", "off")
     os.environ.setdefault("AUTOCAPTURE_AUDIT_PLUGIN_METADATA", "0")
     os.environ.setdefault("AUTOCAPTURE_RETRIEVAL_LATEST_SCAN_LIMIT", "250")
@@ -733,12 +928,27 @@ def cmd_batch_run(args: argparse.Namespace) -> int:
     metadata_override = _resolve_batch_metadata_path_override()
     if metadata_override:
         os.environ.setdefault("AUTOCAPTURE_STORAGE_METADATA_PATH", metadata_override)
+    if str(os.environ.get("AUTOCAPTURE_STORAGE_METADATA_PATH") or "").strip():
+        # Batch source selection is authoritative for this run. Avoid silent
+        # fallback to a different DB path inside storage initialization.
+        os.environ.setdefault("AUTOCAPTURE_STORAGE_METADATA_PATH_STRICT", "1")
     facade = create_facade(safe_mode=args.safe_mode)
     result = facade.batch_run(
         max_loops=int(args.max_loops),
         sleep_ms=int(args.sleep_ms),
         require_idle=bool(args.require_idle),
     )
+    if isinstance(result, dict):
+        result.setdefault("batch_metadata_path", str(os.environ.get("AUTOCAPTURE_STORAGE_METADATA_PATH") or ""))
+        result.setdefault(
+            "batch_metadata_selection_reason",
+            str(os.environ.get("AUTOCAPTURE_BATCH_METADATA_SELECTION_REASON") or ""),
+        )
+        result.setdefault(
+            "batch_metadata_selection_probe",
+            str(os.environ.get("AUTOCAPTURE_BATCH_METADATA_SELECTION_PROBE") or ""),
+        )
+        result.setdefault("batch_metadata_path_strict", str(os.environ.get("AUTOCAPTURE_STORAGE_METADATA_PATH_STRICT") or ""))
     _print_json(result)
     return 0
 

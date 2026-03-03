@@ -125,8 +125,13 @@ def _backfill_stage1_and_retention(
             sql += " LIMIT ?"
             params.append(int(limit))
 
+        _BATCH_COMMIT_INTERVAL = 500
+        write_store.begin_batch()
         for row in source_conn.execute(sql, tuple(params)):
             summary["scanned_frames"] = int(summary.get("scanned_frames", 0) or 0) + 1
+            if int(summary["scanned_frames"]) % _BATCH_COMMIT_INTERVAL == 0:
+                write_store.end_batch()
+                write_store.begin_batch()
             frame_id = str(row[id_col] or "")
             payload = _decode_payload(row[payload_col])
             if not frame_id or not isinstance(payload, dict):
@@ -194,6 +199,10 @@ def _backfill_stage1_and_retention(
             if retention_after and isinstance(retention_after_payload, dict) and bool(retention_after_payload.get("stage1_contract_validated", False)):
                 summary["retention_validated_after"] = int(summary.get("retention_validated_after", 0) or 0) + 1
     finally:
+        try:
+            write_store.end_batch()
+        except Exception:
+            pass
         source_conn.close()
     return summary
 
@@ -235,6 +244,7 @@ def _write_markdown(path: Path, payload: dict[str, Any]) -> None:
     lines.append(f"- backfill_uia_obs: `{payload.get('backfill_uia_obs', {})}`")
     lines.append(f"- backfill_stage1_retention: `{payload.get('backfill_stage1_retention', {})}`")
     lines.append(f"- revalidate_stage1_markers: `{payload.get('revalidate_stage1_markers', {})}`")
+    lines.append(f"- backfill_stage2: `{payload.get('backfill_stage2', {})}`")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -314,6 +324,18 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=False,
         limit=int(args.limit) if int(args.limit) > 0 else None,
     )
+    stage2_mod = _load_tool_module(
+        "tools/migrations/backfill_stage2_projection_docs.py",
+        "backfill_stage2_projection_docs_tool",
+    )
+    backfill_stage2 = stage2_mod.backfill_stage2_projection_docs(
+        resolved_db,
+        derived_db_path=derived_db,
+        dry_run=False,
+        limit=int(args.limit) if int(args.limit) > 0 else None,
+        snapshot_read=True,
+        mark_stage2=True,
+    )
     post_audit = audit_mod.run_audit(
         resolved_db,
         derived_db_path=derived_db,
@@ -348,6 +370,7 @@ def main(argv: list[str] | None = None) -> int:
         "backfill_uia_obs": backfill_uia,
         "backfill_stage1_retention": backfill_stage1_retention,
         "revalidate_stage1_markers": revalidate_summary,
+        "backfill_stage2": backfill_stage2,
         "post_audit": post_audit,
     }
     out_json.parent.mkdir(parents=True, exist_ok=True)

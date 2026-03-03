@@ -87,6 +87,18 @@ def _probe_sqlite_readable(path: str) -> tuple[bool, str]:
                 pass
 
 
+def _env_flag(name: str, *, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    value = str(raw).strip().casefold()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
 def _resolve_metadata_path(
     storage_cfg: dict[str, Any],
     *,
@@ -94,6 +106,7 @@ def _resolve_metadata_path(
     legacy_meta_path: str,
     logger: Any = None,
     probe_readable: bool = True,
+    strict_selection: bool = False,
 ) -> str:
     configured_primary = str(storage_cfg.get("metadata_path") or "").strip()
     primary = configured_primary or str(legacy_meta_path)
@@ -105,6 +118,37 @@ def _resolve_metadata_path(
     ]
     candidates = _dedupe_paths([primary] + [str(x) for x in configured_fallbacks] + auto_fallbacks)
     if not candidates:
+        return primary
+
+    if strict_selection:
+        if not probe_readable:
+            if os.path.exists(primary):
+                return primary
+            if logger is not None:
+                try:
+                    logger(
+                        "storage.metadata_path_strict_missing",
+                        {
+                            "primary_path": primary,
+                        },
+                    )
+                except Exception:
+                    pass
+            return primary
+        primary_ok, primary_reason = _probe_sqlite_readable(primary)
+        if primary_ok:
+            return primary
+        if logger is not None:
+            try:
+                logger(
+                    "storage.metadata_path_strict_unreadable",
+                    {
+                        "primary_path": primary,
+                        "primary_probe_error": primary_reason,
+                    },
+                )
+            except Exception:
+                pass
         return primary
 
     if not probe_readable:
@@ -1802,6 +1846,7 @@ class SQLCipherStoragePlugin(PluginBase):
         require_decrypt = bool(encryption_required)
         sqlcipher_cfg = storage_cfg.get("sqlcipher", {})
         self._sqlcipher_enabled = bool(sqlcipher_cfg.get("enabled", False))
+        strict_metadata_selection = _env_flag("AUTOCAPTURE_STORAGE_METADATA_PATH_STRICT", default=False)
         legacy_meta_path = os.path.join(data_dir, "metadata", "metadata.db")
         metadata_path = _resolve_metadata_path(
             storage_cfg if isinstance(storage_cfg, dict) else {},
@@ -1809,6 +1854,7 @@ class SQLCipherStoragePlugin(PluginBase):
             legacy_meta_path=str(legacy_meta_path),
             logger=getattr(self.context, "logger", None),
             probe_readable=not self._sqlcipher_enabled,
+            strict_selection=bool(strict_metadata_selection),
         )
         self._metadata_dir = storage_cfg.get("metadata_dir") or os.path.join(data_dir, "metadata")
         self._metadata_path = metadata_path

@@ -7,9 +7,11 @@ import zipfile
 from pathlib import Path
 
 from autocapture.core.hashing import hash_text, normalize_text
+from autocapture_nx.ingest.uia_obs_docs import _frame_uia_expected_ids
 from autocapture_nx.kernel.derived_records import derived_text_record_id
 from autocapture_nx.plugin_system.api import PluginContext
-from autocapture_nx.processing.idle import IdleProcessor, _get_media_blob
+from autocapture_nx.processing.idle import IdleProcessStats, IdleProcessor, _IdleWorkItem, _get_media_blob
+from autocapture_nx.storage.stage1_derived_store import Stage1DerivedSqliteStore
 from autocapture.storage.retention import retention_eligibility_record_id
 from autocapture.storage.stage1 import stage1_complete_record_id, stage2_complete_record_id
 from plugins.builtin.retrieval_basic.plugin import RetrievalStrategy
@@ -69,6 +71,16 @@ class _Extractor:
     def extract(self, _frame: bytes):
         self.calls += 1
         return {"text": self._text}
+
+
+class _BatchExtractor:
+    def __init__(self, text: str) -> None:
+        self._text = text
+        self.calls = 0
+
+    def extract_batch(self, frames):  # noqa: ANN001
+        self.calls += 1
+        return [{"text": self._text} for _ in list(frames)]
 
 
 class _EmptyExtractor:
@@ -444,6 +456,162 @@ class IdleProcessorTests(unittest.TestCase):
         self.assertEqual(stats.errors, 0)
         self.assertGreaterEqual(int(stats.records_completed), 1)
 
+    def test_preexisting_stage1_retention_still_projects_stage2(self) -> None:
+        config = {
+            "runtime": {"run_id": "run1"},
+            "processing": {
+                "idle": {
+                    "enabled": True,
+                    "auto_start": False,
+                    "max_items_per_run": 5,
+                    "max_seconds_per_run": 5,
+                    "sleep_ms": 1,
+                    "max_concurrency_cpu": 1,
+                    "max_concurrency_gpu": 0,
+                    "extractors": {"ocr": True, "vlm": False},
+                },
+                "sst": {"enabled": False},
+            },
+        }
+        metadata = _MetadataStore()
+        record_id = "run1/evidence.capture.frame/88"
+        metadata.put(
+            record_id,
+            {
+                "record_type": "evidence.capture.frame",
+                "ts_utc": "2024-01-01T00:00:00+00:00",
+                # Deliberately omit blob_path/input_ref so mark_stage1_complete()
+                # cannot regenerate Stage1 from raw frame contract.
+                "content_hash": "frame88",
+                "content_type": "image/png",
+            },
+        )
+        metadata.put(
+            stage1_complete_record_id(record_id),
+            {
+                "record_type": "derived.ingest.stage1.complete",
+                "source_record_id": record_id,
+                "source_record_type": "evidence.capture.frame",
+                "complete": True,
+                "ts_utc": "2024-01-01T00:00:01+00:00",
+            },
+        )
+        metadata.put(
+            retention_eligibility_record_id(record_id),
+            {
+                "record_type": "retention.eligible",
+                "source_record_id": record_id,
+                "source_record_type": "evidence.capture.frame",
+                "stage1_contract_validated": True,
+                "quarantine_pending": False,
+                "ts_utc": "2024-01-01T00:00:01+00:00",
+            },
+        )
+        media = _MediaStore({record_id: b"\x89PNG\r\n\x1a\nframe"})
+        events = _EventBuilder()
+        system = _System(config, metadata, media, _Extractor("ocr text"), None, events)
+
+        processor = IdleProcessor(system)
+        done, stats = processor.process_step(budget_ms=0)
+
+        self.assertIsInstance(done, bool)
+        self.assertGreaterEqual(int(stats.stage2_complete_records), 1)
+        self.assertGreaterEqual(int(stats.records_completed), 1)
+        stage2_marker = metadata.data.get(stage2_complete_record_id(record_id), {})
+        self.assertTrue(bool(stage2_marker.get("complete", False)))
+
+    def test_overlay_derived_text_satisfies_processing_and_allows_stage1_completion(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            config = {
+                "runtime": {"run_id": "run1"},
+                "storage": {"data_dir": str(data_dir), "stage1_derived": {"enabled": True}},
+                "processing": {
+                    "idle": {
+                        "enabled": True,
+                        "auto_start": False,
+                        "max_items_per_run": 5,
+                        "max_seconds_per_run": 5,
+                        "sleep_ms": 1,
+                        "max_concurrency_cpu": 1,
+                        "max_concurrency_gpu": 0,
+                        "extractors": {"ocr": True, "vlm": False},
+                    },
+                    "sst": {"enabled": False},
+                },
+            }
+            metadata = _MetadataStore()
+            record_id = "run1/evidence.capture.frame/99"
+            uia_id = "run1/evidence.uia.snapshot/99"
+            metadata.put(
+                record_id,
+                {
+                    "record_type": "evidence.capture.frame",
+                    "run_id": "run1",
+                    "ts_utc": "2024-01-01T00:00:00+00:00",
+                    "blob_path": "media/frame99.png",
+                    "content_hash": "frame_hash_99",
+                    "content_type": "image/png",
+                    "uia_ref": {"record_id": uia_id, "content_hash": "uia_hash_99"},
+                    "input_ref": {"record_id": "run1/derived.input.summary/99"},
+                    "input_batch_ref": {"record_id": "run1/input.batch/99"},
+                },
+            )
+            metadata.put(
+                uia_id,
+                {
+                    "record_type": "evidence.uia.snapshot",
+                    "record_id": uia_id,
+                    "run_id": "run1",
+                    "ts_utc": "2024-01-01T00:00:00+00:00",
+                    "hwnd": "100",
+                    "window": {"title": "Editor", "process_path": "editor.exe", "pid": 1234},
+                    "focus_path": [{"eid": "f1", "role": "button", "name": "Save", "rect": [0, 0, 10, 10], "enabled": True, "offscreen": False}],
+                    "context_peers": [],
+                    "operables": [{"eid": "o1", "role": "button", "name": "Run", "rect": [11, 0, 22, 10], "enabled": True, "offscreen": False}],
+                    "stats": {"walk_ms": 2, "nodes_emitted": 2, "failures": 0},
+                    "content_hash": "uia_hash_99",
+                },
+            )
+
+            derived_path = data_dir / "derived" / "stage1_derived.db"
+            derived_store = Stage1DerivedSqliteStore(derived_path)
+            ocr_id = derived_text_record_id(
+                kind="ocr",
+                run_id="run1",
+                provider_id="ocr.engine",
+                source_id=record_id,
+                config=config,
+            )
+            derived_store.put_new(
+                ocr_id,
+                {
+                    "record_type": "derived.text.ocr",
+                    "run_id": "run1",
+                    "source_id": record_id,
+                    "provider_id": "ocr.engine",
+                    "model_id": "ocr.engine",
+                    "model_digest": "digest",
+                    "text": "existing overlay text",
+                    "content_hash": hash_text(normalize_text("existing overlay text")),
+                    "ts_utc": "2024-01-01T00:00:01+00:00",
+                },
+            )
+
+            media = _TrackingMediaStore({})
+            events = _EventBuilder()
+            system = _System(config, metadata, media, _Extractor("unused"), None, events)
+
+            processor = IdleProcessor(system)
+            done, stats = processor.process_step(budget_ms=0)
+
+            self.assertIsInstance(done, bool)
+            self.assertEqual(media.calls, 0)
+            self.assertGreaterEqual(int(stats.records_completed), 1)
+            self.assertGreaterEqual(int(stats.stage1_complete_records), 1)
+            self.assertIsInstance(derived_store.get(stage1_complete_record_id(record_id), None), dict)
+            self.assertIsInstance(derived_store.get(retention_eligibility_record_id(record_id), None), dict)
+
     def test_intelligent_batch_defers_repeat_hash_vlm_and_materializes_copy(self) -> None:
         with tempfile.TemporaryDirectory():
             config = {
@@ -506,6 +674,86 @@ class IdleProcessorTests(unittest.TestCase):
             )
             self.assertIn(vlm_id_a, metadata.data)
             self.assertIn(vlm_id_b, metadata.data)
+
+    def test_batch_extract_persists_full_provider_batch_when_budget_expires_mid_batch(self) -> None:
+        config = {
+            "runtime": {"run_id": "run1"},
+            "processing": {
+                "idle": {
+                    "enabled": True,
+                    "auto_start": False,
+                    "max_items_per_run": 10,
+                    "max_seconds_per_run": 5,
+                    "sleep_ms": 1,
+                    "max_concurrency_cpu": 1,
+                    "max_concurrency_gpu": 0,
+                    "extractors": {"ocr": True, "vlm": False},
+                },
+                "sst": {"enabled": False},
+            },
+        }
+        metadata = _MetadataStore()
+        record_a = "run1/evidence.capture.frame/100"
+        record_b = "run1/evidence.capture.frame/101"
+        payload = {
+            "record_type": "evidence.capture.frame",
+            "run_id": "run1",
+            "ts_utc": "2024-01-01T00:00:00+00:00",
+            "content_hash": "hash",
+            "content_type": "image/png",
+        }
+        metadata.put(record_a, dict(payload))
+        metadata.put(record_b, dict(payload))
+        media = _MediaStore({record_a: b"frame", record_b: b"frame"})
+        events = _EventBuilder()
+        ocr = _BatchExtractor("ocr batch")
+        system = _System(config, metadata, media, ocr, None, events)
+        processor = IdleProcessor(system)
+
+        def _item(record_id: str, ts_utc: str) -> _IdleWorkItem:
+            return _IdleWorkItem(
+                source_id=record_id,
+                record_id=record_id,
+                record=metadata.data[record_id],
+                frame_bytes=b"frame",
+                run_id="run1",
+                ts_utc=ts_utc,
+                encoded_source="src",
+                parent_hash="hash",
+                missing_count=1,
+                needs_ocr=True,
+                needs_vlm=False,
+                needs_pipeline=False,
+                allow_pipeline_vlm=False,
+                deferred_vlm_from=None,
+            )
+
+        items = [_item(record_a, "2024-01-01T00:00:00+00:00"), _item(record_b, "2024-01-01T00:00:01+00:00")]
+        stats = IdleProcessStats()
+        calls = {"n": 0}
+
+        def _expired() -> bool:
+            calls["n"] += 1
+            # First two calls happen before provider output handling and must
+            # stay open; per-item checks then signal budget exhaustion.
+            return calls["n"] >= 3
+
+        processed = processor._batch_extract(
+            items=items,
+            kind="ocr",
+            providers=[("ocr.engine", ocr)],
+            allow=True,
+            max_workers=1,
+            batch_size=8,
+            should_abort=None,
+            expired=_expired,
+            stats=stats,
+            max_items=10,
+        )
+
+        self.assertEqual(processed, 2)
+        self.assertEqual(stats.processed, 2)
+        self.assertEqual(stats.ocr_ok, 2)
 
     def test_intelligent_batch_caps_vlm_records_per_run(self) -> None:
         with tempfile.TemporaryDirectory():
@@ -767,6 +1015,111 @@ class IdleProcessorTests(unittest.TestCase):
         marker = metadata.data[retention_eligibility_record_id(frame_id)]
         self.assertTrue(bool(marker.get("stage1_contract_validated", False)))
         self.assertFalse(bool(marker.get("quarantine_pending", False)))
+
+    def test_stage1_backfill_repairs_legacy_retention_without_media_and_projects_stage2(self) -> None:
+        config = {
+            "runtime": {"run_id": "run1"},
+            "processing": {
+                "idle": {
+                    "enabled": True,
+                    "auto_start": False,
+                    "max_items_per_run": 10,
+                    "max_seconds_per_run": 5,
+                    "max_concurrency_cpu": 1,
+                    "max_concurrency_gpu": 0,
+                    "extractors": {"ocr": True, "vlm": False},
+                    "stage1_marker_backfill": {"enabled": True, "max_records_per_run": 10},
+                },
+                "sst": {"enabled": False},
+            },
+        }
+        metadata = _MetadataStore()
+        frame_id = "run1/evidence.capture.frame/0"
+        uia_id = "run1/evidence.uia.snapshot/0"
+        metadata.put(
+            frame_id,
+            {
+                "record_type": "evidence.capture.frame",
+                "run_id": "run1",
+                "ts_utc": "2024-01-01T00:00:00+00:00",
+                "blob_path": "media/frame0.png",
+                "content_hash": "hash_frame_0",
+                "uia_ref": {"record_id": uia_id, "content_hash": "uia_hash_0"},
+                "input_ref": {"record_id": "run1/evidence.input.batch/0"},
+                "content_type": "image/png",
+                "desktop_rect": [0, 0, 1920, 1080],
+                "width": 1920,
+                "height": 1080,
+            },
+        )
+        metadata.put(
+            uia_id,
+            {
+                "record_type": "evidence.uia.snapshot",
+                "record_id": uia_id,
+                "run_id": "run1",
+                "ts_utc": "2024-01-01T00:00:00+00:00",
+                "unix_ms_utc": 1704067200000,
+                "hwnd": "101",
+                "window": {"title": "Outlook", "process_path": "outlook.exe", "pid": 1234},
+                "focus_path": [{"eid": "n1", "role": "button", "name": "Complete", "rect": [10, 10, 80, 30], "enabled": True, "offscreen": False}],
+                "context_peers": [],
+                "operables": [{"eid": "n2", "role": "button", "name": "View", "rect": [90, 10, 150, 30], "enabled": True, "offscreen": False}],
+                "stats": {"walk_ms": 2, "nodes_emitted": 2, "failures": 0},
+                "content_hash": "uia_hash_0",
+            },
+        )
+        metadata.put(
+            stage1_complete_record_id(frame_id),
+            {
+                "record_type": "derived.ingest.stage1.complete",
+                "run_id": "run1",
+                "source_record_id": frame_id,
+                "source_record_type": "evidence.capture.frame",
+                "complete": True,
+                "uia_record_id": uia_id,
+                "uia_content_hash": "uia_hash_0",
+                "ts_utc": "2024-01-01T00:00:00+00:00",
+            },
+        )
+        metadata.put(
+            retention_eligibility_record_id(frame_id),
+            {
+                "record_type": "retention.eligible",
+                "run_id": "run1",
+                "source_record_id": frame_id,
+                "source_record_type": "evidence.capture.frame",
+                "eligible": True,
+            },
+        )
+        checkpoint_id = "system/derived.idle.checkpoint"
+        metadata.put(
+            checkpoint_id,
+            {
+                "record_type": "derived.idle.checkpoint",
+                "run_id": "run1",
+                "ts_utc": "2024-01-01T00:00:01+00:00",
+                "last_record_id": frame_id,
+                "processed_total": 1,
+            },
+        )
+        media = _MediaStore({})
+        ocr = _Extractor("should not run")
+        events = _EventBuilder()
+        system = _System(config, metadata, media, ocr, None, events)
+
+        processor = IdleProcessor(system)
+        done, stats = processor.process_step(budget_ms=0)
+
+        self.assertTrue(done)
+        self.assertEqual(ocr.calls, 0)
+        self.assertGreaterEqual(int(stats.stage1_backfill_scanned_records), 1)
+        self.assertGreaterEqual(int(stats.stage2_complete_records), 1)
+        marker = metadata.data[retention_eligibility_record_id(frame_id)]
+        self.assertTrue(bool(marker.get("stage1_contract_validated", False)))
+        self.assertFalse(bool(marker.get("quarantine_pending", False)))
+        stage2_marker = metadata.data.get(stage2_complete_record_id(frame_id), {})
+        self.assertTrue(bool(stage2_marker.get("complete", False)))
 
     def test_stage1_backfill_inserts_uia_obs_docs_when_snapshot_present(self) -> None:
         config = {
@@ -1077,6 +1430,123 @@ class IdleProcessorTests(unittest.TestCase):
         self.assertTrue(bool(metadata.data[stage2_id].get("complete", False)))
         self.assertGreaterEqual(int(stats.stage1_backfill_scanned_records), 1)
 
+    def test_stage1_backfill_not_done_until_checkpoint_prefix_scan_exhausted(self) -> None:
+        config = {
+            "runtime": {"run_id": "run1"},
+            "storage": {"data_dir": "/tmp/autocapture", "stage1_derived": {"enabled": False}},
+            "processing": {
+                "idle": {
+                    "enabled": True,
+                    "auto_start": False,
+                    "max_items_per_run": 10,
+                    "max_seconds_per_run": 5,
+                    "max_concurrency_cpu": 1,
+                    "max_concurrency_gpu": 0,
+                    "extractors": {"ocr": False, "vlm": False},
+                    "stage1_marker_backfill": {
+                        "enabled": True,
+                        "max_records_per_run": 1,
+                    },
+                },
+                "sst": {"enabled": False},
+            },
+        }
+        metadata = _MetadataStore()
+        media = _MediaStore({})
+
+        frame_ids = [f"run1/evidence.capture.frame/{idx}" for idx in range(3)]
+        for idx, frame_id in enumerate(frame_ids):
+            uia_id = f"run1/evidence.uia.snapshot/{idx}"
+            uia_hash = f"uia_hash_{idx}"
+            metadata.put(
+                frame_id,
+                {
+                    "record_type": "evidence.capture.frame",
+                    "run_id": "run1",
+                    "ts_utc": f"2024-01-01T00:00:0{idx}+00:00",
+                    "blob_path": f"media/frame{idx}.png",
+                    "content_hash": f"hash_frame_{idx}",
+                    "uia_ref": {"record_id": uia_id, "content_hash": uia_hash},
+                    "input_ref": {"record_id": f"run1/evidence.input.batch/{idx}"},
+                    "content_type": "image/png",
+                    "desktop_rect": [0, 0, 1920, 1080],
+                },
+            )
+            metadata.put(
+                uia_id,
+                {
+                    "record_type": "evidence.uia.snapshot",
+                    "record_id": uia_id,
+                    "run_id": "run1",
+                    "ts_utc": f"2024-01-01T00:00:0{idx}+00:00",
+                    "unix_ms_utc": 1704067200000 + idx,
+                    "hwnd": "101",
+                    "window": {"title": "Outlook", "process_path": "outlook.exe", "pid": 1234},
+                    "focus_path": [{"eid": "n1", "role": "button", "name": "Complete", "rect": [10, 10, 80, 30]}],
+                    "context_peers": [],
+                    "operables": [{"eid": "n2", "role": "button", "name": "View", "rect": [90, 10, 150, 30]}],
+                    "content_hash": uia_hash,
+                },
+            )
+            metadata.put(
+                stage1_complete_record_id(frame_id),
+                {
+                    "record_type": "derived.ingest.stage1.complete",
+                    "run_id": "run1",
+                    "source_record_id": frame_id,
+                    "complete": True,
+                },
+            )
+            metadata.put(
+                retention_eligibility_record_id(frame_id),
+                {
+                    "record_type": "retention.eligible",
+                    "run_id": "run1",
+                    "source_record_id": frame_id,
+                    "source_record_type": "evidence.capture.frame",
+                    "eligible": True,
+                    "stage1_contract_validated": True,
+                    "quarantine_pending": False,
+                },
+            )
+            for kind, doc_id in _frame_uia_expected_ids(uia_id).items():
+                metadata.put(
+                    doc_id,
+                    {
+                        "record_type": kind,
+                        "run_id": "run1",
+                        "source_record_id": frame_id,
+                        "uia_record_id": uia_id,
+                        "uia_content_hash": uia_hash,
+                    },
+                )
+
+        metadata.put(
+            "system/derived.idle.checkpoint",
+            {
+                "record_type": "derived.idle.checkpoint",
+                "run_id": "run1",
+                "ts_utc": "2024-01-01T00:00:10+00:00",
+                "last_record_id": frame_ids[-1],
+                "processed_total": 3,
+            },
+        )
+
+        processor = IdleProcessor(_System(config, metadata, media, None, None, _EventBuilder()))
+        done_1, stats_1 = processor.process_step(budget_ms=0)
+        done_2, stats_2 = processor.process_step(budget_ms=0)
+        done_3, stats_3 = processor.process_step(budget_ms=0)
+
+        self.assertFalse(done_1)
+        self.assertFalse(done_2)
+        self.assertTrue(done_3)
+        self.assertGreaterEqual(int(stats_1.stage2_complete_records), 1)
+        self.assertGreaterEqual(int(stats_2.stage2_complete_records), 1)
+        self.assertGreaterEqual(int(stats_3.stage2_complete_records), 1)
+        for frame_id in frame_ids:
+            marker = metadata.get(stage2_complete_record_id(frame_id), {})
+            self.assertTrue(bool(marker.get("complete", False)))
+
     def test_stage2_projection_refreshes_indexes_for_immediate_retrieval(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config = {
@@ -1166,6 +1636,126 @@ class IdleProcessorTests(unittest.TestCase):
             self.assertTrue(lexical_tiers)
             self.assertGreaterEqual(int(lexical_tiers[0].get("result_count", 0) or 0), 1)
             self.assertFalse(any(str(row.get("tier") or "") == "LATEST_SCAN" for row in trace))
+
+    def test_stage1_backfill_scans_newest_tail_even_when_checkpoint_is_early(self) -> None:
+        config = {
+            "runtime": {"run_id": "run1"},
+            "storage": {"data_dir": "/tmp/autocapture", "stage1_derived": {"enabled": False}},
+            "processing": {
+                "idle": {
+                    "enabled": True,
+                    "auto_start": False,
+                    "max_items_per_run": 10,
+                    "max_seconds_per_run": 5,
+                    "max_concurrency_cpu": 1,
+                    "max_concurrency_gpu": 0,
+                    "extractors": {"ocr": False, "vlm": False},
+                    "stage1_marker_backfill": {
+                        "enabled": True,
+                        "max_records_per_run": 2,
+                        "initial_scan_records": 8,
+                    },
+                },
+                "sst": {"enabled": False},
+            },
+        }
+        metadata = _MetadataStore()
+        media = _MediaStore({})
+
+        frame_ids = [f"run1/evidence.capture.frame/{idx}" for idx in range(6)]
+        for idx, frame_id in enumerate(frame_ids):
+            uia_id = f"run1/evidence.uia.snapshot/{idx}"
+            uia_hash = f"uia_hash_{idx}"
+            metadata.put(
+                frame_id,
+                {
+                    "record_type": "evidence.capture.frame",
+                    "run_id": "run1",
+                    "ts_utc": f"2024-01-01T00:00:{idx:02d}+00:00",
+                    "blob_path": f"media/frame{idx}.png",
+                    "content_hash": f"hash_frame_{idx}",
+                    "uia_ref": {"record_id": uia_id, "content_hash": uia_hash},
+                    "input_ref": {"record_id": f"run1/evidence.input.batch/{idx}"},
+                    "content_type": "image/png",
+                    "desktop_rect": [0, 0, 1920, 1080],
+                },
+            )
+            metadata.put(
+                uia_id,
+                {
+                    "record_type": "evidence.uia.snapshot",
+                    "record_id": uia_id,
+                    "run_id": "run1",
+                    "ts_utc": f"2024-01-01T00:00:{idx:02d}+00:00",
+                    "unix_ms_utc": 1704067200000 + idx,
+                    "hwnd": "101",
+                    "window": {"title": "Outlook", "process_path": "outlook.exe", "pid": 1234},
+                    "focus_path": [{"eid": "n1", "role": "button", "name": "Complete", "rect": [10, 10, 80, 30]}],
+                    "context_peers": [],
+                    "operables": [{"eid": "n2", "role": "button", "name": "View", "rect": [90, 10, 150, 30]}],
+                    "content_hash": uia_hash,
+                },
+            )
+            metadata.put(
+                stage1_complete_record_id(frame_id),
+                {
+                    "record_type": "derived.ingest.stage1.complete",
+                    "run_id": "run1",
+                    "source_record_id": frame_id,
+                    "complete": True,
+                },
+            )
+            metadata.put(
+                retention_eligibility_record_id(frame_id),
+                {
+                    "record_type": "retention.eligible",
+                    "run_id": "run1",
+                    "source_record_id": frame_id,
+                    "source_record_type": "evidence.capture.frame",
+                    "eligible": True,
+                    "stage1_contract_validated": True,
+                    "quarantine_pending": False,
+                },
+            )
+            for kind, doc_id in _frame_uia_expected_ids(uia_id).items():
+                metadata.put(
+                    doc_id,
+                    {
+                        "record_type": kind,
+                        "run_id": "run1",
+                        "source_record_id": frame_id,
+                        "uia_record_id": uia_id,
+                        "uia_content_hash": uia_hash,
+                    },
+                )
+            if idx < (len(frame_ids) - 1):
+                metadata.put(
+                    stage2_complete_record_id(frame_id),
+                    {
+                        "record_type": "derived.ingest.stage2.complete",
+                        "run_id": "run1",
+                        "source_record_id": frame_id,
+                        "complete": True,
+                    },
+                )
+
+        metadata.put(
+            "system/derived.idle.checkpoint",
+            {
+                "record_type": "derived.idle.checkpoint",
+                "run_id": "run1",
+                "ts_utc": "2024-01-01T00:00:10+00:00",
+                "last_record_id": frame_ids[0],
+                "processed_total": 1,
+            },
+        )
+
+        processor = IdleProcessor(_System(config, metadata, media, None, None, _EventBuilder()))
+        _done, stats = processor.process_step(budget_ms=0)
+
+        newest_marker = metadata.get(stage2_complete_record_id(frame_ids[-1]), {})
+        self.assertTrue(bool(newest_marker.get("complete", False)))
+        self.assertGreaterEqual(int(stats.stage2_complete_records), 1)
 
     def test_stage1_backfill_uses_plugin_uia_dataroot_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

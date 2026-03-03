@@ -824,13 +824,30 @@ def main(argv: list[str] | None = None) -> int:
     # Hard policy invariants for safety.
     base_cfg.setdefault("storage", {})
     if isinstance(base_cfg["storage"], dict):
-        base_cfg["storage"]["data_dir"] = str(data_dir)
-        base_cfg["storage"]["no_deletion_mode"] = True
-        base_cfg["storage"]["raw_first_local"] = True
+        storage_cfg = base_cfg["storage"]
+        run_data_dir = Path(data_dir)
+        storage_cfg["data_dir"] = str(run_data_dir)
+        # Keep storage paths absolute so plugin filesystem guards do not reject
+        # fallback probes that would otherwise resolve to repo-local relative paths.
+        storage_cfg["metadata_path"] = str(run_data_dir / "metadata.db")
+        storage_cfg["metadata_fallback_paths"] = [
+            str(run_data_dir / "metadata.live.db"),
+            str(run_data_dir / "metadata" / "metadata.db"),
+        ]
+        storage_cfg["media_dir"] = str(run_data_dir / "media")
+        storage_cfg["blob_dir"] = str(run_data_dir / "blobs")
+        storage_cfg["spool_dir"] = str(run_data_dir / "spool")
+        storage_cfg["audit_db_path"] = str(run_data_dir / "audit" / "kernel_audit.db")
+        storage_cfg["lexical_path"] = str(run_data_dir / "lexical.db")
+        storage_cfg["vector_path"] = str(run_data_dir / "vector.db")
+        storage_cfg["state_tape_path"] = str(run_data_dir / "state" / "state_tape.db")
+        storage_cfg["state_vector_path"] = str(run_data_dir / "state" / "state_vector.db")
+        storage_cfg["no_deletion_mode"] = True
+        storage_cfg["raw_first_local"] = True
         # Keep the storage_sqlcipher plugin but run it in plaintext mode so we can
         # persist metadata/media on disk without relying on keyring material.
-        base_cfg["storage"]["encryption_enabled"] = False
-        base_cfg["storage"]["encryption_required"] = False
+        storage_cfg["encryption_enabled"] = False
+        storage_cfg["encryption_required"] = False
     base_cfg.setdefault("paths", {})
     if isinstance(base_cfg["paths"], dict):
         # IMPORTANT: apply_path_defaults prefers `paths.*` over env vars. If left

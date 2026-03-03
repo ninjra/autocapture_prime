@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -347,6 +348,251 @@ class RuntimeBatchAdaptiveParallelismTests(unittest.TestCase):
         step = steps[0] if isinstance(steps[0], dict) else {}
         self.assertEqual(str(step.get("mode") or ""), "IDLE_DRAIN")
         self.assertEqual(str(step.get("reason") or ""), "fixture_override")
+
+    def test_run_processing_batch_no_require_idle_allows_churn_guard(self) -> None:
+        class _Lease:
+            def __init__(self) -> None:
+                self.allowed = True
+                self.granted_ms = 2500
+
+            def record(self, _consumed_ms):  # noqa: ANN001
+                return None
+
+        class _Governor:
+            def update_config(self, _cfg):  # noqa: ANN001
+                return None
+
+            def decide(self, _signals):  # noqa: ANN001
+                return SimpleNamespace(
+                    mode="IDLE_DRAIN",
+                    heavy_allowed=True,
+                    reason="fixture_override",
+                    budget=SimpleNamespace(remaining_ms=2500),
+                )
+
+            def lease(self, _job_name, _estimated_ms, heavy=True):  # noqa: ANN001
+                _ = heavy
+                return _Lease()
+
+            def should_preempt(self, _signals=None):  # noqa: ANN001
+                return False
+
+        class _Conductor:
+            def __init__(self) -> None:
+                self._governor = _Governor()
+
+            def _signals(self):  # noqa: ANN001
+                return {"user_active": True, "activity_recent": True, "idle_seconds": 0.0}
+
+        class _System:
+            def __init__(self, base: dict[str, object]) -> None:
+                self.config = base
+
+            def get(self, _name):  # noqa: ANN001
+                return None
+
+        system = _System(self._base_config())
+        with (
+            mock.patch("autocapture_nx.runtime.batch.create_conductor", return_value=_Conductor()),
+            mock.patch("autocapture_nx.runtime.batch.IdleProcessor") as processor_cls,
+            mock.patch(
+                "autocapture_nx.runtime.batch._metadata_db_guard",
+                return_value={
+                    "enabled": True,
+                    "ok": False,
+                    "fail_closed": True,
+                    "reason": "metadata_db_churn_detected",
+                    "snapshot": {"stable": False},
+                },
+            ),
+            mock.patch(
+                "autocapture_nx.runtime.batch.auto_drain_handoff_spool",
+                return_value={"ok": True, "processed": 0, "errors": 0},
+            ),
+        ):
+            processor = processor_cls.return_value
+            processor.process_step.return_value = (True, {"records_completed": 1, "pending_records": 0})
+            out = run_processing_batch(system, max_loops=3, sleep_ms=1, require_idle=False)
+        self.assertTrue(bool(out.get("ok", False)))
+        self.assertEqual(int(out.get("loops") or 0), 1)
+        self.assertEqual(str(out.get("blocked_reason") or ""), "")
+
+
+    def test_metadata_db_guard_io_error_detected(self) -> None:
+        config = self._base_config()
+        config["processing"]["idle"]["metadata_db_guard"] = {
+            "enabled": True,
+            "fail_closed": True,
+            "sample_count": 3,
+            "poll_interval_ms": 50,
+        }
+        with mock.patch(
+            "autocapture_nx.runtime.batch.metadata_db_stability_snapshot",
+            return_value={
+                "ok": False,
+                "exists": True,
+                "stable": None,
+                "reason": "metadata_db_io_error",
+                "io_error": True,
+                "io_error_detail": "OperationalError:disk I/O error",
+            },
+        ):
+            guard = _metadata_db_guard(config)
+        self.assertIsInstance(guard, dict)
+        self.assertFalse(bool(guard.get("ok", True)))
+        self.assertTrue(bool(guard.get("io_error", False)))
+        self.assertEqual(str(guard.get("reason")), "metadata_db_io_error")
+
+    def test_run_processing_batch_io_error_fallback_to_live_db(self) -> None:
+        class _Lease:
+            def __init__(self) -> None:
+                self.allowed = True
+                self.granted_ms = 2500
+
+            def record(self, _consumed_ms):  # noqa: ANN001
+                return None
+
+        class _Governor:
+            def update_config(self, _cfg):  # noqa: ANN001
+                return None
+
+            def decide(self, _signals):  # noqa: ANN001
+                return SimpleNamespace(
+                    mode="IDLE_DRAIN",
+                    heavy_allowed=True,
+                    reason="fixture_override",
+                    budget=SimpleNamespace(remaining_ms=2500),
+                )
+
+            def lease(self, _job_name, _estimated_ms, heavy=True):  # noqa: ANN001
+                _ = heavy
+                return _Lease()
+
+            def should_preempt(self, _signals=None):  # noqa: ANN001
+                return False
+
+        class _Conductor:
+            def __init__(self) -> None:
+                self._governor = _Governor()
+
+            def _signals(self):  # noqa: ANN001
+                return {}
+
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            live = data_dir / "metadata.live.db"
+            live.write_text("", encoding="utf-8")
+            primary = data_dir / "metadata.db"
+            primary.write_text("", encoding="utf-8")
+
+            config = self._base_config()
+            config["storage"] = {"metadata_path": str(primary)}
+
+            class _System:
+                def __init__(self, base: dict[str, object]) -> None:
+                    self.config = base
+
+                def get(self, _name):  # noqa: ANN001
+                    return None
+
+            system = _System(config)
+            with (
+                mock.patch("autocapture_nx.runtime.batch.create_conductor", return_value=_Conductor()),
+                mock.patch("autocapture_nx.runtime.batch.IdleProcessor") as processor_cls,
+                mock.patch(
+                    "autocapture_nx.runtime.batch._metadata_db_guard",
+                    return_value={
+                        "enabled": True,
+                        "ok": False,
+                        "fail_closed": True,
+                        "reason": "metadata_db_io_error",
+                        "io_error": True,
+                        "snapshot": {"stable": None, "io_error": True},
+                    },
+                ),
+                mock.patch(
+                    "autocapture_nx.kernel.db_status._sqlite_probe_readonly",
+                    return_value=(True, "ok"),
+                ),
+                mock.patch(
+                    "autocapture_nx.runtime.batch.auto_drain_handoff_spool",
+                    return_value={"ok": True, "processed": 0, "errors": 0},
+                ),
+            ):
+                processor = processor_cls.return_value
+                processor.process_step.return_value = (True, {"records_completed": 1, "pending_records": 0})
+                out = run_processing_batch(system, max_loops=3, sleep_ms=1, require_idle=False)
+            self.assertTrue(bool(out.get("ok", False)))
+            guard = out.get("metadata_db_guard", {}) if isinstance(out.get("metadata_db_guard"), dict) else {}
+            self.assertEqual(str(guard.get("reason", "")), "primary_io_error_fallback_live")
+            self.assertTrue(bool(guard.get("io_error_fallback", False)))
+
+    def test_zero_throughput_escalation_guard(self) -> None:
+        class _Lease:
+            def __init__(self) -> None:
+                self.allowed = True
+                self.granted_ms = 2500
+
+            def record(self, _consumed_ms):  # noqa: ANN001
+                return None
+
+        class _Governor:
+            def update_config(self, _cfg):  # noqa: ANN001
+                return None
+
+            def decide(self, _signals):  # noqa: ANN001
+                return SimpleNamespace(
+                    mode="IDLE_DRAIN",
+                    heavy_allowed=True,
+                    reason="idle",
+                    budget=SimpleNamespace(remaining_ms=2500),
+                )
+
+            def lease(self, _job_name, _estimated_ms, heavy=True):  # noqa: ANN001
+                _ = heavy
+                return _Lease()
+
+            def should_preempt(self, _signals=None):  # noqa: ANN001
+                return False
+
+        class _Conductor:
+            def __init__(self) -> None:
+                self._governor = _Governor()
+
+            def _signals(self):  # noqa: ANN001
+                return {"cpu_utilization": 0.2, "ram_utilization": 0.2}
+
+        class _System:
+            def __init__(self, base: dict[str, object]) -> None:
+                self.config = base
+
+            def get(self, _name):  # noqa: ANN001
+                return None
+
+        config = self._base_config()
+        system = _System(config)
+        with (
+            mock.patch("autocapture_nx.runtime.batch.create_conductor", return_value=_Conductor()),
+            mock.patch("autocapture_nx.runtime.batch.IdleProcessor") as processor_cls,
+            mock.patch(
+                "autocapture_nx.runtime.batch._metadata_db_guard",
+                return_value={"enabled": True, "ok": True, "fail_closed": True, "reason": "ok", "snapshot": {"stable": True}},
+            ),
+            mock.patch(
+                "autocapture_nx.runtime.batch.auto_drain_handoff_spool",
+                return_value={"ok": True, "processed": 0, "errors": 0},
+            ),
+        ):
+            processor = processor_cls.return_value
+            # Always return zero completions with pending records
+            processor.process_step.return_value = (False, {"records_completed": 0, "pending_records": 100})
+            out = run_processing_batch(system, max_loops=10, sleep_ms=0, require_idle=False)
+        self.assertFalse(bool(out.get("ok", False)))
+        self.assertEqual(str(out.get("blocked_reason") or ""), "throughput_zero_escalation_exhausted")
+        slo_alerts = [str(x) for x in (out.get("slo_alerts") or [])]
+        self.assertIn("throughput_zero_with_backlog", slo_alerts)
+        self.assertIn("throughput_zero_escalation_exhausted", slo_alerts)
 
 
 if __name__ == "__main__":

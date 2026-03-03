@@ -63,11 +63,24 @@ def _ensure_frame_uia_docs(
     snapshot_metadata: Any | None = None,
     allow_latest_snapshot_fallback: bool = True,
     require_hash_match: bool = True,
+    logger: Any | None = None,
 ) -> dict[str, Any]:
+    def _emit(result: dict[str, Any]) -> dict[str, Any]:
+        if logger is not None and bool(result.get("required", False)) and not bool(result.get("ok", True)):
+            try:
+                logger.log("uia_obs.emission_failure", {
+                    "source_record_id": str(source_record_id),
+                    "reason": str(result.get("reason") or ""),
+                    "require_hash_match": bool(require_hash_match),
+                })
+            except Exception:
+                pass
+        return result
+
     if not isinstance(record, dict):
-        return {"required": False, "ok": True, "inserted": 0, "reason": "invalid_record"}
+        return _emit({"required": False, "ok": True, "inserted": 0, "reason": "invalid_record"})
     if str(record.get("record_type") or "") != "evidence.capture.frame":
-        return {"required": False, "ok": True, "inserted": 0, "reason": "not_frame"}
+        return _emit({"required": False, "ok": True, "inserted": 0, "reason": "not_frame"})
     uia_ref_raw = record.get("uia_ref")
     uia_ref: dict[str, Any] = uia_ref_raw if isinstance(uia_ref_raw, dict) else {}
     uia_record_id = str(uia_ref.get("record_id") or "").strip()
@@ -85,7 +98,7 @@ def _ensure_frame_uia_docs(
         from plugins.builtin.processing_sst_uia_context.plugin import _fallback_hash_ok as _uia_fallback_hash_ok
         from plugins.builtin.processing_sst_uia_context.plugin import _matches_uia_ref as _uia_matches_uia_ref
     except Exception:
-        return {"required": True, "ok": False, "inserted": 0, "reason": "snapshot_plugin_unavailable"}
+        return _emit({"required": True, "ok": False, "inserted": 0, "reason": "snapshot_plugin_unavailable"})
 
     snapshot: dict[str, Any] | None = None
     snapshot_source = snapshot_metadata if snapshot_metadata is not None else metadata
@@ -123,13 +136,13 @@ def _ensure_frame_uia_docs(
                 file_hash = hashlib.sha256(raw_bytes).hexdigest().lower()
                 parsed = json.loads(raw_bytes.decode("utf-8"))
             except Exception:
-                return {"required": True, "ok": False, "inserted": 0, "reason": "fallback_parse_failed"}
+                return _emit({"required": True, "ok": False, "inserted": 0, "reason": "fallback_parse_failed"})
             fallback_snapshot = _uia_extract_snapshot_dict(parsed)
             if not isinstance(fallback_snapshot, dict):
-                return {"required": True, "ok": False, "inserted": 0, "reason": "fallback_snapshot_missing"}
+                return _emit({"required": True, "ok": False, "inserted": 0, "reason": "fallback_snapshot_missing"})
             fallback_record_type = str(fallback_snapshot.get("record_type") or "").strip()
             if fallback_record_type not in {"", "evidence.uia.snapshot"}:
-                return {"required": True, "ok": False, "inserted": 0, "reason": "fallback_record_type_invalid"}
+                return _emit({"required": True, "ok": False, "inserted": 0, "reason": "fallback_record_type_invalid"})
             hash_ok = _uia_fallback_hash_ok(
                 snapshot=fallback_snapshot,
                 uia_ref=uia_ref,
@@ -138,18 +151,18 @@ def _ensure_frame_uia_docs(
                 hash_file_path=latest_path.with_suffix(".sha256"),
             )
             if not bool(hash_ok):
-                return {"required": True, "ok": False, "inserted": 0, "reason": "fallback_hash_mismatch"}
+                return _emit({"required": True, "ok": False, "inserted": 0, "reason": "fallback_hash_mismatch"})
             snapshot = fallback_snapshot
 
     if not isinstance(snapshot, dict):
         reason = "snapshot_missing" if metadata_status == "lookup_failed" else "snapshot_invalid"
-        return {"required": True, "ok": False, "inserted": 0, "reason": reason}
+        return _emit({"required": True, "ok": False, "inserted": 0, "reason": reason})
 
     try:
         from plugins.builtin.processing_sst_uia_context.plugin import _parse_settings as _uia_parse_settings
         from plugins.builtin.processing_sst_uia_context.plugin import _snapshot_to_docs as _uia_snapshot_to_docs
     except Exception:
-        return {"required": True, "ok": False, "inserted": 0, "reason": "snapshot_plugin_unavailable"}
+        return _emit({"required": True, "ok": False, "inserted": 0, "reason": "snapshot_plugin_unavailable"})
 
     width, height = _frame_dims(record)
     docs = _uia_snapshot_to_docs(
@@ -167,7 +180,7 @@ def _ensure_frame_uia_docs(
         ),
     )
     if not docs:
-        return {"required": True, "ok": False, "inserted": 0, "reason": "snapshot_to_docs_empty"}
+        return _emit({"required": True, "ok": False, "inserted": 0, "reason": "snapshot_to_docs_empty"})
 
     run_id = str(record.get("run_id") or (source_record_id.split("/", 1)[0] if "/" in source_record_id else "run"))
     ts_utc = _source_ts(record)
@@ -208,10 +221,10 @@ def _ensure_frame_uia_docs(
         except FileExistsError:
             continue
         except Exception:
-            return {"required": True, "ok": False, "inserted": int(inserted), "reason": "doc_insert_failed"}
+            return _emit({"required": True, "ok": False, "inserted": int(inserted), "reason": "doc_insert_failed"})
 
     for kind, doc_id in expected_ids.items():
         row = metadata.get(doc_id, None) if hasattr(metadata, "get") else None
         if not (isinstance(row, dict) and str(row.get("record_type") or "") == kind):
-            return {"required": True, "ok": False, "inserted": int(inserted), "reason": "doc_missing_after_insert"}
+            return _emit({"required": True, "ok": False, "inserted": int(inserted), "reason": "doc_missing_after_insert"})
     return {"required": True, "ok": True, "inserted": int(inserted), "reason": "ok"}

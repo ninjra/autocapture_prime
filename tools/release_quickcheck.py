@@ -15,6 +15,22 @@ def _utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _parse_iso_utc(raw: Any) -> datetime | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    normalized = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+    return parsed
+
+
 def _load_json(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
@@ -126,7 +142,7 @@ def _popup_failure_reasons(popup: dict[str, Any], popup_misses: dict[str, Any] |
     return reasons
 
 
-def build_quickcheck(*, root: Path) -> dict[str, Any]:
+def build_quickcheck(*, root: Path, max_freshness_lag_hours: float = 24.0) -> dict[str, Any]:
     release_path = root / "artifacts/release/release_gate_latest.json"
     popup_path = root / "artifacts/query_acceptance/popup_regression_latest.json"
     popup_misses_path = root / "artifacts/query_acceptance/popup_regression_misses_latest.json"
@@ -157,10 +173,23 @@ def build_quickcheck(*, root: Path) -> dict[str, Any]:
     stage_summary = {}
     if isinstance(lineage, dict):
         summary = lineage.get("summary", {}) if isinstance(lineage.get("summary", {}), dict) else {}
+        windows = lineage.get("queryable_windows", []) if isinstance(lineage.get("queryable_windows", []), list) else []
         frames_total = _to_int(summary.get("frames_total", 0))
         frames_queryable = _to_int(summary.get("frames_queryable", 0))
         lineage_complete = _to_int(summary.get("lineage_complete", lineage.get("lineage_complete", -1)))
         lineage_incomplete = _to_int(summary.get("lineage_incomplete", lineage.get("lineage_incomplete", -1)))
+        latest_queryable_dt: datetime | None = None
+        for row in windows:
+            if not isinstance(row, dict):
+                continue
+            end_dt = _parse_iso_utc(row.get("end_utc"))
+            if end_dt is None:
+                continue
+            if latest_queryable_dt is None or end_dt > latest_queryable_dt:
+                latest_queryable_dt = end_dt
+        freshness_lag_hours = None
+        if latest_queryable_dt is not None:
+            freshness_lag_hours = max(0.0, round((datetime.now(timezone.utc) - latest_queryable_dt).total_seconds() / 3600.0, 6))
         if lineage_complete < 0:
             lineage_complete = max(0, frames_queryable)
         if lineage_incomplete < 0:
@@ -172,6 +201,8 @@ def build_quickcheck(*, root: Path) -> dict[str, Any]:
             "lineage_complete": lineage_complete,
             "lineage_incomplete": lineage_incomplete,
             "lineage_path": str(lineage_path) if isinstance(lineage_path, Path) else "",
+            "latest_queryable_ts_utc": latest_queryable_dt.isoformat().replace("+00:00", "Z") if latest_queryable_dt is not None else "",
+            "freshness_lag_hours": freshness_lag_hours,
         }
     else:
         stage_summary = {
@@ -181,6 +212,8 @@ def build_quickcheck(*, root: Path) -> dict[str, Any]:
             "lineage_complete": 0,
             "lineage_incomplete": 0,
             "lineage_path": str(lineage_path) if isinstance(lineage_path, Path) else "",
+            "latest_queryable_ts_utc": "",
+            "freshness_lag_hours": None,
         }
 
     q40_source_tier = str((q40 or {}).get("source_tier") or "").strip().lower()
@@ -189,12 +222,23 @@ def build_quickcheck(*, root: Path) -> dict[str, Any]:
     real_corpus_ok_with_real_source = bool(
         isinstance(real_corpus, dict) and real_corpus.get("ok") is True and real_source_tier == "real"
     )
+    freshness_lag_hours = stage_summary.get("freshness_lag_hours")
+    freshness_ok = True
+    if isinstance(freshness_lag_hours, (int, float)):
+        freshness_ok = float(freshness_lag_hours) <= float(max_freshness_lag_hours)
+    popup_sample = _to_int((popup or {}).get("sample_count", 0))
+    popup_accepted = _to_int((popup or {}).get("accepted_count", 0))
+    popup_failed = _to_int((popup or {}).get("failed_count", 0))
+    popup_contract_ok = (popup_sample <= 0) or (popup_accepted >= popup_sample and popup_failed == 0)
+    popup_strict_ok = bool(isinstance(popup, dict) and popup.get("ok") is True and popup_contract_ok)
+
     statuses = {
         "release_gate_ok": bool(isinstance(release, dict) and release.get("ok") is True),
-        "popup_strict_ok": bool(isinstance(popup, dict) and popup.get("ok") is True),
+        "popup_strict_ok": bool(popup_strict_ok),
         "q40_strict_ok": bool(q40_ok_with_real_source),
         "temporal40_strict_ok": bool(isinstance(temporal, dict) and temporal.get("ok") is True),
         "real_corpus_strict_ok": bool(real_corpus_ok_with_real_source),
+        "freshness_ok": bool(freshness_ok),
     }
     all_ok = all(bool(v) for v in statuses.values()) and len(missing_artifacts) == 0
 
@@ -202,7 +246,7 @@ def build_quickcheck(*, root: Path) -> dict[str, Any]:
     if isinstance(release, dict) and not bool(release.get("ok", False)):
         for reason in _extract_reason_candidates(release):
             reason_counter[str(reason)] += 1
-    if isinstance(popup, dict) and not bool(popup.get("ok", False)):
+    if isinstance(popup, dict) and not popup_strict_ok:
         for reason in _popup_failure_reasons(popup, popup_misses):
             reason_counter[str(reason)] += 1
     if isinstance(q40, dict) and not bool(q40.get("ok", False)):
@@ -218,6 +262,8 @@ def build_quickcheck(*, root: Path) -> dict[str, Any]:
             reason_counter[str(reason)] += 1
     elif isinstance(real_corpus, dict) and real_source_tier != "real":
         reason_counter["real_corpus.source_tier_not_real"] += 1
+    if not freshness_ok:
+        reason_counter["freshness_lag_exceeded"] += 1
     for path in missing_artifacts:
         reason_counter[f"missing_artifact:{path}"] += 1
     top_failure_reasons = [key for key, _count in reason_counter.most_common(8)]
@@ -262,6 +308,9 @@ def build_quickcheck(*, root: Path) -> dict[str, Any]:
         "stage_coverage": stage_summary,
         "top_failure_reasons": top_failure_reasons,
         "missing_artifacts": missing_artifacts,
+        "thresholds": {
+            "max_freshness_lag_hours": float(max_freshness_lag_hours),
+        },
     }
 
 
@@ -269,11 +318,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Quick operator status for strict golden pipeline readiness.")
     parser.add_argument("--repo-root", default="")
     parser.add_argument("--output", default="artifacts/release/release_quickcheck_latest.json")
+    parser.add_argument("--max-freshness-lag-hours", type=float, default=24.0)
     parser.add_argument("--strict-exit", action=argparse.BooleanOptionalAction, default=False)
     args = parser.parse_args(argv)
 
     root = Path(str(args.repo_root)).expanduser().resolve() if str(args.repo_root).strip() else Path(__file__).resolve().parents[1]
-    payload = build_quickcheck(root=root)
+    payload = build_quickcheck(root=root, max_freshness_lag_hours=float(args.max_freshness_lag_hours))
     out_path = root / str(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")

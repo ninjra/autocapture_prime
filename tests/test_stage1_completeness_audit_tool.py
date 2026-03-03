@@ -143,6 +143,9 @@ class Stage1CompletenessAuditToolTests(unittest.TestCase):
             self.assertEqual(int(summary.get("frames_total") or 0), 1)
             self.assertEqual(int(summary.get("frames_queryable") or 0), 1)
             self.assertEqual(int(summary.get("contiguous_queryable_windows") or 0), 1)
+            self.assertEqual(str(summary.get("latest_frame_ts_utc") or ""), "2026-02-21T01:00:00Z")
+            self.assertEqual(str(summary.get("latest_queryable_ts_utc") or ""), "2026-02-21T01:00:00Z")
+            self.assertIsInstance(summary.get("freshness_lag_hours"), float)
             self.assertEqual(len(out.get("queryable_windows") or []), 1)
             self.assertEqual(int(out.get("frame_lineage_total") or 0), 1)
             rows = out.get("frame_lineage", []) if isinstance(out.get("frame_lineage", []), list) else []

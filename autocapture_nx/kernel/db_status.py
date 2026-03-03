@@ -36,9 +36,29 @@ class DbStatus:
     churn_events: int | None
 
 
+def _sqlite_probe_readonly(path: Path) -> tuple[bool, str]:
+    """Attempt a read-only open + PRAGMA to detect I/O errors vs healthy DB."""
+    conn: sqlite3.Connection | None = None
+    try:
+        if not path.exists():
+            return False, "missing"
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=0.5)
+        conn.execute("PRAGMA query_only = ON")
+        conn.execute("PRAGMA schema_version")
+        return True, "ok"
+    except Exception as exc:
+        return False, f"{type(exc).__name__}:{exc}"
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 def _sqlite_pragmas(path: Path) -> tuple[int | None, int | None]:
     try:
-        con = sqlite3.connect(str(path))
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2.0)
         try:
             user_version = con.execute("PRAGMA user_version").fetchone()
             schema_version = con.execute("PRAGMA schema_version").fetchone()
@@ -115,6 +135,20 @@ def metadata_db_stability_snapshot(
         out["inode"] = int(sig.get("inode", 0))
         out["size_bytes"] = int(sig.get("size_bytes", 0))
         out["mtime_ns"] = int(sig.get("mtime_ns", 0))
+
+    # Probe for read-level I/O errors before stability sampling.
+    probe_ok, probe_reason = _sqlite_probe_readonly(path)
+    out["probe_ok"] = bool(probe_ok)
+    out["probe_reason"] = str(probe_reason)
+    if not probe_ok:
+        out["ok"] = False
+        out["stable"] = None
+        out["churn_events"] = None
+        out["reason"] = "metadata_db_io_error"
+        out["io_error"] = True
+        out["io_error_detail"] = str(probe_reason)
+        return out
+
     stable, churn_events = _sample_stability(
         path,
         sample_count=int(out["sample_count"]),

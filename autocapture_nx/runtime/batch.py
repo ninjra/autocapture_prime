@@ -93,7 +93,7 @@ def _build_landscape_manifest(
         payload["sla"] = dict(sla)
     if isinstance(metadata_db_guard, dict):
         payload["metadata_db_guard"] = dict(metadata_db_guard)
-    payload["slo_alerts"] = _derive_slo_alerts(sla=sla, metadata_db_guard=metadata_db_guard)
+    payload["slo_alerts"] = _derive_slo_alerts(sla=sla, metadata_db_guard=metadata_db_guard, blocked_reason=blocked_reason)
     payload = _canonical_safe(payload)
     payload["payload_hash"] = sha256_canonical({k: v for k, v in payload.items() if k != "payload_hash"})
     return payload
@@ -410,6 +410,7 @@ def _derive_slo_alerts(
     *,
     sla: dict[str, Any] | None,
     metadata_db_guard: dict[str, Any] | None,
+    blocked_reason: str | None = None,
 ) -> list[str]:
     alerts: list[str] = []
     row = sla if isinstance(sla, dict) else {}
@@ -421,6 +422,8 @@ def _derive_slo_alerts(
         alerts.append("throughput_zero_with_backlog")
     if isinstance(metadata_db_guard, dict) and not bool(metadata_db_guard.get("ok", True)):
         alerts.append("metadata_db_unstable")
+    if str(blocked_reason or "") == "throughput_zero_escalation_exhausted":
+        alerts.append("throughput_zero_escalation_exhausted")
     return alerts
 
 
@@ -474,13 +477,15 @@ def _metadata_db_guard(config: dict[str, Any]) -> dict[str, Any] | None:
     snapshot = metadata_db_stability_snapshot(config, sample_count=sample_count, poll_interval_ms=poll_interval_ms)
     stable = snapshot.get("stable")
     exists = bool(snapshot.get("exists", False))
-    ok = bool(exists and stable is not False)
+    io_error = bool(snapshot.get("io_error", False))
+    ok = bool(exists and stable is not False and not io_error)
     reason = str(snapshot.get("reason") or ("ok" if ok else "metadata_db_unstable_or_missing"))
     return {
         "enabled": True,
         "ok": ok,
         "fail_closed": fail_closed,
         "reason": reason,
+        "io_error": io_error,
         "snapshot": snapshot,
     }
 
@@ -512,10 +517,30 @@ def run_processing_batch(
         and not bool(metadata_db_guard.get("ok", True))
         and bool(metadata_db_guard.get("fail_closed", True))
     )
+    if guard_blocked and not require_idle and isinstance(metadata_db_guard, dict):
+        guard_reason = str(metadata_db_guard.get("reason") or "")
+        if guard_reason == "metadata_db_churn_detected":
+            guard_blocked = False
+    # I/O error fallback: when primary DB has I/O errors, try metadata.live.db
+    if guard_blocked and isinstance(metadata_db_guard, dict) and bool(metadata_db_guard.get("io_error", False)):
+        storage_cfg = config.get("storage", {}) if isinstance(config.get("storage"), dict) else {}
+        primary_path_str = str(storage_cfg.get("metadata_path", "data/metadata.db"))
+        primary_path = Path(primary_path_str)
+        live_path = primary_path.parent / "metadata.live.db"
+        if live_path.exists():
+            from autocapture_nx.kernel.db_status import _sqlite_probe_readonly
+            live_ok, _live_probe = _sqlite_probe_readonly(live_path)
+            if live_ok:
+                guard_blocked = False
+                metadata_db_guard["io_error_fallback"] = True
+                metadata_db_guard["io_error_fallback_path"] = str(live_path)
+                metadata_db_guard["reason"] = "primary_io_error_fallback_live"
     if guard_blocked:
         guard_reason = metadata_db_guard.get("reason") if isinstance(metadata_db_guard, dict) else "metadata_db_unstable"
         blocked_reason = str(guard_reason or "metadata_db_unstable")
 
+    consecutive_zero_completion_loops = 0
+    zero_throughput_escalated = False
     for loop_idx in range(max(1, int(max_loops))):
         if guard_blocked:
             break
@@ -604,6 +629,25 @@ def run_processing_batch(
         snapshot["sla"] = _estimate_sla_snapshot(config, steps=loop_stats + [snapshot])
         previous_sla = snapshot["sla"] if isinstance(snapshot.get("sla"), dict) else None
         loop_stats.append(snapshot)
+
+        # Zero-throughput escalation guard
+        step_completed = 0
+        step_pending = 0
+        if isinstance(step_stats, dict):
+            step_completed = int(step_stats.get("records_completed", 0) or 0)
+            step_pending = int(step_stats.get("pending_records", 0) or 0)
+        if step_pending > 0 and step_completed == 0 and not step_done:
+            consecutive_zero_completion_loops += 1
+            if not zero_throughput_escalated and consecutive_zero_completion_loops >= 2:
+                zero_throughput_escalated = True
+                _apply_adaptive_idle_parallelism(config, signals=signals, recent_steps=loop_stats)
+                consecutive_zero_completion_loops = 0
+            elif zero_throughput_escalated and consecutive_zero_completion_loops >= 2:
+                blocked_reason = "throughput_zero_escalation_exhausted"
+                break
+        else:
+            consecutive_zero_completion_loops = 0
+
         if step_done:
             done = True
             break
@@ -611,7 +655,7 @@ def run_processing_batch(
             time.sleep(max(0.01, min(5.0, float(sleep_ms) / 1000.0)))
 
     sla_snapshot = _estimate_sla_snapshot(config, steps=loop_stats)
-    slo_alerts = _derive_slo_alerts(sla=sla_snapshot, metadata_db_guard=metadata_db_guard)
+    slo_alerts = _derive_slo_alerts(sla=sla_snapshot, metadata_db_guard=metadata_db_guard, blocked_reason=blocked_reason)
     manifest = _build_landscape_manifest(
         config,
         stats=loop_stats,

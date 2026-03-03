@@ -1,8 +1,8 @@
 # Question Validation + Plugin Path Trace (Q/H)
 
-- Generated: `2026-02-26T16:57:57.913820Z`
-- Artifact: `artifacts/advanced10/advanced20_20260226T165750Z.json`
-- Run report: `artifacts/single_image_runs/single_20260226T165223Z/report.json`
+- Generated: `2026-02-26T18:49:44.920453Z`
+- Artifact: `artifacts/advanced10/advanced20_20260226T184932Z.json`
+- Run report: `artifacts/single_image_runs/single_20260226T184536Z/report.json`
 - Evaluated summary: total=20 passed=20 failed=0
 - Overall confidence mean: `0.9300`
 

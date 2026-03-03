@@ -687,6 +687,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lineage-json", default="")
     parser.add_argument("--min-queryable-ratio", type=float, default=0.0)
     parser.add_argument("--source-tier", choices=["real", "synthetic", "mixed"], default="real")
+    parser.add_argument(
+        "--max-report-age-hours",
+        type=float,
+        default=24.0,
+        help="Maximum age of source reports in hours. Reports older than this fail the recency gate.",
+    )
     args = parser.parse_args(argv)
 
     contract_path = Path(str(args.contract))
@@ -714,7 +720,28 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     advanced = _load_json(advanced_path)
     generic = _load_json(generic_path)
+
+    # --- Recency gate: reject reports older than --max-report-age-hours ---
+    max_report_age_hours = float(args.max_report_age_hours)
+    report_age_failures: list[str] = []
+    if max_report_age_hours > 0.0:
+        import time as _time
+
+        now_ts = _time.time()
+        max_age_seconds = max_report_age_hours * 3600.0
+        for label, rpath in [("advanced20", advanced_path), ("generic20", generic_path)]:
+            try:
+                mtime = rpath.stat().st_mtime
+                age_hours = (now_ts - mtime) / 3600.0
+                if age_hours > max_report_age_hours:
+                    report_age_failures.append(
+                        f"strict_source_report_stale:{label}:{round(age_hours, 1)}h>{round(max_report_age_hours, 1)}h"
+                    )
+            except Exception:
+                report_age_failures.append(f"strict_source_report_stat_failed:{label}")
+
     strict_summary, strict_rows, strict_failures = _strict_eval(contract=contract, advanced=advanced, generic=generic)
+    strict_failures.extend(report_age_failures)
     strict_failure_causes = _strict_failure_cause_summary(strict_rows)
     generic_summary = _generic_eval(generic)
 

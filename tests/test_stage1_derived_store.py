@@ -23,6 +23,11 @@ class _ReadStore:
         return self._rows.get(str(record_id), default)
 
 
+class _FaultyReadStore(_ReadStore):
+    def get(self, record_id: str, default=None):  # noqa: ANN001
+        raise OSError("disk I/O error")
+
+
 class Stage1DerivedStoreTests(unittest.TestCase):
     def test_default_path_under_dataroot(self) -> None:
         out = default_stage1_derived_db_path("/tmp/ac")
@@ -62,6 +67,54 @@ class Stage1DerivedStoreTests(unittest.TestCase):
             overlay.put_new("d1", {"record_type": "derived.ingest.stage1.complete", "v": 2})
             self.assertEqual((overlay.get("d1") or {}).get("v"), 2)
             self.assertEqual((overlay.get("x") or {}).get("v"), 1)
+
+    def test_overlay_fail_open_when_metadata_read_get_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "derived.db"
+            derived = Stage1DerivedSqliteStore(db_path)
+            overlay = Stage1OverlayStore(metadata_read=_FaultyReadStore(), derived_write=derived)
+            self.assertIsNone(overlay.get("missing"))
+
+    def test_stage2_marker_idempotent_put(self) -> None:
+        """Stage2 completion markers should use put() (upsert) for idempotent re-runs."""
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "derived.db"
+            derived = Stage1DerivedSqliteStore(db_path)
+            marker = {
+                "record_type": "derived.ingest.stage2.complete",
+                "source_record_id": "frame/123",
+                "complete": True,
+                "ts_utc": "2026-02-28T12:00:00Z",
+            }
+            # First write
+            derived.put("stage2/frame/123", marker)
+            self.assertEqual((derived.get("stage2/frame/123") or {}).get("complete"), True)
+            # Second write (idempotent) — should not raise
+            marker_updated = dict(marker)
+            marker_updated["ts_utc"] = "2026-02-28T13:00:00Z"
+            derived.put("stage2/frame/123", marker_updated)
+            self.assertEqual(
+                (derived.get("stage2/frame/123") or {}).get("ts_utc"),
+                "2026-02-28T13:00:00Z",
+            )
+            self.assertEqual(derived.count(record_type="derived.ingest.stage2.complete"), 1)
+
+    def test_overlay_put_uses_derived_write(self) -> None:
+        """Overlay store puts should go to derived, not to metadata_read."""
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "derived.db"
+            derived = Stage1DerivedSqliteStore(db_path)
+            read = _ReadStore()
+            overlay = Stage1OverlayStore(metadata_read=read, derived_write=derived)
+            marker = {
+                "record_type": "derived.ingest.stage2.complete",
+                "complete": True,
+            }
+            overlay.put("stage2/frame/abc", marker)
+            # Must be in derived
+            self.assertIsNotNone(derived.get("stage2/frame/abc"))
+            # Must be readable through overlay
+            self.assertEqual((overlay.get("stage2/frame/abc") or {}).get("complete"), True)
 
 
 if __name__ == "__main__":

@@ -72,6 +72,10 @@ def open_sqlite_reader(
     if not src_path.exists():
         raise FileNotFoundError(str(src_path))
 
+    # Auto-snapshot for 9P filesystem paths to avoid D-state blocks on reads.
+    if not force_snapshot and str(src_path).startswith("/mnt/"):
+        force_snapshot = True
+
     if force_snapshot:
         snap = create_sqlite_read_snapshot(src_path)
         conn = sqlite3.connect(f"file:{snap}?mode=ro&immutable=1", uri=True, timeout=2.0)

@@ -16,6 +16,12 @@ class CliQueryMetadataOnlyTests(unittest.TestCase):
             def query(self, text: str):  # noqa: ANN001
                 captured["text"] = text
                 captured["AUTOCAPTURE_QUERY_METADATA_ONLY"] = str(os.environ.get("AUTOCAPTURE_QUERY_METADATA_ONLY") or "")
+                captured["AUTOCAPTURE_QUERY_HARD_FAIL_STALE"] = str(
+                    os.environ.get("AUTOCAPTURE_QUERY_HARD_FAIL_STALE") or ""
+                )
+                captured["AUTOCAPTURE_QUERY_ALLOW_LIVE_FALLBACK_ON_PRIMARY_UNREADABLE"] = str(
+                    os.environ.get("AUTOCAPTURE_QUERY_ALLOW_LIVE_FALLBACK_ON_PRIMARY_UNREADABLE") or ""
+                )
                 captured["AUTOCAPTURE_ADV_HARD_VLM_MODE"] = str(os.environ.get("AUTOCAPTURE_ADV_HARD_VLM_MODE") or "")
                 captured["AUTOCAPTURE_AUDIT_PLUGIN_METADATA"] = str(os.environ.get("AUTOCAPTURE_AUDIT_PLUGIN_METADATA") or "")
                 captured["AUTOCAPTURE_RETRIEVAL_LATEST_SCAN_LIMIT"] = str(
@@ -33,6 +39,8 @@ class CliQueryMetadataOnlyTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(captured.get("text"), "hello")
         self.assertEqual(captured.get("AUTOCAPTURE_QUERY_METADATA_ONLY"), "1")
+        self.assertEqual(captured.get("AUTOCAPTURE_QUERY_HARD_FAIL_STALE"), "1")
+        self.assertEqual(captured.get("AUTOCAPTURE_QUERY_ALLOW_LIVE_FALLBACK_ON_PRIMARY_UNREADABLE"), "1")
         self.assertEqual(captured.get("AUTOCAPTURE_ADV_HARD_VLM_MODE"), "off")
         self.assertEqual(captured.get("AUTOCAPTURE_AUDIT_PLUGIN_METADATA"), "0")
         self.assertEqual(captured.get("AUTOCAPTURE_RETRIEVAL_LATEST_SCAN_LIMIT"), "250")

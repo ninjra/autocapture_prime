@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import threading
 import time
 import uuid
@@ -32,7 +33,7 @@ from autocapture_nx.kernel.activity_signal import is_activity_signal_fresh, load
 from autocapture_nx.kernel.logging import JsonlLogger
 from autocapture_nx.plugin_system.manager import PluginManager
 from autocapture_nx.processing.idle import _extract_frame, _get_media_blob
-from autocapture_nx.storage.stage1_derived_store import build_stage1_overlay_store
+from autocapture_nx.storage.stage1_derived_store import build_stage1_overlay_store, default_stage1_derived_db_path
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -52,6 +53,210 @@ def _env_true(name: str, default: bool = False) -> bool:
     if raw in {"0", "false", "no", "off"}:
         return False
     return bool(default)
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return float(default)
+    try:
+        return float(raw)
+    except Exception:
+        return float(default)
+
+
+def _metadata_role_paths(config: dict[str, Any]) -> tuple[Path, Path, Path]:
+    storage = config.get("storage", {}) if isinstance(config, dict) else {}
+    data_dir_raw = str(storage.get("data_dir") or "").strip()
+    data_dir = Path(data_dir_raw or ".")
+    metadata_path_raw = str(storage.get("metadata_path") or "").strip()
+    selected = Path(metadata_path_raw) if metadata_path_raw else (data_dir / "metadata.db")
+    selected_name = selected.name
+    if selected_name == "metadata.live.db":
+        live = selected
+        primary = selected.with_name("metadata.db")
+    elif selected_name == "metadata.db":
+        primary = selected
+        live = selected.with_name("metadata.live.db")
+    else:
+        primary = data_dir / "metadata.db"
+        live = data_dir / "metadata.live.db"
+    return selected, primary, live
+
+
+def _sqlite_probe_readonly(path: Path) -> tuple[bool, str]:
+    conn: sqlite3.Connection | None = None
+    try:
+        if not path.exists():
+            return False, "missing"
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=0.5)
+        conn.execute("PRAGMA query_only = ON")
+        conn.execute("PRAGMA schema_version")
+        return True, "ok"
+    except Exception as exc:
+        return False, f"{type(exc).__name__}:{exc}"
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _sqlite_max_ts(path: Path, record_type: str) -> tuple[str | None, str]:
+    conn: sqlite3.Connection | None = None
+    try:
+        if not path.exists():
+            return None, "missing"
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=0.5)
+        conn.execute("PRAGMA query_only = ON")
+        row = conn.execute("SELECT MAX(ts_utc) FROM metadata WHERE record_type = ?", (str(record_type),)).fetchone()
+        if row is None:
+            return None, "ok"
+        value = row[0]
+        text = str(value).strip() if value is not None else ""
+        return (text or None), "ok"
+    except Exception as exc:
+        return None, f"{type(exc).__name__}:{exc}"
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _parse_ts_utc(value: str | None) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _evaluate_query_hard_fail_guard(config: dict[str, Any]) -> dict[str, Any]:
+    selected_path, primary_path, live_path = _metadata_role_paths(config)
+    freshness_fail_hours = max(0.1, _env_float("AUTOCAPTURE_QUERY_FRESHNESS_FAIL_HOURS", 15.0))
+    stage2_gap_fail_hours = max(0.1, _env_float("AUTOCAPTURE_QUERY_STAGE2_PROGRESS_MAX_GAP_HOURS", 2.0))
+    allow_live_fallback = _env_true("AUTOCAPTURE_QUERY_ALLOW_LIVE_FALLBACK_ON_PRIMARY_UNREADABLE", default=False)
+
+    guard: dict[str, Any] = {
+        "ok": True,
+        "error": "",
+        "detail": "",
+        "selected_metadata_path": str(selected_path),
+        "primary_metadata_path": str(primary_path),
+        "live_metadata_path": str(live_path),
+        "freshness_fail_hours": float(freshness_fail_hours),
+        "stage2_progress_max_gap_hours": float(stage2_gap_fail_hours),
+        "allow_live_fallback_on_primary_unreadable": bool(allow_live_fallback),
+    }
+
+    selected_ok, selected_probe = _sqlite_probe_readonly(selected_path)
+    primary_ok, primary_probe = _sqlite_probe_readonly(primary_path)
+    live_ok, live_probe = _sqlite_probe_readonly(live_path)
+    guard["selected_probe"] = str(selected_probe)
+    guard["primary_probe"] = str(primary_probe)
+    guard["live_probe"] = str(live_probe)
+
+    effective_selected_path = selected_path
+    if not selected_ok:
+        if bool(allow_live_fallback) and live_ok:
+            effective_selected_path = live_path
+            guard["selected_fallback"] = "live_selected_path_fallback"
+        else:
+            guard["ok"] = False
+            guard["error"] = "stale_or_unreadable_source"
+            guard["detail"] = f"selected_unreadable:{selected_probe}"
+            return guard
+
+    frame_source_path = primary_path
+    if bool(allow_live_fallback) and live_ok and selected_path.name == "metadata.live.db":
+        frame_source_path = live_path
+        guard["frame_source_override"] = "live_selected_authoritative"
+        if not primary_ok:
+            guard["primary_degraded"] = True
+            guard["primary_degraded_reason"] = f"primary_unreadable:{primary_probe}"
+    elif not primary_ok:
+        if bool(allow_live_fallback) and live_ok:
+            frame_source_path = live_path
+            guard["primary_degraded"] = True
+            guard["primary_degraded_reason"] = f"primary_unreadable:{primary_probe}"
+        else:
+            guard["ok"] = False
+            guard["error"] = "stale_or_unreadable_source"
+            guard["detail"] = f"primary_unreadable:{primary_probe}"
+            return guard
+
+    guard["frame_source_path"] = str(frame_source_path)
+    guard["effective_selected_metadata_path"] = str(effective_selected_path)
+
+    frame_ts_raw, frame_probe = _sqlite_max_ts(frame_source_path, "evidence.capture.frame")
+    stage2_ts_raw, stage2_probe = _sqlite_max_ts(effective_selected_path, "derived.ingest.stage2.complete")
+    guard["frame_source_probe"] = str(frame_probe)
+    guard["primary_frame_probe"] = str(frame_probe)
+    guard["selected_stage2_probe"] = str(stage2_probe)
+    guard["latest_frame_ts_utc"] = frame_ts_raw
+    guard["latest_stage2_ts_utc"] = stage2_ts_raw
+
+    if selected_path.name == "metadata.db" and not str(stage2_ts_raw or "").strip():
+        derived_path = default_stage1_derived_db_path(selected_path.parent)
+        guard["derived_stage1_path"] = str(derived_path)
+        derived_ok, derived_probe = _sqlite_probe_readonly(derived_path)
+        guard["derived_stage1_probe"] = str(derived_probe)
+        if derived_ok:
+            derived_stage2_ts_raw, derived_stage2_probe = _sqlite_max_ts(derived_path, "derived.ingest.stage2.complete")
+            guard["derived_stage2_probe"] = str(derived_stage2_probe)
+            guard["derived_latest_stage2_ts_utc"] = derived_stage2_ts_raw
+            if str(derived_stage2_ts_raw or "").strip():
+                stage2_ts_raw = derived_stage2_ts_raw
+                stage2_probe = str(derived_stage2_probe)
+                guard["selected_stage2_probe"] = str(stage2_probe)
+                guard["latest_stage2_ts_utc"] = stage2_ts_raw
+                guard["selected_stage2_fallback"] = "derived_overlay"
+
+    if str(frame_probe) != "ok":
+        guard["ok"] = False
+        guard["error"] = "stale_or_unreadable_source"
+        guard["detail"] = f"frame_source_unreadable:{frame_probe}"
+        return guard
+
+    frame_dt = _parse_ts_utc(frame_ts_raw)
+    stage2_dt = _parse_ts_utc(stage2_ts_raw)
+    now_utc = datetime.now(timezone.utc)
+
+    if frame_dt is not None and stage2_dt is None:
+        guard["ok"] = False
+        guard["error"] = "stage2_not_progressing"
+        guard["detail"] = "frames_present_without_stage2_markers"
+        return guard
+
+    if stage2_dt is not None:
+        freshness_lag_hours = max(0.0, (now_utc - stage2_dt).total_seconds() / 3600.0)
+        guard["freshness_lag_hours"] = float(round(freshness_lag_hours, 6))
+        if freshness_lag_hours > freshness_fail_hours:
+            guard["ok"] = False
+            guard["error"] = "freshness_lag_exceeded"
+            guard["detail"] = f"stage2_lag_hours={freshness_lag_hours:.3f}>max={freshness_fail_hours:.3f}"
+            return guard
+
+    if frame_dt is not None and stage2_dt is not None:
+        stage2_gap_hours = max(0.0, (frame_dt - stage2_dt).total_seconds() / 3600.0)
+        guard["stage2_progress_gap_hours"] = float(round(stage2_gap_hours, 6))
+        if stage2_gap_hours > stage2_gap_fail_hours:
+            guard["ok"] = False
+            guard["error"] = "stage2_not_progressing"
+            guard["detail"] = f"frame_stage2_gap_hours={stage2_gap_hours:.3f}>max={stage2_gap_fail_hours:.3f}"
+            return guard
+
+    return guard
 
 
 _MISSING = object()
@@ -1149,6 +1354,63 @@ class UXFacade:
             "scheduled_extract_job_id": "",
         }
 
+    def _query_hard_fail_result(
+        self,
+        text: str,
+        *,
+        error_code: str,
+        detail: str,
+        guard: dict[str, Any],
+    ) -> dict[str, Any]:
+        summary = "Query blocked because corpus freshness/source integrity is degraded."
+        return {
+            "ok": False,
+            "error": str(error_code),
+            "query": str(text or ""),
+            "answer": {
+                "state": "degraded",
+                "summary": summary,
+                "display": {
+                    "summary": summary,
+                    "topic": "runtime",
+                    "confidence_pct": 0.0,
+                    "bullets": [
+                        f"blocked_reason: {error_code}",
+                        f"detail: {detail}",
+                    ],
+                },
+                "errors": [
+                    {
+                        "error": str(error_code),
+                        "detail": str(detail),
+                    }
+                ],
+                "claims": [],
+                "policy": {"require_citations": True},
+            },
+            "processing": {
+                "extraction": {
+                    "allowed": False,
+                    "ran": False,
+                    "blocked": True,
+                    "blocked_reason": str(error_code),
+                    "scheduled_extract_job_id": "",
+                },
+                "query_trace": {
+                    "query_run_id": f"qry_guard_{uuid.uuid4().hex[:12]}",
+                    "stage_ms": {"total": 0.0},
+                    "error": str(error_code),
+                    "error_detail": str(detail),
+                    "freshness_guard": dict(guard),
+                },
+            },
+            "evaluation": {
+                "blocked_reason": str(error_code),
+                "freshness_lag_hours": guard.get("freshness_lag_hours"),
+            },
+            "scheduled_extract_job_id": "",
+        }
+
     @staticmethod
     def _missing_capabilities_from_error(error: str | None) -> list[str]:
         text = str(error or "").strip()
@@ -1198,6 +1460,19 @@ class UXFacade:
                     missing_caps.append(capability)
             if missing_caps:
                 return self._missing_query_capabilities_result(text, missing_caps)
+            hard_fail_enabled = _env_true(
+                "AUTOCAPTURE_QUERY_HARD_FAIL_STALE",
+                default=_env_true("AUTOCAPTURE_QUERY_METADATA_ONLY", default=False),
+            )
+            if hard_fail_enabled:
+                guard = _evaluate_query_hard_fail_guard(system.config if isinstance(system.config, dict) else {})
+                if not bool(guard.get("ok", False)):
+                    return self._query_hard_fail_result(
+                        text,
+                        error_code=str(guard.get("error") or "query_hard_fail"),
+                        detail=str(guard.get("detail") or ""),
+                        guard=guard,
+                    )
             _ = schedule_extract
             return run_query(system, text, schedule_extract=False)
 

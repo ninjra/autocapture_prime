@@ -8752,6 +8752,12 @@ def _build_temporal_display(query: str, metadata: Any | None, claim_texts: list[
                 f"query=\"{query_excerpt}\" markers={marker_summary}"
             ).strip()
             evidence_status = "complete"
+        elif "most_recent" in markers and not requires_rich_temporal_rollup:
+            summary = (
+                "Temporal query matched; most-recent state is grounded in normalized timestamped evidence. "
+                f"query=\"{query_excerpt}\" markers={marker_summary}"
+            ).strip()
+            evidence_status = "complete"
         else:
             summary = (
                 "Temporal query matched; normalized evidence is present but aggregate rollups are incomplete for strict metric guarantees. "

@@ -1,6 +1,6 @@
 {
   "contract_lock_hash": "98293c179931c403475a1bf5ce34492c90271feec5b4ade20b2592b19de0d4ac",
-  "generated_at": "2026-02-24T18:00:56.250526+00:00",
+  "generated_at": "2026-02-27T02:33:34.585190+00:00",
   "kernel_api_version": "0.1.0",
   "plugins": {
     "builtin.anchor.basic": {
@@ -774,7 +774,7 @@
       }
     },
     "builtin.storage.sqlcipher": {
-      "artifact_sha256": "cdea0db6fd627755c2eaa96ed31128e71820ab42a3b34afda250301d20696e6b",
+      "artifact_sha256": "ee4d796326b033c69af10179c4c11614ef71ba74f7998fb740f79a2485a6e866",
       "contract_lock_hash": "98293c179931c403475a1bf5ce34492c90271feec5b4ade20b2592b19de0d4ac",
       "kernel_api_version": "0.1.0",
       "manifest_sha256": "8f379a9e55a943e137492ac3d9a3e1e03c3c4aaddb3f2dccd54606256b74d522",

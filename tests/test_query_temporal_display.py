@@ -48,6 +48,38 @@ class _MetadataTemporalElapsed:
         ]
 
 
+class _MetadataMostRecentWindow:
+    def latest(self, record_type: str, limit: int = 10):  # noqa: ARG002
+        if record_type != "evidence.window.meta":
+            return []
+        return [
+            {
+                "record_id": "wm1",
+                "record": {
+                    "record_type": "evidence.window.meta",
+                    "ts_utc": "2026-02-24T18:03:00Z",
+                    "window": {
+                        "title": "File Explorer",
+                        "process_path": "C:\\WINDOWS\\Explorer.EXE",
+                        "pid": 1824,
+                    },
+                },
+            },
+            {
+                "record_id": "wm2",
+                "record": {
+                    "record_type": "evidence.window.meta",
+                    "ts_utc": "2026-02-24T18:02:30Z",
+                    "window": {
+                        "title": "Terminal",
+                        "process_path": "C:\\Windows\\System32\\cmd.exe",
+                        "pid": 992,
+                    },
+                },
+            },
+        ]
+
+
 class QueryTemporalDisplayTests(unittest.TestCase):
     def test_build_answer_display_temporal_indeterminate_when_no_rows(self) -> None:
         display = query_mod._build_answer_display(  # type: ignore[attr-defined]
@@ -101,6 +133,19 @@ class QueryTemporalDisplayTests(unittest.TestCase):
         fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
         self.assertEqual(str(fields.get("evidence_status") or ""), "partial_normalized")
         self.assertEqual(float(fields.get("elapsed_minutes") or 0.0), 2.0)
+
+    def test_build_answer_display_temporal_most_recent_returns_complete(self) -> None:
+        display = query_mod._build_answer_display(  # type: ignore[attr-defined]
+            "What app was in focus most recently?",
+            [],
+            [],
+            _MetadataMostRecentWindow(),
+            query_intent={"topic": "temporal_analytics", "family": "temporal"},
+        )
+        self.assertEqual(str(display.get("topic") or ""), "temporal_analytics")
+        fields = display.get("fields", {}) if isinstance(display.get("fields", {}), dict) else {}
+        self.assertEqual(str(fields.get("evidence_status") or ""), "complete")
+        self.assertIn("most-recent state is grounded", str(display.get("summary") or ""))
 
     def test_build_answer_display_grounded_snapshot_progress_returns_complete(self) -> None:
         display = query_mod._build_answer_display(  # type: ignore[attr-defined]

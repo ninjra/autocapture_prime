@@ -145,6 +145,42 @@ def _lexical_overlap(question: str, answer_text: str) -> float:
     return float(overlap / max(1, len(q_tokens)))
 
 
+NORMALIZED_RECORD_TYPE_PREFIXES = (
+    "derived.sst.",
+    "derived.text.",
+    "derived.state.",
+    "derived.obs.",
+    "derived.ingest.stage1.complete",
+    "derived.ingest.stage2.complete",
+    "obs.uia.",
+    "retention.eligible",
+)
+
+
+def _citation_record_types(row: dict[str, Any]) -> list[str]:
+    """Extract all record_types referenced by provider citations."""
+    providers = row.get("providers", [])
+    if not isinstance(providers, list):
+        return []
+    out: list[str] = []
+    for item in providers:
+        if not isinstance(item, dict):
+            continue
+        rts = item.get("record_types", [])
+        if isinstance(rts, list):
+            out.extend(str(x).strip() for x in rts if str(x).strip())
+    return out
+
+
+def _citation_chain_violations(row: dict[str, Any]) -> list[str]:
+    """Return record types that are not from the normalized layer."""
+    violations: list[str] = []
+    for rt in _citation_record_types(row):
+        if not any(rt.startswith(prefix) for prefix in NORMALIZED_RECORD_TYPE_PREFIXES):
+            violations.append(rt)
+    return sorted(set(violations))
+
+
 def _citations_present(row: dict[str, Any]) -> bool:
     providers = row.get("providers", [])
     if not isinstance(providers, list):
@@ -191,6 +227,9 @@ def evaluate_row(case: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
         reasons.append("answer_surface_empty")
     if answer_state == "ok" and not _citations_present(row):
         reasons.append("citations_missing")
+    chain_violations = _citation_chain_violations(row)
+    if chain_violations:
+        reasons.append("citation_chain_violation")
 
     overlap = _lexical_overlap(question, text_low)
     overlap_min = 0.12 if degraded_state else 0.18
@@ -229,7 +268,7 @@ def evaluate_row(case: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
                 reasons.append("list_evidence_missing")
 
     ok = len(reasons) == 0
-    return {
+    result: dict[str, Any] = {
         "id": case_id,
         "difficulty_class": difficulty,
         "answer_state": answer_state,
@@ -240,6 +279,9 @@ def evaluate_row(case: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
         "summary": summary,
         "groups": group_rows,
     }
+    if chain_violations:
+        result["citation_chain_violations"] = chain_violations
+    return result
 
 
 def missing_rule_classes(cases: list[dict[str, Any]]) -> list[str]:

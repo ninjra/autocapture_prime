@@ -16,6 +16,7 @@ def test_build_health_snapshot_emits_alerts_for_risk_and_db_churn() -> None:
     mod = _load_module("tools/soak/processing_health_snapshot.py", "processing_health_snapshot_tool")
     rows = [
         {
+            "ts_utc": "2026-02-26T08:00:00Z",
             "sla": {
                 "pending_records": 200,
                 "completed_records": 0,
@@ -32,3 +33,6 @@ def test_build_health_snapshot_emits_alerts_for_risk_and_db_churn() -> None:
     assert "retention_risk" in alerts
     assert "metadata_db_unstable" in alerts
     assert "throughput_zero_with_backlog" in alerts
+    latest = out.get("latest", {}) if isinstance(out.get("latest"), dict) else {}
+    assert str(latest.get("manifest_ts_utc") or "") == "2026-02-26T08:00:00Z"
+    assert isinstance(latest.get("manifest_freshness_lag_hours"), float)

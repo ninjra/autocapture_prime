@@ -918,6 +918,15 @@ def run_audit(
                 )
 
         queryable_rows = [row for row in rows if bool(row.get("queryable", False))]
+        latest_frame_ts = max((row.get("ts_obj") for row in rows if isinstance(row.get("ts_obj"), datetime)), default=None)
+        latest_queryable_ts = max(
+            (row.get("ts_obj") for row in queryable_rows if isinstance(row.get("ts_obj"), datetime)),
+            default=None,
+        )
+        freshness_lag_hours = None
+        if isinstance(latest_queryable_ts, datetime):
+            now_utc = datetime.now(timezone.utc)
+            freshness_lag_hours = max(0.0, round((now_utc - latest_queryable_ts).total_seconds() / 3600.0, 6))
         windows = _window_rows(queryable_rows, gap_seconds=int(gap_seconds))
         frame_limit = max(1, int(frame_report_limit))
         frame_lineage: list[dict[str, Any]] = []
@@ -942,6 +951,17 @@ def run_audit(
                 "frames_queryable": int(len(queryable_rows)),
                 "frames_blocked": int(max(0, len(rows) - len(queryable_rows))),
                 "contiguous_queryable_windows": int(len(windows)),
+                "latest_frame_ts_utc": (
+                    latest_frame_ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+                    if isinstance(latest_frame_ts, datetime)
+                    else ""
+                ),
+                "latest_queryable_ts_utc": (
+                    latest_queryable_ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+                    if isinstance(latest_queryable_ts, datetime)
+                    else ""
+                ),
+                "freshness_lag_hours": freshness_lag_hours,
             },
             "record_counts": counts,
             "plugin_completion": {
@@ -976,6 +996,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--samples", type=int, default=10, help="Blocked frame samples to emit.")
     parser.add_argument("--frame-limit", type=int, default=200, help="How many per-frame lineage rows to include.")
     parser.add_argument("--output", default="", help="Optional JSON output path.")
+    parser.add_argument(
+        "--strict-mode",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Strict mode: fail when any sampled frame has UIA snapshot but missing obs docs.",
+    )
     return parser
 
 
@@ -1011,6 +1037,19 @@ def main() -> int:
     payload["db_requested"] = str(requested_db)
     payload["db_resolved"] = str(resolved_db)
     payload["db_resolution"] = str(resolved_reason)
+    payload["strict_mode"] = bool(args.strict_mode)
+
+    # Strict mode: check for UIA obs gaps in sampled frames
+    if bool(args.strict_mode):
+        issue_counts = payload.get("issue_counts", {}) if isinstance(payload.get("issue_counts"), dict) else {}
+        uia_gap_keys = ("obs_uia_focus_missing_or_invalid", "obs_uia_context_missing_or_invalid", "obs_uia_operable_missing_or_invalid")
+        uia_gap_count = sum(int(issue_counts.get(k, 0) or 0) for k in uia_gap_keys)
+        if uia_gap_count > 0:
+            payload["ok"] = False
+            strict_failures = payload.get("strict_failures", []) if isinstance(payload.get("strict_failures"), list) else []
+            strict_failures.append(f"uia_obs_gaps={uia_gap_count}")
+            payload["strict_failures"] = strict_failures
+
     out = str(args.output or "").strip()
     if out:
         out_path = Path(out).expanduser()
